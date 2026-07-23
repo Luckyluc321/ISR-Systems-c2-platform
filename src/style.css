@@ -1,0 +1,20 @@
+html, body, #cesiumContainer {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background: #06080b;
+  color: #eef2f7;
+  font-family: -apple-system, "SF Pro Display", "Segoe UI", Roboto, system-ui, sans-serif;
+}
+
+/* Hide the default Cesium credits container */
+.cesium-widget-credits {
+  display: none !important;
+}
+
+/* Slight cyan bias to match ISR palette */
+.cesium-widget canvas {
+  filter: hue-rotate(-6deg) saturate(1.05);
+}
