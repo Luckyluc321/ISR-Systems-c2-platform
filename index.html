@@ -9,6 +9,29 @@
   </head>
   <body>
     <div id="cesiumContainer"></div>
+
+    <!-- Control panel top-right -->
+    <div id="control-panel">
+      <div class="cp-section">
+        <div class="cp-label">Imagery</div>
+        <div class="cp-group" role="group" aria-label="Imagery mode">
+          <button class="cp-btn active" data-mode="auto">Auto</button>
+          <button class="cp-btn" data-mode="day">Day</button>
+          <button class="cp-btn" data-mode="night">Night</button>
+        </div>
+      </div>
+
+      <div class="cp-section">
+        <div class="cp-label">Fly to</div>
+        <div class="cp-group cp-group-vert">
+          <button class="cp-btn wide" data-fly="cph">CPH Airport</button>
+          <button class="cp-btn wide" data-fly="alps">Swiss Alps</button>
+          <button class="cp-btn wide" data-fly="denmark">Denmark</button>
+          <button class="cp-btn wide" data-fly="globe">Globe</button>
+        </div>
+      </div>
+    </div>
+
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
