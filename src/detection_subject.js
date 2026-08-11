@@ -32,16 +32,18 @@ export const CATEGORY = Object.freeze({
 // head expands. Never remove entries — retire by setting `deprecated`.
 export const CLASS_VOCAB = Object.freeze({
   aerial_platform: [
-    'micro_drone',              // <250g, hand-launched
-    'quadcopter',               // consumer / prosumer rotary
-    'hexcopter_octocopter',     // higher-payload rotary
-    'fixed_wing_drone',         // long-endurance UAV
-    'vtol_hybrid',              // tiltrotor / hybrid UAV
+    'micro_drone',                // <250g, hand-launched
+    'quadcopter',                 // consumer / prosumer rotary
+    'hexcopter_octocopter',       // higher-payload rotary
+    'fixed_wing_drone',           // long-endurance UAV
+    'vtol_hybrid',                // tiltrotor / hybrid UAV
     'helicopter_civilian',
     'helicopter_military',
-    'fixed_wing_civilian',      // GA aircraft
-    'fixed_wing_commercial',    // airliners
-    'fixed_wing_military',      // jets, transports
+    'fixed_wing_civilian',        // GA aircraft
+    'fixed_wing_commercial',      // airliners
+    'fixed_wing_military',        // jets, transports
+    'glider',                     // unpowered, slow, engine-off, low RCS
+    'paraglider_hang_glider',     // recreational, unauthorized incursions at airports
     'balloon_airship',
   ],
   biological: [
@@ -54,7 +56,8 @@ export const CLASS_VOCAB = Object.freeze({
   weapon: [
     'cruise_missile',
     'ballistic_missile',
-    'loitering_munition',       // Shahed-class, Lancet-class
+    'hypersonic_weapon',          // >Mach 5, distinct kinematic envelope
+    'loitering_munition',         // Shahed-class, Lancet-class
     'dropped_ordnance',
     'artillery_shell',
     'rocket_barrage',
@@ -114,18 +117,18 @@ const PAYLOAD_CAPABLE_CLASSES = new Set([
   'quadcopter', 'hexcopter_octocopter', 'fixed_wing_drone', 'vtol_hybrid',
   'helicopter_civilian', 'helicopter_military',
   'fixed_wing_civilian', 'fixed_wing_commercial', 'fixed_wing_military',
-  'cruise_missile', 'ballistic_missile', 'loitering_munition',
+  'cruise_missile', 'ballistic_missile', 'hypersonic_weapon', 'loitering_munition',
   'dropped_ordnance', 'artillery_shell', 'rocket_barrage',
 ]);
 
 const KNOWN_MILITARY_CLASSES = new Set([
   'helicopter_military', 'fixed_wing_military',
-  'cruise_missile', 'ballistic_missile', 'loitering_munition',
+  'cruise_missile', 'ballistic_missile', 'hypersonic_weapon', 'loitering_munition',
   'artillery_shell', 'rocket_barrage',
 ]);
 
 const WEAPON_CLASSES = new Set([
-  'cruise_missile', 'ballistic_missile', 'loitering_munition',
+  'cruise_missile', 'ballistic_missile', 'hypersonic_weapon', 'loitering_munition',
   'dropped_ordnance', 'artillery_shell', 'rocket_barrage',
 ]);
 
@@ -301,9 +304,12 @@ function estimateEndurance(klass) {
     fixed_wing_civilian: 300,
     fixed_wing_commercial: 720,
     fixed_wing_military: 240,
+    glider: 480,                    // unpowered but ridge/thermal-sustained
+    paraglider_hang_glider: 180,
     balloon_airship: null,
     cruise_missile: 90,
     ballistic_missile: null,
+    hypersonic_weapon: 30,
     loitering_munition: 300,
     dropped_ordnance: null,
     artillery_shell: null,
@@ -365,6 +371,9 @@ function deriveRfSignatureLabel(klass, conf) {
     fixed_wing_drone: `custom telemetry ${pct}%`,
     loitering_munition: `low-emission (LO) signature`,
     cruise_missile: `no active emitter (LO)`,
+    hypersonic_weapon: `plasma-attenuated emissions (LO)`,
+    glider: null,
+    paraglider_hang_glider: null,
     helicopter_civilian: null,
     fixed_wing_commercial: null,
   };
@@ -382,7 +391,10 @@ function deriveAcousticSignatureLabel(klass, conf) {
     fixed_wing_commercial: `turbofan signature ${pct}%`,
     fixed_wing_military: `turbojet signature ${pct}%`,
     cruise_missile: `turbojet signature ${pct}%`,
+    hypersonic_weapon: `sonic-boom + plasma sheath ${pct}%`,
     loitering_munition: `IC engine signature ${pct}%`,
+    glider: `wind-noise only, no propulsion signature`,
+    paraglider_hang_glider: `wind-noise only, no propulsion signature`,
     small_bird_flock: `avian calls`,
     large_bird_flock: `avian calls`,
   };
@@ -400,8 +412,11 @@ function deriveRadarClass(klass) {
     fixed_wing_civilian: 'small fixed-wing return',
     fixed_wing_commercial: 'large airliner return',
     fixed_wing_military: 'high-speed jet return',
+    glider: 'slow low-RCS return, no doppler on prop',
+    paraglider_hang_glider: 'very low speed, very low RCS',
     cruise_missile: 'high-speed low-alt track',
     ballistic_missile: 'high-speed ballistic track',
+    hypersonic_weapon: 'hypersonic track (>Mach 5), plasma-attenuated return',
     loitering_munition: 'small-RCS slow-mover',
     single_bird: null,
     small_bird_flock: null,
@@ -416,6 +431,14 @@ function deriveRadarClass(klass) {
 // can lean on labeled fields rather than parsing free text. Skips
 // null/zero fields to keep the prompt tight and avoid the model
 // confabulating around empty values.
+// Count noun by category. Prevents "1 airframe" for a bird.
+function countNoun(category, count) {
+  if (category === 'biological') return count === 1 ? 'target' : 'targets';
+  if (category === 'unknown') return count === 1 ? 'target' : 'targets';
+  // aerial_platform + weapon
+  return count === 1 ? 'airframe' : 'airframes';
+}
+
 export function renderSubjectDigest(subject) {
   const lines = [];
   const push = (l) => lines.push(l);
@@ -428,7 +451,7 @@ export function renderSubjectDigest(subject) {
   if (subject.subclass) push(`Subclass: ${subject.subclass}`);
 
   const c = subject.cardinality;
-  push(`Cardinality: ${c.kind} (${c.count_estimate} airframe${c.count_estimate === 1 ? '' : 's'}, ${pct(c.count_confidence)} confidence)`);
+  push(`Cardinality: ${c.kind} (${c.count_estimate} ${countNoun(subject.category, c.count_estimate)}, ${pct(c.count_confidence)} confidence)`);
 
   if (subject.formation && subject.formation.kind !== FORMATION_KIND.NONE) {
     const f = subject.formation;
