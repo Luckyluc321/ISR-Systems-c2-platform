@@ -103,64 +103,105 @@ the fusion or classification the NN already did.
 Seven agents. Numbered by their position in the live-detection flow.
 Not all fire on every event.
 
-### Agent 1 · Correlation `[live: partial]`
+### Event registry (plumbing, not an agent)
 
-**Role.** Cross-references the incoming NN detection against
-historical events and concurrent active events across all sites.
-Detects repeat signatures, cross-border tracks, and coordinated
-multi-site incursions. Also folds subsequent ticks for the same
-target into an existing active event instead of spawning duplicates.
-
-**Inputs.** NN detection stream plus the full EVENTS registry.
-
-**Outputs.** Either a new `Event` scaffold or an update to an existing
-active event, plus `CorrelationResult { linked_event_ids,
-similarity_scores, cross_site_track, pattern_flags }`.
-
-**Correlation heuristics.**
-- Same RF signature at another site within 4 hours → cross-site track
-- Same platform class at same site within 90 days → recurring
-  incursion
-- More than 3 similar events across the country in 30 days → national
-  pattern flag
-- Tick's target within 200 m and 8 s of an existing active event →
-  attach to that event, do not spawn new
-
-**Model.** Deterministic scoring. Signature match plus temporal
-proximity plus spatial connectivity.
-
-**Latency budget.** Sub-300 ms per tick.
-
-**Fallback.** Correlation is advisory beyond the local same-target
-attach. Missing cross-site correlation never blocks escalation, only
-enriches the narrative.
+Before Agent 1 fires, the event registry handles same-target track
+continuity. Each incoming NN detection is checked against active
+events for that site: if the tick's target is within 200 m and 8 s of
+an existing active event's last known position, the tick attaches to
+that event. Otherwise a new event scaffold is created. This is
+deterministic plumbing at the ingestion boundary, not an agent.
 
 ---
 
-### Agent 2 · Site Context (Agent A) `[live]`
+### Agent 1 · Site Context (Agent A) `[live]`
 
 **Role.** Maintains a per-site knowledge base of critical assets,
 response asset positions, aircraft of interest, dwell zones,
-perimeter geometry, and jurisdictional coverage.
+perimeter geometry, jurisdictional coverage, and operator-declared
+temporary state (VIP presence, closed hangars, scheduled maintenance
+windows, restricted airspace activations). Frame of reference for
+every downstream agent.
 
-**Inputs.** Site definition files, response asset registries, ATC /
-port authority feeds.
+**Inputs.**
+- Site definition files (static base layer)
+- Response asset registries
+- ATC / port authority feeds (live where available)
+- **Operator briefings from the Site Context Console** (live edits by
+  the operator on shift)
 
 **Outputs.** `SiteContext { site_id, critical_areas, high_value_assets,
 response_asset_positions, aircraft_of_interest, dwell_zones,
-politikreds, tier_1_operators }`
+politikreds, tier_1_operators, active_briefings: [{ id, category,
+scope, from_utc, to_utc, reason, author, priority }] }`
 
-**Model.** Deterministic. Loaded from `site_context.js` and refreshed
-per site on operator config change.
+**Model.** Deterministic. Loaded from `site_context.js` at boot, then
+mutated live by operator briefings. Refreshed per site on any change.
 
-**Latency budget.** Zero at runtime. Cached in memory at boot.
+**Latency budget.** Zero at runtime for lookups. Briefing writes
+propagate to downstream agents within 200 ms.
 
 **Fallback.** Missing site context means the narrative agent falls
 back to generic language ("track observed across site sensor
 coverage"). Never blocks the pipeline.
 
-**Why offline.** Site context does not need real-time recomputation.
-The Copenhagen Airport terminal layout does not change per detection.
+**Operator surface: Site Context Console `[planned]`.** A dedicated
+UI on each site's Control Panel where the operator on shift can:
+- Add or edit critical assets (name, geometry, why it matters)
+- Declare time-windowed activations (VIP visit Tuesday 14:00-18:00,
+  runway 04L closed for maintenance, drone film permit active over
+  Terminal 3)
+- Attach reason annotations to any asset or zone (readable inline in
+  the narrative agent's briefings)
+- See a change log of who briefed what, when, and why
+- Push a briefing to a linked sister site (CPH ↔ Amalienborg jointly
+  briefed for state visits)
+
+Every operator-side edit immediately updates SiteContext and appears
+in Agent 3's next narrative pass. Briefings are versioned and
+attached to the event's audit trail so the receiver reading a briefing
+sees exactly which operator-declared context was in force at the time
+of detection.
+
+**Why this matters.** Site context is not a config file that changes
+quarterly. It is a live operational picture that the operator on
+shift knows better than any static definition. Giving the operator a
+direct channel to Agent 1 turns Site Context from stale reference
+data into ground truth.
+
+---
+
+### Agent 2 · Correlation `[live: partial]`
+
+**Role.** Macro correlation. Cross-references the current event
+against historical events and concurrent active events across all
+sites. Detects repeat signatures, cross-border tracks, and
+coordinated multi-site incursions. External to the site, not
+internal to the tick.
+
+**Inputs.** Current event (with NN classification and Site Context)
+plus the full EVENTS registry across all sites.
+
+**Outputs.** `CorrelationResult { linked_event_ids, similarity_scores,
+cross_site_track, pattern_flags }`
+
+**Correlation heuristics.**
+- Same RF signature at another site within 4 hours → cross-site track
+- Same platform class at same site within 90 days → recurring
+  incursion
+- More than 3 similar events across the country in 30 days →
+  national pattern flag
+- Trajectory heading toward a briefed high-value asset (from Agent 1)
+  → directional intent flag
+
+**Model.** Deterministic scoring. Signature match plus temporal
+proximity plus spatial connectivity plus directional projection
+against Site Context.
+
+**Latency budget.** Sub-300 ms per event update.
+
+**Fallback.** Correlation is advisory. Missing cross-site correlation
+never blocks escalation, only enriches the narrative.
 
 ---
 
@@ -342,14 +383,17 @@ narrative replaces it when it arrives.
         +----- NN output stream (~500 ms tick) ----+
                              |
                              v
-                    Agent 1 · Correlation
+                Event registry: same-target attach
                              |
-                    +--------+---------+
-                    |                  |
-                    v                  v
-        (Event scaffold)     Agent 2 · Site Context
-                    |                  |
-                    +--------+---------+
+                             v
+                    Agent 1 · Site Context
+                     (live-briefed by operator
+                      via Site Context Console)
+                             |
+                             v
+                    Agent 2 · Correlation
+                     (macro: cross-site, historical,
+                      pattern flags, directional intent)
                              |
                              v
                     Agent 3 · Narrative (Mistral Large 2, streaming)
@@ -415,8 +459,8 @@ narrative replaces it when it arrives.
 | Layer | Task | Model | Rationale |
 |---|---|---|---|
 | Sensor node NN | Modality processing, fusion, classification | Neural network on-node | Real-time signal-level work, must live at the sensor |
-| Agent 1 Correlation | Cross-event pattern match | Deterministic | Similarity scores are math, not language |
-| Agent 2 Site Context | Knowledge base | Cached deterministic | Zero-latency requirement, no reasoning needed |
+| Agent 1 Site Context | Knowledge base + live operator briefings | Cached deterministic | Zero-latency lookups, briefing writes propagate in ~200 ms |
+| Agent 2 Correlation | Macro cross-event pattern match | Deterministic | Similarity scores are math, not language |
 | Agent 3 Narrative | Event summary | **Mistral Large 2** | Natural language quality matters, sovereign requirement |
 | Agent 4 Recommendation | Route logic | Deterministic rules | Auditable, editable, no black-box risk on dispatch |
 | Agent 5 Escalation Router | Dispatch | Deterministic | Send-reliability critical, no room for hallucination |
@@ -613,8 +657,10 @@ integration ships.
 | Stage | p50 | p99 | Availability target |
 |---|---|---|---|
 | Raw signal → NN output on the wire (on sensor node) | 400 ms | 800 ms | 99.9% |
-| NN output → Correlation (Agent 1) | 80 ms | 300 ms | 99.9% |
+| NN output → Site Context lookup (Agent 1) | 20 ms | 80 ms | 99.9% |
+| Site Context → Correlation (Agent 2) | 80 ms | 300 ms | 99.9% |
 | Correlation → Recommendation (Agent 4) | 40 ms | 150 ms | 99.9% |
+| Operator briefing write → downstream propagation | 100 ms | 200 ms | 99.9% |
 | Recommendation → Dispatch (Agent 5) | 80 ms | 400 ms | 99.5% |
 | Total live path (raw signal → receiver inbox) | **700 ms** | **1.8 s** | 99.5% |
 | Narrative first token (Agent 3) | 2.5 s | 8 s | 99% |
@@ -645,9 +691,10 @@ Narrative failure never blocks dispatch. Deterministic path holds the
 
 ### What exists today (Aug 2026)
 
-- Agents 2, 4, 5 fully deterministic and running
-- Agent 1 partial (mock NN output source drives event lifecycle,
-  cross-site correlation heuristics wired but not exercised at scale)
+- Agents 1, 4, 5 fully deterministic and running (Site Context is
+  static config today, briefing console not yet built)
+- Agent 2 partial (cross-site correlation heuristics wired but not
+  exercised at scale, directional intent flag pending)
 - Agent 3 mock (`_mockAiSynthesis`)
 - Agent 6 partial (single-receiver flows wired, multi-receiver
   coordination pending Advance C)
@@ -679,7 +726,19 @@ Narrative failure never blocks dispatch. Deterministic path holds the
 - Receiver-side timeline showing other receivers' actions
 - Coordination indicator on operator ledger
 
-### Roadmap beyond Advances A + B + C
+### What Advance D delivers (Site Context Console)
+
+- Operator-facing UI to brief and update Agent 1 live
+- CRUD on critical assets with reason annotations
+- Time-windowed activations (VIP visits, closed hangars, permits,
+  restricted airspace)
+- Change log with author, timestamp, reason
+- Cross-site briefing propagation (CPH ↔ Amalienborg for state
+  visits)
+- Every briefing versioned and attached to event audit trail
+- Immediate propagation to Agent 3 narrative pass
+
+### Roadmap beyond Advances A + B + C + D
 
 - Sovereign backend deployment (Mistral inference, event storage,
   correlation index)
