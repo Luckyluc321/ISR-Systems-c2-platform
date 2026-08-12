@@ -10362,7 +10362,13 @@ async function main() {
               ? renderEventReport(event)
               : renderEventMapOverlay(event)}
           </main>
-          <aside class="rws-console">${renderResponseOverlay(event)}</aside>
+          <aside class="rws-console">
+            <div class="c-panel">
+              <div class="c-section-eyebrow">Mission Console</div>
+              <div class="c-section-title" style="margin-bottom: var(--space-3);">Awaiting recommendation</div>
+              <p style="color: var(--text-dim); font-size: var(--fs-sm); line-height: 1.55;">Recommendation, ranked options, and authorize controls arrive in Phase 3.2. Currently a placeholder.</p>
+            </div>
+          </aside>
         </div>
       </div>
     `;

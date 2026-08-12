@@ -6593,14 +6593,6 @@ body.view-fleet #fleet-view { display: block; }
   background: var(--surface-panel);
   overflow-y: auto;
 }
-/* When the Response Overlay is nested inside the workspace aside
-   (P89 fix), suppress its own border-left, width, and slide-in
-   animation so it acts as pane content instead of a floating overlay. */
-.rws-console .rcv-response-overlay {
-  width: auto;
-  border-left: none;
-  animation: none;
-}
 
 .rws-placeholder {
   padding: var(--space-6) var(--space-5);
