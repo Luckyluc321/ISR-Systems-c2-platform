@@ -1591,6 +1591,38 @@ async function main() {
     return c;
   }
 
+  function sofIcon(hex) {
+    const c = document.createElement('canvas');
+    c.width = 56; c.height = 56;
+    const ctx = c.getContext('2d');
+    // Filled triangle base (tactical unit convention)
+    ctx.fillStyle = hex;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(28, 6);
+    ctx.lineTo(52, 46);
+    ctx.lineTo(4, 46);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    // Inner white star (SOF glyph)
+    ctx.fillStyle = '#fff';
+    ctx.strokeStyle = hex;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    const cx = 28, cy = 32, r = 10;
+    for (let i = 0; i < 10; i++) {
+      const angle = -Math.PI / 2 + i * Math.PI / 5;
+      const rr = i % 2 === 0 ? r : r / 2.5;
+      const x = cx + rr * Math.cos(angle);
+      const y = cy + rr * Math.sin(angle);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    return c;
+  }
+
   // Counter-asset icon by response kind. Green tint for friendly
   // dispatched assets. Reuses existing quad/fixed-wing symbols for
   // counter-drones per Lucas's spec.
@@ -1600,6 +1632,7 @@ async function main() {
       case 'army-c-uas':
       case 'police-c-uas':         return jammerIcon(GREEN_COUNTER_HEX);
       case 'army-isr-drone':       return quadcopterIcon(GREEN_COUNTER_HEX);
+      case 'sof-tactical':         return sofIcon(GREEN_COUNTER_HEX);
       default:                     return null;
     }
   }
@@ -2138,6 +2171,301 @@ async function main() {
     _startF35Loop();
     toast('Fighter dispatched. F-35 airborne from Skrydstrup on projected intercept vector. Chase engages when downstream sensors reacquire.', 'info');
     if (getActiveRole().kind === 'receiver') renderReceiverView();
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // COUNTER-RESPONSE DISPATCH (P87 · Level 3)
+  // ══════════════════════════════════════════════════════════════════
+  // Multi-instance dispatch of graduated counter-response assets. Unlike
+  // the singleton F-35 QRA (session-wide, one-shot), each counter asset
+  // dispatched here runs an independent en_route → engaging → complete
+  // state machine with its own Cesium billboard, trail, and (for ground
+  // jammers) a pulsing radiation cone. Multiple dispatches per event
+  // are supported. The first non-visual dispatch that completes marks
+  // the event outcome as neutralised.
+
+  const _counterDispatches = new Map();   // dispatchId -> dispatch state
+  let _cdRafId = null;
+
+  // Per-kind kinematic + engagement profile. Real doctrine would come
+  // from response_assets.js RESPONSE_PROFILE + a doctrine lookup, but
+  // demo profiles are tuned for readable pacing (~10 s per engagement).
+  const CD_PROFILE = {
+    'helicopter-intercept': {
+      cruiseKmh: 250, arriveAtM: 500, engageSec: 8,
+      icon: 'helicopter', trail: true, airborne: true,
+      label: 'Helicopter intercept',
+    },
+    'army-c-uas': {
+      cruiseKmh: 0, arriveAtM: null, engageSec: 12,
+      icon: 'jammer', trail: false, airborne: false, radiationCone: true,
+      label: 'Army C-UAS jammer',
+    },
+    'police-c-uas': {
+      cruiseKmh: 80, arriveAtM: 500, engageSec: 10,
+      icon: 'jammer', trail: false, airborne: false, radiationCone: true,
+      label: 'Police C-UAS patrol',
+    },
+    'army-isr-drone': {
+      cruiseKmh: 60, arriveAtM: 300, engageSec: 6,
+      icon: 'quadcopter', trail: true, airborne: true,
+      visualVerifyOnly: true,   // does NOT neutralise on its own
+      label: 'ISR drone (visual verify)',
+    },
+    'sof-tactical': {
+      cruiseKmh: 200, arriveAtM: 400, engageSec: 15,
+      icon: 'sof', trail: true, airborne: true,
+      label: 'SOF tactical response',
+    },
+    'wildlife-response': {
+      cruiseKmh: 20, arriveAtM: 200, engageSec: 4,
+      icon: 'sof', trail: false, airborne: false,
+      label: 'Wildlife management',
+    },
+  };
+
+  function _bearingRad(lat1, lon1, lat2, lon2) {
+    return Math.atan2(lon2 - lon1, lat2 - lat1);
+  }
+
+  function _counterDispatchIcon(iconKind) {
+    switch (iconKind) {
+      case 'helicopter': return helicopterIcon(GREEN_COUNTER_HEX);
+      case 'jammer':     return jammerIcon(GREEN_COUNTER_HEX);
+      case 'quadcopter': return quadcopterIcon(GREEN_COUNTER_HEX);
+      case 'sof':        return sofIcon(GREEN_COUNTER_HEX);
+      default:           return null;
+    }
+  }
+
+  // Public entry point. Called by the Dispatch button in the Response
+  // Overlay assetRow. asset is a response_assets bundle entry with
+  // {id, name, kind, lat, lon, etaLabel, distanceKm, ...}.
+  function dispatchCounterResponse(eventId, asset) {
+    const event = getEvent(eventId);
+    if (!event) return;
+    const profile = CD_PROFILE[asset.kind];
+    if (!profile) {
+      toast(`No dispatch profile for ${asset.kind}`, 'warn');
+      return;
+    }
+    // Dedup: already dispatched this asset for this event?
+    for (const [, d] of _counterDispatches) {
+      if (d.eventId === eventId && d.assetId === asset.id && d.state !== 'complete') {
+        toast(`${asset.name} already dispatched.`, 'info');
+        return;
+      }
+    }
+    const threatLat = event.lastPosition?.lat ?? event.entry?.lat;
+    const threatLon = event.lastPosition?.lon ?? event.entry?.lon;
+    if (threatLat == null || threatLon == null) return;
+
+    const dispatchId = `cd-${eventId}-${asset.id}-${Date.now()}`;
+    const isStatic = profile.cruiseKmh === 0;
+    const d = {
+      id: dispatchId,
+      eventId,
+      assetId: asset.id,
+      assetName: asset.name,
+      kind: asset.kind,
+      profile,
+      state: isStatic ? 'engaging' : 'en_route',
+      dispatchedTs: Date.now(),
+      lastFrameTs: Date.now(),
+      arrivedTs: isStatic ? Date.now() : null,
+      engageStartTs: isStatic ? Date.now() : null,
+      curLat: asset.lat, curLon: asset.lon,
+      originLat: asset.lat, originLon: asset.lon,
+      targetLat: threatLat, targetLon: threatLon,
+      heading: _bearingRad(asset.lat, asset.lon, threatLat, threatLon),
+      entity: null, trail: null, trailPositions: [], radiationEntity: null,
+    };
+    _counterDispatches.set(dispatchId, d);
+    _createCounterDispatchEntities(d);
+    if (isStatic && profile.radiationCone) _createRadiationEntity(d);
+    _startCounterDispatchLoop();
+
+    // Track on event for ledger + audit
+    if (!Array.isArray(event.counterDispatches)) event.counterDispatches = [];
+    event.counterDispatches.push({
+      dispatchId, assetId: asset.id, assetName: asset.name, kind: asset.kind,
+      dispatchedTs: d.dispatchedTs,
+    });
+
+    const originLabel = isStatic ? `activated at ${asset.name}` : `dispatched from ${asset.name}`;
+    toast(`${profile.label} ${originLabel}.`, 'info');
+    if (getActiveRole().kind === 'receiver') renderReceiverView();
+  }
+
+  function _createCounterDispatchEntities(d) {
+    const iconCanvas = _counterDispatchIcon(d.profile.icon);
+    if (!iconCanvas) return;
+    const iconUrl = iconCanvas.toDataURL();
+    d.entity = viewer.entities.add({
+      position: new Cesium.CallbackProperty(() => (
+        Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0)
+      ), false),
+      billboard: {
+        image: iconUrl,
+        verticalOrigin: Cesium.VerticalOrigin.CENTER,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        scale: 0.85,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      label: {
+        text: new Cesium.CallbackProperty(() => {
+          const suffix = d.state === 'en_route' ? ' · en route'
+                       : d.state === 'engaging' ? ' · engaging'
+                       : d.state === 'complete' ? ' · complete'
+                       : '';
+          return d.assetName + suffix;
+        }, false),
+        font: '11px system-ui',
+        fillColor: Cesium.Color.fromCssColorString('#4dff9c'),
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 2,
+        pixelOffset: new Cesium.Cartesian2(0, -28),
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        showBackground: true,
+        backgroundColor: Cesium.Color.fromCssColorString('rgba(8, 11, 16, 0.85)'),
+        backgroundPadding: new Cesium.Cartesian2(6, 3),
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      },
+    });
+
+    if (d.profile.trail) {
+      d.trail = viewer.entities.add({
+        polyline: {
+          positions: new Cesium.CallbackProperty(() => d.trailPositions, false),
+          width: 2,
+          material: Cesium.Color.fromCssColorString('#4dff9c').withAlpha(0.55),
+          clampToGround: true,
+        },
+      });
+    }
+  }
+
+  function _createRadiationEntity(d) {
+    // Pulsing green cone/ellipse emanating from the jammer position
+    // toward the threat. Animated via CallbackProperty per frame.
+    d.radiationEntity = viewer.entities.add({
+      position: new Cesium.CallbackProperty(() => (
+        Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0)
+      ), false),
+      ellipse: {
+        semiMajorAxis: new Cesium.CallbackProperty(() => {
+          const t = ((Date.now() - d.engageStartTs) / 1500) % 1;
+          return 500 + t * 900;
+        }, false),
+        semiMinorAxis: new Cesium.CallbackProperty(() => {
+          const t = ((Date.now() - d.engageStartTs) / 1500) % 1;
+          return 500 + t * 900;
+        }, false),
+        material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
+          const t = ((Date.now() - d.engageStartTs) / 1500) % 1;
+          return Cesium.Color.fromCssColorString('#4dff9c').withAlpha(0.22 * (1 - t));
+        }, false)),
+        outline: true,
+        outlineColor: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
+          const t = ((Date.now() - d.engageStartTs) / 1500) % 1;
+          return Cesium.Color.fromCssColorString('#4dff9c').withAlpha(0.55 * (1 - t));
+        }, false)),
+        outlineWidth: 2,
+        height: 0,
+      },
+    });
+  }
+
+  function _startCounterDispatchLoop() {
+    if (_cdRafId) return;
+    const tick = () => {
+      const now = Date.now();
+      for (const [, d] of _counterDispatches) {
+        _tickCounterDispatch(d, now);
+      }
+      if (_counterDispatches.size > 0) {
+        _cdRafId = requestAnimationFrame(tick);
+      } else {
+        _cdRafId = null;
+      }
+    };
+    _cdRafId = requestAnimationFrame(tick);
+  }
+
+  function _tickCounterDispatch(d, now) {
+    // Live target update — if threat is still moving, track it
+    const event = getEvent(d.eventId);
+    if (event?.lastPosition) {
+      d.targetLat = event.lastPosition.lat;
+      d.targetLon = event.lastPosition.lon;
+    }
+
+    if (d.state === 'en_route') {
+      const dtSec = (now - d.lastFrameTs) / 1000;
+      d.lastFrameTs = now;
+      if (dtSec <= 0) return;
+      const brng = _bearingRad(d.curLat, d.curLon, d.targetLat, d.targetLon);
+      d.heading = brng;
+      const speedMps = (d.profile.cruiseKmh * 1000) / 3600;
+      const stepM = speedMps * dtSec;
+      const stepDegLat = (stepM * Math.cos(brng)) / 111000;
+      const stepDegLon = (stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
+      d.curLat += stepDegLat;
+      d.curLon += stepDegLon;
+      if (d.profile.trail) {
+        d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0));
+        if (d.trailPositions.length > 500) d.trailPositions.shift();
+      }
+      const distM = haversineM(d.curLat, d.curLon, d.targetLat, d.targetLon);
+      if (distM <= d.profile.arriveAtM) {
+        d.state = 'engaging';
+        d.arrivedTs = now;
+        d.engageStartTs = now;
+        if (d.profile.radiationCone) _createRadiationEntity(d);
+        if (getActiveRole().kind === 'receiver') renderReceiverView();
+        toast(`${d.assetName} on station. Engaging.`, 'info');
+      }
+    } else if (d.state === 'engaging') {
+      const engageDur = (now - d.engageStartTs) / 1000;
+      if (engageDur >= d.profile.engageSec) {
+        d.state = 'complete';
+        _resolveEngagement(d);
+      }
+    }
+  }
+
+  function _resolveEngagement(d) {
+    const event = getEvent(d.eventId);
+    if (event && !d.profile.visualVerifyOnly) {
+      if (!event.outcome || event.outcome === 'awaiting_neutralization') {
+        event.outcome = 'neutralized';
+        event.neutralisedByDispatchId = d.id;
+        event.neutralisedAt = new Date().toISOString();
+        toast(`Threat neutralised. ${d.assetName} confirmed disruption.`, 'ok');
+      }
+    } else if (d.profile.visualVerifyOnly) {
+      toast(`${d.assetName} visual verify complete. Standing by.`, 'info');
+    }
+    if (getActiveRole().kind === 'receiver') renderReceiverView();
+
+    // Retire entities after a short delay so operator can see completion
+    setTimeout(() => {
+      if (d.entity) { viewer.entities.remove(d.entity); d.entity = null; }
+      if (d.trail) { viewer.entities.remove(d.trail); d.trail = null; }
+      if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+      _counterDispatches.delete(d.id);
+    }, 5000);
+  }
+
+  // Lookup: has this asset been dispatched for this event? Returns
+  // the dispatch state string or null.
+  function counterDispatchStateFor(eventId, assetId) {
+    for (const [, d] of _counterDispatches) {
+      if (d.eventId === eventId && d.assetId === assetId) return d.state;
+    }
+    const event = getEvent(eventId);
+    if (event?.counterDispatches?.some(cd => cd.assetId === assetId)) return 'complete';
+    return null;
   }
 
   // Post incident responders = the subset of a site's destinations that make
@@ -9723,12 +10051,35 @@ async function main() {
     // Skrydstrup, helos at Karup, transports at Aalborg). Click opens the
     // universal aircraft info popup. Ground / consequence assets get no
     // airframe icons since they aren't air platforms.
-    const assetRow = (a, _isTactical) => {
+    // Kinds that can be dispatched via the counter-response Level 3
+    // visualisation. F-35 QRA uses its own dedicated dispatch flow
+    // (session-wide singleton), so excluded here.
+    const DISPATCHABLE_KINDS = new Set([
+      'helicopter-intercept', 'army-c-uas', 'police-c-uas',
+      'army-isr-drone', 'sof-tactical', 'wildlife-response',
+    ]);
+
+    const assetRow = (a, isTactical) => {
       const airframes = aircraftForResponseAsset(a.id);
       const airframeChips = airframes.map(af => {
         const id = Object.keys(AIRCRAFT).find(k => AIRCRAFT[k].designation === af.designation);
         return `<button class="c-chip accent" style="cursor: pointer; padding: 3px 6px 3px 8px; gap: 5px;" data-aircraft-info="${id}" aria-label="${af.designation} info">${af.designation.split(' ')[0]}<span style="font-style: italic; opacity: 0.7;">i</span></button>`;
       }).join('');
+
+      // Dispatch button — only for tactical counter-response assets.
+      // State-aware: Dispatch → En route → Engaging → Complete.
+      let dispatchBtn = '';
+      if (isTactical && DISPATCHABLE_KINDS.has(a.kind)) {
+        const cdState = counterDispatchStateFor(event.id, a.id);
+        const stateLabel = { en_route: 'En route', engaging: 'Engaging', complete: 'Complete' }[cdState];
+        if (cdState) {
+          const stateColor = cdState === 'complete' ? '#6b7280' : cdState === 'engaging' ? '#ffb84d' : '#4dd2ff';
+          dispatchBtn = `<div style="margin-top: 4px; font-size: var(--fs-xs); color: ${stateColor}; font-family: var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase;">${stateLabel}</div>`;
+        } else {
+          dispatchBtn = `<button class="c-btn-primary" style="margin-top: 4px; padding: 3px 10px; font-size: var(--fs-xs); background: #4dff9c; color: #06080b; border: none; border-radius: 3px; cursor: pointer; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">Dispatch</button>`;
+        }
+      }
+
       return `
       <div class="c-row">
         <div style="color: ${kindColor(a.kind)}; font-size: 14px; line-height: 1; width: 20px; text-align: center; flex: 0 0 20px;">${kindIcon(a.kind)}</div>
@@ -9740,6 +10091,7 @@ async function main() {
         <div style="text-align: right; white-space: nowrap; flex: 0 0 auto;">
           <div style="color: ${kindColor(a.kind)}; font-family: var(--font-mono); font-size: var(--fs-sm); font-weight: 600; letter-spacing: var(--ls-body); font-variant-numeric: tabular-nums;">${a.etaLabel}</div>
           <div class="c-label" style="margin-top: 2px;">${a.distanceKm} km</div>
+          ${dispatchBtn}
         </div>
       </div>`;
     };
@@ -10633,6 +10985,24 @@ async function main() {
       else if (action === 'ack') { updateEscalationStatus(_selectedReceiverEventId, escId, 'acknowledged'); toast('Acknowledgment sent to operator', 'ok'); renderReceiverView(); }
       else if (action === 'advisory-view') { toast(`Advisory only: track ${id} is projecting toward your site. Full escalation not yet sent.`, 'info'); }
       else if (action === 'qra-dispatch') { triggerQraIntercept(id); renderReceiverView(); }
+      else if (action === 'counter-dispatch') {
+        // Level 3 counter-response dispatch. Uses the current event's
+        // subject-derived response bundle to find the asset by id, then
+        // fires dispatchCounterResponse which handles state machine +
+        // Cesium visuals + engagement resolution.
+        const assetId = el.dataset.assetId;
+        const ev = getEvent(id);
+        if (!ev || !assetId) return;
+        const threatLat = ev.lastPosition?.lat ?? ev.entry?.lat;
+        const threatLon = ev.lastPosition?.lon ?? ev.entry?.lon;
+        if (threatLat == null) { toast('No threat position available', 'err'); return; }
+        const bundle = ev.subject
+          ? responseBundleForSubject(ev.subject, threatLat, threatLon)
+          : responseBundle(threatLat, threatLon);
+        const asset = [...bundle.tactical, ...bundle.ground, ...bundle.consequence].find(a => a.id === assetId);
+        if (!asset) { toast('Asset not found in response bundle', 'err'); return; }
+        dispatchCounterResponse(id, asset);
+      }
       else if (action === 'cascade-fe-pet') {
         // Receiver-initiated cascade to FE + PET tier-3 destinations.
         // Uses the same escalateEvent path the operator uses; dedupe in
