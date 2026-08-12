@@ -19,6 +19,12 @@
 // per-tick NN detection batch.
 // ═══════════════════════════════════════════════════════════════════
 
+// ── Schema version ────────────────────────────────────────────────
+// Bump when the DetectionSubject shape changes in a way consumers
+// need to react to. Consumers should defensively check this before
+// reading new fields. Never remove fields — deprecate in place.
+export const SUBJECT_SCHEMA_VERSION = '1.0';
+
 // ── Taxonomy vocabularies ─────────────────────────────────────────
 
 export const CATEGORY = Object.freeze({
@@ -188,6 +194,7 @@ export function subjectFromEvent(event, opts = {}) {
   };
 
   return {
+    schema_version: SUBJECT_SCHEMA_VERSION,
     category: tax.category,
     class: tax.klass,
     subclass: event.droneType || tax.subclass || null,
@@ -199,7 +206,87 @@ export function subjectFromEvent(event, opts = {}) {
     threat_profile,
     sensor_evidence,
     nn_meta,
+    // Class-change log. When the NN reclassifies mid-event (e.g.
+    // "quadcopter" upgraded to "loitering_munition" once payload
+    // signature clarifies), each transition appends here. Consumers
+    // key off this for "classification was revised" surfacing.
+    class_change_log: [],
   };
+}
+
+// Attach or refresh event.subject from the current flat event fields.
+// Called on event creation, reclassification, and any mutation that
+// should be reflected downstream. Idempotent: running twice with no
+// interim change produces the same subject.
+//
+// Preserves class_change_log across syncs. If the class actually
+// changed since the last sync, records the transition.
+export function syncEventSubject(event) {
+  if (!event) return null;
+  const previous = event.subject;
+  const next = subjectFromEvent(event);
+
+  if (previous) {
+    // Preserve prior class change history
+    next.class_change_log = previous.class_change_log || [];
+    // Record a transition if the class actually changed
+    if (previous.class && previous.class !== next.class) {
+      next.class_change_log.push({
+        from: previous.class,
+        to: next.class,
+        at: new Date().toISOString(),
+        reason: event.lastReclassifyReason || 'sync',
+      });
+    }
+  }
+
+  event.subject = next;
+  return next;
+}
+
+// Apply a per-tick NN detection update to an existing subject.
+// This is the integration point that Advance B (NN output source
+// adapter) will call as real hardware streams detections. The
+// function mutates subject in-place with fresh kinematics, updated
+// per-modality confidence, and updated cardinality/formation if the
+// NN's fused output differs from the current state.
+//
+// nnTick shape: { detections: [{nn_class, nn_confidence, lat, lon,
+//   alt_m, heading_deg, speed_ms, contributing_modalities,
+//   rf_signature_match}], node_health, nn_model_version, tick_id }
+export function applyNnTickToSubject(subject, nnTick) {
+  if (!subject || !nnTick?.detections?.length) return subject;
+  const det = nnTick.detections[0];   // primary detection this tick
+
+  // Fresh kinematics from the latest fused fix
+  if (det.speed_ms != null) subject.kinematics.speed_ms = det.speed_ms;
+  if (det.alt_m != null) subject.kinematics.altitude_m_agl = det.alt_m;
+  if (det.heading_deg != null) subject.kinematics.heading_deg = det.heading_deg;
+
+  // Update fused class confidence (running max, not overwrite — the NN
+  // can dip below on a noisy tick without collapsing our confidence)
+  if (det.nn_confidence != null) {
+    subject.class_confidence = Math.max(subject.class_confidence, det.nn_confidence);
+  }
+
+  // Record class transitions if the NN's per-tick class disagrees
+  // with the subject's current class
+  if (det.nn_class && det.nn_class !== subject.class) {
+    subject.class_change_log.push({
+      from: subject.class,
+      to: det.nn_class,
+      at: new Date().toISOString(),
+      reason: `nn_tick_${nnTick.tick_id || 'unknown'}`,
+    });
+    subject.class = det.nn_class;
+  }
+
+  // NN meta stamps for provenance
+  subject.nn_meta.inference_ts = new Date().toISOString();
+  subject.nn_meta.fusion_ts = new Date().toISOString();
+  if (nnTick.nn_model_version) subject.nn_meta.model_version = nnTick.nn_model_version;
+
+  return subject;
 }
 
 // ── Derivation helpers ────────────────────────────────────────────

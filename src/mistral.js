@@ -130,11 +130,12 @@ function buildCaseFileMessages(event, site) {
   const startedAt = event.startTime || new Date().toISOString();
   const linked = event.linkedEventIds?.length || 0;
 
-  // Rich structured detection subject — the deep-learning-ready
-  // taxonomy the NN emits. Derived from the current mock event today,
-  // will be consumed directly from the NN output batch once real
-  // hardware lands. See detection_subject.js for the full schema.
-  const subject = subjectFromEvent(event);
+  // Rich structured detection subject — canonical shape attached to
+  // event.subject by events.js. Fall back to on-demand derivation for
+  // events created outside addEvent() (defensive guard, should not
+  // fire once every consumer goes through addEvent). See
+  // detection_subject.js for the full schema.
+  const subject = event.subject || subjectFromEvent(event);
   const subjectDigest = renderSubjectDigest(subject);
 
   const systemPrompt = [
@@ -168,15 +169,29 @@ function buildCaseFileMessages(event, site) {
 
 function buildDebriefMessages(event, samples, analysis) {
   const siteName = event.siteName || event.siteId || 'unknown site';
-  const droneN = event.droneType || 'Contact';
   const dur = samples.length ? Math.round(samples[samples.length - 1].t_sec_from_event - samples[0].t_sec_from_event) : 0;
   const primaryDwell = analysis.dwellZones.filter(d => d.pctOfFlight >= 40).slice(0, 2);
   const notableDwell = analysis.dwellZones.filter(d => d.pctOfFlight >= 20 && d.pctOfFlight < 40).slice(0, 2);
   const closest = analysis.touched[0];
   const linked = event.linkedEventIds?.length || 0;
 
+  // Canonical detection subject (attached by events.js). Defensive
+  // fallback for events created outside addEvent().
+  const subject = event.subject || subjectFromEvent(event);
+  const subjectDigest = renderSubjectDigest(subject);
+
+  // Class-change log surfacing. If the NN reclassified mid-event
+  // (e.g. quadcopter → loitering_munition once payload signature
+  // clarified), that transition is analyst-relevant.
+  const classChanges = (subject.class_change_log || []).slice(0, 3);
+  const classChangeLines = classChanges.length
+    ? classChanges.map(c => `  ${c.from} → ${c.to} (${c.reason})`)
+    : ['  Classification held throughout.'];
+
   const systemPrompt = [
     'You are an intelligence analyst producing a post-event debrief narrative for a Danish critical-infrastructure operator. The event has closed. Write a retrospective analyst summary of what happened and what it likely means.',
+    '',
+    'The DETECTION SUBJECT block below is the fused NN output at close of event. TRAJECTORY ANALYSIS is the post-event geospatial analysis from the recorded track. CLASSIFICATION LOG shows whether the NN revised its class during the event.',
     '',
     'Writing rules:',
     '- ' + WRITING_RULES,
@@ -191,16 +206,23 @@ function buildDebriefMessages(event, samples, analysis) {
   const userPrompt = [
     `Event ID: ${event.id}`,
     `Site: ${siteName}`,
-    `Platform: ${droneN}`,
-    `Classification: ${event.classification || 'unknown'}`,
     `Total duration: ${dur} seconds`,
+    `Outcome: ${event.outcome || 'no dispatch'}`,
+    `Correlated events at other sites: ${linked}`,
+    '',
+    subjectDigest,
+    '',
+    'TRAJECTORY ANALYSIS',
+    '─────────────────',
     'Dwell profile:',
     ...dwellLines,
     closest ? `Closest asset approach: ${closest.name} at ${closest.minDistM}m` : 'No close asset approach recorded.',
-    `Correlated events at other sites: ${linked}`,
-    event.outcome ? `Outcome: ${event.outcome}` : '',
     '',
-    'Produce the debrief narrative using the rules and format above. Focus on behavioral interpretation (reconnaissance, transit, deliberate loiter, indecisive path) rather than restating raw numbers.',
+    'CLASSIFICATION LOG',
+    '─────────────────',
+    ...classChangeLines,
+    '',
+    'Produce the debrief narrative using the rules and format above. Focus on behavioral interpretation (reconnaissance, transit, deliberate loiter, indecisive path) rather than restating raw numbers. If the classification log shows a mid-event revision, address why that matters.',
   ].filter(Boolean).join('\n');
 
   return [
