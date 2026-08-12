@@ -10059,6 +10059,25 @@ async function main() {
       'army-isr-drone', 'sof-tactical', 'wildlife-response',
     ]);
 
+    // Role-scoping (P90): which receiver roles have jurisdiction to
+    // dispatch which asset kinds. Only these roles see a live Dispatch
+    // button; others see the asset row for situational awareness only.
+    // Admin sees all (fallback below).
+    const ROLE_DISPATCH_SCOPE = {
+      'flv-qra':        new Set(['helicopter-intercept']),
+      'forsvarskmd':    new Set(['helicopter-intercept', 'army-c-uas', 'army-isr-drone', 'army-ground', 'sof-tactical']),
+      'fe':             new Set(['army-isr-drone']),
+      'rigspoliti':     new Set(['police-c-uas']),
+      'politi-kbh':     new Set(['police-c-uas']),
+      'politi-sydvest': new Set(['police-c-uas']),
+      'op-cph-airports':new Set(['wildlife-response']),
+      'op-esbjerg-port':new Set(['wildlife-response']),
+      'op-energinet':   new Set([]),
+    };
+    const roleScope = ROLE_DISPATCH_SCOPE[activeRole?.id] || null;
+    const canDispatch = (kind) => (activeRole?.kind === 'admin')
+      || (roleScope ? roleScope.has(kind) : false);
+
     const assetRow = (a, isTactical) => {
       const airframes = aircraftForResponseAsset(a.id);
       const airframeChips = airframes.map(af => {
@@ -10066,10 +10085,13 @@ async function main() {
         return `<button class="c-chip accent" style="cursor: pointer; padding: 3px 6px 3px 8px; gap: 5px;" data-aircraft-info="${id}" aria-label="${af.designation} info">${af.designation.split(' ')[0]}<span style="font-style: italic; opacity: 0.7;">i</span></button>`;
       }).join('');
 
-      // Dispatch button — only for tactical counter-response assets.
-      // State-aware: Dispatch → En route → Engaging → Complete.
+      // Dispatch button — only for tactical counter-response assets
+      // AND only when the current role has jurisdictional scope.
+      // Other roles still see the asset row (situational awareness),
+      // but no dispatch action. State-aware button: Dispatch → En route
+      // → Engaging → Complete.
       let dispatchBtn = '';
-      if (isTactical && DISPATCHABLE_KINDS.has(a.kind)) {
+      if (isTactical && DISPATCHABLE_KINDS.has(a.kind) && canDispatch(a.kind)) {
         const cdState = counterDispatchStateFor(event.id, a.id);
         const stateLabel = { en_route: 'En route', engaging: 'Engaging', complete: 'Complete' }[cdState];
         if (cdState) {
@@ -10077,6 +10099,18 @@ async function main() {
           dispatchBtn = `<div style="margin-top: 4px; font-size: var(--fs-xs); color: ${stateColor}; font-family: var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase;">${stateLabel}</div>`;
         } else {
           dispatchBtn = `<button class="c-btn-primary" style="margin-top: 4px; padding: 3px 10px; font-size: var(--fs-xs); background: #4dff9c; color: #06080b; border: none; border-radius: 3px; cursor: pointer; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">Dispatch</button>`;
+        }
+      } else if (isTactical && DISPATCHABLE_KINDS.has(a.kind)) {
+        // Asset is dispatchable but this role doesn't have jurisdiction —
+        // show the state as an unclickable label so operator sees another
+        // agency is handling / can handle it.
+        const cdState = counterDispatchStateFor(event.id, a.id);
+        if (cdState) {
+          const stateLabel = { en_route: 'En route', engaging: 'Engaging', complete: 'Complete' }[cdState];
+          const stateColor = cdState === 'complete' ? '#6b7280' : cdState === 'engaging' ? '#ffb84d' : '#4dd2ff';
+          dispatchBtn = `<div style="margin-top: 4px; font-size: var(--fs-xs); color: ${stateColor}; font-family: var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase;">${stateLabel}</div>`;
+        } else {
+          dispatchBtn = `<div style="margin-top: 4px; font-size: var(--fs-2xs); color: var(--text-dim); font-family: var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase;">Other agency</div>`;
         }
       }
 
@@ -10157,9 +10191,14 @@ async function main() {
     } else if (isFlyvevaabnet && isMissile) {
       const skrydstrupList = aircraftAtBase('skrydstrup');
       if (!_f35.airborne) {
+        // P91 fix: wrap the chip in a flex column with align-items:
+        // flex-start so it can never stretch to fill the parent's width
+        // (previous yellow-pillar bug in Flyvevåbnet view).
         dispatchBlock = `
           <section class="c-panel">
-            <span class="c-chip warn">Awaiting Dispatch</span>
+            <div style="display: flex; flex-direction: column; align-items: flex-start;">
+              <span class="c-chip warn" style="align-self: flex-start; max-width: max-content;">Awaiting Dispatch</span>
+            </div>
             <div style="font-size: var(--fs-base); color: var(--text); line-height: 1.55; margin-top: var(--space-3);">Confirmed cruise missile signature. Airborne intercept authorised on scramble.</div>
             ${airframeList('Available airframes · Skrydstrup', skrydstrupList)}
             <button class="c-btn solid ok wide" style="justify-content: center;" data-rcv="qra-dispatch" data-id="${event.id}">
@@ -10323,13 +10362,7 @@ async function main() {
               ? renderEventReport(event)
               : renderEventMapOverlay(event)}
           </main>
-          <aside class="rws-console">
-            <div class="c-panel">
-              <div class="c-section-eyebrow">Mission Console</div>
-              <div class="c-section-title" style="margin-bottom: var(--space-3);">Awaiting recommendation</div>
-              <p style="color: var(--text-dim); font-size: var(--fs-sm); line-height: 1.55;">Recommendation, ranked options, and authorize controls arrive in Phase 3.2. Currently a placeholder.</p>
-            </div>
-          </aside>
+          <aside class="rws-console">${renderResponseOverlay(event)}</aside>
         </div>
       </div>
     `;
@@ -10682,12 +10715,34 @@ async function main() {
 
   // Fires the Mistral streaming call for the currently-mounted case-file.
   // The mock summary is already in the DOM as a placeholder. Tokens replace
-  // it as they arrive. On error the mock stays visible and the user sees
-  // no visible degradation. Guarded so repeat calls (e.g. ai-refresh) don't
-  // pile up: aborts by keying to the current _workspaceEventId.
+  // it as they arrive. On error the mock stays visible.
+  //
+  // DEDUP INVARIANT: renderReceiverView runs on ~15 triggers (tick loops,
+  // ack, respond, filter changes). We must NOT re-fire Mistral on every
+  // render or we blink the UI and slam the rate limit. Track which event
+  // last fired; skip if the workspace is still on the same event. Only
+  // force re-fire on ai-refresh (bypasses dedup) or workspace change.
+  // 429 backoff parks the event in a cooldown window that expires after
+  // MISTRAL_COOLDOWN_MS so retries stop until the demo tier resets.
   let _mistralCaseFileGen = 0;
-  function _fireMistralCaseFile(event) {
+  let _mistralFiredForEvent = null;   // event.id we last fired for
+  const _mistralCooldownUntil = new Map();   // event.id -> Date.now() cooldown expiry
+  const MISTRAL_COOLDOWN_MS = 45 * 1000;   // 45s cooldown on 429
+
+  function _fireMistralCaseFile(event, opts = {}) {
     if (!isMistralConfigured() || !event) return;
+    const { force = false } = opts;
+
+    // Cooldown check: if we recently 429'd for this event, hold on mock
+    const cooldownExp = _mistralCooldownUntil.get(event.id) || 0;
+    if (!force && Date.now() < cooldownExp) return;
+    if (force) _mistralCooldownUntil.delete(event.id);
+
+    // Dedup: same event as last fire? Skip. On force (ai-refresh) or new
+    // event, proceed and set the fired-for tracker.
+    if (!force && _mistralFiredForEvent === event.id) return;
+    _mistralFiredForEvent = event.id;
+
     const gen = ++_mistralCaseFileGen;
     const bodyEl = document.querySelector(`[data-ai-body="${event.id}"]`);
     const recoEl = document.querySelector(`[data-ai-reco="${event.id}"]`);
@@ -10717,7 +10772,14 @@ async function main() {
       onError: (err) => {
         if (gen !== _mistralCaseFileGen) return;
         console.warn('[mistral case-file] falling back to mock:', err.message);
-        if (footEl) footEl.textContent = `Mistral unreachable · showing mock synthesis · ${err.message.slice(0, 80)}`;
+        // 429 = rate limit. Park this event in cooldown so we don't
+        // hammer the endpoint on every subsequent render.
+        if (/429|Rate limit/i.test(err.message)) {
+          _mistralCooldownUntil.set(event.id, Date.now() + MISTRAL_COOLDOWN_MS);
+          if (footEl) footEl.textContent = `Mistral rate-limited. Showing mock synthesis. Retry available in ${Math.round(MISTRAL_COOLDOWN_MS / 1000)}s or click regenerate.`;
+        } else {
+          if (footEl) footEl.textContent = `Mistral unreachable · showing mock synthesis · ${err.message.slice(0, 80)}`;
+        }
       },
     });
   }
@@ -11066,7 +11128,7 @@ async function main() {
         if (ev) _enterMapMode(ev);
         renderReceiverView();
       }
-      else if (action === 'workspace-back' || action === 'workspace-close') { _workspaceEventId = null; _exitMapMode(); renderReceiverView(); }
+      else if (action === 'workspace-back' || action === 'workspace-close') { _workspaceEventId = null; _mistralFiredForEvent = null; _exitMapMode(); renderReceiverView(); }
       else if (action === 'workspace-mode') {
         _workspaceMode = el.dataset.mode;
         const ev = _lookupWorkspaceEvent(_workspaceEventId);
@@ -11078,7 +11140,7 @@ async function main() {
         if (!isMistralConfigured()) { toast('Mistral API key not configured (set VITE_MISTRAL_API_TOKEN)', 'warn'); }
         else {
           const ev = EVENTS.find(e => e.id === _workspaceEventId);
-          if (ev) { _fireMistralCaseFile(ev); toast('Regenerating synthesis via Mistral Large 2', 'info'); }
+          if (ev) { _fireMistralCaseFile(ev, { force: true }); toast('Regenerating synthesis via Mistral Large 2', 'info'); }
         }
       }
       else if (action === 'map-layer-locked') { toast('3D layer is disabled for this demo. See project map architecture for the sovereign rollout plan.', 'info'); }
