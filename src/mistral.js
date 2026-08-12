@@ -106,10 +106,10 @@ async function streamCompletion(messages, callbacks, opts = {}) {
 // ─────────────────────────────────────────────────────────────
 
 const WRITING_RULES = [
+  'Write in ENGLISH. Do not write in Danish, even though the operator is Danish. Only use Danish characters (æ ø å) for proper nouns like site names or agency names, never for the body text itself.',
   'Two short paragraphs maximum for the briefing body.',
   'Declarative voice. No hedging phrases like "may" or "could indicate".',
   'No em-dashes. No semicolons. No filler words like "furthermore" or "moreover".',
-  'Use Danish characters æ ø å where relevant. Never substitute with ae, oe, o.',
   'Do not use markdown. No bold, italic, headers, or bullets.',
   'Keep the briefing body under 500 characters.',
   'Recommendation is one sentence starting with an action verb, under 200 characters.',
