@@ -39,7 +39,7 @@ import {
 } from './destinations.js';
 import { renderDetectionBrief } from './summary.js';
 import { contextForSite, nearestCriticalArea, dwellZonesAtPoint } from './site_context.js';
-import { responseBundle } from './response_assets.js';
+import { responseBundle, responseBundleForSubject } from './response_assets.js';
 import { AIRCRAFT, aircraftAtBase, aircraftForResponseAsset } from './aircraft.js';
 import { playbookFor } from './response_playbook.js';
 import { ADMIN, OPERATORS, RECEIVERS, getActiveRole, setActiveRole, onRoleChange } from './roles.js';
@@ -1492,6 +1492,116 @@ async function main() {
     ctx.strokeText('?', 28, 30);
     ctx.fillText('?', 28, 30);
     return c;
+  }
+
+  // ── Counter-response icons (green-tinted friendly asset symbols) ──
+  // Used for the graduated-response render (helicopter intercept,
+  // counter-drones, ground C-UAS jammers). Passing GREEN_COUNTER_HEX
+  // gives the recognisable "friendly counter-asset" cue on the map.
+  // Counter-drones re-use quadcopterIcon / fixedWingIcon with green hex
+  // per Lucas's spec — no new symbols needed there.
+  const GREEN_COUNTER_HEX = '#4dff9c';
+
+  function helicopterIcon(hex) {
+    const c = document.createElement('canvas');
+    c.width = 56; c.height = 56;
+    const ctx = c.getContext('2d');
+
+    // Main rotor disc — 4-blade rotor, top-down view
+    ctx.strokeStyle = hex;
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(4, 22); ctx.lineTo(52, 22);
+    ctx.moveTo(22, 4); ctx.lineTo(22, 44);
+    ctx.stroke();
+    // Rotor hub
+    ctx.fillStyle = hex;
+    ctx.beginPath(); ctx.arc(22, 22, 4, 0, Math.PI * 2); ctx.fill();
+
+    // Fuselage (offset from rotor centre for clarity)
+    ctx.fillStyle = hex;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.ellipse(22, 22, 6, 10, 0, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+
+    // Tail boom running down-right
+    ctx.beginPath();
+    ctx.moveTo(22, 30);
+    ctx.lineTo(24, 30);
+    ctx.lineTo(46, 46);
+    ctx.lineTo(44, 48);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+
+    // Tail rotor
+    ctx.beginPath();
+    ctx.arc(46, 46, 4, 0, Math.PI * 2);
+    ctx.fill(); ctx.stroke();
+    ctx.strokeStyle = hex;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(42, 46); ctx.lineTo(50, 46);
+    ctx.moveTo(46, 42); ctx.lineTo(46, 50);
+    ctx.stroke();
+
+    return c;
+  }
+
+  function jammerIcon(hex) {
+    const c = document.createElement('canvas');
+    c.width = 56; c.height = 56;
+    const ctx = c.getContext('2d');
+
+    // Base plate (ground-mounted equipment)
+    ctx.fillStyle = hex;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.rect(18, 40, 20, 6);
+    ctx.fill(); ctx.stroke();
+
+    // Antenna mast (vertical)
+    ctx.strokeStyle = hex;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(28, 40); ctx.lineTo(28, 22);
+    ctx.stroke();
+
+    // Antenna crossbar (dipole)
+    ctx.beginPath();
+    ctx.moveTo(22, 22); ctx.lineTo(34, 22);
+    ctx.stroke();
+
+    // Radiating jamming waves (arcs emanating from top)
+    ctx.strokeStyle = hex;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(28, 22, 8, Math.PI * 1.15, Math.PI * 1.85);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(28, 22, 13, Math.PI * 1.1, Math.PI * 1.9);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(28, 22, 18, Math.PI * 1.05, Math.PI * 1.95);
+    ctx.stroke();
+
+    return c;
+  }
+
+  // Counter-asset icon by response kind. Green tint for friendly
+  // dispatched assets. Reuses existing quad/fixed-wing symbols for
+  // counter-drones per Lucas's spec.
+  function counterAssetIcon(responseKind) {
+    switch (responseKind) {
+      case 'helicopter-intercept': return helicopterIcon(GREEN_COUNTER_HEX);
+      case 'army-c-uas':
+      case 'police-c-uas':         return jammerIcon(GREEN_COUNTER_HEX);
+      case 'army-isr-drone':       return quadcopterIcon(GREEN_COUNTER_HEX);
+      default:                     return null;
+    }
   }
 
   function platformIcon(platform, hex) {
@@ -9379,24 +9489,47 @@ async function main() {
     const threatLat = event.lastPosition?.lat || event.entry?.lat;
     const threatLon = event.lastPosition?.lon || event.entry?.lon;
     if (threatLat == null || threatLon == null) return '';
-    const bundle = responseBundle(threatLat, threatLon);
+    // Subject-aware bundle. Falls back to legacy proximity-based bundle
+    // for events without a subject (defensive; every event via addEvent
+    // has event.subject attached by events.js).
+    const bundle = event.subject
+      ? responseBundleForSubject(event.subject, threatLat, threatLon)
+      : responseBundle(threatLat, threatLon);
     const pb = playbookFor(event);
     const severity = pb?.severity || 'medium';
     const site = SITES[event.siteId];
     const heading = event.lastPosition?.heading;
     const speedKmh = (event.lastPosition?.speed || 40) * 3.6;
     const kindIcon = (k) => ({
+      // Legacy kinds
       'police': '⚑', 'police-national': '⚑',
       'air-force-qra': '✈', 'air-force': '✈',
       'navy': '⚓', 'coast-guard': '⚓',
       'home-guard': '◼', 'emergency': '✚',
       'defence-command': '◉',
+      // New counter-response kinds (P85)
+      'army-isr-drone': '◈',
+      'army-c-uas': '≋',
+      'army-ground': '⚒',
+      'police-c-uas': '⇉',
+      'helicopter-intercept': '⌂',
+      'sof-tactical': '★',
+      'wildlife-response': '◇',
     }[k] || '●');
     const kindColor = (k) => ({
+      // Legacy: air = blue, police/emergency mixed
       'air-force-qra': '#4dd2ff', 'air-force': '#4dd2ff',
       'navy': '#4dd2ff', 'coast-guard': '#4dd2ff',
       'police': '#4dff9c', 'police-national': '#4dff9c',
       'emergency': '#ffb84d', 'home-guard': '#ffb84d',
+      // Counter-response (friendly-dispatched) = green
+      'army-isr-drone': '#4dff9c',
+      'army-c-uas': '#4dff9c',
+      'army-ground': '#4dff9c',
+      'police-c-uas': '#4dff9c',
+      'helicopter-intercept': '#4dff9c',
+      'sof-tactical': '#4dff9c',
+      'wildlife-response': '#e6ecf0',
     }[k] || '#e6ecf0');
 
     // ── Scramble decision cockpit ─────────────────────────────────
@@ -9753,8 +9886,12 @@ async function main() {
         <section class="c-panel">
           <div class="c-panel-title" style="margin-bottom: var(--space-2);">Tactical Assets</div>
           <div>${bundle.tactical.map(a => assetRow(a, true)).join('')}</div>
-          <div class="c-label" style="margin-top: var(--space-2); line-height: 1.5; text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs);">Airborne + maritime. Only these can act on the threat in flight.</div>
-        </section>` : ''}
+          <div class="c-label" style="margin-top: var(--space-2); line-height: 1.5; text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs);">${bundle.tacticalRationale || 'Airborne + maritime. Only these can act on the threat in flight.'}</div>
+        </section>` : (bundle.tacticalRationale ? `
+        <section class="c-panel">
+          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Tactical Assets</div>
+          <div class="c-label" style="line-height: 1.5; text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs);">${bundle.tacticalRationale}</div>
+        </section>` : '')}
 
         ${bundle.ground.length ? `
         <section class="c-panel">
