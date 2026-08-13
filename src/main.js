@@ -1591,6 +1591,59 @@ async function main() {
     return c;
   }
 
+  function policeVehicleIcon(hex) {
+    const c = document.createElement('canvas');
+    c.width = 56; c.height = 56;
+    const ctx = c.getContext('2d');
+
+    // Vehicle body (top-down)
+    ctx.fillStyle = hex;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(16, 12, 24, 34, 3);
+    ctx.fill(); ctx.stroke();
+
+    // Windshield (dark)
+    ctx.fillStyle = 'rgba(6, 8, 11, 0.55)';
+    ctx.beginPath();
+    ctx.roundRect(19, 15, 18, 6, 1);
+    ctx.fill();
+    // Rear window
+    ctx.beginPath();
+    ctx.roundRect(19, 37, 18, 6, 1);
+    ctx.fill();
+
+    // Roof light bar
+    ctx.fillStyle = '#4dd2ff';
+    ctx.fillRect(20, 25, 7, 3);
+    ctx.fillStyle = '#ff5a5a';
+    ctx.fillRect(29, 25, 7, 3);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 0.8;
+    ctx.strokeRect(20, 25, 16, 3);
+
+    // Antenna (jammer) rising from roof (indicates C-UAS capability)
+    ctx.strokeStyle = hex;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(28, 12); ctx.lineTo(28, 6);
+    ctx.stroke();
+    ctx.fillStyle = hex;
+    ctx.beginPath();
+    ctx.arc(28, 5, 1.8, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Wheels
+    ctx.fillStyle = 'rgba(6, 8, 11, 0.8)';
+    ctx.fillRect(13, 17, 4, 6);
+    ctx.fillRect(13, 35, 4, 6);
+    ctx.fillRect(39, 17, 4, 6);
+    ctx.fillRect(39, 35, 4, 6);
+
+    return c;
+  }
+
   function sofIcon(hex) {
     const c = document.createElement('canvas');
     c.width = 56; c.height = 56;
@@ -2203,7 +2256,7 @@ async function main() {
     },
     'police-c-uas': {
       cruiseKmh: 80, arriveAtM: 500, engageSec: 10,
-      icon: 'jammer', trail: false, airborne: false, radiationCone: true,
+      icon: 'police-vehicle', trail: false, airborne: false, radiationCone: true,
       label: 'Police C-UAS patrol',
     },
     'army-isr-drone': {
@@ -2230,11 +2283,12 @@ async function main() {
 
   function _counterDispatchIcon(iconKind) {
     switch (iconKind) {
-      case 'helicopter': return helicopterIcon(GREEN_COUNTER_HEX);
-      case 'jammer':     return jammerIcon(GREEN_COUNTER_HEX);
-      case 'quadcopter': return quadcopterIcon(GREEN_COUNTER_HEX);
-      case 'sof':        return sofIcon(GREEN_COUNTER_HEX);
-      default:           return null;
+      case 'helicopter':      return helicopterIcon(GREEN_COUNTER_HEX);
+      case 'jammer':          return jammerIcon(GREEN_COUNTER_HEX);
+      case 'police-vehicle':  return policeVehicleIcon(GREEN_COUNTER_HEX);
+      case 'quadcopter':      return quadcopterIcon(GREEN_COUNTER_HEX);
+      case 'sof':             return sofIcon(GREEN_COUNTER_HEX);
+      default:                return null;
     }
   }
 
@@ -2330,6 +2384,7 @@ async function main() {
         backgroundColor: Cesium.Color.fromCssColorString('rgba(8, 11, 16, 0.85)'),
         backgroundPadding: new Cesium.Cartesian2(6, 3),
         heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     });
 
@@ -7184,8 +7239,12 @@ async function main() {
       const rangeLine = isActive && e.lastPosition
         ? `<div class="alert-line"><span>Range</span><b>${e.lastPosition.rangeToPerim} m</b></div>`
         : `<div class="alert-line"><span>Duration</span><b>${formatDuration(e.duration)}</b></div>`;
+      // Operator alert card actions. Acknowledge is a RECEIVER action
+      // (confirming they received the brief), not an operator one — the
+      // operator's action set is Escalate + Reclassify + Note, all wired
+      // in the detail panel. Non-functional Acknowledge stub removed.
       const actions = isActive
-        ? `<div class="alert-actions"><button class="mini-btn">Acknowledge</button><button class="mini-btn danger">Escalate</button></div>`
+        ? `<div class="alert-actions"><button class="mini-btn danger" data-action="escalate">Escalate</button></div>`
         : '';
       return `
         <div class="alert-card ${e.classification} ${isSel} ${isActive ? 'is-active' : ''}" data-event-id="${e.id}">
@@ -9886,8 +9945,8 @@ async function main() {
       const stateColor = cdState === 'complete' ? '#6b7280' : cdState === 'engaging' ? '#ffb84d' : '#4dd2ff';
       const details = RESPONSE_OPTION_DETAILS[a.kind] || {};
       const ctaBlock = cdState
-        ? `<div style="display: inline-flex; align-items: center; padding: 6px 14px; background: rgba(255,255,255,0.04); border: 1px solid ${stateColor}; border-radius: 3px; font-size: var(--fs-xs); color: ${stateColor}; font-family: var(--font-mono); letter-spacing: 0.10em; font-weight: 700;">${stateLabel}</div>`
-        : `<button class="c-btn-primary" style="padding: 8px 18px; font-size: var(--fs-xs); background: #4dff9c; color: #06080b; border: none; border-radius: 3px; cursor: pointer; font-weight: 700; letter-spacing: 0.10em; text-transform: uppercase;" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">Dispatch this option</button>`;
+        ? `<div style="display: inline-flex; align-items: center; padding: 7px 14px; background: rgba(255,255,255,0.02); border: 1px solid ${stateColor}66; border-left: 2px solid ${stateColor}; border-radius: 2px; font-size: var(--fs-2xs); color: ${stateColor}; font-family: var(--font-mono); letter-spacing: 0.18em; font-weight: 600; text-transform: uppercase;">${stateLabel}</div>`
+        : `<button class="pl-dispatch-btn" style="padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.06); color: #4dff9c; border: 1px solid rgba(77, 255, 156, 0.35); border-left: 2px solid #4dff9c; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.20em; text-transform: uppercase; font-family: var(--font-mono); transition: background 120ms, border-color 120ms;" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">Dispatch</button>`;
 
       const includesHtml = (details.includes || []).length
         ? `<div style="margin-top: var(--space-3);">
@@ -10295,7 +10354,7 @@ async function main() {
           const stateColor = cdState === 'complete' ? '#6b7280' : cdState === 'engaging' ? '#ffb84d' : '#4dd2ff';
           dispatchBtn = `<div style="margin-top: 4px; font-size: var(--fs-xs); color: ${stateColor}; font-family: var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase;">${stateLabel}</div>`;
         } else {
-          dispatchBtn = `<button class="c-btn-primary" style="margin-top: 4px; padding: 3px 10px; font-size: var(--fs-xs); background: #4dff9c; color: #06080b; border: none; border-radius: 3px; cursor: pointer; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">Dispatch</button>`;
+          dispatchBtn = `<button class="pl-dispatch-btn" style="margin-top: 4px; padding: 5px 12px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.06); color: #4dff9c; border: 1px solid rgba(77, 255, 156, 0.35); border-left: 2px solid #4dff9c; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">Dispatch</button>`;
         }
       } else if (isTactical && DISPATCHABLE_KINDS.has(a.kind)) {
         // Asset is dispatchable but this role doesn't have jurisdiction —

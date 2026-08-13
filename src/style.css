@@ -6594,6 +6594,15 @@ body.view-fleet #fleet-view { display: block; }
   overflow-y: auto;
 }
 
+/* Palantir-themed dispatch button hover — subtle fill + border brighten */
+.pl-dispatch-btn:hover {
+  background: rgba(77, 255, 156, 0.12) !important;
+  border-color: rgba(77, 255, 156, 0.7) !important;
+}
+.pl-dispatch-btn:active {
+  background: rgba(77, 255, 156, 0.20) !important;
+}
+
 .rws-placeholder {
   padding: var(--space-6) var(--space-5);
   max-width: 720px;
