@@ -10914,9 +10914,34 @@ async function main() {
     try { return iso.slice(11, 19) + 'Z'; } catch (e) { return iso; }
   }
 
-  function renderReceiverView() {
+  // P94: Memoize renderReceiverView. Rebuilding receiverView.innerHTML on
+  // every _listeners fire (escalation status transitions, addNote,
+  // reacquisition auto-escalations) caused visible full-DOM blink every
+  // time an event mutated. Compute a signature of the render inputs. If
+  // unchanged, skip the innerHTML replace and reuse the existing DOM.
+  // Live values (positions, ETAs, confidences) update via _patchLiveTelemetry
+  // separately without needing a full re-render.
+  let _lastReceiverViewSig = null;
+  function _receiverViewSignature(role, wsEvent, selectedEvId, receivedEvents) {
+    const parts = [
+      role?.id || 'no-role',
+      _workspaceEventId || 'no-ws',
+      _workspaceMode || 'inbox',
+      selectedEvId || 'no-sel',
+      _respondingEscId || 'no-resp',
+      // Workspace-event specific: escalation count + outcome + status +
+      // active dispatch count so state transitions trigger a re-render.
+      wsEvent ? `${wsEvent.id}:${(wsEvent.escalations || []).length}:${wsEvent.outcome || 'n'}:${wsEvent.status}:${(wsEvent.counterDispatches || []).length}` : 'no-wsev',
+      // Inbox-mode: cardinality of visible events + latest escalation
+      // status hash so ledger updates re-render.
+      `evc:${receivedEvents.length}`,
+    ];
+    return parts.join('|');
+  }
+
+  function renderReceiverView(opts = {}) {
     const role = getActiveRole();
-    if (role.kind !== 'receiver') { receiverView.style.display = 'none'; return; }
+    if (role.kind !== 'receiver') { receiverView.style.display = 'none'; _lastReceiverViewSig = null; return; }
     const receivedEvents = eventsForDestinations(role.destinationIds);
 
     // Workspace mode takes over the entire receiver surface. Inbox and
@@ -10926,6 +10951,9 @@ async function main() {
       const wsEvent = receivedEvents.find(e => e.id === _workspaceEventId)
                     || EVENTS.find(e => e.id === _workspaceEventId);
       if (wsEvent) {
+        const sig = _receiverViewSignature(role, wsEvent, null, receivedEvents);
+        if (!opts.force && sig === _lastReceiverViewSig) return;   // memoized, skip
+        _lastReceiverViewSig = sig;
         receiverView.innerHTML = renderEventWorkspace(wsEvent);
         receiverView.style.display = 'block';
         _bindReceiverActions();
@@ -11022,6 +11050,11 @@ async function main() {
     ` : `<div class="rcv-empty rcv-empty-detail">Select an incoming event on the left to view the detection brief.</div>`;
 
     const overlay = selectedEv ? renderResponseOverlay(selectedEv) : '';
+
+    // P94 memoization guard for inbox mode
+    const sig = _receiverViewSignature(role, null, _selectedReceiverEventId, receivedEvents);
+    if (!opts.force && sig === _lastReceiverViewSig) return;
+    _lastReceiverViewSig = sig;
 
     receiverView.innerHTML = `
       <aside class="rcv-list ${selectedEv ? '' : 'rcv-list--full'}">
