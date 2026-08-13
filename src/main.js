@@ -39,7 +39,7 @@ import {
 } from './destinations.js';
 import { renderDetectionBrief } from './summary.js';
 import { contextForSite, nearestCriticalArea, dwellZonesAtPoint } from './site_context.js';
-import { responseBundle, responseBundleForSubject } from './response_assets.js';
+import { responseBundle, responseBundleForSubject, RESPONSE_OPTION_DETAILS } from './response_assets.js';
 import { AIRCRAFT, aircraftAtBase, aircraftForResponseAsset } from './aircraft.js';
 import { playbookFor } from './response_playbook.js';
 import { ADMIN, OPERATORS, RECEIVERS, getActiveRole, setActiveRole, onRoleChange, getRoleChildren, getRoleDestinationIdsRolledUp } from './roles.js';
@@ -9876,22 +9876,54 @@ async function main() {
     const mineList = tactical.filter(a => DISPATCHABLE_KINDS_MC.has(a.kind) && canDispatchMc(a.kind));
     const otherList = tactical.filter(a => DISPATCHABLE_KINDS_MC.has(a.kind) && !canDispatchMc(a.kind));
 
+    // Rich response option card. Shows what the option INCLUDES, what
+    // it's typically DEPLOYED FOR, and its TRADEOFFS — before the duty
+    // officer commits. Metadata sourced from RESPONSE_OPTION_DETAILS in
+    // response_assets.js (doctrine layer, config-driven).
     const dispatchRow = (a) => {
       const cdState = counterDispatchStateFor(event.id, a.id);
       const stateLabel = { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE' }[cdState];
       const stateColor = cdState === 'complete' ? '#6b7280' : cdState === 'engaging' ? '#ffb84d' : '#4dd2ff';
-      const rightBlock = cdState
-        ? `<div style="font-size: var(--fs-xs); color: ${stateColor}; font-family: var(--font-mono); letter-spacing: 0.08em; font-weight: 600;">${stateLabel}</div>`
-        : `<button class="c-btn-primary" style="padding: 4px 12px; font-size: var(--fs-xs); background: #4dff9c; color: #06080b; border: none; border-radius: 3px; cursor: pointer; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">Dispatch</button>`;
+      const details = RESPONSE_OPTION_DETAILS[a.kind] || {};
+      const ctaBlock = cdState
+        ? `<div style="display: inline-flex; align-items: center; padding: 6px 14px; background: rgba(255,255,255,0.04); border: 1px solid ${stateColor}; border-radius: 3px; font-size: var(--fs-xs); color: ${stateColor}; font-family: var(--font-mono); letter-spacing: 0.10em; font-weight: 700;">${stateLabel}</div>`
+        : `<button class="c-btn-primary" style="padding: 8px 18px; font-size: var(--fs-xs); background: #4dff9c; color: #06080b; border: none; border-radius: 3px; cursor: pointer; font-weight: 700; letter-spacing: 0.10em; text-transform: uppercase;" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">Dispatch this option</button>`;
+
+      const includesHtml = (details.includes || []).length
+        ? `<div style="margin-top: var(--space-3);">
+             <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-dim); font-size: var(--fs-2xs); margin-bottom: var(--space-1);">Includes</div>
+             <ul style="margin: 0; padding-left: 18px; font-size: var(--fs-xs); color: var(--text); line-height: 1.6;">
+               ${details.includes.map(i => `<li>${i}</li>`).join('')}
+             </ul>
+           </div>`
+        : '';
+      const deployedForHtml = details.deployedFor
+        ? `<div style="margin-top: var(--space-3);">
+             <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-dim); font-size: var(--fs-2xs); margin-bottom: var(--space-1);">Usually deployed for</div>
+             <div style="font-size: var(--fs-xs); color: var(--text); line-height: 1.6;">${details.deployedFor}</div>
+           </div>`
+        : '';
+      const tradeoffsHtml = details.tradeoffs
+        ? `<div style="margin-top: var(--space-3); padding: var(--space-2) var(--space-3); background: rgba(255, 184, 77, 0.06); border-left: 2px solid #ffb84d; border-radius: 2px;">
+             <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: #ffb84d; font-size: var(--fs-2xs); margin-bottom: var(--space-1);">Tradeoffs</div>
+             <div style="font-size: var(--fs-xs); color: var(--text); line-height: 1.55;">${details.tradeoffs}</div>
+           </div>`
+        : '';
+
       return `
-        <div class="c-row" style="align-items: flex-start;">
-          <div style="flex: 1 1 auto; min-width: 0;">
-            <div style="font-size: var(--fs-sm); color: var(--text); font-weight: 500;">${a.name}</div>
-            <div class="c-label" style="margin-top: 2px;">${a.response}</div>
-            <div class="c-label" style="margin-top: 2px; color: var(--text-dim);">${a.etaLabel} · ${a.distanceKm} km</div>
-          </div>
-          <div style="text-align: right; flex: 0 0 auto; padding-left: var(--space-2);">${rightBlock}</div>
-        </div>`;
+        <article style="padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-panel); margin-bottom: var(--space-3);">
+          <header style="display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-2);">
+            <div style="flex: 1 1 auto; min-width: 0;">
+              <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent); font-size: var(--fs-2xs); margin-bottom: 2px;">${details.displayName || a.name}</div>
+              <div style="font-size: var(--fs-sm); color: var(--text); font-weight: 500;">${a.name}</div>
+              <div class="c-label" style="margin-top: 2px; color: var(--text-dim);">${a.etaLabel} · ${a.distanceKm} km</div>
+            </div>
+          </header>
+          ${includesHtml}
+          ${deployedForHtml}
+          ${tradeoffsHtml}
+          <div style="margin-top: var(--space-3); display: flex; justify-content: flex-end;">${ctaBlock}</div>
+        </article>`;
     };
 
     const otherRow = (a) => {
@@ -9909,23 +9941,46 @@ async function main() {
         </div>`;
     };
 
+    // Acknowledgment gate — options unlock only after this role has
+    // acked. Mirrors real command-room doctrine: read, ack, deliberate,
+    // then commit. Uses the same rec lookup as renderEventReport.
+    const roleDestSet = new Set(activeRole?.destinationIds || []);
+    const rec = (event.escalations || []).find(r => roleDestSet.has(r.destinationId));
+    const ackTs = rec?.statusHistory?.find(h => h.status === 'acknowledged')?.timestamp;
+    const isAcked = !!ackTs;
+
+    const ackGateHtml = !isAcked && rec ? `
+      <div class="c-panel" style="border-top: 3px solid #ffb84d;">
+        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #ffb84d;">Step 1 · Acknowledge receipt</div>
+        <div style="font-size: var(--fs-xs); color: var(--text); line-height: 1.55; margin-bottom: var(--space-3);">Response options unlock once you confirm the case is with you. This locks a receipt into the operator's audit trail.</div>
+        <button class="c-btn solid ok wide" style="justify-content: center;" data-rcv="ack" data-id="${event.id}" data-esc="${rec.id}">Acknowledge Receipt</button>
+      </div>` : '';
+
+    const ackedBadge = isAcked ? `<span style="font-size: var(--fs-2xs); color: var(--ok); letter-spacing: 0.10em; text-transform: uppercase; font-family: var(--font-mono);">✓ Acked ${ackTs ? ackTs.slice(11,19) + 'Z' : ''}</span>` : '';
+
     return `
       <div class="c-panel">
         <div class="c-section-eyebrow">Mission Console</div>
-        <div class="c-section-title" style="margin-bottom: var(--space-2);">Recommended Response</div>
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-2);">
+          <div class="c-section-title">Recommended Response</div>
+          ${ackedBadge}
+        </div>
         <div class="c-label" style="margin-bottom: var(--space-3); text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim);">${subjectLine}</div>
         <div style="padding: var(--space-2) var(--space-3); background: rgba(77, 210, 255, 0.05); border-left: 2px solid var(--accent); margin-bottom: var(--space-3); font-size: var(--fs-xs); color: var(--text); line-height: 1.55;">${bundle.tacticalRationale || 'Graduated response computed from live subject.'}</div>
       </div>
 
-      ${mineList.length ? `
+      ${ackGateHtml}
+
+      ${isAcked || !rec ? (mineList.length ? `
         <div class="c-panel">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Your Dispatch Options</div>
+          <div class="c-panel-title" style="margin-bottom: var(--space-3);">${isAcked ? 'Step 2 · Select response option' : 'Your Response Options'}</div>
+          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">Each option below shows what it deploys, when it's normally used, and its tradeoffs. Multiple can be dispatched concurrently.</div>
           ${mineList.map(dispatchRow).join('')}
         </div>` : `
         <div class="c-panel">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Your Dispatch Options</div>
+          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Response Options</div>
           <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">No assets under your jurisdiction match this threat class. Other agencies below can act.</div>
-        </div>`}
+        </div>`) : ''}
 
       ${otherList.length ? `
         <div class="c-panel">

@@ -350,6 +350,92 @@ export function tacticalKindsForSubject(subject) {
   return { kinds: ['police-c-uas', 'army-c-uas', 'army-isr-drone'], rationale: 'Unknown classification. Dispatch graduated ground C-UAS + Army C-UAS + ISR drone for visual verify.' };
 }
 
+// ══════════════════════════════════════════════════════════════════
+// RESPONSE OPTION DOCTRINE — what each dispatch kind actually includes
+// and when it's typically deployed. Consumed by the Mission Console
+// after acknowledgment so the duty officer picks with full context,
+// not just a green button.
+// ══════════════════════════════════════════════════════════════════
+export const RESPONSE_OPTION_DETAILS = {
+  'helicopter-intercept': {
+    displayName: 'Helicopter Airborne Intercept',
+    includes: [
+      'EH-101 Merlin or AS550 Fennec airborne from Karup',
+      'Airborne within ~12 minutes',
+      'Orbits threat for observation + shadowing',
+      'Optional door-mounted C-UAS jam assist',
+      'Real-time relay to ground C-UAS team',
+    ],
+    deployedFor: 'Slow to medium-speed aerial threats. Especially valuable at rural sites where ground C-UAS mobilisation exceeds 30 minutes. Serves as airborne C2 for coordinated multi-asset response.',
+    tradeoffs: 'Commits 1 airframe + 4 crew for ~90 min. Not appropriate for cruise missile intercept (closure rate too high).',
+  },
+  'army-c-uas': {
+    displayName: 'Ground-Based Counter-UAS (Jammer)',
+    includes: [
+      'Deployed C-UAS ground station activates on base',
+      'RF disruption cone projected toward threat',
+      'Kinetic C-UAS option if system is fitted',
+      'Continuous jam for up to 12 minutes',
+    ],
+    deployedFor: 'Coordinated drone swarms, quadcopter incursions, loitering munitions inside effective range (~5-8 km of the ground station).',
+    tradeoffs: 'Cannot pursue if threat moves out of coverage. Best paired with helicopter-intercept for follow-up.',
+  },
+  'police-c-uas': {
+    displayName: 'Police C-UAS Patrol Response',
+    includes: [
+      'Patrol vehicle with mounted C-UAS gear from district HQ',
+      'Drives to intercept point at ~80 km/h',
+      'On-site RF jam and small drone kit',
+      'Arrest capability if operator located',
+    ],
+    deployedFor: 'Small drone incursions, unauthorised hobby aircraft, jurisdictional response inside police district. Standard first response for airport perimeter incidents.',
+    tradeoffs: 'Slower than airborne assets. Effective mainly against single or small groups, not coordinated swarms.',
+  },
+  'army-isr-drone': {
+    displayName: 'Own ISR Drone Visual Verify',
+    includes: [
+      'Own recon quadcopter launched from unit',
+      'Flies to threat area, orbits for visual confirmation',
+      'Live video feed to command',
+      'Handoff to kinetic asset once verified',
+    ],
+    deployedFor: 'Ambiguous classifications requiring visual confirmation before kinetic response. Standard first move when NN confidence is under 70% or the signature is unusual.',
+    tradeoffs: 'Does NOT neutralise on its own. Adds ~6 minutes to response chain but reduces friendly-fire and misclassification risk.',
+  },
+  'sof-tactical': {
+    displayName: 'SOF Tactical Interdiction',
+    includes: [
+      'Jægerkorpset team dispatched via air insertion',
+      'Ground engagement package',
+      'Kinetic capability incl. small arms + C-UAS',
+      'Post-engagement site security',
+    ],
+    deployedFor: 'Loitering munitions with expected ground impact, hostile drone recovery, high-value target defence when standard assets are insufficient.',
+    tradeoffs: 'Longest response chain. ~25 min mobilisation + air transit. Reserved for scenarios other assets cannot handle.',
+  },
+  'wildlife-response': {
+    displayName: 'Airport Wildlife Team',
+    includes: [
+      'On-airport ornithologist dispatched to site',
+      'Pyrotechnic bird deterrent',
+      'Habitat management adjustment if pattern repeats',
+    ],
+    deployedFor: 'Bird flock detections, wildlife on runway. Standard ICAO Annex 14 airport response.',
+    tradeoffs: 'Not applicable to man-made threats. Contained to airport perimeter.',
+  },
+  'army-ground': {
+    displayName: 'Ground Reinforcement',
+    includes: [
+      'Livgarden or similar unit dispatched',
+      'Perimeter cordon',
+      'Ground search + civilian evacuation',
+      'Handoff to Politi for arrest phase',
+    ],
+    deployedFor: 'Post-impact site security, downed drone recovery, ground threat where police alone is insufficient.',
+    tradeoffs: 'Slow to mobilise (~30 min). No airborne or kinetic asset. Not appropriate for active airborne threats.',
+  },
+};
+
 // Subject-aware response bundle. Returns tactical assets matched to
 // the DetectionSubject, plus the same ground + consequence layers as
 // the legacy bundle.
