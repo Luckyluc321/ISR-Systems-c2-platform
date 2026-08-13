@@ -49,6 +49,7 @@ import { HV_SUBSTATION_TARGETS } from './targets_hv.js';
 const TARGETS = [...TARGETS_CORE, ...HV_SUBSTATION_TARGETS];
 import { getRules, onRulesChange, toggleRule, removeRule, upsertRule, resetRulesToDefault, ruleSummaryText } from './rules.js';
 import { isMistralConfigured, streamCaseFileNarrative, streamDebriefNarrative } from './mistral.js';
+import { fetchDrivingRoute, computeSegmentLengths, advanceAlongPolyline } from './routing.js';
 import {
   CPH_RUNWAYS, CPH_PERIMETER_ROADS, CPH_TAXIWAYS, CPH_RAMP_SPOTS,
   DK_MOTORWAYS, CPH_ARTERIALS, CITY_GLOWS,
@@ -2257,6 +2258,7 @@ async function main() {
     'police-c-uas': {
       cruiseKmh: 80, arriveAtM: 500, engageSec: 10,
       icon: 'police-vehicle', trail: false, airborne: false, radiationCone: true,
+      useRoadRouting: true,   // ground vehicle → follow real streets via OSRM
       label: 'Police C-UAS patrol',
     },
     'army-isr-drone': {
@@ -2339,6 +2341,23 @@ async function main() {
     if (isStatic && profile.radiationCone) _createRadiationEntity(d);
     _startCounterDispatchLoop();
 
+    // Async street-network route fetch for ground vehicles. Vehicle sits
+    // at origin billboard while fetch completes (~300-800ms). On success,
+    // subsequent ticks advance along the real polyline. On failure or
+    // timeout, we fall back to straight-line motion (existing behavior).
+    if (profile.useRoadRouting) {
+      fetchDrivingRoute({ lat: asset.lat, lon: asset.lon }, { lat: threatLat, lon: threatLon })
+        .then(positions => {
+          if (!positions || positions.length < 2) return;
+          if (!_counterDispatches.has(dispatchId)) return;   // dispatch already complete
+          d.routePositions = positions;
+          d.routeSegmentLengths = computeSegmentLengths(positions);
+          d.routeSegIdx = 0;
+          d.routeSegProgress = 0;
+          _createRouteVisual(d);
+        });
+    }
+
     // Track on event for ledger + audit
     if (!Array.isArray(event.counterDispatches)) event.counterDispatches = [];
     event.counterDispatches.push({
@@ -2349,6 +2368,24 @@ async function main() {
     const originLabel = isStatic ? `activated at ${asset.name}` : `dispatched from ${asset.name}`;
     toast(`${profile.label} ${originLabel}.`, 'info');
     if (getActiveRole().kind === 'receiver') renderReceiverView();
+  }
+
+  // Subtle dashed green polyline showing the OSRM-computed route the
+  // vehicle will follow. Ground-clamped, thin, low opacity so it's a
+  // hint not a distraction.
+  function _createRouteVisual(d) {
+    if (!d.routePositions?.length) return;
+    d.routeEntity = viewer.entities.add({
+      polyline: {
+        positions: d.routePositions.map(p => Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 0)),
+        width: 2.5,
+        material: new Cesium.PolylineDashMaterialProperty({
+          color: Cesium.Color.fromCssColorString('#4dff9c').withAlpha(0.55),
+          dashLength: 12,
+        }),
+        clampToGround: true,
+      },
+    });
   }
 
   function _createCounterDispatchEntities(d) {
@@ -2459,26 +2496,49 @@ async function main() {
       const dtSec = (now - d.lastFrameTs) / 1000;
       d.lastFrameTs = now;
       if (dtSec <= 0) return;
-      const brng = _bearingRad(d.curLat, d.curLon, d.targetLat, d.targetLon);
-      d.heading = brng;
       const speedMps = (d.profile.cruiseKmh * 1000) / 3600;
       const stepM = speedMps * dtSec;
-      const stepDegLat = (stepM * Math.cos(brng)) / 111000;
-      const stepDegLon = (stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
-      d.curLat += stepDegLat;
-      d.curLon += stepDegLon;
-      if (d.profile.trail) {
-        d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0));
-        if (d.trailPositions.length > 500) d.trailPositions.shift();
-      }
-      const distM = haversineM(d.curLat, d.curLon, d.targetLat, d.targetLon);
-      if (distM <= d.profile.arriveAtM) {
-        d.state = 'engaging';
-        d.arrivedTs = now;
-        d.engageStartTs = now;
-        if (d.profile.radiationCone) _createRadiationEntity(d);
-        if (getActiveRole().kind === 'receiver') renderReceiverView();
-        toast(`${d.assetName} on station. Engaging.`, 'info');
+
+      if (d.routePositions && d.routeSegmentLengths) {
+        // Follow OSRM street network route
+        const step = advanceAlongPolyline(
+          d.routePositions, d.routeSegmentLengths,
+          d.routeSegIdx, d.routeSegProgress, stepM
+        );
+        d.curLat = step.lat;
+        d.curLon = step.lon;
+        d.routeSegIdx = step.segIdx;
+        d.routeSegProgress = step.segProgress;
+        d.heading = step.headingRad;
+        if (step.isEnd) {
+          d.state = 'engaging';
+          d.arrivedTs = now;
+          d.engageStartTs = now;
+          if (d.profile.radiationCone) _createRadiationEntity(d);
+          if (getActiveRole().kind === 'receiver') renderReceiverView();
+          toast(`${d.assetName} on station. Engaging.`, 'info');
+        }
+      } else {
+        // Straight-line fallback (used pre-route-fetch or on OSRM fail)
+        const brng = _bearingRad(d.curLat, d.curLon, d.targetLat, d.targetLon);
+        d.heading = brng;
+        const stepDegLat = (stepM * Math.cos(brng)) / 111000;
+        const stepDegLon = (stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
+        d.curLat += stepDegLat;
+        d.curLon += stepDegLon;
+        if (d.profile.trail) {
+          d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0));
+          if (d.trailPositions.length > 500) d.trailPositions.shift();
+        }
+        const distM = haversineM(d.curLat, d.curLon, d.targetLat, d.targetLon);
+        if (distM <= d.profile.arriveAtM) {
+          d.state = 'engaging';
+          d.arrivedTs = now;
+          d.engageStartTs = now;
+          if (d.profile.radiationCone) _createRadiationEntity(d);
+          if (getActiveRole().kind === 'receiver') renderReceiverView();
+          toast(`${d.assetName} on station. Engaging.`, 'info');
+        }
       }
     } else if (d.state === 'engaging') {
       const engageDur = (now - d.engageStartTs) / 1000;
@@ -2508,6 +2568,7 @@ async function main() {
       if (d.entity) { viewer.entities.remove(d.entity); d.entity = null; }
       if (d.trail) { viewer.entities.remove(d.trail); d.trail = null; }
       if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+      if (d.routeEntity) { viewer.entities.remove(d.routeEntity); d.routeEntity = null; }
       _counterDispatches.delete(d.id);
     }, 5000);
   }
