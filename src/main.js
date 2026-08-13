@@ -9809,6 +9809,124 @@ async function main() {
     if (r.kind === 'receiver') renderReceiverView(); else receiverView.style.display = 'none';
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // P95 · Workspace Mission Console (lean right panel for case-file)
+  // ══════════════════════════════════════════════════════════════════
+  // Purpose-built for the workspace aside. Shows the DetectionSubject
+  // one-liner, the graduated-response rationale, dispatch buttons
+  // scoped to the current role, and live status of any active
+  // dispatches for this event. Deliberately excludes the SVG scramble
+  // cockpit, Flyvevåbnet-specific dispatch block, and other content
+  // from the inbox-side Response Overlay to avoid the layout collision
+  // that broke the workspace during the P89 attempt.
+  function renderWorkspaceMissionConsole(event) {
+    const activeRole = getActiveRole();
+    const threatLat = event.lastPosition?.lat ?? event.entry?.lat;
+    const threatLon = event.lastPosition?.lon ?? event.entry?.lon;
+    if (threatLat == null || threatLon == null) {
+      return `
+        <div class="c-panel">
+          <div class="c-section-eyebrow">Mission Console</div>
+          <p style="color: var(--text-dim); font-size: var(--fs-sm); line-height: 1.55; margin-top: var(--space-3);">Awaiting first sensor fix for this event.</p>
+        </div>`;
+    }
+    const bundle = event.subject
+      ? responseBundleForSubject(event.subject, threatLat, threatLon)
+      : responseBundle(threatLat, threatLon);
+
+    // Role-scoping (P90) — restricted to this role's jurisdictional
+    // asset kinds. Other roles' assets show as "OTHER AGENCY" label
+    // so the operator sees full picture of who is on the case.
+    const DISPATCHABLE_KINDS_MC = new Set([
+      'helicopter-intercept', 'army-c-uas', 'police-c-uas',
+      'army-isr-drone', 'sof-tactical', 'wildlife-response',
+    ]);
+    const ROLE_SCOPE_MC = {
+      'flv-qra':        new Set(['helicopter-intercept']),
+      'forsvarskmd':    new Set(['helicopter-intercept', 'army-c-uas', 'army-isr-drone', 'army-ground', 'sof-tactical']),
+      'fe':             new Set(['army-isr-drone']),
+      'rigspoliti':     new Set(['police-c-uas']),
+      'politi-kbh':     new Set(['police-c-uas']),
+      'politi-sydvest': new Set(['police-c-uas']),
+      'op-cph-airports':new Set(['wildlife-response']),
+      'op-esbjerg-port':new Set(['wildlife-response']),
+      'op-energinet':   new Set([]),
+    };
+    const roleScopeMc = ROLE_SCOPE_MC[activeRole?.id] || null;
+    const canDispatchMc = (kind) => (activeRole?.kind === 'admin')
+      || (roleScopeMc ? roleScopeMc.has(kind) : false);
+
+    // Subject one-liner for orientation
+    const subj = event.subject;
+    const subjectLine = subj
+      ? `${subj.class.replace(/_/g, ' ')} · ${subj.cardinality?.kind || 'single'} · ${Math.round((subj.class_confidence || 0) * 100)}% confidence`
+      : `${event.platform || 'unknown'} · ${Math.round((event.confidence || 0) * 100)}% confidence`;
+
+    // Assets to show: tactical bundle, split into dispatchable-by-me
+    // and other-agency lists.
+    const tactical = bundle.tactical || [];
+    const mineList = tactical.filter(a => DISPATCHABLE_KINDS_MC.has(a.kind) && canDispatchMc(a.kind));
+    const otherList = tactical.filter(a => DISPATCHABLE_KINDS_MC.has(a.kind) && !canDispatchMc(a.kind));
+
+    const dispatchRow = (a) => {
+      const cdState = counterDispatchStateFor(event.id, a.id);
+      const stateLabel = { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE' }[cdState];
+      const stateColor = cdState === 'complete' ? '#6b7280' : cdState === 'engaging' ? '#ffb84d' : '#4dd2ff';
+      const rightBlock = cdState
+        ? `<div style="font-size: var(--fs-xs); color: ${stateColor}; font-family: var(--font-mono); letter-spacing: 0.08em; font-weight: 600;">${stateLabel}</div>`
+        : `<button class="c-btn-primary" style="padding: 4px 12px; font-size: var(--fs-xs); background: #4dff9c; color: #06080b; border: none; border-radius: 3px; cursor: pointer; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">Dispatch</button>`;
+      return `
+        <div class="c-row" style="align-items: flex-start;">
+          <div style="flex: 1 1 auto; min-width: 0;">
+            <div style="font-size: var(--fs-sm); color: var(--text); font-weight: 500;">${a.name}</div>
+            <div class="c-label" style="margin-top: 2px;">${a.response}</div>
+            <div class="c-label" style="margin-top: 2px; color: var(--text-dim);">${a.etaLabel} · ${a.distanceKm} km</div>
+          </div>
+          <div style="text-align: right; flex: 0 0 auto; padding-left: var(--space-2);">${rightBlock}</div>
+        </div>`;
+    };
+
+    const otherRow = (a) => {
+      const cdState = counterDispatchStateFor(event.id, a.id);
+      const stateLabel = cdState
+        ? { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE' }[cdState]
+        : 'OTHER AGENCY';
+      return `
+        <div class="c-row" style="align-items: flex-start; opacity: 0.7;">
+          <div style="flex: 1 1 auto; min-width: 0;">
+            <div style="font-size: var(--fs-sm); color: var(--text-dim); font-weight: 500;">${a.name}</div>
+            <div class="c-label" style="margin-top: 2px;">${a.response}</div>
+          </div>
+          <div style="font-size: var(--fs-2xs); color: var(--text-dim); font-family: var(--font-mono); letter-spacing: 0.08em; padding-left: var(--space-2);">${stateLabel}</div>
+        </div>`;
+    };
+
+    return `
+      <div class="c-panel">
+        <div class="c-section-eyebrow">Mission Console</div>
+        <div class="c-section-title" style="margin-bottom: var(--space-2);">Recommended Response</div>
+        <div class="c-label" style="margin-bottom: var(--space-3); text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim);">${subjectLine}</div>
+        <div style="padding: var(--space-2) var(--space-3); background: rgba(77, 210, 255, 0.05); border-left: 2px solid var(--accent); margin-bottom: var(--space-3); font-size: var(--fs-xs); color: var(--text); line-height: 1.55;">${bundle.tacticalRationale || 'Graduated response computed from live subject.'}</div>
+      </div>
+
+      ${mineList.length ? `
+        <div class="c-panel">
+          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Your Dispatch Options</div>
+          ${mineList.map(dispatchRow).join('')}
+        </div>` : `
+        <div class="c-panel">
+          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Your Dispatch Options</div>
+          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">No assets under your jurisdiction match this threat class. Other agencies below can act.</div>
+        </div>`}
+
+      ${otherList.length ? `
+        <div class="c-panel">
+          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Other Agencies On Case</div>
+          ${otherList.map(otherRow).join('')}
+        </div>` : ''}
+    `;
+  }
+
   // ── Response Overlay (right-side slide-in panel on receiver dashboard) ──
   // Categorized asset table: tactical intercept (real response), ground coordination
   // (police, cordon, evidence), civil consequence (emergency + reinforcement).
@@ -10362,13 +10480,7 @@ async function main() {
               ? renderEventReport(event)
               : renderEventMapOverlay(event)}
           </main>
-          <aside class="rws-console">
-            <div class="c-panel">
-              <div class="c-section-eyebrow">Mission Console</div>
-              <div class="c-section-title" style="margin-bottom: var(--space-3);">Awaiting recommendation</div>
-              <p style="color: var(--text-dim); font-size: var(--fs-sm); line-height: 1.55;">Recommendation, ranked options, and authorize controls arrive in Phase 3.2. Currently a placeholder.</p>
-            </div>
-          </aside>
+          <aside class="rws-console">${renderWorkspaceMissionConsole(event)}</aside>
         </div>
       </div>
     `;
