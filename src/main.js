@@ -42,7 +42,7 @@ import { contextForSite, nearestCriticalArea, dwellZonesAtPoint } from './site_c
 import { responseBundle, responseBundleForSubject } from './response_assets.js';
 import { AIRCRAFT, aircraftAtBase, aircraftForResponseAsset } from './aircraft.js';
 import { playbookFor } from './response_playbook.js';
-import { ADMIN, OPERATORS, RECEIVERS, getActiveRole, setActiveRole, onRoleChange } from './roles.js';
+import { ADMIN, OPERATORS, RECEIVERS, getActiveRole, setActiveRole, onRoleChange, getRoleChildren, getRoleDestinationIdsRolledUp } from './roles.js';
 import { runbookFor } from './runbooks.js';
 import { TARGETS as TARGETS_CORE } from './targets.js';
 import { HV_SUBSTATION_TARGETS } from './targets_hv.js';
@@ -9842,7 +9842,14 @@ async function main() {
       'army-isr-drone', 'sof-tactical', 'wildlife-response',
     ]);
     const ROLE_SCOPE_MC = {
-      'flv-qra':        new Set(['helicopter-intercept']),
+      'flv-skrydstrup': new Set(['helicopter-intercept']),
+      'flv-karup':      new Set(['helicopter-intercept']),
+      'haer-slagelse':  new Set(['army-c-uas', 'army-isr-drone']),
+      'haer-hovelte':   new Set(['army-ground']),
+      'haer-varde':     new Set(['army-isr-drone', 'army-c-uas']),
+      'haer-bornholm':  new Set(['army-c-uas']),
+      'haer-oksbol':    new Set(['army-c-uas']),
+      'sok-aalborg':    new Set(['sof-tactical']),
       'forsvarskmd':    new Set(['helicopter-intercept', 'army-c-uas', 'army-isr-drone', 'army-ground', 'sof-tactical']),
       'fe':             new Set(['army-isr-drone']),
       'rigspoliti':     new Set(['police-c-uas']),
@@ -9851,6 +9858,7 @@ async function main() {
       'op-cph-airports':new Set(['wildlife-response']),
       'op-esbjerg-port':new Set(['wildlife-response']),
       'op-energinet':   new Set([]),
+      'flv-qra':        new Set(['helicopter-intercept']),   // legacy alias
     };
     const roleScopeMc = ROLE_SCOPE_MC[activeRole?.id] || null;
     const canDispatchMc = (kind) => (activeRole?.kind === 'admin')
@@ -10177,20 +10185,36 @@ async function main() {
       'army-isr-drone', 'sof-tactical', 'wildlife-response',
     ]);
 
-    // Role-scoping (P90): which receiver roles have jurisdiction to
-    // dispatch which asset kinds. Only these roles see a live Dispatch
-    // button; others see the asset row for situational awareness only.
-    // Admin sees all (fallback below).
+    // Role-scoping (P90 + P92): which receiver roles have jurisdiction
+    // to dispatch which asset kinds. Now covers the P92 per-base leaves.
+    // Only these roles see a live Dispatch button; others see the asset
+    // row for situational awareness only. Admin sees all.
     const ROLE_DISPATCH_SCOPE = {
-      'flv-qra':        new Set(['helicopter-intercept']),
+      // Air Force bases
+      'flv-skrydstrup': new Set(['helicopter-intercept']),
+      'flv-karup':      new Set(['helicopter-intercept']),
+      // Army bases
+      'haer-slagelse':  new Set(['army-c-uas', 'army-isr-drone']),
+      'haer-hovelte':   new Set(['army-ground']),
+      'haer-varde':     new Set(['army-isr-drone', 'army-c-uas']),
+      'haer-bornholm':  new Set(['army-c-uas']),
+      'haer-oksbol':    new Set(['army-c-uas']),
+      // SOF
+      'sok-aalborg':    new Set(['sof-tactical']),
+      // Command HQ (sees all military dispatch)
       'forsvarskmd':    new Set(['helicopter-intercept', 'army-c-uas', 'army-isr-drone', 'army-ground', 'sof-tactical']),
+      // Intelligence
       'fe':             new Set(['army-isr-drone']),
+      // Police
       'rigspoliti':     new Set(['police-c-uas']),
       'politi-kbh':     new Set(['police-c-uas']),
       'politi-sydvest': new Set(['police-c-uas']),
+      // Operators (wildlife on site)
       'op-cph-airports':new Set(['wildlife-response']),
       'op-esbjerg-port':new Set(['wildlife-response']),
       'op-energinet':   new Set([]),
+      // Legacy alias (still respected while call sites migrate)
+      'flv-qra':        new Set(['helicopter-intercept']),
     };
     const roleScope = ROLE_DISPATCH_SCOPE[activeRole?.id] || null;
     const canDispatch = (kind) => (activeRole?.kind === 'admin')
@@ -11026,6 +11050,76 @@ async function main() {
     try { return iso.slice(11, 19) + 'Z'; } catch (e) { return iso; }
   }
 
+  // ══════════════════════════════════════════════════════════════════
+  // P92 · Parent landing page — hierarchical role selection
+  // ══════════════════════════════════════════════════════════════════
+  // When a receiver logs in as a parent (Forsvaret, Hæren, Politi,
+  // etc.), they land on a tile grid of children instead of an inbox.
+  // Each tile shows the child org, roll-up active event count,
+  // description, and a "Drill in" affordance. Clicking sets the child
+  // as the active role and renders the normal receiver view.
+  function renderReceiverParentLanding(role, children) {
+    const tiles = children.map(child => {
+      const dests = child.destinationIds || getRoleDestinationIdsRolledUp(child.id);
+      const activeEvents = eventsForDestinations(dests).filter(e => e.status === 'active');
+      const badge = activeEvents.length
+        ? `<span class="c-chip warn" style="align-self: flex-start; max-width: max-content;">${activeEvents.length} ACTIVE</span>`
+        : `<span class="c-chip ok" style="align-self: flex-start; max-width: max-content;">No active events</span>`;
+      const isParent = child.type === 'parent';
+      const grandchildCount = isParent && child.childrenIds ? child.childrenIds.length : 0;
+      return `
+        <button class="rcv-parent-tile" data-parent-pick="${child.id}" style="
+          text-align: left; padding: var(--space-4); border-radius: var(--radius);
+          background: var(--surface-panel); border: 1px solid var(--border);
+          cursor: pointer; display: flex; flex-direction: column; gap: var(--space-2);
+          transition: border-color 120ms, background 120ms;
+        ">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);">
+            <div>
+              <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-dim); font-size: var(--fs-2xs);">${isParent ? 'BRANCH' : 'BASE'}</div>
+              <div style="font-size: var(--fs-lg); color: var(--text); font-weight: 600; margin-top: 2px;">${child.org}</div>
+            </div>
+            ${badge}
+          </div>
+          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">${child.description || ''}</div>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: var(--space-2); border-top: 1px solid var(--border);">
+            <div class="c-label" style="color: var(--text-dim);">
+              ${isParent ? `${grandchildCount} sub-unit${grandchildCount === 1 ? '' : 's'}` : (child.person || 'Duty officer')}
+            </div>
+            <div class="c-label" style="color: var(--accent);">Drill in →</div>
+          </div>
+        </button>`;
+    }).join('');
+
+    return `
+      <div class="rcv-parent-landing" style="padding: var(--space-6); max-width: 1200px; margin: 0 auto;">
+        <div style="margin-bottom: var(--space-5);">
+          <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.14em; color: var(--text-dim); font-size: var(--fs-2xs);">Logged in as</div>
+          <h1 style="font-size: var(--fs-2xl); color: var(--text); margin: var(--space-1) 0 var(--space-2); font-weight: 600;">${role.label}</h1>
+          <p style="color: var(--text-dim); font-size: var(--fs-sm); line-height: 1.55; max-width: 720px;">${role.description || 'Select a sub-unit to drill in.'}</p>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--space-3);">
+          ${tiles}
+        </div>
+      </div>
+      <style>
+        .rcv-parent-tile:hover { border-color: var(--accent) !important; background: rgba(77, 210, 255, 0.04) !important; }
+      </style>
+    `;
+  }
+
+  function _bindReceiverParentActions() {
+    receiverView.querySelectorAll('[data-parent-pick]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const childId = btn.dataset.parentPick;
+        const child = RECEIVERS.find(r => r.id === childId);
+        if (!child) return;
+        _lastReceiverViewSig = null;   // force full re-render on role change
+        setActiveRole(childId);
+      });
+    });
+  }
+
   // P94: Memoize renderReceiverView. Rebuilding receiverView.innerHTML on
   // every _listeners fire (escalation status transitions, addNote,
   // reacquisition auto-escalations) caused visible full-DOM blink every
@@ -11054,6 +11148,22 @@ async function main() {
   function renderReceiverView(opts = {}) {
     const role = getActiveRole();
     if (role.kind !== 'receiver') { receiverView.style.display = 'none'; _lastReceiverViewSig = null; return; }
+
+    // P92: Parent roles land on a chooser tile grid (Forsvaret →
+    // branches, Hæren → bases, Politi → districts). Leaf roles get the
+    // normal inbox flow below. Signature includes children active-count
+    // so newly incoming events refresh the tile counts.
+    if (role.type === 'parent') {
+      const children = getRoleChildren(role.id);
+      const sig = `parent:${role.id}:${children.map(c => eventsForDestinations(c.destinationIds || getRoleDestinationIdsRolledUp(c.id)).length).join(',')}`;
+      if (!opts.force && sig === _lastReceiverViewSig) return;
+      _lastReceiverViewSig = sig;
+      receiverView.innerHTML = renderReceiverParentLanding(role, children);
+      receiverView.style.display = 'block';
+      _bindReceiverParentActions();
+      return;
+    }
+
     const receivedEvents = eventsForDestinations(role.destinationIds);
 
     // Workspace mode takes over the entire receiver surface. Inbox and
