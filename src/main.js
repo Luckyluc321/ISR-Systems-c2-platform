@@ -8521,7 +8521,6 @@ async function main() {
 
     const actionsBlock = isActive ? `
       <div class="dp-actions">
-        <button class="btn primary">Acknowledge</button>
         <button class="btn danger" data-action="escalate">Escalate</button>
       </div>
       <div class="dp-actions">
@@ -10004,11 +10003,17 @@ async function main() {
     // it's typically DEPLOYED FOR, and its TRADEOFFS — before the duty
     // officer commits. Metadata sourced from RESPONSE_OPTION_DETAILS in
     // response_assets.js (doctrine layer, config-driven).
-    const dispatchRow = (a) => {
+    // The first item in mineList is the closest asset by ETA (bundle
+    // is already sorted). Flag it as Recommended so operators see the
+    // graduated-response system's top pick at a glance.
+    const dispatchRow = (a, idx) => {
       const cdState = counterDispatchStateFor(event.id, a.id);
       const stateLabel = { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE' }[cdState];
       const stateColor = cdState === 'complete' ? '#6b7280' : cdState === 'engaging' ? '#ffb84d' : '#4dd2ff';
       const details = RESPONSE_OPTION_DETAILS[a.kind] || {};
+      const recommendedBadge = idx === 0
+        ? `<span style="display: inline-flex; align-items: center; padding: 2px 8px; background: rgba(77, 210, 255, 0.12); border: 1px solid rgba(77, 210, 255, 0.5); color: var(--accent); font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600; border-radius: 2px;">◆ Recommended</span>`
+        : '';
       const ctaBlock = cdState
         ? `<div style="display: inline-flex; align-items: center; padding: 7px 14px; background: rgba(255,255,255,0.02); border: 1px solid ${stateColor}66; border-left: 2px solid ${stateColor}; border-radius: 2px; font-size: var(--fs-2xs); color: ${stateColor}; font-family: var(--font-mono); letter-spacing: 0.18em; font-weight: 600; text-transform: uppercase;">${stateLabel}</div>`
         : `<button class="pl-dispatch-btn" style="padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.06); color: #4dff9c; border: 1px solid rgba(77, 255, 156, 0.35); border-left: 2px solid #4dff9c; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.20em; text-transform: uppercase; font-family: var(--font-mono); transition: background 120ms, border-color 120ms;" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">Dispatch</button>`;
@@ -10035,13 +10040,14 @@ async function main() {
         : '';
 
       return `
-        <article style="padding: var(--space-4); border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-panel); margin-bottom: var(--space-3);">
-          <header style="display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-2);">
+        <article style="padding: var(--space-4); border: 1px solid ${idx === 0 ? 'rgba(77, 210, 255, 0.3)' : 'var(--border)'}; border-left: ${idx === 0 ? '2px' : '1px'} solid ${idx === 0 ? 'var(--accent)' : 'var(--border)'}; border-radius: var(--radius); background: var(--surface-panel); margin-bottom: var(--space-3);">
+          <header style="display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-2); margin-bottom: var(--space-2);">
             <div style="flex: 1 1 auto; min-width: 0;">
               <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent); font-size: var(--fs-2xs); margin-bottom: 2px;">${details.displayName || a.name}</div>
               <div style="font-size: var(--fs-sm); color: var(--text); font-weight: 500;">${a.name}</div>
               <div class="c-label" style="margin-top: 2px; color: var(--text-dim);">${a.etaLabel} · ${a.distanceKm} km</div>
             </div>
+            ${recommendedBadge}
           </header>
           ${includesHtml}
           ${deployedForHtml}
@@ -10100,9 +10106,12 @@ async function main() {
 
       ${isAcked || !rec ? (mineList.length ? `
         <div class="c-panel">
-          <div class="c-panel-title" style="margin-bottom: var(--space-3);">${isAcked ? 'Step 2 · Select response option' : 'Your Response Options'}</div>
-          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">Each option below shows what it deploys, when it's normally used, and its tradeoffs. Multiple can be dispatched concurrently.</div>
-          ${mineList.map(dispatchRow).join('')}
+          <div class="c-panel-title" style="margin-bottom: var(--space-2);">${isAcked ? 'Step 2 · Select response option' : 'Your Response Options'}</div>
+          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${mineList.length} option${mineList.length === 1 ? '' : 's'} available. Multiple can be dispatched concurrently. Recommended pick is the closest by ETA.</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-3);">
+            ${mineList.map((a, i) => `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: ${i === 0 ? 'rgba(77, 210, 255, 0.08)' : 'rgba(255, 255, 255, 0.03)'}; border: 1px solid ${i === 0 ? 'rgba(77, 210, 255, 0.35)' : 'var(--border)'}; border-radius: 2px; font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.10em; text-transform: uppercase; color: ${i === 0 ? 'var(--accent)' : 'var(--text-dim)'};">${i === 0 ? '◆' : '○'} ${(RESPONSE_OPTION_DETAILS[a.kind]?.displayName || a.kind).split(' ').slice(0, 3).join(' ')}</span>`).join('')}
+          </div>
+          ${mineList.map((a, i) => dispatchRow(a, i)).join('')}
         </div>` : `
         <div class="c-panel">
           <div class="c-panel-title" style="margin-bottom: var(--space-2);">Response Options</div>
@@ -11074,16 +11083,36 @@ async function main() {
   let _mistralCaseFileGen = 0;
   let _mistralFiredForEvent = null;   // event.id we last fired for
   const _mistralCooldownUntil = new Map();   // event.id -> Date.now() cooldown expiry
+  const _mistralResultCache = new Map();   // event.id -> {body, recommendation, model_version, generated_at}
   const MISTRAL_COOLDOWN_MS = 45 * 1000;   // 45s cooldown on 429
 
   function _fireMistralCaseFile(event, opts = {}) {
     if (!isMistralConfigured() || !event) return;
     const { force = false } = opts;
 
+    const bodyEl = document.querySelector(`[data-ai-body="${event.id}"]`);
+    const recoEl = document.querySelector(`[data-ai-reco="${event.id}"]`);
+    const footEl = document.querySelector(`[data-ai-foot="${event.id}"]`);
+    if (!bodyEl || !recoEl) return;
+
+    // Cache restore: if we already generated a Mistral summary for this
+    // event, paint it back immediately after the re-render wiped the
+    // DOM. Prevents "blinking" where Mistral text is lost every time
+    // an escalation status changes and triggers a re-render.
+    if (!force) {
+      const cached = _mistralResultCache.get(event.id);
+      if (cached) {
+        bodyEl.textContent = cached.body;
+        recoEl.textContent = cached.recommendation;
+        if (footEl) footEl.textContent = `Generated ${_ageString(cached.generated_at)} ago · Sovereign EU inference · Model: ${cached.model_version}`;
+        return;   // cached restore, no new stream
+      }
+    }
+
     // Cooldown check: if we recently 429'd for this event, hold on mock
     const cooldownExp = _mistralCooldownUntil.get(event.id) || 0;
     if (!force && Date.now() < cooldownExp) return;
-    if (force) _mistralCooldownUntil.delete(event.id);
+    if (force) { _mistralCooldownUntil.delete(event.id); _mistralResultCache.delete(event.id); }
 
     // Dedup: same event as last fire? Skip. On force (ai-refresh) or new
     // event, proceed and set the fired-for tracker.
@@ -11091,10 +11120,6 @@ async function main() {
     _mistralFiredForEvent = event.id;
 
     const gen = ++_mistralCaseFileGen;
-    const bodyEl = document.querySelector(`[data-ai-body="${event.id}"]`);
-    const recoEl = document.querySelector(`[data-ai-reco="${event.id}"]`);
-    const footEl = document.querySelector(`[data-ai-foot="${event.id}"]`);
-    if (!bodyEl || !recoEl) return;
 
     // Show "generating" state on the foot so the operator knows the
     // real model is being invoked over the mock placeholder.
@@ -11114,6 +11139,14 @@ async function main() {
       },
       onDone: (result) => {
         if (gen !== _mistralCaseFileGen) return;
+        // Cache the completed result so future re-renders restore it
+        // from cache instead of re-firing (kills the "blink").
+        _mistralResultCache.set(event.id, {
+          body: result.body,
+          recommendation: result.recommendation,
+          model_version: result.model_version,
+          generated_at: Date.now(),
+        });
         if (footEl) footEl.textContent = `Generated just now · Sovereign EU inference · Model: ${result.model_version} · Verify against ground truth`;
       },
       onError: (err) => {
@@ -11129,6 +11162,14 @@ async function main() {
         }
       },
     });
+  }
+
+  // Compact "N sec ago" / "N min ago" formatter for cached Mistral timestamps
+  function _ageString(ts) {
+    const sec = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+    if (sec < 60) return `${sec}s`;
+    if (sec < 3600) return `${Math.floor(sec / 60)} min`;
+    return `${Math.floor(sec / 3600)}h`;
   }
 
   function _mockAiSynthesis(event, site) {
