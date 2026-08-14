@@ -39,7 +39,7 @@ import {
 } from './destinations.js';
 import { renderDetectionBrief } from './summary.js';
 import { contextForSite, nearestCriticalArea, dwellZonesAtPoint } from './site_context.js';
-import { responseBundle, responseBundleForSubject, RESPONSE_OPTION_DETAILS } from './response_assets.js';
+import { responseBundle, responseBundleForSubject, RESPONSE_OPTION_DETAILS, outcomesForKind } from './response_assets.js';
 import { AIRCRAFT, aircraftAtBase, aircraftForResponseAsset } from './aircraft.js';
 import { playbookFor } from './response_playbook.js';
 import { ADMIN, OPERATORS, RECEIVERS, getActiveRole, setActiveRole, onRoleChange, getRoleChildren, getRoleDestinationIdsRolledUp } from './roles.js';
@@ -2625,7 +2625,14 @@ async function main() {
   function dispatchPostIncident(eventId, destId) {
     const event = getEvent(eventId);
     if (!event) return;
-    if (event.outcome !== 'neutralized') return;
+    // Gate relaxed for P97 Step 5 flow: post-incident handoff is
+    // available once at least one dispatch outcome has been confirmed
+    // (event.dispatchOutcomes populated) OR the legacy neutralized
+    // pathway triggered. Prevents blocking Step 5 for outcomes like
+    // "operator detained" or "link disrupted" that aren't literal
+    // neutralisations but still warrant ground handoff.
+    const outcomeConfirmed = event.dispatchOutcomes && Object.keys(event.dispatchOutcomes).length > 0;
+    if (event.outcome !== 'neutralized' && !outcomeConfirmed) return;
     const dest = getDestination(destId);
     if (!dest) return;
     if (!Array.isArray(event.postIncidentDispatched)) event.postIncidentDispatched = [];
@@ -10118,6 +10125,11 @@ async function main() {
           <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">No assets under your jurisdiction match this threat class. Other agencies below can act.</div>
         </div>`) : ''}
 
+      ${_renderStep3ActiveEngagement(event, activeRole)}
+      ${_renderStep4OutcomeConfirm(event, activeRole)}
+      ${_renderStep5PostIncidentHandoff(event, activeRole)}
+      ${_renderStep6CloseEvent(event, activeRole)}
+
       ${otherList.length ? `
         <div class="c-panel">
           <div class="c-panel-title" style="margin-bottom: var(--space-2);">Other Agencies On Case</div>
@@ -10125,6 +10137,179 @@ async function main() {
         </div>` : ''}
     `;
   }
+
+  // ══════════════════════════════════════════════════════════════════
+  // STEP 3 · Monitor engagement
+  // ══════════════════════════════════════════════════════════════════
+  // Shown when at least one counter-response dispatch has been fired by
+  // this role. Lists every dispatch with its live state chip so the
+  // duty officer sees the whole engagement picture at once.
+  function _renderStep3ActiveEngagement(event, activeRole) {
+    const dispatches = (event.counterDispatches || []).filter(cd => {
+      // Only show dispatches this role owns (issued from their scope)
+      const scope = _ROLE_DISPATCH_SCOPE_LOOKUP[activeRole?.id];
+      return activeRole?.kind === 'admin' || (scope && scope.has(cd.kind));
+    });
+    if (!dispatches.length) return '';
+    const rows = dispatches.map(cd => {
+      const state = counterDispatchStateFor(event.id, cd.assetId) || 'complete';
+      const stateColor = state === 'complete' ? '#6b7280' : state === 'engaging' ? '#ffb84d' : '#4dd2ff';
+      const stateLabel = { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE' }[state] || state.toUpperCase();
+      const elapsedSec = Math.max(0, Math.floor((Date.now() - cd.dispatchedTs) / 1000));
+      const elapsedStr = elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
+      const kindLabel = RESPONSE_OPTION_DETAILS[cd.kind]?.displayName || cd.kind;
+      return `
+        <div style="display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; border-top: 1px solid var(--border);">
+          <div style="flex: 1 1 auto; min-width: 0;">
+            <div style="font-size: var(--fs-sm); color: var(--text); font-weight: 500;">${cd.assetName}</div>
+            <div class="c-label" style="margin-top: 2px; color: var(--text-dim);">${kindLabel} · Elapsed ${elapsedStr}</div>
+          </div>
+          <div style="display: inline-flex; align-items: center; padding: 4px 10px; background: rgba(255,255,255,0.02); border: 1px solid ${stateColor}66; border-left: 2px solid ${stateColor}; border-radius: 2px; font-size: var(--fs-2xs); color: ${stateColor}; font-family: var(--font-mono); letter-spacing: 0.16em; font-weight: 600; text-transform: uppercase;">${stateLabel}</div>
+        </div>`;
+    }).join('');
+    return `
+      <div class="c-panel" style="border-top: 3px solid var(--accent);">
+        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--accent);">Step 3 · Monitor engagement</div>
+        <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-1);">${dispatches.length} dispatch${dispatches.length === 1 ? '' : 'es'} tracked. Live state above updates as assets progress.</div>
+        ${rows}
+      </div>`;
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // STEP 4 · Confirm outcome
+  // ══════════════════════════════════════════════════════════════════
+  // Shown when at least one dispatch has completed AND is awaiting an
+  // outcome confirmation from the operator. Per-dispatch outcome
+  // selector uses formal operational vocabulary from
+  // RESPONSE_OPTION_DETAILS[kind].outcomes (not slang, not "kill/
+  // neutralise" for cases where the real outcome is "identified" or
+  // "tracked to origin").
+  function _renderStep4OutcomeConfirm(event, activeRole) {
+    const outcomes = event.dispatchOutcomes || {};
+    const dispatches = (event.counterDispatches || []).filter(cd => {
+      if (outcomes[cd.dispatchId]) return false;   // already confirmed
+      const state = counterDispatchStateFor(event.id, cd.assetId);
+      // Include completed dispatches OR dispatches whose entities have
+      // already been retired (state lookup returns 'complete' from the
+      // event's counterDispatches trail even after entities are gone).
+      if (state && state !== 'complete') return false;
+      const scope = _ROLE_DISPATCH_SCOPE_LOOKUP[activeRole?.id];
+      return activeRole?.kind === 'admin' || (scope && scope.has(cd.kind));
+    });
+    if (!dispatches.length) return '';
+    const blocks = dispatches.map(cd => {
+      const outcomeOptions = outcomesForKind(cd.kind);
+      const optionsHtml = outcomeOptions.length
+        ? outcomeOptions.map(o => `<option value="${o.id}">${o.label}</option>`).join('')
+        : '<option value="complete">Engagement complete</option>';
+      const kindLabel = RESPONSE_OPTION_DETAILS[cd.kind]?.displayName || cd.kind;
+      return `
+        <article style="padding: var(--space-3); border: 1px solid var(--border); border-left: 2px solid #ffb84d; border-radius: var(--radius); background: var(--surface-panel); margin-bottom: var(--space-3);">
+          <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: #ffb84d; font-size: var(--fs-2xs); margin-bottom: 4px;">${kindLabel}</div>
+          <div style="font-size: var(--fs-sm); color: var(--text); font-weight: 500; margin-bottom: var(--space-2);">${cd.assetName}</div>
+          <label class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-dim); font-size: var(--fs-2xs); display: block; margin-bottom: 4px;">Outcome</label>
+          <select data-outcome-select="${cd.dispatchId}" style="width: 100%; padding: 6px 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--border); border-radius: 2px; color: var(--text); font-family: var(--font-body); font-size: var(--fs-sm); margin-bottom: var(--space-2);">
+            <option value="">Select outcome...</option>
+            ${optionsHtml}
+          </select>
+          <label class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-dim); font-size: var(--fs-2xs); display: block; margin-bottom: 4px;">Analyst notes (optional)</label>
+          <textarea data-outcome-notes="${cd.dispatchId}" rows="2" placeholder="Free-text observations..." style="width: 100%; padding: 6px 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--border); border-radius: 2px; color: var(--text); font-family: var(--font-body); font-size: var(--fs-sm); resize: vertical; box-sizing: border-box; margin-bottom: var(--space-2);"></textarea>
+          <div style="display: flex; justify-content: flex-end;">
+            <button class="pl-dispatch-btn" style="padding: 6px 14px; font-size: var(--fs-2xs); background: rgba(255, 184, 77, 0.08); color: #ffb84d; border: 1px solid rgba(255, 184, 77, 0.4); border-left: 2px solid #ffb84d; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="confirm-outcome" data-dispatch-id="${cd.dispatchId}" data-event-id="${event.id}">Confirm outcome</button>
+          </div>
+        </article>`;
+    }).join('');
+    return `
+      <div class="c-panel" style="border-top: 3px solid #ffb84d;">
+        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #ffb84d;">Step 4 · Confirm outcome</div>
+        <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${dispatches.length} completed dispatch${dispatches.length === 1 ? '' : 'es'} awaiting formal outcome. Outcomes lock into the audit trail and unlock handoff options.</div>
+        ${blocks}
+      </div>`;
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // STEP 5 · Post-incident handoff
+  // ══════════════════════════════════════════════════════════════════
+  // Shown when at least one outcome has been confirmed AND there are
+  // applicable ground-response destinations that haven't been notified
+  // yet. Reuses postIncidentResponders + dispatchPostIncident wiring.
+  function _renderStep5PostIncidentHandoff(event, activeRole) {
+    const outcomes = event.dispatchOutcomes || {};
+    if (!Object.keys(outcomes).length) return '';
+    const responders = postIncidentResponders(event.siteId);
+    if (!responders.length) return '';
+    const dispatched = new Set(event.postIncidentDispatched || []);
+    const pending = responders.filter(r => !dispatched.has(r.id));
+    if (!pending.length) return '';
+    const rows = pending.map(r => `
+      <div style="display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; border-top: 1px solid var(--border);">
+        <div style="flex: 1 1 auto; min-width: 0;">
+          <div style="font-size: var(--fs-sm); color: var(--text); font-weight: 500;">${r.name}</div>
+          <div class="c-label" style="margin-top: 2px; color: var(--text-dim);">Tier ${r.tier} · ${r.type}</div>
+        </div>
+        <button class="pl-dispatch-btn" style="padding: 6px 12px; font-size: var(--fs-2xs); background: rgba(77, 210, 255, 0.06); color: var(--accent); border: 1px solid rgba(77, 210, 255, 0.4); border-left: 2px solid var(--accent); border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="dispatch-postinc" data-id="${event.id}" data-dest="${r.id}">Dispatch</button>
+      </div>
+    `).join('');
+    return `
+      <div class="c-panel" style="border-top: 3px solid #4dd2ff;">
+        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #4dd2ff;">Step 5 · Post-incident handoff</div>
+        <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-1);">${pending.length} ground-response destination${pending.length === 1 ? '' : 's'} available for cordon, evidence recovery, and civil handoff.</div>
+        ${rows}
+      </div>`;
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // STEP 6 · Close event
+  // ══════════════════════════════════════════════════════════════════
+  // Shown when all outcomes are confirmed AND all applicable handoffs
+  // have been dispatched (or there were none applicable). Final formal
+  // step. Marks the event closed and archives to history.
+  function _renderStep6CloseEvent(event, activeRole) {
+    const outcomes = event.dispatchOutcomes || {};
+    if (!Object.keys(outcomes).length) return '';
+    if (event.status === 'closed' || event.outcome === 'closed') {
+      return `
+        <div class="c-panel" style="border-top: 3px solid var(--ok);">
+          <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--ok);">Step 6 · Event closed</div>
+          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">Event archived to history. Full incident record retained for audit.</div>
+        </div>`;
+    }
+    const responders = postIncidentResponders(event.siteId);
+    const dispatched = new Set(event.postIncidentDispatched || []);
+    const handoffPending = responders.filter(r => !dispatched.has(r.id));
+    if (handoffPending.length) return '';   // Step 5 still active
+    return `
+      <div class="c-panel" style="border-top: 3px solid var(--ok);">
+        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--ok);">Step 6 · Close event</div>
+        <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">All outcomes confirmed. All applicable handoffs dispatched. Event ready for formal closure and archive.</div>
+        <div style="display: flex; justify-content: flex-end;">
+          <button class="pl-dispatch-btn" style="padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.08); color: var(--ok); border: 1px solid rgba(77, 255, 156, 0.4); border-left: 2px solid var(--ok); border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="close-event" data-id="${event.id}">Close event</button>
+      </div>
+      </div>`;
+  }
+
+  // Shared lookup for the ROLE_DISPATCH_SCOPE map, used by Steps 3+4
+  // to filter dispatches by "did this role own it". Kept as module
+  // scope so all step renderers reference the same source of truth.
+  const _ROLE_DISPATCH_SCOPE_LOOKUP = {
+    'flv-skrydstrup': new Set(['helicopter-intercept']),
+    'flv-karup':      new Set(['helicopter-intercept']),
+    'haer-slagelse':  new Set(['army-c-uas', 'army-isr-drone']),
+    'haer-hovelte':   new Set(['army-ground']),
+    'haer-varde':     new Set(['army-isr-drone', 'army-c-uas']),
+    'haer-bornholm':  new Set(['army-c-uas']),
+    'haer-oksbol':    new Set(['army-c-uas']),
+    'sok-aalborg':    new Set(['sof-tactical']),
+    'forsvarskmd':    new Set(['helicopter-intercept', 'army-c-uas', 'army-isr-drone', 'army-ground', 'sof-tactical']),
+    'fe':             new Set(['army-isr-drone']),
+    'rigspoliti':     new Set(['police-c-uas']),
+    'politi-kbh':     new Set(['police-c-uas']),
+    'politi-sydvest': new Set(['police-c-uas']),
+    'op-cph-airports':new Set(['wildlife-response']),
+    'op-esbjerg-port':new Set(['wildlife-response']),
+    'op-energinet':   new Set([]),
+    'flv-qra':        new Set(['helicopter-intercept']),
+  };
 
   // ── Response Overlay (right-side slide-in panel on receiver dashboard) ──
   // Categorized asset table: tactical intercept (real response), ground coordination
@@ -11391,8 +11576,9 @@ async function main() {
       selectedEvId || 'no-sel',
       _respondingEscId || 'no-resp',
       // Workspace-event specific: escalation count + outcome + status +
-      // active dispatch count so state transitions trigger a re-render.
-      wsEvent ? `${wsEvent.id}:${(wsEvent.escalations || []).length}:${wsEvent.outcome || 'n'}:${wsEvent.status}:${(wsEvent.counterDispatches || []).length}` : 'no-wsev',
+      // active dispatch count + confirmed outcomes + handoffs done so
+      // Steps 3→4→5→6 transitions all trigger a re-render.
+      wsEvent ? `${wsEvent.id}:${(wsEvent.escalations || []).length}:${wsEvent.outcome || 'n'}:${wsEvent.status}:${(wsEvent.counterDispatches || []).length}:o${Object.keys(wsEvent.dispatchOutcomes || {}).length}:h${(wsEvent.postIncidentDispatched || []).length}` : 'no-wsev',
       // Ack + response state per escalation
       escStatusHash,
       // Inbox-mode: cardinality of visible events so ledger updates re-render.
@@ -11564,6 +11750,33 @@ async function main() {
       else if (action === 'ack') { updateEscalationStatus(_selectedReceiverEventId, escId, 'acknowledged'); toast('Acknowledgment sent to operator', 'ok'); renderReceiverView(); }
       else if (action === 'advisory-view') { toast(`Advisory only: track ${id} is projecting toward your site. Full escalation not yet sent.`, 'info'); }
       else if (action === 'qra-dispatch') { triggerQraIntercept(id); renderReceiverView(); }
+      else if (action === 'confirm-outcome') {
+        // Step 4 handler: read outcome select + notes, save to
+        // event.dispatchOutcomes[dispatchId], trigger re-render so
+        // Step 5 (post-incident handoff) can appear.
+        const dispatchId = el.dataset.dispatchId;
+        const eventId = el.dataset.eventId;
+        const ev = getEvent(eventId);
+        if (!ev || !dispatchId) return;
+        const selectEl = document.querySelector(`[data-outcome-select="${dispatchId}"]`);
+        const notesEl = document.querySelector(`[data-outcome-notes="${dispatchId}"]`);
+        const outcomeId = selectEl?.value;
+        if (!outcomeId) { toast('Select an outcome before confirming', 'warn'); return; }
+        const cd = (ev.counterDispatches || []).find(c => c.dispatchId === dispatchId);
+        const outcomes = outcomesForKind(cd?.kind || '');
+        const outcomeDef = outcomes.find(o => o.id === outcomeId);
+        if (!ev.dispatchOutcomes) ev.dispatchOutcomes = {};
+        ev.dispatchOutcomes[dispatchId] = {
+          outcomeId,
+          outcomeLabel: outcomeDef?.label || outcomeId,
+          notes: notesEl?.value || '',
+          confirmedAt: new Date().toISOString(),
+          confirmedBy: getActiveRole()?.id || 'unknown',
+        };
+        toast(`Outcome confirmed: ${outcomeDef?.label || outcomeId}`, 'ok');
+        _lastReceiverViewSig = null;   // force re-render so Step 5 unlocks
+        renderReceiverView();
+      }
       else if (action === 'counter-dispatch') {
         // Level 3 counter-response dispatch. Uses the current event's
         // subject-derived response bundle to find the asset by id, then

@@ -368,6 +368,12 @@ export const RESPONSE_OPTION_DETAILS = {
     ],
     deployedFor: 'Slow to medium-speed aerial threats. Especially valuable at rural sites where ground C-UAS mobilisation exceeds 30 minutes. Serves as airborne C2 for coordinated multi-asset response.',
     tradeoffs: 'Commits 1 airframe + 4 crew for ~90 min. Not appropriate for cruise missile intercept (closure rate too high).',
+    outcomes: [
+      { id: 'visual_shadow', label: 'Visual identification and shadowing complete', description: 'Threat platform positively identified; observation feed relayed to command.' },
+      { id: 'contact_broken', label: 'Contact broken', description: 'Threat exited helicopter tracking envelope before engagement.' },
+      { id: 'ground_handoff', label: 'Relayed to ground C-UAS team', description: 'Threat position handed off to ground jamming or patrol assets for kinetic follow-up.' },
+      { id: 'no_intercept', label: 'Intercept not established', description: 'Threat closure rate exceeded helicopter capability; escalation required.' },
+    ],
   },
   'army-c-uas': {
     displayName: 'Ground-Based Counter-UAS (Jammer)',
@@ -379,6 +385,12 @@ export const RESPONSE_OPTION_DETAILS = {
     ],
     deployedFor: 'Coordinated drone swarms, quadcopter incursions, loitering munitions inside effective range (~5-8 km of the ground station).',
     tradeoffs: 'Cannot pursue if threat moves out of coverage. Best paired with helicopter-intercept for follow-up.',
+    outcomes: [
+      { id: 'link_disrupted', label: 'Command link disrupted', description: 'RF jamming successful; threat lost control or returned to origin.' },
+      { id: 'ineffective_range', label: 'Ineffective at range', description: 'Threat outside effective jamming radius; kinetic escalation required.' },
+      { id: 'kinetic_authorised', label: 'Kinetic engagement authorised', description: 'Handoff to armed C-UAS operator or SOF team.' },
+      { id: 'contact_lost', label: 'Contact lost', description: 'Threat exited coverage before engagement outcome could be assessed.' },
+    ],
   },
   'police-c-uas': {
     displayName: 'Police C-UAS Patrol Response',
@@ -390,6 +402,12 @@ export const RESPONSE_OPTION_DETAILS = {
     ],
     deployedFor: 'Small drone incursions, unauthorised hobby aircraft, jurisdictional response inside police district. Standard first response for airport perimeter incidents.',
     tradeoffs: 'Slower than airborne assets. Effective mainly against single or small groups, not coordinated swarms.',
+    outcomes: [
+      { id: 'operator_detained', label: 'Operator located and detained', description: 'Ground-based operator apprehended; drone recovered and secured as evidence.' },
+      { id: 'link_disrupted', label: 'Command link disrupted', description: 'RF jam successful; threat lost control before operator could be located.' },
+      { id: 'operator_fled', label: 'Operator fled jurisdiction', description: 'Ground team arrived; operator no longer at launch site.' },
+      { id: 'no_track', label: 'No track located', description: 'Threat exited before patrol arrival; case referred to intelligence.' },
+    ],
   },
   'army-isr-drone': {
     displayName: 'Own ISR Drone Visual Verify',
@@ -401,6 +419,13 @@ export const RESPONSE_OPTION_DETAILS = {
     ],
     deployedFor: 'Ambiguous classifications requiring visual confirmation before kinetic response. Standard first move when NN confidence is under 70% or the signature is unusual.',
     tradeoffs: 'Does NOT neutralise on its own. Adds ~6 minutes to response chain but reduces friendly-fire and misclassification risk.',
+    outcomes: [
+      { id: 'platform_confirmed', label: 'Platform visually confirmed', description: 'ISR feed confirms threat class and airframe; classification locked in.' },
+      { id: 'payload_confirmed', label: 'Payload signature confirmed', description: 'Visible payload or fitting matches weaponised profile; escalation warranted.' },
+      { id: 'hostile_intent_confirmed', label: 'Hostile intent confirmed', description: 'Behaviour observed (loiter, dive, target reconnaissance) consistent with hostile mission.' },
+      { id: 'friendly_reidentified', label: 'Reclassified as friendly', description: 'Visual confirms platform is registered / benign; downgrade classification.' },
+      { id: 'track_lost', label: 'Track lost before identification', description: 'ISR drone could not maintain visual before threat exited coverage.' },
+    ],
   },
   'sof-tactical': {
     displayName: 'SOF Tactical Interdiction',
@@ -412,6 +437,12 @@ export const RESPONSE_OPTION_DETAILS = {
     ],
     deployedFor: 'Loitering munitions with expected ground impact, hostile drone recovery, high-value target defence when standard assets are insufficient.',
     tradeoffs: 'Longest response chain. ~25 min mobilisation + air transit. Reserved for scenarios other assets cannot handle.',
+    outcomes: [
+      { id: 'threat_neutralised', label: 'Threat neutralised on ground', description: 'SOF engagement successful; threat platform destroyed or captured.' },
+      { id: 'payload_recovered', label: 'Payload recovered intact', description: 'Threat payload secured for intelligence exploitation.' },
+      { id: 'operator_apprehended', label: 'Operator apprehended', description: 'Ground operator located and detained.' },
+      { id: 'threat_evaded', label: 'Threat evaded engagement', description: 'Threat displaced before SOF team could close; alternate assets required.' },
+    ],
   },
   'wildlife-response': {
     displayName: 'Airport Wildlife Team',
@@ -422,6 +453,11 @@ export const RESPONSE_OPTION_DETAILS = {
     ],
     deployedFor: 'Bird flock detections, wildlife on runway. Standard ICAO Annex 14 airport response.',
     tradeoffs: 'Not applicable to man-made threats. Contained to airport perimeter.',
+    outcomes: [
+      { id: 'dispersed', label: 'Flock dispersed', description: 'Pyrotechnic or acoustic deterrent successful; airspace cleared.' },
+      { id: 'relocated', label: 'Wildlife relocated', description: 'Ground fauna moved to safe distance from operating surface.' },
+      { id: 'recurrent_pattern', label: 'Recurrent pattern logged', description: 'Habitat modification scheduled; ornithology report filed.' },
+    ],
   },
   'army-ground': {
     displayName: 'Ground Reinforcement',
@@ -433,8 +469,18 @@ export const RESPONSE_OPTION_DETAILS = {
     ],
     deployedFor: 'Post-impact site security, downed drone recovery, ground threat where police alone is insufficient.',
     tradeoffs: 'Slow to mobilise (~30 min). No airborne or kinetic asset. Not appropriate for active airborne threats.',
+    outcomes: [
+      { id: 'cordon_established', label: 'Cordon established', description: 'Perimeter secured; unauthorised personnel excluded.' },
+      { id: 'evidence_secured', label: 'Evidence secured', description: 'Debris, payload, or ground evidence recovered; chain of custody initiated.' },
+      { id: 'politi_handoff', label: 'Handed off to Politi', description: 'Site under police control for arrest and investigation phase.' },
+    ],
   },
 };
+
+// Convenience: outcomes for a given kind (empty array if unknown)
+export function outcomesForKind(kind) {
+  return RESPONSE_OPTION_DETAILS[kind]?.outcomes || [];
+}
 
 // Subject-aware response bundle. Returns tactical assets matched to
 // the DetectionSubject, plus the same ground + consequence layers as
