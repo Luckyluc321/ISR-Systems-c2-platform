@@ -2401,6 +2401,10 @@ async function main() {
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
         heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
         scale: 0.85,
+        // Keep the icon visible at Denmark-wide zoom (up to ~500km eye
+        // distance). Without this, the 56x56 canvas is <1px when zoomed
+        // out and the operator can't see the dispatch happen.
+        scaleByDistance: new Cesium.NearFarScalar(1000, 1.4, 500000, 0.7),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       label: {
@@ -10069,11 +10073,14 @@ async function main() {
     const ackTs = rec?.statusHistory?.find(h => h.status === 'acknowledged')?.timestamp;
     const isAcked = !!ackTs;
 
+    // Step 1 gate: point the operator at the canonical Acknowledge
+    // Receipt button in the case-file's Your Response section rather
+    // than duplicating it here. Two ack buttons for the same action was
+    // confusing UX. This block just tells them WHERE to look.
     const ackGateHtml = !isAcked && rec ? `
       <div class="c-panel" style="border-top: 3px solid #ffb84d;">
         <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #ffb84d;">Step 1 · Acknowledge receipt</div>
-        <div style="font-size: var(--fs-xs); color: var(--text); line-height: 1.55; margin-bottom: var(--space-3);">Response options unlock once you confirm the case is with you. This locks a receipt into the operator's audit trail.</div>
-        <button class="c-btn solid ok wide" style="justify-content: center;" data-rcv="ack" data-id="${event.id}" data-esc="${rec.id}">Acknowledge Receipt</button>
+        <div style="font-size: var(--fs-xs); color: var(--text); line-height: 1.55;">Click <b style="color: #4dff9c;">Acknowledge receipt</b> in the case-file to the left. Response options unlock once acknowledged.</div>
       </div>` : '';
 
     const ackedBadge = isAcked ? `<span style="font-size: var(--fs-2xs); color: var(--ok); letter-spacing: 0.10em; text-transform: uppercase; font-family: var(--font-mono);">✓ Acked ${ackTs ? ackTs.slice(11,19) + 'Z' : ''}</span>` : '';
@@ -10930,6 +10937,27 @@ async function main() {
 
     // ── 3. Your response (this receiver's actions) ─────────────
     const ctas = _buildRecommendedCtas(event, rec, isAcked, isActive);
+    // Response composer — appears inline when "Respond to operator" is
+    // clicked. Sends a text message back to the operator inbox, threaded
+    // on this escalation. Previously only rendered in inbox split view,
+    // making the workspace "Respond" button appear to do nothing.
+    const isResponding = rec && _respondingEscId === rec.id;
+    const composerHtml = isResponding ? `
+      <div class="rer-composer" style="margin-top: var(--space-3); padding: var(--space-3); background: rgba(77, 210, 255, 0.05); border-left: 2px solid var(--accent); border-radius: 2px;">
+        <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent); font-size: var(--fs-2xs); margin-bottom: var(--space-2);">Response to operator</div>
+        <textarea id="rcv-response-text" rows="3" placeholder="Type your response here. Delivered to the operator inbox with your role and timestamp." style="width: 100%; padding: var(--space-2); background: rgba(0,0,0,0.25); border: 1px solid var(--border); border-radius: 2px; color: var(--text); font-family: var(--font-body); font-size: var(--fs-sm); line-height: 1.5; resize: vertical; box-sizing: border-box;"></textarea>
+        <div style="margin-top: var(--space-2); display: flex; gap: var(--space-2); justify-content: flex-end;">
+          <button class="c-btn" data-rcv="respond-cancel">Cancel</button>
+          <button class="c-btn primary" data-rcv="respond-send" data-esc="${rec.id}">Send response</button>
+        </div>
+      </div>` : '';
+    // Sent-response display: if the operator has already responded to
+    // this receiver's message, show the reply thread inline.
+    const sentHtml = rec?.response ? `
+      <div style="margin-top: var(--space-3); padding: var(--space-3); background: rgba(77, 255, 156, 0.05); border-left: 2px solid var(--ok); border-radius: 2px;">
+        <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: var(--ok); font-size: var(--fs-2xs); margin-bottom: var(--space-1);">Your response sent ${rec.response.receivedAt ? rec.response.receivedAt.slice(11,19) + 'Z' : ''}</div>
+        <div style="font-size: var(--fs-sm); color: var(--text); line-height: 1.5;">${rec.response.text}</div>
+      </div>` : '';
     const actions = `
       <section class="rer-section rer-actions">
         <div class="c-section-eyebrow">Your Response · ${role.name || 'Receiver'}</div>
@@ -10943,6 +10971,8 @@ async function main() {
               </span>
             </button>`).join('')}
         </div>
+        ${composerHtml}
+        ${sentHtml}
       </section>`;
 
     // ── 4. Detection ground truth ──────────────────────────────
@@ -11304,6 +11334,15 @@ async function main() {
   // separately without needing a full re-render.
   let _lastReceiverViewSig = null;
   function _receiverViewSignature(role, wsEvent, selectedEvId, receivedEvents) {
+    // Include the latest status of every escalation on the workspace
+    // event so ack / delivered / read / responded transitions actually
+    // trigger a re-render (previously the sig stayed the same and Step
+    // 2 in the Mission Console never unlocked after ack).
+    const escStatusHash = wsEvent
+      ? (wsEvent.escalations || []).map(e =>
+          `${e.id}:${e.statusHistory?.[e.statusHistory.length - 1]?.status || 'pending'}:${e.response ? 'r' : 'nr'}`
+        ).join(',')
+      : '';
     const parts = [
       role?.id || 'no-role',
       _workspaceEventId || 'no-ws',
@@ -11313,8 +11352,9 @@ async function main() {
       // Workspace-event specific: escalation count + outcome + status +
       // active dispatch count so state transitions trigger a re-render.
       wsEvent ? `${wsEvent.id}:${(wsEvent.escalations || []).length}:${wsEvent.outcome || 'n'}:${wsEvent.status}:${(wsEvent.counterDispatches || []).length}` : 'no-wsev',
-      // Inbox-mode: cardinality of visible events + latest escalation
-      // status hash so ledger updates re-render.
+      // Ack + response state per escalation
+      escStatusHash,
+      // Inbox-mode: cardinality of visible events so ledger updates re-render.
       `evc:${receivedEvents.length}`,
     ];
     return parts.join('|');
