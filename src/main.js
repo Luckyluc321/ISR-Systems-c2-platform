@@ -2693,20 +2693,46 @@ async function main() {
           d.state = 'engaging';
           d.arrivedTs = now;
           d.engageStartTs = now;
+          // Interceptor swarm: assign this drone a specific hostile
+          // target (not the abstract event centroid). Each interceptor
+          // picks one non-overwatch drone. With 3 interceptors and 4
+          // downable drones the assignment is deterministic by member
+          // index modulo. Overwatch is never targeted (always escapes).
+          if (d.kind === 'counter-drone-swarm') {
+            _assignInterceptorTarget(d);
+          }
           if (d.profile.radiationCone) _createRadiationEntity(d);
-          if (d.profile.firesTracer) _fireTracerEffect(d);
+          if (d.profile.firesTracer) _fireMachineGunBurst(d);
           if (getActiveRole().kind === 'receiver') renderReceiverView();
           toast(`${d.assetName} on station. Engaging.`, 'info');
         }
       }
     } else if (d.state === 'engaging') {
       const engageDur = (now - d.engageStartTs) / 1000;
-      // For interceptor swarms, fire additional tracer bursts every ~1.2s
-      // during engagement to visually communicate sustained kinetic action
-      if (d.profile.firesTracer && !d._nextTracerTs) d._nextTracerTs = d.engageStartTs + 1200;
+      // Orbit the target during engagement so the drone doesn't freeze
+      // visually. Small circular motion (radius ~40m) around the
+      // assigned target coord.
+      if (d.profile.airborne && d.assignedTargetCoord) {
+        const orbitOmega = 1.4;   // rad/s
+        const orbitR = 40;
+        const t = (now - d.engageStartTs) / 1000;
+        const angle = t * orbitOmega;
+        const orbitLatOffset = (orbitR * Math.cos(angle)) / 111000;
+        const orbitLonOffset = (orbitR * Math.sin(angle)) / (111000 * Math.cos(d.assignedTargetCoord.lat * Math.PI / 180));
+        d.curLat = d.assignedTargetCoord.lat + orbitLatOffset;
+        d.curLon = d.assignedTargetCoord.lon + orbitLonOffset;
+        d.heading = angle + Math.PI / 2;
+        if (d.profile.trail) {
+          d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0));
+          if (d.trailPositions.length > 500) d.trailPositions.shift();
+        }
+      }
+      // Fire additional machine-gun bursts every ~1.4s during
+      // engagement for sustained kinetic action visual read
+      if (d.profile.firesTracer && !d._nextTracerTs) d._nextTracerTs = d.engageStartTs + 1400;
       if (d.profile.firesTracer && now >= d._nextTracerTs) {
-        _fireTracerEffect(d);
-        d._nextTracerTs = now + 1200;
+        _fireMachineGunBurst(d);
+        d._nextTracerTs = now + 1400;
       }
       if (engageDur >= d.profile.engageSec) {
         d.state = 'complete';
@@ -2780,53 +2806,111 @@ async function main() {
   }
 
   // ══════════════════════════════════════════════════════════════════
-  // PHASE C · Interception visual effects
+  // PHASE C · Interception visual effects (proper machine-gun burst)
   // ══════════════════════════════════════════════════════════════════
-  // Small-arms tracer + flash at target. Deliberately restrained — no
-  // explosion sphere, no missile arc. Green tracer polyline flashes
-  // briefly (400ms fade) from interceptor to target coord. Fits the
-  // Palantir aesthetic (understated action).
-  function _fireTracerEffect(d) {
+  // Assigns each counter-drone interceptor a specific hostile swarm
+  // member as its target. Overwatch role is never assigned (always
+  // escapes per doctrine). If more interceptors than downable drones,
+  // assignment wraps modulo.
+  function _assignInterceptorTarget(d) {
+    const state = droneState.get(d.eventId);
+    if (!state?.swarmBillboards?.length) {
+      // Fallback: no swarm structure known, target the abstract centroid
+      d.assignedTargetCoord = { lat: d.targetLat, lon: d.targetLon };
+      return;
+    }
+    const downable = state.swarmBillboards.filter(sw => sw.role !== 'overwatch' && !sw.neutralised);
+    if (!downable.length) {
+      d.assignedTargetCoord = { lat: d.targetLat, lon: d.targetLon };
+      return;
+    }
+    const assignedIdx = (d.memberIndex || 0) % downable.length;
+    const target = downable[assignedIdx];
+    d.assignedSwarmMember = target;
+    // Read live position from the target's billboard so we track it
+    // even if it moves during the engagement window.
+    if (target.billboard?.position) {
+      const cart = target.billboard.position.getValue?.(Cesium.JulianDate.now());
+      if (cart) {
+        const cartographic = Cesium.Cartographic.fromCartesian(cart);
+        d.assignedTargetCoord = {
+          lat: Cesium.Math.toDegrees(cartographic.latitude),
+          lon: Cesium.Math.toDegrees(cartographic.longitude),
+        };
+      }
+    }
+    if (!d.assignedTargetCoord) {
+      d.assignedTargetCoord = { lat: d.targetLat, lon: d.targetLon };
+    }
+  }
+
+  // Machine-gun burst — 4 rapid tracer rounds over ~280ms + muzzle
+  // flash at interceptor + impact flash at target. Fires at the
+  // assigned specific drone, not the swarm centroid. Realistic
+  // small-arms C-UAS engagement for civilian airspace (no missiles,
+  // no explosions).
+  function _fireMachineGunBurst(d) {
+    // Refresh target position (drone may have moved since engagement start)
+    if (d.assignedSwarmMember?.billboard?.position) {
+      const cart = d.assignedSwarmMember.billboard.position.getValue?.(Cesium.JulianDate.now());
+      if (cart) {
+        const cartographic = Cesium.Cartographic.fromCartesian(cart);
+        d.assignedTargetCoord = {
+          lat: Cesium.Math.toDegrees(cartographic.latitude),
+          lon: Cesium.Math.toDegrees(cartographic.longitude),
+        };
+      }
+    }
+    const target = d.assignedTargetCoord || { lat: d.targetLat, lon: d.targetLon };
+    const roundCount = 4;
+    const roundGap = 70;   // ms between rounds
+    for (let r = 0; r < roundCount; r++) {
+      setTimeout(() => _fireSingleTracerRound(d, target), r * roundGap);
+    }
+    // Muzzle flash at interceptor (single, quick)
+    _spawnFlashEntity(d.curLon, d.curLat, 180, '#ffdb4d', 3, 8);
+  }
+
+  // Single tracer round + impact flash at target
+  function _fireSingleTracerRound(d, target) {
     const startTs = Date.now();
-    const durMs = 450;
+    const durMs = 220;
     const tracerEntity = viewer.entities.add({
       polyline: {
         positions: new Cesium.CallbackProperty(() => [
           Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 8),
-          Cesium.Cartesian3.fromDegrees(d.targetLon, d.targetLat, 8),
+          Cesium.Cartesian3.fromDegrees(target.lon, target.lat, 8),
         ], false),
-        width: 2.5,
+        width: 2,
         material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
           const t = (Date.now() - startTs) / durMs;
-          const alpha = Math.max(0, 1 - t);
-          return Cesium.Color.fromCssColorString('#4dff9c').withAlpha(alpha);
+          return Cesium.Color.fromCssColorString('#a3ff70').withAlpha(Math.max(0, 1 - t));
         }, false)),
         arcType: Cesium.ArcType.NONE,
       },
     });
-    // Small flash entity at target position (expanding then fading)
+    setTimeout(() => { if (tracerEntity) viewer.entities.remove(tracerEntity); }, durMs + 30);
+    _spawnFlashEntity(target.lon, target.lat, 200, '#ffdb4d', 4, 12);
+  }
+
+  // Small point flash — reused for muzzle + impact
+  function _spawnFlashEntity(lon, lat, durMs, colorHex, startSize, endSize) {
+    const startTs = Date.now();
     const flashEntity = viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(d.targetLon, d.targetLat, 8),
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, 8),
       point: {
         pixelSize: new Cesium.CallbackProperty(() => {
           const t = (Date.now() - startTs) / durMs;
-          return 6 + t * 18;
+          return startSize + t * (endSize - startSize);
         }, false),
         color: new Cesium.CallbackProperty(() => {
           const t = (Date.now() - startTs) / durMs;
-          const alpha = Math.max(0, 1 - t);
-          return Cesium.Color.fromCssColorString('#ffdb4d').withAlpha(alpha * 0.85);
+          return Cesium.Color.fromCssColorString(colorHex).withAlpha(Math.max(0, 1 - t) * 0.9);
         }, false),
-        outlineColor: Cesium.Color.fromCssColorString('#4dff9c'),
-        outlineWidth: 1,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     });
-    // Retire both entities after fade
-    setTimeout(() => {
-      if (tracerEntity) viewer.entities.remove(tracerEntity);
-      if (flashEntity) viewer.entities.remove(flashEntity);
-    }, durMs + 50);
+    setTimeout(() => { if (flashEntity) viewer.entities.remove(flashEntity); }, durMs + 30);
   }
 
   function _resolveEngagement(d) {
@@ -2848,8 +2932,46 @@ async function main() {
         if (state?.swarmBillboards?.length) {
           for (const sw of state.swarmBillboards) {
             if (sw.role === 'overwatch') { overwatchSurvived = true; continue; }
-            sw.downed = true;
-            sw._downedAt = new Date().toISOString();
+            // Hit animation FIRST — brief red flash at the drone's
+            // last known position + a downward "falling" arc, then mark
+            // neutralised so the render loop stops updating it.
+            const cart = sw.billboard?.position?.getValue?.(Cesium.JulianDate.now());
+            let dropLat, dropLon;
+            if (cart) {
+              const cartographic = Cesium.Cartographic.fromCartesian(cart);
+              dropLat = Cesium.Math.toDegrees(cartographic.latitude);
+              dropLon = Cesium.Math.toDegrees(cartographic.longitude);
+              // Red hit flash at the drone
+              _spawnFlashEntity(dropLon, dropLat, 500, '#ff5a5a', 6, 22);
+              // Small ground impact marker at final position (persistent)
+              viewer.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(dropLon, dropLat, 0),
+                point: {
+                  pixelSize: 6,
+                  color: Cesium.Color.fromCssColorString('#8b0e0e'),
+                  outlineColor: Cesium.Color.fromCssColorString('#ff5a5a'),
+                  outlineWidth: 1,
+                  heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+                  disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                },
+                label: {
+                  text: '× DOWNED',
+                  font: '9px system-ui',
+                  fillColor: Cesium.Color.fromCssColorString('#ff8a8a'),
+                  outlineColor: Cesium.Color.BLACK,
+                  outlineWidth: 2,
+                  style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                  pixelOffset: new Cesium.Cartesian2(0, -14),
+                  showBackground: true,
+                  backgroundColor: Cesium.Color.fromCssColorString('rgba(8, 11, 16, 0.85)'),
+                  backgroundPadding: new Cesium.Cartesian2(5, 2),
+                  heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+                  disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                },
+              });
+            }
+            sw.neutralised = true;
+            sw._neutralisedAt = new Date().toISOString();
             downedCount++;
           }
         }
@@ -6285,12 +6407,15 @@ async function main() {
         }
         for (let i = 0; i < state.swarmBillboards.length; i++) {
           const sw = state.swarmBillboards[i];
-          // Phase D: if this swarm member was marked downed by an
-          // interceptor engagement, freeze it at the impact point and
-          // hide the billboard + trail so it visually reads as "gone".
-          if (sw.downed) {
+          // Phase D: if this swarm member was neutralised by an
+          // interceptor engagement, hide EVERY render surface (billboard,
+          // trailLine polyline, projection line) and stop growing the
+          // position arrays. Kills the "ghost trajectory line still
+          // drawing after drone is gone" bug — property name was
+          // sw.trailLine (not sw.trail).
+          if (sw.neutralised) {
             sw.billboard.show = false;
-            if (sw.trail) sw.trail.show = false;
+            if (sw.trailLine) sw.trailLine.show = false;
             if (sw.projLine) sw.projLine.show = false;
             continue;
           }
