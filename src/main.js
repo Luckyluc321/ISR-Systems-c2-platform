@@ -2327,6 +2327,8 @@ async function main() {
       cruiseKmh: 120, arriveAtM: 100, engageSec: 4,
       icon: 'counter-drone-interceptor', trail: true, airborne: true,
       swarmSize: 3,             // 3 interceptor drones per dispatch
+      swarmSpacingM: 35,        // wider triangle so 3 icons don't overlap
+      billboardScale: 0.5,      // smaller icon so pack reads as swarm not one blob
       supportsRTB: true,        // late-dispatch return-to-base behaviour
       firesTracer: true,        // renders small-arms tracer + downed state on engage
       label: 'Interceptor Swarm',
@@ -2378,9 +2380,11 @@ async function main() {
     const groupId = `cdg-${eventId}-${asset.id}-${Date.now()}`;
     const variantId = opts.variantId || 'default';
 
-    // Formation offsets — small triangle at origin so 3 icons don't
-    // overlap visually. ~15m spacing between members.
-    const offsets = _swarmFormationOffsets(swarmSize);
+    // Formation offsets — triangle at origin, radius from profile
+    // (default 15m for legacy, wider for interceptor swarms so 3
+    // small icons read as a distinct pack, not one blob).
+    const spacingM = profile.swarmSpacingM || 15;
+    const offsets = _swarmFormationOffsets(swarmSize, spacingM);
 
     for (let i = 0; i < swarmSize; i++) {
       _spawnDispatchInstance(event, asset, profile, {
@@ -2399,9 +2403,8 @@ async function main() {
   // Compute small formation offsets (metres NE/SW/etc.) so N swarm
   // members don't stack pixel-perfectly at the origin. Triangle for 3,
   // line for 2, single for 1, hexagon for 6+.
-  function _swarmFormationOffsets(n) {
+  function _swarmFormationOffsets(n, radius = 15) {
     if (n <= 1) return [{ dNorth: 0, dEast: 0 }];
-    const radius = 15;   // metres
     const offsets = [];
     for (let i = 0; i < n; i++) {
       const angle = (Math.PI * 2 * i) / n;
@@ -2502,7 +2505,9 @@ async function main() {
         image: iconUrl,
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
         heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-        scale: 0.85,
+        // Per-profile scale override (interceptor swarm is 0.5 so 3
+        // small icons read as a pack, not one blob). Default 0.85.
+        scale: d.profile.billboardScale ?? 0.85,
         // Keep the icon visible at Denmark-wide zoom (up to ~500km eye
         // distance). Without this, the 56x56 canvas is <1px when zoomed
         // out and the operator can't see the dispatch happen.
@@ -2642,17 +2647,75 @@ async function main() {
           d.arrivedTs = now;
           d.engageStartTs = now;
           if (d.profile.radiationCone) _createRadiationEntity(d);
+          if (d.profile.firesTracer) _fireTracerEffect(d);
           if (getActiveRole().kind === 'receiver') renderReceiverView();
           toast(`${d.assetName} on station. Engaging.`, 'info');
         }
       }
     } else if (d.state === 'engaging') {
       const engageDur = (now - d.engageStartTs) / 1000;
+      // For interceptor swarms, fire additional tracer bursts every ~1.2s
+      // during engagement to visually communicate sustained kinetic action
+      if (d.profile.firesTracer && !d._nextTracerTs) d._nextTracerTs = d.engageStartTs + 1200;
+      if (d.profile.firesTracer && now >= d._nextTracerTs) {
+        _fireTracerEffect(d);
+        d._nextTracerTs = now + 1200;
+      }
       if (engageDur >= d.profile.engageSec) {
         d.state = 'complete';
         _resolveEngagement(d);
       }
     }
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // PHASE C · Interception visual effects
+  // ══════════════════════════════════════════════════════════════════
+  // Small-arms tracer + flash at target. Deliberately restrained — no
+  // explosion sphere, no missile arc. Green tracer polyline flashes
+  // briefly (400ms fade) from interceptor to target coord. Fits the
+  // Palantir aesthetic (understated action).
+  function _fireTracerEffect(d) {
+    const startTs = Date.now();
+    const durMs = 450;
+    const tracerEntity = viewer.entities.add({
+      polyline: {
+        positions: new Cesium.CallbackProperty(() => [
+          Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 8),
+          Cesium.Cartesian3.fromDegrees(d.targetLon, d.targetLat, 8),
+        ], false),
+        width: 2.5,
+        material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
+          const t = (Date.now() - startTs) / durMs;
+          const alpha = Math.max(0, 1 - t);
+          return Cesium.Color.fromCssColorString('#4dff9c').withAlpha(alpha);
+        }, false)),
+        arcType: Cesium.ArcType.NONE,
+      },
+    });
+    // Small flash entity at target position (expanding then fading)
+    const flashEntity = viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(d.targetLon, d.targetLat, 8),
+      point: {
+        pixelSize: new Cesium.CallbackProperty(() => {
+          const t = (Date.now() - startTs) / durMs;
+          return 6 + t * 18;
+        }, false),
+        color: new Cesium.CallbackProperty(() => {
+          const t = (Date.now() - startTs) / durMs;
+          const alpha = Math.max(0, 1 - t);
+          return Cesium.Color.fromCssColorString('#ffdb4d').withAlpha(alpha * 0.85);
+        }, false),
+        outlineColor: Cesium.Color.fromCssColorString('#4dff9c'),
+        outlineWidth: 1,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+    // Retire both entities after fade
+    setTimeout(() => {
+      if (tracerEntity) viewer.entities.remove(tracerEntity);
+      if (flashEntity) viewer.entities.remove(flashEntity);
+    }, durMs + 50);
   }
 
   function _resolveEngagement(d) {
@@ -2669,7 +2732,17 @@ async function main() {
     }
     if (getActiveRole().kind === 'receiver') renderReceiverView();
 
-    // Retire entities after a short delay so operator can see completion
+    // Graceful fade-out instead of instant hard remove. Interceptor
+    // billboards fade over 1.5s so they don't just pop off the map.
+    // Full removal at 5s after fade completes.
+    const fadeStartTs = Date.now();
+    const fadeDurMs = 1500;
+    if (d.entity?.billboard) {
+      d.entity.billboard.color = new Cesium.CallbackProperty(() => {
+        const t = Math.min(1, (Date.now() - fadeStartTs) / fadeDurMs);
+        return Cesium.Color.WHITE.withAlpha(1 - t * 0.9);
+      }, false);
+    }
     setTimeout(() => {
       if (d.entity) { viewer.entities.remove(d.entity); d.entity = null; }
       if (d.trail) { viewer.entities.remove(d.trail); d.trail = null; }
