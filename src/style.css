@@ -1079,50 +1079,6 @@ body.details-collapsed #control-panel {
   letter-spacing: 0.10em;
 }
 
-/* Floating labels toggle chip. Hidden in operator mode (control panel
-   already has the toggle). Visible in receiver + admin. Palantir-esque
-   pill on a translucent dark bg, accent-cyan when active. */
-.labels-chip {
-  position: fixed;
-  top: 14px;
-  right: 14px;
-  z-index: 40;
-  display: none;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: rgba(8, 11, 16, 0.82);
-  backdrop-filter: blur(6px);
-  border: 1px solid rgba(255, 255, 255, 0.10);
-  color: var(--text-dim);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.20em;
-  text-transform: uppercase;
-  cursor: pointer;
-  border-radius: 2px;
-  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
-}
-body.mode-receiver .labels-chip,
-body.mode-admin    .labels-chip { display: inline-flex; }
-.labels-chip:hover {
-  color: var(--text);
-  border-color: rgba(255, 255, 255, 0.22);
-  background: rgba(8, 11, 16, 0.92);
-}
-.labels-chip-dot {
-  width: 7px; height: 7px; border-radius: 50%;
-  background: rgba(255, 255, 255, 0.25);
-  transition: background 120ms ease, box-shadow 120ms ease;
-}
-.labels-chip.is-on {
-  color: var(--accent);
-  border-color: rgba(77, 210, 255, 0.45);
-}
-.labels-chip.is-on .labels-chip-dot {
-  background: var(--accent);
-  box-shadow: 0 0 6px rgba(77, 210, 255, 0.55);
-}
 
 /* ─────────── EVENT LEDGER + DETAIL PANEL BINDING ─────────── */
 
