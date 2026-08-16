@@ -2305,6 +2305,8 @@ async function main() {
       cruiseKmh: 80, arriveAtM: 500, engageSec: 10,
       icon: 'police-vehicle', trail: false, airborne: false, radiationCone: true,
       useRoadRouting: true,   // ground vehicle → follow real streets via OSRM
+      supportsMultiDispatch: true,   // more than one patrol from same base is doctrine
+      maxUnitsPerDispatch: 5,        // units picker range 1-5
       label: 'Police Counter-Drone Patrol',
     },
     'army-isr-drone': {
@@ -2365,11 +2367,18 @@ async function main() {
       toast(`No dispatch profile for ${asset.kind}`, 'warn');
       return;
     }
-    // Dedup: already dispatched this asset for this event?
-    for (const [, d] of _counterDispatches) {
-      if (d.eventId === eventId && d.assetId === asset.id && d.state !== 'complete') {
-        toast(`${asset.name} already dispatched.`, 'info');
-        return;
+    // Dedup: block re-dispatch of same asset while active — but only
+    // for kinds where multiple concurrent dispatches would be
+    // doctrinally weird (helicopter, interceptor swarm, SOF team).
+    // Kinds with supportsMultiDispatch (police patrols, ground
+    // reinforcement) can spawn multiple concurrent instances via the
+    // units picker on the option card.
+    if (!profile.supportsMultiDispatch) {
+      for (const [, d] of _counterDispatches) {
+        if (d.eventId === eventId && d.assetId === asset.id && d.state !== 'complete') {
+          toast(`${asset.name} already dispatched.`, 'info');
+          return;
+        }
       }
     }
     const threatLat = event.lastPosition?.lat ?? event.entry?.lat;
@@ -10485,9 +10494,36 @@ async function main() {
       const recommendedBadge = idx === 0
         ? `<span style="display: inline-flex; align-items: center; padding: 2px 8px; background: rgba(77, 210, 255, 0.12); border: 1px solid rgba(77, 210, 255, 0.5); color: var(--accent); font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600; border-radius: 2px;">◆ Recommended</span>`
         : '';
-      const ctaBlock = cdState
+      // Multi-dispatch kinds (police patrols etc): show a units picker
+      // next to Dispatch so operator picks 1-N in one action instead of
+      // clicking Dispatch multiple times. Also show a compact counter
+      // of currently active units for this asset when > 0.
+      const profile = CD_PROFILE[a.kind];
+      const supportsMulti = profile?.supportsMultiDispatch;
+      const maxUnits = profile?.maxUnitsPerDispatch || 5;
+      const activeUnitsForThisAsset = supportsMulti
+        ? Array.from(_counterDispatches.values()).filter(cd =>
+            cd.eventId === event.id && cd.assetId === a.id && cd.state !== 'complete'
+          ).length
+        : 0;
+      const unitsCounter = activeUnitsForThisAsset > 0
+        ? `<div style="font-size: var(--fs-2xs); color: var(--text-dim); font-family: var(--font-mono); letter-spacing: 0.14em; margin-bottom: 6px; text-transform: uppercase;">${activeUnitsForThisAsset} unit${activeUnitsForThisAsset === 1 ? '' : 's'} active</div>`
+        : '';
+      const unitsPickerHtml = supportsMulti
+        ? `<select data-units-for="${a.id}" style="padding: 6px 8px; background: rgba(0,0,0,0.30); border: 1px solid var(--border); border-radius: 2px; color: var(--text); font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.14em; text-transform: uppercase; margin-right: 8px; cursor: pointer;">
+             ${Array.from({length: maxUnits}, (_, i) => `<option value="${i + 1}">${i + 1} unit${i === 0 ? '' : 's'}</option>`).join('')}
+           </select>`
+        : '';
+
+      const ctaBlock = (!supportsMulti && cdState)
         ? `<div style="display: inline-flex; align-items: center; padding: 7px 14px; background: rgba(255,255,255,0.02); border: 1px solid ${stateColor}66; border-left: 2px solid ${stateColor}; border-radius: 2px; font-size: var(--fs-2xs); color: ${stateColor}; font-family: var(--font-mono); letter-spacing: 0.18em; font-weight: 600; text-transform: uppercase;">${stateLabel}</div>`
-        : `<button class="pl-dispatch-btn" style="padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.06); color: #4dff9c; border: 1px solid rgba(77, 255, 156, 0.35); border-left: 2px solid #4dff9c; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.20em; text-transform: uppercase; font-family: var(--font-mono); transition: background 120ms, border-color 120ms;" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">Dispatch</button>`;
+        : `<div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+             ${unitsCounter}
+             <div style="display: flex; align-items: center;">
+               ${unitsPickerHtml}
+               <button class="pl-dispatch-btn" style="padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.06); color: #4dff9c; border: 1px solid rgba(77, 255, 156, 0.35); border-left: 2px solid #4dff9c; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.20em; text-transform: uppercase; font-family: var(--font-mono); transition: background 120ms, border-color 120ms;" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">${supportsMulti && activeUnitsForThisAsset > 0 ? 'Dispatch more' : 'Dispatch'}</button>
+             </div>
+           </div>`;
 
       const includesHtml = (details.includes || []).length
         ? `<div style="margin-top: var(--space-3);">
@@ -12252,7 +12288,9 @@ async function main() {
         // Level 3 counter-response dispatch. Uses the current event's
         // subject-derived response bundle to find the asset by id, then
         // fires dispatchCounterResponse which handles state machine +
-        // Cesium visuals + engagement resolution.
+        // Cesium visuals + engagement resolution. Reads the units
+        // picker for multi-dispatch kinds (police patrols etc.) so N
+        // instances spawn in one action.
         const assetId = el.dataset.assetId;
         const ev = getEvent(id);
         if (!ev || !assetId) return;
@@ -12264,7 +12302,10 @@ async function main() {
           : responseBundle(threatLat, threatLon);
         const asset = [...bundle.tactical, ...bundle.ground, ...bundle.consequence].find(a => a.id === assetId);
         if (!asset) { toast('Asset not found in response bundle', 'err'); return; }
-        dispatchCounterResponse(id, asset);
+        // Read units picker if present (multi-dispatch kinds only)
+        const unitsSelect = document.querySelector(`[data-units-for="${assetId}"]`);
+        const units = unitsSelect ? Math.max(1, parseInt(unitsSelect.value, 10) || 1) : 1;
+        dispatchCounterResponse(id, asset, units > 1 ? { swarmSize: units } : {});
       }
       else if (action === 'cascade-fe-pet') {
         // Receiver-initiated cascade to FE + PET tier-3 destinations.
