@@ -2341,6 +2341,48 @@ async function main() {
     return Math.atan2(lon2 - lon1, lat2 - lat1);
   }
 
+  // Best-available target across the event graph. Handles CPH → AMK
+  // handover for dispatched assets and routes police to wreckage /
+  // last-spotted location after neutralisation, not to the stale
+  // primary-event lastPosition.
+  function _bestTargetForDispatch(event) {
+    if (!event) return null;
+    const chain = [event, ...(event.linkedEventIds || []).map(getEvent).filter(Boolean)];
+    // 1. Wreckage — any event in chain has a downed-drone location
+    for (const e of chain) {
+      if (e.wreckageLocation) {
+        return { lat: e.wreckageLocation.lat, lon: e.wreckageLocation.lon, kind: 'wreckage', siteHint: siteName(e.siteId) };
+      }
+    }
+    // 2. Last-spotted — RTB orbit point captured when interceptors
+    //    reached the last-known area but the swarm had already escaped
+    for (const e of chain) {
+      if (e.lastSpottedLocation) {
+        return { lat: e.lastSpottedLocation.lat, lon: e.lastSpottedLocation.lon, kind: 'last_spotted', siteHint: siteName(e.siteId) };
+      }
+    }
+    // 3. Freshest active event's lastPosition — prefers a linked
+    //    event over the primary if the primary is closed. Handles the
+    //    handover case: primary CPH closed, AMK still tracking.
+    const activeWithPos = chain.filter(e => e.status === 'active' && e.lastPosition);
+    if (activeWithPos.length) {
+      // Prefer linked (non-primary) if it exists and primary is closed
+      const preferred = event.status === 'closed'
+        ? activeWithPos.find(e => e.id !== event.id) || activeWithPos[0]
+        : activeWithPos[0];
+      return { lat: preferred.lastPosition.lat, lon: preferred.lastPosition.lon, kind: 'live_track', siteHint: siteName(preferred.siteId) };
+    }
+    // 4. Fallback: primary event's lastPosition even if stale
+    if (event.lastPosition) {
+      return { lat: event.lastPosition.lat, lon: event.lastPosition.lon, kind: 'stale', siteHint: siteName(event.siteId) };
+    }
+    // 5. Last resort: entry point
+    if (event.entry) {
+      return { lat: event.entry.lat, lon: event.entry.lon, kind: 'entry', siteHint: siteName(event.siteId) };
+    }
+    return null;
+  }
+
   function _counterDispatchIcon(iconKind) {
     switch (iconKind) {
       case 'helicopter':               return helicopterIcon(GREEN_COUNTER_HEX);
@@ -2381,9 +2423,25 @@ async function main() {
         }
       }
     }
-    const threatLat = event.lastPosition?.lat ?? event.entry?.lat;
-    const threatLon = event.lastPosition?.lon ?? event.entry?.lon;
-    if (threatLat == null || threatLon == null) return;
+    // Choose the best available target across the event graph.
+    // Preference: wreckage location (post-kill) > last-spotted (RTB
+    // orbit point) > freshest active event's lastPosition (handles
+    // CPH → AMK handover) > primary event's lastPosition even if
+    // stale > entry point. Fixes the bug where police cars drove to
+    // CPH airport (primary event coord) after drones were downed at
+    // AMK (linked event coord).
+    const bestTarget = _bestTargetForDispatch(event);
+    if (!bestTarget) {
+      toast('No target coord available for dispatch', 'err');
+      return;
+    }
+    const threatLat = bestTarget.lat;
+    const threatLon = bestTarget.lon;
+    if (bestTarget.kind === 'wreckage') {
+      toast(`${asset.name} routing to wreckage location at ${bestTarget.siteHint || 'downed drone site'}.`, 'info');
+    } else if (bestTarget.kind === 'last_spotted') {
+      toast(`${asset.name} routing to last-spotted location.`, 'info');
+    }
 
     const swarmSize = Math.max(1, opts.swarmSize || profile.swarmSize || 1);
     const groupId = `cdg-${eventId}-${asset.id}-${Date.now()}`;
@@ -2718,22 +2776,29 @@ async function main() {
       }
     } else if (d.state === 'engaging') {
       const engageDur = (now - d.engageStartTs) / 1000;
-      // Orbit the target during engagement so the drone doesn't freeze
-      // visually. Small circular motion (radius ~40m) around the
-      // assigned target coord.
-      if (d.profile.airborne && d.assignedTargetCoord) {
-        const orbitOmega = 1.4;   // rad/s
-        const orbitR = 40;
-        const t = (now - d.engageStartTs) / 1000;
-        const angle = t * orbitOmega;
-        const orbitLatOffset = (orbitR * Math.cos(angle)) / 111000;
-        const orbitLonOffset = (orbitR * Math.sin(angle)) / (111000 * Math.cos(d.assignedTargetCoord.lat * Math.PI / 180));
-        d.curLat = d.assignedTargetCoord.lat + orbitLatOffset;
-        d.curLon = d.assignedTargetCoord.lon + orbitLonOffset;
-        d.heading = angle + Math.PI / 2;
-        if (d.profile.trail) {
-          d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0));
-          if (d.trailPositions.length > 500) d.trailPositions.shift();
+      // Shadow the assigned target's LIVE position every tick — the
+      // hostile drone keeps moving along its waypoints during the 4s
+      // engagement window. If we froze on the entry coord (previous
+      // bug), tracers fired at empty space while the drone flew off.
+      // Interceptor sits at a small trailing offset unique per member
+      // index so 3 interceptors don't stack pixel-perfect.
+      if (d.profile.airborne && d.assignedSwarmMember?.billboard?.position) {
+        const cart = d.assignedSwarmMember.billboard.position.getValue?.(Cesium.JulianDate.now());
+        if (cart) {
+          const cartographic = Cesium.Cartographic.fromCartesian(cart);
+          const targetLat = Cesium.Math.toDegrees(cartographic.latitude);
+          const targetLon = Cesium.Math.toDegrees(cartographic.longitude);
+          d.assignedTargetCoord = { lat: targetLat, lon: targetLon };
+          // Shadow position — 30m offset at a stable bearing per member
+          const offsetM = 30;
+          const bearing = ((d.memberIndex || 0) * (Math.PI * 2 / 3));
+          d.curLat = targetLat + (offsetM * Math.cos(bearing)) / 111000;
+          d.curLon = targetLon + (offsetM * Math.sin(bearing)) / (111000 * Math.cos(targetLat * Math.PI / 180));
+          d.heading = bearing + Math.PI;   // face target
+          if (d.profile.trail) {
+            d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0));
+            if (d.trailPositions.length > 500) d.trailPositions.shift();
+          }
         }
       }
       // Fire additional machine-gun bursts every ~1.4s during
@@ -2926,66 +2991,71 @@ async function main() {
     const event = getEvent(d.eventId);
 
     // Phase D · Counter-drone interceptor swarm engagement outcome.
-    // First group member to complete triggers the group-level effect.
-    // Downs all hostile swarm members EXCEPT the overwatch role (higher
-    // altitude, unknown control link, always escapes). Sets event
-    // outcome to partial_neutralisation. Wreckage location for Phase G
-    // perimeter cordon. Skips the generic neutralisation branch below.
+    // PER-INTERCEPTOR kill: each interceptor takes down its assigned
+    // hostile drone (fired-at, tracer-hit) on its own engagement
+    // complete, not bulk-marking all at first-complete. Overwatch is
+    // never assignable and always survives. Group-level outcome
+    // (wreckage location, event.outcome) is set when the last of the
+    // group's members completes.
     if (d.kind === 'counter-drone-swarm' && event && d.state === 'complete' && !d.rtbCompleted) {
+      const sw = d.assignedSwarmMember;
+      if (sw && !sw.neutralised && sw.role !== 'overwatch') {
+        // Hit animation at THIS drone's live position
+        const cart = sw.billboard?.position?.getValue?.(Cesium.JulianDate.now());
+        if (cart) {
+          const cartographic = Cesium.Cartographic.fromCartesian(cart);
+          const dropLat = Cesium.Math.toDegrees(cartographic.latitude);
+          const dropLon = Cesium.Math.toDegrees(cartographic.longitude);
+          _spawnFlashEntity(dropLon, dropLat, 500, '#ff5a5a', 6, 22);
+          viewer.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(dropLon, dropLat, 0),
+            point: {
+              pixelSize: 6,
+              color: Cesium.Color.fromCssColorString('#8b0e0e'),
+              outlineColor: Cesium.Color.fromCssColorString('#ff5a5a'),
+              outlineWidth: 1,
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+            label: {
+              text: '× DOWNED',
+              font: '9px system-ui',
+              fillColor: Cesium.Color.fromCssColorString('#ff8a8a'),
+              outlineColor: Cesium.Color.BLACK,
+              outlineWidth: 2,
+              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+              pixelOffset: new Cesium.Cartesian2(0, -14),
+              showBackground: true,
+              backgroundColor: Cesium.Color.fromCssColorString('rgba(8, 11, 16, 0.85)'),
+              backgroundPadding: new Cesium.Cartesian2(5, 2),
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+          });
+          // Wreckage centroid updates to the latest kill position
+          event.wreckageLocation = { lat: dropLat, lon: dropLon, at: new Date().toISOString() };
+        }
+        sw.neutralised = true;
+        sw._neutralisedAt = new Date().toISOString();
+      }
+      // Group-level outcome — set on last group member complete
       if (!event._interceptorGroupsCompleted) event._interceptorGroupsCompleted = new Set();
-      if (!event._interceptorGroupsCompleted.has(d.groupId)) {
+      const state = droneState.get(d.eventId);
+      const groupMembers = (event.counterDispatches || []).filter(cd => cd.groupId === d.groupId);
+      const groupCompletedCount = groupMembers.filter(cd => {
+        const s = counterDispatchStateFor(d.eventId, cd.assetId);
+        return s === 'complete' || cd.dispatchId === d.id;   // include this one which just completed
+      }).length;
+      if (groupCompletedCount >= groupMembers.length && !event._interceptorGroupsCompleted.has(d.groupId)) {
         event._interceptorGroupsCompleted.add(d.groupId);
-        const state = droneState.get(d.eventId);
         let downedCount = 0;
         let overwatchSurvived = false;
         if (state?.swarmBillboards?.length) {
-          for (const sw of state.swarmBillboards) {
-            if (sw.role === 'overwatch') { overwatchSurvived = true; continue; }
-            // Hit animation FIRST — brief red flash at the drone's
-            // last known position + a downward "falling" arc, then mark
-            // neutralised so the render loop stops updating it.
-            const cart = sw.billboard?.position?.getValue?.(Cesium.JulianDate.now());
-            let dropLat, dropLon;
-            if (cart) {
-              const cartographic = Cesium.Cartographic.fromCartesian(cart);
-              dropLat = Cesium.Math.toDegrees(cartographic.latitude);
-              dropLon = Cesium.Math.toDegrees(cartographic.longitude);
-              // Red hit flash at the drone
-              _spawnFlashEntity(dropLon, dropLat, 500, '#ff5a5a', 6, 22);
-              // Small ground impact marker at final position (persistent)
-              viewer.entities.add({
-                position: Cesium.Cartesian3.fromDegrees(dropLon, dropLat, 0),
-                point: {
-                  pixelSize: 6,
-                  color: Cesium.Color.fromCssColorString('#8b0e0e'),
-                  outlineColor: Cesium.Color.fromCssColorString('#ff5a5a'),
-                  outlineWidth: 1,
-                  heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-                  disableDepthTestDistance: Number.POSITIVE_INFINITY,
-                },
-                label: {
-                  text: '× DOWNED',
-                  font: '9px system-ui',
-                  fillColor: Cesium.Color.fromCssColorString('#ff8a8a'),
-                  outlineColor: Cesium.Color.BLACK,
-                  outlineWidth: 2,
-                  style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                  pixelOffset: new Cesium.Cartesian2(0, -14),
-                  showBackground: true,
-                  backgroundColor: Cesium.Color.fromCssColorString('rgba(8, 11, 16, 0.85)'),
-                  backgroundPadding: new Cesium.Cartesian2(5, 2),
-                  heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-                  disableDepthTestDistance: Number.POSITIVE_INFINITY,
-                },
-              });
-            }
-            sw.neutralised = true;
-            sw._neutralisedAt = new Date().toISOString();
-            downedCount++;
+          for (const sw2 of state.swarmBillboards) {
+            if (sw2.role === 'overwatch') { overwatchSurvived = true; continue; }
+            if (sw2.neutralised) downedCount++;
           }
         }
-        // Wreckage marker for Phase G perimeter cordon
-        event.wreckageLocation = { lat: d.targetLat, lon: d.targetLon, at: new Date().toISOString(), downedCount };
         // Auto-outcome on the dispatch group
         if (!event.dispatchOutcomes) event.dispatchOutcomes = {};
         const outcomeId = overwatchSurvived ? 'partial_neutralisation' : 'neutralised';
