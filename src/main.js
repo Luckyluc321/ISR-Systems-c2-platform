@@ -1645,6 +1645,52 @@ async function main() {
     return c;
   }
 
+  // Counter-drone interceptor icon. Distinct from generic quadcopter:
+  // slimmer body, forward-swept arms, subtle "muzzle" indicator to read
+  // as kinetic-capable. Green for friendly counter-response.
+  function interceptorDroneIcon(hex) {
+    const c = document.createElement('canvas');
+    c.width = 56; c.height = 56;
+    const ctx = c.getContext('2d');
+    // Forward-swept X arms (tips angled toward nose)
+    ctx.strokeStyle = hex;
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(28, 28); ctx.lineTo(10, 12);
+    ctx.moveTo(28, 28); ctx.lineTo(46, 12);
+    ctx.moveTo(28, 28); ctx.lineTo(14, 46);
+    ctx.moveTo(28, 28); ctx.lineTo(42, 46);
+    ctx.stroke();
+    // Rotor discs at arm tips
+    ctx.fillStyle = hex;
+    [[10, 12], [46, 12], [14, 46], [42, 46]].forEach(([x, y]) => {
+      ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2); ctx.fill();
+    });
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 0.8;
+    [[10, 12], [46, 12], [14, 46], [42, 46]].forEach(([x, y]) => {
+      ctx.beginPath(); ctx.arc(x, y, 4.5, 0, Math.PI * 2); ctx.stroke();
+    });
+    // Elongated central body (points forward)
+    ctx.fillStyle = hex;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(28, 12);
+    ctx.lineTo(33, 22);
+    ctx.lineTo(33, 34);
+    ctx.lineTo(28, 40);
+    ctx.lineTo(23, 34);
+    ctx.lineTo(23, 22);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    // Muzzle indicator (forward, small red dot to read as armed)
+    ctx.fillStyle = '#ff5a5a';
+    ctx.beginPath(); ctx.arc(28, 11, 1.8, 0, Math.PI * 2); ctx.fill();
+    return c;
+  }
+
   function sofIcon(hex) {
     const c = document.createElement('canvas');
     c.width = 56; c.height = 56;
@@ -2277,6 +2323,14 @@ async function main() {
       icon: 'sof', trail: false, airborne: false,
       label: 'Wildlife management',
     },
+    'counter-drone-swarm': {
+      cruiseKmh: 120, arriveAtM: 100, engageSec: 4,
+      icon: 'counter-drone-interceptor', trail: true, airborne: true,
+      swarmSize: 3,             // 3 interceptor drones per dispatch
+      supportsRTB: true,        // late-dispatch return-to-base behaviour
+      firesTracer: true,        // renders small-arms tracer + downed state on engage
+      label: 'Interceptor Swarm',
+    },
   };
 
   function _bearingRad(lat1, lon1, lat2, lon2) {
@@ -2285,19 +2339,23 @@ async function main() {
 
   function _counterDispatchIcon(iconKind) {
     switch (iconKind) {
-      case 'helicopter':      return helicopterIcon(GREEN_COUNTER_HEX);
-      case 'jammer':          return jammerIcon(GREEN_COUNTER_HEX);
-      case 'police-vehicle':  return policeVehicleIcon(GREEN_COUNTER_HEX);
-      case 'quadcopter':      return quadcopterIcon(GREEN_COUNTER_HEX);
-      case 'sof':             return sofIcon(GREEN_COUNTER_HEX);
-      default:                return null;
+      case 'helicopter':               return helicopterIcon(GREEN_COUNTER_HEX);
+      case 'jammer':                   return jammerIcon(GREEN_COUNTER_HEX);
+      case 'police-vehicle':           return policeVehicleIcon(GREEN_COUNTER_HEX);
+      case 'quadcopter':               return quadcopterIcon(GREEN_COUNTER_HEX);
+      case 'sof':                      return sofIcon(GREEN_COUNTER_HEX);
+      case 'counter-drone-interceptor':return interceptorDroneIcon(GREEN_COUNTER_HEX);
+      default:                         return null;
     }
   }
 
   // Public entry point. Called by the Dispatch button in the Response
   // Overlay assetRow. asset is a response_assets bundle entry with
-  // {id, name, kind, lat, lon, etaLabel, distanceKm, ...}.
-  function dispatchCounterResponse(eventId, asset) {
+  // {id, name, kind, lat, lon, etaLabel, distanceKm, ...}. If the
+  // profile has swarmSize > 1, spawns that many instances offset in
+  // a small formation around the asset origin. All members share a
+  // dispatchGroupId so Steps 3+4 can group them in the UI.
+  function dispatchCounterResponse(eventId, asset, opts = {}) {
     const event = getEvent(eventId);
     if (!event) return;
     const profile = CD_PROFILE[asset.kind];
@@ -2316,13 +2374,63 @@ async function main() {
     const threatLon = event.lastPosition?.lon ?? event.entry?.lon;
     if (threatLat == null || threatLon == null) return;
 
-    const dispatchId = `cd-${eventId}-${asset.id}-${Date.now()}`;
+    const swarmSize = Math.max(1, opts.swarmSize || profile.swarmSize || 1);
+    const groupId = `cdg-${eventId}-${asset.id}-${Date.now()}`;
+    const variantId = opts.variantId || 'default';
+
+    // Formation offsets — small triangle at origin so 3 icons don't
+    // overlap visually. ~15m spacing between members.
+    const offsets = _swarmFormationOffsets(swarmSize);
+
+    for (let i = 0; i < swarmSize; i++) {
+      _spawnDispatchInstance(event, asset, profile, {
+        groupId, memberIndex: i, memberCount: swarmSize, variantId,
+        originOffset: offsets[i],
+        threatLat, threatLon,
+      });
+    }
+
+    const originLabel = profile.cruiseKmh === 0 ? `activated at ${asset.name}` : `dispatched from ${asset.name}`;
+    const countStr = swarmSize > 1 ? `${swarmSize} interceptors ` : '';
+    toast(`${countStr}${profile.label} ${originLabel}.`, 'info');
+    if (getActiveRole().kind === 'receiver') renderReceiverView();
+  }
+
+  // Compute small formation offsets (metres NE/SW/etc.) so N swarm
+  // members don't stack pixel-perfectly at the origin. Triangle for 3,
+  // line for 2, single for 1, hexagon for 6+.
+  function _swarmFormationOffsets(n) {
+    if (n <= 1) return [{ dNorth: 0, dEast: 0 }];
+    const radius = 15;   // metres
+    const offsets = [];
+    for (let i = 0; i < n; i++) {
+      const angle = (Math.PI * 2 * i) / n;
+      offsets.push({ dNorth: radius * Math.cos(angle), dEast: radius * Math.sin(angle) });
+    }
+    return offsets;
+  }
+
+  // Spawn a single dispatch instance. Called once per member for
+  // single-drone dispatches, N times for swarm dispatches.
+  function _spawnDispatchInstance(event, asset, profile, memberOpts) {
+    const { groupId, memberIndex, memberCount, variantId, originOffset, threatLat, threatLon } = memberOpts;
+    const dispatchId = `cd-${event.id}-${asset.id}-${memberIndex}-${Date.now()}`;
     const isStatic = profile.cruiseKmh === 0;
+
+    // Apply origin offset in degrees (rough flat-earth conversion)
+    const originLat = asset.lat + (originOffset?.dNorth || 0) / 111000;
+    const originLon = asset.lon + (originOffset?.dEast || 0) / (111000 * Math.cos(asset.lat * Math.PI / 180));
+
     const d = {
       id: dispatchId,
-      eventId,
+      groupId,
+      memberIndex,
+      memberCount,
+      variantId,
+      eventId: event.id,
       assetId: asset.id,
-      assetName: asset.name,
+      assetName: memberCount > 1 ? `${asset.name} · Unit ${memberIndex + 1}/${memberCount}` : asset.name,
+      groupName: asset.name,
       kind: asset.kind,
       profile,
       state: isStatic ? 'engaging' : 'en_route',
@@ -2330,10 +2438,10 @@ async function main() {
       lastFrameTs: Date.now(),
       arrivedTs: isStatic ? Date.now() : null,
       engageStartTs: isStatic ? Date.now() : null,
-      curLat: asset.lat, curLon: asset.lon,
-      originLat: asset.lat, originLon: asset.lon,
+      curLat: originLat, curLon: originLon,
+      originLat, originLon,
       targetLat: threatLat, targetLon: threatLon,
-      heading: _bearingRad(asset.lat, asset.lon, threatLat, threatLon),
+      heading: _bearingRad(originLat, originLon, threatLat, threatLon),
       entity: null, trail: null, trailPositions: [], radiationEntity: null,
     };
     _counterDispatches.set(dispatchId, d);
@@ -2341,15 +2449,12 @@ async function main() {
     if (isStatic && profile.radiationCone) _createRadiationEntity(d);
     _startCounterDispatchLoop();
 
-    // Async street-network route fetch for ground vehicles. Vehicle sits
-    // at origin billboard while fetch completes (~300-800ms). On success,
-    // subsequent ticks advance along the real polyline. On failure or
-    // timeout, we fall back to straight-line motion (existing behavior).
+    // Async street-network route fetch for ground vehicles
     if (profile.useRoadRouting) {
-      fetchDrivingRoute({ lat: asset.lat, lon: asset.lon }, { lat: threatLat, lon: threatLon })
+      fetchDrivingRoute({ lat: originLat, lon: originLon }, { lat: threatLat, lon: threatLon })
         .then(positions => {
           if (!positions || positions.length < 2) return;
-          if (!_counterDispatches.has(dispatchId)) return;   // dispatch already complete
+          if (!_counterDispatches.has(dispatchId)) return;
           d.routePositions = positions;
           d.routeSegmentLengths = computeSegmentLengths(positions);
           d.routeSegIdx = 0;
@@ -2358,16 +2463,13 @@ async function main() {
         });
     }
 
-    // Track on event for ledger + audit
+    // Track on event (one record per group member for audit + Step 3 UI)
     if (!Array.isArray(event.counterDispatches)) event.counterDispatches = [];
     event.counterDispatches.push({
-      dispatchId, assetId: asset.id, assetName: asset.name, kind: asset.kind,
-      dispatchedTs: d.dispatchedTs,
+      dispatchId, groupId, memberIndex, memberCount, variantId,
+      assetId: asset.id, assetName: d.assetName, groupName: asset.name,
+      kind: asset.kind, dispatchedTs: d.dispatchedTs,
     });
-
-    const originLabel = isStatic ? `activated at ${asset.name}` : `dispatched from ${asset.name}`;
-    toast(`${profile.label} ${originLabel}.`, 'info');
-    if (getActiveRole().kind === 'receiver') renderReceiverView();
   }
 
   // Subtle dashed green polyline showing the OSRM-computed route the
@@ -9969,20 +10071,20 @@ async function main() {
     // so the operator sees full picture of who is on the case.
     const DISPATCHABLE_KINDS_MC = new Set([
       'helicopter-intercept', 'army-c-uas', 'police-c-uas',
-      'army-isr-drone', 'sof-tactical', 'wildlife-response',
+      'army-isr-drone', 'sof-tactical', 'wildlife-response', 'counter-drone-swarm',
     ]);
     const ROLE_SCOPE_MC = {
       'flv-skrydstrup': new Set(['helicopter-intercept']),
       'flv-karup':      new Set(['helicopter-intercept']),
       'haer-slagelse':  new Set(['army-c-uas', 'army-isr-drone']),
       'haer-hovelte':   new Set(['army-ground']),
-      'haer-varde':     new Set(['army-isr-drone', 'army-c-uas']),
+      'haer-varde':     new Set(['army-isr-drone', 'army-c-uas', 'counter-drone-swarm']),
       'haer-bornholm':  new Set(['army-c-uas']),
       'haer-oksbol':    new Set(['army-c-uas']),
       'sok-aalborg':    new Set(['sof-tactical']),
-      'forsvarskmd':    new Set(['helicopter-intercept', 'army-c-uas', 'army-isr-drone', 'army-ground', 'sof-tactical']),
+      'forsvarskmd':    new Set(['helicopter-intercept', 'army-c-uas', 'army-isr-drone', 'army-ground', 'sof-tactical', 'counter-drone-swarm']),
       'fe':             new Set(['army-isr-drone']),
-      'rigspoliti':     new Set(['police-c-uas']),
+      'rigspoliti':     new Set(['police-c-uas', 'counter-drone-swarm']),
       'politi-kbh':     new Set(['police-c-uas']),
       'politi-sydvest': new Set(['police-c-uas']),
       'op-cph-airports':new Set(['wildlife-response']),
@@ -10296,13 +10398,13 @@ async function main() {
     'flv-karup':      new Set(['helicopter-intercept']),
     'haer-slagelse':  new Set(['army-c-uas', 'army-isr-drone']),
     'haer-hovelte':   new Set(['army-ground']),
-    'haer-varde':     new Set(['army-isr-drone', 'army-c-uas']),
+    'haer-varde':     new Set(['army-isr-drone', 'army-c-uas', 'counter-drone-swarm']),
     'haer-bornholm':  new Set(['army-c-uas']),
     'haer-oksbol':    new Set(['army-c-uas']),
     'sok-aalborg':    new Set(['sof-tactical']),
-    'forsvarskmd':    new Set(['helicopter-intercept', 'army-c-uas', 'army-isr-drone', 'army-ground', 'sof-tactical']),
+    'forsvarskmd':    new Set(['helicopter-intercept', 'army-c-uas', 'army-isr-drone', 'army-ground', 'sof-tactical', 'counter-drone-swarm']),
     'fe':             new Set(['army-isr-drone']),
-    'rigspoliti':     new Set(['police-c-uas']),
+    'rigspoliti':     new Set(['police-c-uas', 'counter-drone-swarm']),
     'politi-kbh':     new Set(['police-c-uas']),
     'politi-sydvest': new Set(['police-c-uas']),
     'op-cph-airports':new Set(['wildlife-response']),
@@ -10345,6 +10447,7 @@ async function main() {
       'helicopter-intercept': '⌂',
       'sof-tactical': '★',
       'wildlife-response': '◇',
+      'counter-drone-swarm': '⚔',
     }[k] || '●');
     const kindColor = (k) => ({
       // Legacy: air = blue, police/emergency mixed
@@ -10360,6 +10463,7 @@ async function main() {
       'helicopter-intercept': '#4dff9c',
       'sof-tactical': '#4dff9c',
       'wildlife-response': '#e6ecf0',
+      'counter-drone-swarm': '#4dff9c',
     }[k] || '#e6ecf0');
 
     // ── Scramble decision cockpit ─────────────────────────────────
@@ -10558,7 +10662,7 @@ async function main() {
     // (session-wide singleton), so excluded here.
     const DISPATCHABLE_KINDS = new Set([
       'helicopter-intercept', 'army-c-uas', 'police-c-uas',
-      'army-isr-drone', 'sof-tactical', 'wildlife-response',
+      'army-isr-drone', 'sof-tactical', 'wildlife-response', 'counter-drone-swarm',
     ]);
 
     // Role-scoping (P90 + P92): which receiver roles have jurisdiction
@@ -10572,17 +10676,17 @@ async function main() {
       // Army bases
       'haer-slagelse':  new Set(['army-c-uas', 'army-isr-drone']),
       'haer-hovelte':   new Set(['army-ground']),
-      'haer-varde':     new Set(['army-isr-drone', 'army-c-uas']),
+      'haer-varde':     new Set(['army-isr-drone', 'army-c-uas', 'counter-drone-swarm']),
       'haer-bornholm':  new Set(['army-c-uas']),
       'haer-oksbol':    new Set(['army-c-uas']),
       // SOF
       'sok-aalborg':    new Set(['sof-tactical']),
       // Command HQ (sees all military dispatch)
-      'forsvarskmd':    new Set(['helicopter-intercept', 'army-c-uas', 'army-isr-drone', 'army-ground', 'sof-tactical']),
+      'forsvarskmd':    new Set(['helicopter-intercept', 'army-c-uas', 'army-isr-drone', 'army-ground', 'sof-tactical', 'counter-drone-swarm']),
       // Intelligence
       'fe':             new Set(['army-isr-drone']),
       // Police
-      'rigspoliti':     new Set(['police-c-uas']),
+      'rigspoliti':     new Set(['police-c-uas', 'counter-drone-swarm']),
       'politi-kbh':     new Set(['police-c-uas']),
       'politi-sydvest': new Set(['police-c-uas']),
       // Operators (wildlife on site)

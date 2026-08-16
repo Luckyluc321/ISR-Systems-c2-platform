@@ -141,6 +141,30 @@ const ASSETS = [
   // POLICE — C-UAS teams (Rigspolitiet)
   // ══════════════════════════════════════════════════════════════
 
+  // ══════════════════════════════════════════════════════════════
+  // COUNTER-DRONE INTERCEPTOR SWARM (kinetic, close-range)
+  // ══════════════════════════════════════════════════════════════
+
+  // Efterretningsregimentet · Interceptor Drone Team at Varde
+  // Realistic staging ground given the regiment's ISR + EW role
+  // and existing sensor infrastructure. Interceptor drone capability
+  // itself is representative for the demo.
+  { id: 'army-varde-interceptor', name: 'Efterretningsregimentet · Interceptor Drone Team (Varde)',
+    kind: 'counter-drone-swarm', lat: 55.6215, lon: 8.5253,
+    response: 'Airborne counter-drone kinetic package',
+    verified: 'representative',
+    source: 'Danish MoD C-UAS procurement 2024-2026, unit assignment representative for demo' },
+
+  // Rigspolitiet · Slotsholmen Interceptor Team (near Christiansborg)
+  // Inner-city Copenhagen posture. Slotsholmen island lat/lon
+  // matches Christiansborg palace complex. Representative for demo,
+  // no such standing capability exists today in Danish inventory.
+  { id: 'politi-slotsholmen-interceptor', name: 'Rigspolitiet · Slotsholmen Interceptor Team',
+    kind: 'counter-drone-swarm', lat: 55.6767, lon: 12.5793,
+    response: 'Inner-city counter-drone kinetic response',
+    verified: 'representative',
+    source: 'Inner-city Copenhagen protection posture, representative for demo' },
+
   // Rigspolitiet National C-UAS Response Team. Copenhagen HQ.
   // Deployable nationwide, patrol-mounted + fixed jammers.
   { id: 'politi-national-cuas', name: 'Rigspolitiet · National C-UAS Response Team',
@@ -198,6 +222,7 @@ const RESPONSE_PROFILE = {
   'sof-tactical':         { speedKmh: 200,  mobilisationMin: 25 },  // SOF air-inserted
   'emergency':            { speedKmh: 80,   mobilisationMin: 15 },
   'wildlife-response':    { speedKmh: 20,   mobilisationMin: 5  },  // on-airport, foot/vehicle
+  'counter-drone-swarm':  { speedKmh: 120,  mobilisationMin: 5  },  // interceptor swarm, airborne fast
   'defence-command':      { speedKmh: null, mobilisationMin: 2  },  // not physical, coordination only
 };
 
@@ -327,13 +352,16 @@ export function tacticalKindsForSubject(subject) {
   }
 
   // Small consumer drones (micro / quad) — police + own ISR verify
+  // + interceptor swarm as kinetic option for restricted airspace
   if ((cls === 'micro_drone' || cls === 'quadcopter') && !isSwarm) {
-    return { kinds: ['police-c-uas', 'army-isr-drone'], rationale: 'Single small drone. Police C-UAS + own ISR drone for visual verify. Army C-UAS held in reserve.' };
+    return { kinds: ['police-c-uas', 'army-isr-drone', 'counter-drone-swarm'], rationale: 'Single small drone. Police C-UAS patrol as first response. Own ISR drone for visual verify. Interceptor swarm as kinetic option if inside restricted airspace.' };
   }
 
-  // Swarms and coordinated multi-drone — Army C-UAS + helicopter
+  // Swarms and coordinated multi-drone — interceptor swarm (kinetic
+  // pack hunt) + Army C-UAS jammer for multi-target RF disruption +
+  // helicopter for airborne C2 and follow-up
   if (isSwarm) {
-    return { kinds: ['army-c-uas', 'helicopter-intercept'], rationale: `Multi-airframe ${cardinality}. Army C-UAS for multi-target engagement + helicopter tactical intercept.` };
+    return { kinds: ['counter-drone-swarm', 'army-c-uas', 'helicopter-intercept'], rationale: `Multi-airframe ${cardinality}. Interceptor swarm for kinetic engagement inside restricted airspace. Army C-UAS jammer for RF disruption. Helicopter intercept for airborne C2 and follow-up.` };
   }
 
   // Fixed-wing drones + VTOL — larger, longer endurance, helicopter class
@@ -457,6 +485,28 @@ export const RESPONSE_OPTION_DETAILS = {
       { id: 'dispersed', label: 'Flock dispersed', description: 'Pyrotechnic or acoustic deterrent successful; airspace cleared.' },
       { id: 'relocated', label: 'Wildlife relocated', description: 'Ground fauna moved to safe distance from operating surface.' },
       { id: 'recurrent_pattern', label: 'Recurrent pattern logged', description: 'Habitat modification scheduled; ornithology report filed.' },
+    ],
+  },
+  'counter-drone-swarm': {
+    displayName: 'Counter-Drone Interceptor Swarm',
+    includes: [
+      'Three interceptor quadcopters airborne from unit',
+      'Small-arms kinetic package for close-range engagement',
+      'Pursues live threat coordinates in formation',
+      'Position beacon at wreckage for follow-on ground response',
+    ],
+    deployedFor: 'Hostile drone incursions inside restricted airspace where RF jamming is insufficient. Effective against single drones and small coordinated swarms in built-up areas where missile intercept would be inappropriate.',
+    tradeoffs: 'Close-range engagement only. Not suitable for missile-class threats. Interceptors return to base if the hostile drone escapes coverage before they arrive.',
+    outcomes: [
+      { id: 'neutralised', label: 'Hostile drones neutralised', description: 'All targets engaged and downed. Wreckage location logged for perimeter response.' },
+      { id: 'partial_neutralisation', label: 'Partial neutralisation', description: 'Some hostile drones downed. Others escaped sensor coverage before engagement.' },
+      { id: 'target_evaded_before_arrival', label: 'Target evaded before arrival', description: 'Hostile drones exited coverage before interceptors could close. Interceptors patrolled the last known area then returned to base.' },
+      { id: 'engagement_aborted', label: 'Engagement aborted', description: 'Mission called off before contact. Interceptors returned to base.' },
+    ],
+    variants: [
+      { id: 'quad_mk1', label: 'Interceptor Quadcopter Mk I', enabled: true, note: 'Standard kinetic package' },
+      { id: 'fixed_wing', label: 'Fixed-Wing Interceptor', enabled: false, note: 'Future capability' },
+      { id: 'kinetic_net', label: 'Kinetic Net Deployer', enabled: false, note: 'Future capability' },
     ],
   },
   'army-ground': {
