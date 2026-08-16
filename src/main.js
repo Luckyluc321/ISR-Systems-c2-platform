@@ -50,6 +50,7 @@ const TARGETS = [...TARGETS_CORE, ...HV_SUBSTATION_TARGETS];
 import { getRules, onRulesChange, toggleRule, removeRule, upsertRule, resetRulesToDefault, ruleSummaryText } from './rules.js';
 import { isMistralConfigured, streamCaseFileNarrative, streamDebriefNarrative } from './mistral.js';
 import { fetchDrivingRoute, computeSegmentLengths, advanceAlongPolyline } from './routing.js';
+import { buildCordon, assignPatrols, clearCordonCache } from './perimeter.js';
 import {
   CPH_RUNWAYS, CPH_PERIMETER_ROADS, CPH_TAXIWAYS, CPH_RAMP_SPOTS,
   DK_MOTORWAYS, CPH_ARTERIALS, CITY_GLOWS,
@@ -2343,6 +2344,122 @@ async function main() {
     return Math.atan2(lon2 - lon1, lat2 - lat1);
   }
 
+  // ── Wreckage cordon perimeters ─────────────────────────────────────
+  // One entity pair per downed drone: purple polygon fill + dashed
+  // outline polyline. Keyed by wreckage id so re-render on rebalance
+  // does not double-up. Built async via perimeter.buildCordon() —
+  // Overpass street cordon when reachable, compass ring on timeout.
+  const _wreckagePerimeterEntities = new Map();  // wreckageId -> {fill, outline}
+
+  function _renderWreckagePerimeter(wreckage, cordon) {
+    if (!wreckage || !cordon || !cordon.perimeter || cordon.perimeter.length < 4) return;
+    const existing = _wreckagePerimeterEntities.get(wreckage.id);
+    if (existing) {
+      if (existing.fill) viewer.entities.remove(existing.fill);
+      if (existing.outline) viewer.entities.remove(existing.outline);
+    }
+    const flat = [];
+    for (const [lat, lon] of cordon.perimeter) { flat.push(lon, lat); }
+    const outlinePositions = [...flat, cordon.perimeter[0][1], cordon.perimeter[0][0]];
+    const fill = viewer.entities.add({
+      polygon: {
+        hierarchy: Cesium.Cartesian3.fromDegreesArray(flat),
+        material: Cesium.Color.fromCssColorString('#a855f7').withAlpha(0.14),
+        outline: false,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      },
+      properties: { type: 'wreckage-perimeter', wreckageId: wreckage.id },
+    });
+    const outline = viewer.entities.add({
+      polyline: {
+        positions: Cesium.Cartesian3.fromDegreesArray(outlinePositions),
+        width: 2.5,
+        material: new Cesium.PolylineDashMaterialProperty({
+          color: Cesium.Color.fromCssColorString('#c084fc').withAlpha(0.85),
+          dashLength: 14,
+        }),
+        clampToGround: true,
+      },
+      properties: { type: 'wreckage-perimeter-outline', wreckageId: wreckage.id },
+    });
+    _wreckagePerimeterEntities.set(wreckage.id, { fill, outline });
+  }
+
+  function _clearAllWreckagePerimeters() {
+    for (const [, ents] of _wreckagePerimeterEntities) {
+      if (ents.fill) viewer.entities.remove(ents.fill);
+      if (ents.outline) viewer.entities.remove(ents.outline);
+    }
+    _wreckagePerimeterEntities.clear();
+    clearCordonCache();
+  }
+
+  // Rebalance every ground-vehicle dispatch on this event across all
+  // known wreckages. Called after each new drone-downed event so the
+  // cordon fans out as more wreckages appear. Only affects patrols
+  // that support road routing (police, ground reinforcement) — not
+  // airborne interceptors. Each patrol gets pinned to a specific
+  // wreckage id + ingress heading, then re-routed via OSRM from its
+  // current live position.
+  function _rebalancePatrolsToWreckages(event) {
+    if (!event || !Array.isArray(event.wreckages) || !event.wreckages.length) return;
+    const wreckageIds = event.wreckages.map(w => w.id);
+    const patrolDispatches = [];
+    for (const [, d] of _counterDispatches) {
+      if (d.eventId !== event.id) continue;
+      if (!d.profile?.useRoadRouting) continue;   // ground vehicles only
+      if (d.profile?.airborne) continue;
+      if (d.state === 'complete' || d.rtbCompleted) continue;
+      patrolDispatches.push(d);
+    }
+    if (!patrolDispatches.length) return;
+    const patrolIds = patrolDispatches.map(d => d.id);
+    const assignments = assignPatrols(patrolIds, wreckageIds);
+    for (const d of patrolDispatches) {
+      const a = assignments.get(d.id);
+      if (!a) continue;
+      const prevWreckId = d.assignedWreckageId;
+      d.assignedWreckageId = a.wreckageId;
+      d.targetLat = a.ingress.lat;
+      d.targetLon = a.ingress.lon;
+      // Only reroute if the wreckage assignment actually changed OR
+      // the car has no route yet. Same-wreckage reassignments (idempotent
+      // rebalance) skip the OSRM refetch.
+      if (prevWreckId === a.wreckageId && d.routePositions) continue;
+      // If car was in engaging state (stopped at old target), kick it
+      // back to en_route so the tick loop advances along the new route.
+      if (d.state === 'engaging') {
+        d.state = 'en_route';
+        d.arrivedTs = null;
+        d.engageStartTs = null;
+        if (d.radiationEntity) {
+          viewer.entities.remove(d.radiationEntity);
+          d.radiationEntity = null;
+        }
+      }
+      // Fetch fresh OSRM route from current position to the ingress point
+      fetchDrivingRoute({ lat: d.curLat, lon: d.curLon }, { lat: a.ingress.lat, lon: a.ingress.lon })
+        .then(positions => {
+          if (!positions || positions.length < 2) return;
+          if (!_counterDispatches.has(d.id)) return;
+          if (d.routeEntity) {
+            viewer.entities.remove(d.routeEntity);
+            d.routeEntity = null;
+          }
+          d.routePositions = positions;
+          d.routeSegmentLengths = computeSegmentLengths(positions);
+          d.routeSegIdx = 0;
+          d.routeSegProgress = 0;
+          _createRouteVisual(d);
+        })
+        .catch(() => { /* straight-line fallback in tick */ });
+    }
+    if (patrolDispatches.length) {
+      const wCount = wreckageIds.length;
+      toast(`${patrolDispatches.length} patrol${patrolDispatches.length === 1 ? '' : 's'} recalibrated across ${wCount} wreckage site${wCount === 1 ? '' : 's'}.`, 'info');
+    }
+  }
+
   // Best-available target across the event graph. Handles CPH → AMK
   // handover for dispatched assets and routes police to wreckage /
   // last-spotted location after neutralisation, not to the stale
@@ -2466,6 +2583,13 @@ async function main() {
     const originLabel = profile.cruiseKmh === 0 ? `activated at ${asset.name}` : `dispatched from ${asset.name}`;
     const countStr = swarmSize > 1 ? `${swarmSize} interceptors ` : '';
     toast(`${countStr}${profile.label} ${originLabel}.`, 'info');
+    // If wreckages already exist (patrols dispatched after the kill),
+    // pin the newly-spawned ground vehicles to a cordon slot right
+    // away. Defer one tick so the freshly-inserted dispatches are in
+    // _counterDispatches before rebalancing.
+    if (profile.useRoadRouting && !profile.airborne && Array.isArray(event.wreckages) && event.wreckages.length) {
+      setTimeout(() => _rebalancePatrolsToWreckages(event), 0);
+    }
     if (getActiveRole().kind === 'receiver') renderReceiverView();
   }
 
@@ -2703,7 +2827,13 @@ async function main() {
     });
     const targetLost = primaryClosed && !anyLinkedActive;
 
-    if (event?.lastPosition && !targetLost) {
+    // Live target update ONLY if the dispatch is not pinned to a
+    // wreckage cordon position. Ground patrols pinned via
+    // _rebalancePatrolsToWreckages hold their assigned ingress point
+    // — the live lastPosition would drag them back toward the airport
+    // while the drones the cars are supposed to cordon are already
+    // downed on the beach.
+    if (event?.lastPosition && !targetLost && !d.assignedWreckageId) {
       d.targetLat = event.lastPosition.lat;
       d.targetLon = event.lastPosition.lon;
     }
@@ -3037,8 +3167,25 @@ async function main() {
               disableDepthTestDistance: Number.POSITIVE_INFINITY,
             },
           });
-          // Wreckage centroid updates to the latest kill position
-          event.wreckageLocation = { lat: dropLat, lon: dropLon, at: new Date().toISOString() };
+          // Append this kill to the wreckages ledger. Each downed
+          // drone gets its own perimeter, its own patrol assignment.
+          // wreckageLocation (singular) kept as an alias to the latest
+          // for legacy callers (bestTargetForDispatch first-priority
+          // for cars that dispatched before any kill happened).
+          const nowIso = new Date().toISOString();
+          if (!Array.isArray(event.wreckages)) event.wreckages = [];
+          const wreckId = `wr-${event.id}-${event.wreckages.length + 1}`;
+          const wreck = { id: wreckId, lat: dropLat, lon: dropLon, at: nowIso, downedBy: d.id };
+          event.wreckages.push(wreck);
+          event.wreckageLocation = { lat: dropLat, lon: dropLon, at: nowIso };
+          // Build cordon + rebalance patrol assignments. Fire-and-
+          // forget — perimeter render + reroute both happen when the
+          // promise resolves. Compass fallback ensures a polygon
+          // renders even when Overpass is down.
+          buildCordon(wreck).then(cordon => {
+            _renderWreckagePerimeter(wreck, cordon);
+            _rebalancePatrolsToWreckages(event);
+          });
         }
         sw.neutralised = true;
         sw._neutralisedAt = new Date().toISOString();
@@ -6810,6 +6957,7 @@ async function main() {
     for (const eid of Array.from(projectedTrajectoryEntities.keys())) {
       removeProjectedTrajectoryEntity(eid);
     }
+    _clearAllWreckagePerimeters();
     updateContributingRings();
     updateSimButton();
     renderAlertStrip();
