@@ -2596,9 +2596,44 @@ async function main() {
   }
 
   function _tickCounterDispatch(d, now) {
-    // Live target update — if threat is still visible, track it
-    const event = getEvent(d.eventId);
-    const targetLost = event?.status === 'closed' || event?.trackLost === true;
+    // Live target update. Interceptor follows the freshest active
+    // event tracking this same target across sites. Cross-site
+    // handover is automatic — if the primary event closed but a
+    // linked event at another site is still tracking (e.g. AMK
+    // reacquires the swarm after CPH exit), interceptor updates to
+    // that live position without operator intervention. Agency owns
+    // the dispatch decision, sites provide data.
+    let event = getEvent(d.eventId);
+
+    // Cross-cue handover: primary event closed AND linked event still
+    // active → follow the linked event. Toast the handover once so
+    // the operator sees the reacquisition drove the target update.
+    if (event?.status === 'closed' && event.linkedEventIds?.length) {
+      for (const linkedId of event.linkedEventIds) {
+        const linked = getEvent(linkedId);
+        if (linked && linked.status === 'active' && linked.lastPosition) {
+          if (d.eventId !== linkedId) {
+            const fromSite = siteName(event.siteId) || event.siteId;
+            const toSite = siteName(linked.siteId) || linked.siteId;
+            toast(`${d.assetName} track handed off. Signal reacquired at ${toSite} (was ${fromSite}). Live coordinates updated.`, 'info');
+          }
+          d.eventId = linkedId;
+          d.crossCued = true;
+          event = linked;
+          break;
+        }
+      }
+    }
+
+    // Target considered lost only when primary event closed AND no
+    // linked event is still tracking.
+    const primaryClosed = event?.status === 'closed' || event?.trackLost === true;
+    const anyLinkedActive = (event?.linkedEventIds || []).some(id => {
+      const l = getEvent(id);
+      return l && l.status === 'active';
+    });
+    const targetLost = primaryClosed && !anyLinkedActive;
+
     if (event?.lastPosition && !targetLost) {
       d.targetLat = event.lastPosition.lat;
       d.targetLon = event.lastPosition.lon;
@@ -2611,7 +2646,7 @@ async function main() {
       d.rtbTargetLon = d.targetLon;
       d.rtbOrbitStartTs = null;
       d.lastFrameTs = now;
-      toast(`${d.assetName} has lost signal on target. Proceeding to last known area.`, 'warn');
+      toast(`${d.assetName} has lost signal on target across all tracking sites. Proceeding to last known area.`, 'warn');
       return;
     }
 
