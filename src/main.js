@@ -2307,6 +2307,7 @@ async function main() {
       useRoadRouting: true,   // ground vehicle → follow real streets via OSRM
       supportsMultiDispatch: true,   // more than one patrol from same base is doctrine
       maxUnitsPerDispatch: 5,        // units picker range 1-5
+      billboardScale: 0.55,          // smaller so patrol pack reads clearly
       label: 'Police Counter-Drone Patrol',
     },
     'army-isr-drone': {
@@ -2326,13 +2327,14 @@ async function main() {
       label: 'Wildlife management',
     },
     'counter-drone-swarm': {
-      cruiseKmh: 120, arriveAtM: 100, engageSec: 4,
+      cruiseKmh: 120, arriveAtM: 200, engageSec: 4,
       icon: 'counter-drone-interceptor', trail: true, airborne: true,
-      swarmSize: 3,             // 3 interceptor drones per dispatch
-      swarmSpacingM: 35,        // wider triangle so 3 icons don't overlap
-      billboardScale: 0.5,      // smaller icon so pack reads as swarm not one blob
-      supportsRTB: true,        // late-dispatch return-to-base behaviour
-      firesTracer: true,        // renders small-arms tracer + downed state on engage
+      swarmSize: 3,              // 3 interceptor drones per dispatch
+      swarmSpacingM: 80,         // wider triangle so icons read as distinct pack
+      billboardScale: 0.5,       // smaller icon so pack reads as swarm not one blob
+      engageOffsetM: 100,        // interceptor shadows target at 100m (was 30m — caused jump)
+      supportsRTB: true,         // late-dispatch return-to-base behaviour
+      firesTracer: true,         // renders small-arms tracer + downed state on engage
       label: 'Interceptor Swarm',
     },
   };
@@ -2789,8 +2791,11 @@ async function main() {
           const targetLat = Cesium.Math.toDegrees(cartographic.latitude);
           const targetLon = Cesium.Math.toDegrees(cartographic.longitude);
           d.assignedTargetCoord = { lat: targetLat, lon: targetLon };
-          // Shadow position — 30m offset at a stable bearing per member
-          const offsetM = 30;
+          // Shadow position — per-profile offset (100m for interceptor
+          // swarm, was 30m which caused visual "jump" at close range +
+          // tracers had no travel distance to be visible). Bearing
+          // stable per member index so 3 interceptors don't stack.
+          const offsetM = d.profile.engageOffsetM || 30;
           const bearing = ((d.memberIndex || 0) * (Math.PI * 2 / 3));
           d.curLat = targetLat + (offsetM * Math.cos(bearing)) / 111000;
           d.curLon = targetLon + (offsetM * Math.sin(bearing)) / (111000 * Math.cos(targetLat * Math.PI / 180));
@@ -10560,7 +10565,17 @@ async function main() {
       const cdState = counterDispatchStateFor(event.id, a.id);
       const stateLabel = { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE' }[cdState];
       const stateColor = cdState === 'complete' ? '#6b7280' : cdState === 'engaging' ? '#ffb84d' : '#4dd2ff';
-      const details = RESPONSE_OPTION_DETAILS[a.kind] || {};
+      // Asset-level overrides > kind-level defaults. Prevents two
+      // Politi teams (Rigspolitiet + Copenhagen) showing identical
+      // copy — each override reflects their real jurisdictional
+      // scope and equipment.
+      const kindDefaults = RESPONSE_OPTION_DETAILS[a.kind] || {};
+      const details = {
+        ...kindDefaults,
+        includes: a.includesOverride || kindDefaults.includes,
+        deployedFor: a.deployedForOverride || kindDefaults.deployedFor,
+        tradeoffs: a.tradeoffsOverride || kindDefaults.tradeoffs,
+      };
       const recommendedBadge = idx === 0
         ? `<span style="display: inline-flex; align-items: center; padding: 2px 8px; background: rgba(77, 210, 255, 0.12); border: 1px solid rgba(77, 210, 255, 0.5); color: var(--accent); font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.14em; text-transform: uppercase; font-weight: 600; border-radius: 2px;">◆ Recommended</span>`
         : '';
@@ -12164,7 +12179,32 @@ async function main() {
     return parts.join('|');
   }
 
+  // Debounce guard — additional to signature memoization. Coalesces
+  // rapid consecutive triggers (dispatch state transitions, listener
+  // cascades) into one render per 400ms window. Forced renders and
+  // user actions bypass via opts.force / opts.immediate.
+  let _rvvLastFireTs = 0;
+  let _rvvPendingTimer = null;
+  const _RVV_MIN_INTERVAL_MS = 400;
   function renderReceiverView(opts = {}) {
+    if (!opts.force && !opts.immediate) {
+      const now = Date.now();
+      const elapsed = now - _rvvLastFireTs;
+      if (elapsed < _RVV_MIN_INTERVAL_MS) {
+        if (_rvvPendingTimer) return;   // already queued
+        _rvvPendingTimer = setTimeout(() => {
+          _rvvPendingTimer = null;
+          _rvvLastFireTs = Date.now();
+          _renderReceiverViewInternal({});
+        }, _RVV_MIN_INTERVAL_MS - elapsed);
+        return;
+      }
+      _rvvLastFireTs = now;
+    }
+    _renderReceiverViewInternal(opts);
+  }
+
+  function _renderReceiverViewInternal(opts) {
     const role = getActiveRole();
     if (role.kind !== 'receiver') { receiverView.style.display = 'none'; _lastReceiverViewSig = null; return; }
 

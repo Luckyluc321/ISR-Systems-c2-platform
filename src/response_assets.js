@@ -171,14 +171,36 @@ const ASSETS = [
     kind: 'police-c-uas', lat: 55.6867, lon: 12.5680,
     response: 'Patrol-mounted C-UAS jamming + drone kit',
     verified: 'representative',
-    source: 'Danish Police C-UAS capability publicly acknowledged; team structure representative' },
+    source: 'Danish Police C-UAS capability publicly acknowledged; team structure representative',
+    // Team-specific overrides so the two Politi options don't show
+    // identical copy in the Mission Console. Only C-UAS-specialised
+    // units are equipped for this response, not standard patrols.
+    includesOverride: [
+      'Specialised patrol vehicle with heavy RF-jamming array (national kit)',
+      'Cruises to intercept point at ~90 km/h with sirens',
+      'Deploys own drone kit for visual verify',
+      'Coordinates with Air Force + FE if platform is peer-military',
+      'Arrest team on scene if operator located',
+    ],
+    deployedForOverride: 'National-level threats requiring specialised C-UAS package. Cross-jurisdictional incursions, VIP protection, state-level intelligence-linked cases. First-choice unit when the local district lacks C-UAS specialisation.',
+    tradeoffsOverride: 'Larger footprint than local patrol. National mobilisation adds coordination overhead. Held for cases the local district cannot handle alone.',
+  },
 
   // Copenhagen Politi C-UAS team. Metro Copenhagen coverage.
   { id: 'politi-kbh-cuas', name: 'Københavns Politi · C-UAS patrol team',
     kind: 'police-c-uas', lat: 55.6767, lon: 12.5687,
     response: 'Metro Copenhagen C-UAS + drone team',
     verified: 'representative',
-    source: 'Major-city police C-UAS team is standard practice, specific team not public' },
+    source: 'Major-city police C-UAS team is standard practice, specific team not public',
+    includesOverride: [
+      'Local C-UAS-equipped patrol vehicle (compact kit)',
+      'Fast urban response inside Copenhagen district boundaries',
+      'Handheld RF jam plus small drone kit',
+      'Direct handoff to local investigation unit for arrest',
+    ],
+    deployedForOverride: 'District-level airport perimeter incidents and small drone incursions inside Copenhagen. First response for CPH airport perimeter events, Christiansborg district events, and central-Copenhagen protection sweeps.',
+    tradeoffsOverride: 'Not equipped for peer-military threats. Scope limited to Copenhagen district. Standard patrols WITHOUT C-UAS training are not part of this response option.',
+  },
 
   // ══════════════════════════════════════════════════════════════
   // WILDLIFE — airport bird-strike response
