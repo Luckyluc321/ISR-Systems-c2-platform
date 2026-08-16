@@ -177,29 +177,44 @@ export function getCordonSync(wreckageId) {
   return _cache.get(_keyOf(wreckageId)) || null;
 }
 
-// Split N patrol cars across M wreckages, assigning each car an
-// ingress point. Round-robin by wreckage index so each wreckage gets
-// coverage before any wreckage gets a second car.
-//
-// patrolIds: array of dispatch ids (strings)
-// wreckageIds: array of wreckage ids
-// returns: Map<patrolId, { wreckageId, ingress: {lat,lon,heading} }>
-export function assignPatrols(patrolIds, wreckageIds) {
-  const assignments = new Map();
-  if (!patrolIds.length || !wreckageIds.length) return assignments;
+// Instant compass ingress ring for a wreckage. Callers get real
+// coordinates immediately, no waiting on the async Overpass build.
+// The visual polygon (buildCordon) can upgrade to street-following
+// later — patrol coords are already correct from the start.
+export function ingressForWreckage(wreckage) {
+  const cached = _cache.get(_keyOf(wreckage.id));
+  if (cached && cached.ingress) return cached.ingress;
+  return _ingressPoints(wreckage.lat, wreckage.lon, INGRESS_POINTS);
+}
 
-  // Group patrols by wreckage in round-robin fashion
+// Split N patrol cars across M wreckages, assigning each car an
+// ingress point on the wreckage's cordon ring. Round-robin so each
+// wreckage gets its first car before any wreckage gets a second.
+// When N > M the extra cars spread around the ring, so 4 cars on 1
+// wreckage cover 4 different compass sectors (N/NE/E/SE etc).
+//
+// wreckages MUST be objects with lat/lon, not just ids — the ingress
+// fallback needs coordinates. Passing bare ids previously fell through
+// to _ingressPoints(0, 0, ...) which is off the coast of Africa.
+//
+// patrolIds: string[]
+// wreckages: [{ id, lat, lon }, ...]
+// returns: Map<patrolId, { wreckageId, ingress: {lat,lon,heading} }>
+export function assignPatrols(patrolIds, wreckages) {
+  const assignments = new Map();
+  if (!patrolIds.length || !wreckages.length) return assignments;
+
   const perWreckage = new Map();
-  wreckageIds.forEach(w => perWreckage.set(w, []));
+  wreckages.forEach(w => perWreckage.set(w.id, []));
   patrolIds.forEach((pid, i) => {
-    const wid = wreckageIds[i % wreckageIds.length];
+    const wid = wreckages[i % wreckages.length].id;
     perWreckage.get(wid).push(pid);
   });
 
-  // For each wreckage, spread its assigned patrols around the ingress ring
   for (const [wid, pids] of perWreckage.entries()) {
-    const cordon = getCordonSync(wid);
-    const ingressRing = cordon ? cordon.ingress : _ingressPoints(0, 0, INGRESS_POINTS);
+    const wreck = wreckages.find(w => w.id === wid);
+    if (!wreck) continue;
+    const ingressRing = ingressForWreckage(wreck);
     pids.forEach((pid, idx) => {
       const ingress = ingressRing[idx % ingressRing.length];
       assignments.set(pid, { wreckageId: wid, ingress });

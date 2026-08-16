@@ -2410,7 +2410,6 @@ async function main() {
   // current live position.
   function _rebalancePatrolsToWreckages(event) {
     if (!event || !Array.isArray(event.wreckages) || !event.wreckages.length) return;
-    const wreckageIds = event.wreckages.map(w => w.id);
     const patrolDispatches = [];
     for (const [, d] of _counterDispatches) {
       if (d.eventId !== event.id) continue;
@@ -2421,7 +2420,11 @@ async function main() {
     }
     if (!patrolDispatches.length) return;
     const patrolIds = patrolDispatches.map(d => d.id);
-    const assignments = assignPatrols(patrolIds, wreckageIds);
+    // Pass full wreckage objects (id + lat + lon), not just ids —
+    // assignPatrols needs coordinates for the ingress-ring fallback.
+    // Previous version passed ids only and the fallback resolved to
+    // (0, 0) offsets, routing patrols to the Gulf of Guinea.
+    const assignments = assignPatrols(patrolIds, event.wreckages);
     for (const d of patrolDispatches) {
       const a = assignments.get(d.id);
       if (!a) continue;
@@ -2915,12 +2918,17 @@ async function main() {
       }
     } else if (d.state === 'engaging') {
       const engageDur = (now - d.engageStartTs) / 1000;
-      // Shadow the assigned target's LIVE position every tick — the
-      // hostile drone keeps moving along its waypoints during the 4s
-      // engagement window. If we froze on the entry coord (previous
-      // bug), tracers fired at empty space while the drone flew off.
-      // Interceptor sits at a small trailing offset unique per member
-      // index so 3 interceptors don't stack pixel-perfect.
+      // On engagement entry, freeze the interceptor at a fixed standoff
+      // position relative to where the hostile drone is RIGHT NOW.
+      // Then hold that position for the whole engagement — no per-tick
+      // shadowing. Previously we hard-set d.curLat/curLon every tick
+      // to enemy_position + fixed compass bearing offset, which made
+      // the interceptor teleport around the map every time the enemy
+      // drone hopped a waypoint. It also fed the trail with jagged
+      // jump-points that read as "green line going in circles".
+      // The tracer target endpoint STILL follows the enemy drone live
+      // via d.assignedTargetCoord — tracers refresh their aim per
+      // burst, so a moving enemy is still hit visually.
       if (d.profile.airborne && d.assignedSwarmMember?.billboard?.position) {
         const cart = d.assignedSwarmMember.billboard.position.getValue?.(Cesium.JulianDate.now());
         if (cart) {
@@ -2928,18 +2936,22 @@ async function main() {
           const targetLat = Cesium.Math.toDegrees(cartographic.latitude);
           const targetLon = Cesium.Math.toDegrees(cartographic.longitude);
           d.assignedTargetCoord = { lat: targetLat, lon: targetLon };
-          // Shadow position — per-profile offset (100m for interceptor
-          // swarm, was 30m which caused visual "jump" at close range +
-          // tracers had no travel distance to be visible). Bearing
-          // stable per member index so 3 interceptors don't stack.
-          const offsetM = d.profile.engageOffsetM || 30;
-          const bearing = ((d.memberIndex || 0) * (Math.PI * 2 / 3));
-          d.curLat = targetLat + (offsetM * Math.cos(bearing)) / 111000;
-          d.curLon = targetLon + (offsetM * Math.sin(bearing)) / (111000 * Math.cos(targetLat * Math.PI / 180));
-          d.heading = bearing + Math.PI;   // face target
-          if (d.profile.trail) {
-            d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0));
-            if (d.trailPositions.length > 500) d.trailPositions.shift();
+          // ONE-SHOT: snap interceptor to standoff position on the
+          // first engaging tick, then never move it again during this
+          // engagement window. Standoff distance from profile (100m
+          // default). Bearing spread by member index so 3 interceptors
+          // don't overlap.
+          if (!d._engageStandoffLocked) {
+            const offsetM = d.profile.engageOffsetM || 100;
+            const bearing = ((d.memberIndex || 0) * (Math.PI * 2 / 3));
+            d.curLat = targetLat + (offsetM * Math.cos(bearing)) / 111000;
+            d.curLon = targetLon + (offsetM * Math.sin(bearing)) / (111000 * Math.cos(targetLat * Math.PI / 180));
+            d.heading = bearing + Math.PI;
+            d._engageStandoffLocked = true;
+            if (d.profile.trail) {
+              d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0));
+              if (d.trailPositions.length > 500) d.trailPositions.shift();
+            }
           }
         }
       }
@@ -3087,16 +3099,27 @@ async function main() {
     _spawnFlashEntity(d.curLon, d.curLat, 180, '#ffdb4d', 3, 8);
   }
 
-  // Single tracer round + impact flash at target
+  // Single tracer round + impact flash at target.
+  // Both endpoints snapshotted at fire time — no CallbackProperty.
+  // Previously the tracer polyline read d.curLon/d.curLat live via
+  // callback, and the interceptor position was being reassigned every
+  // tick — so the tracer origin whipped around, drawing a bent line
+  // that read as "green line going in circles". Now the tracer is a
+  // straight snapshot from interceptor-at-fire to target-at-fire.
+  // Both are stable during the 220 ms tracer lifetime.
   function _fireSingleTracerRound(d, target) {
     const startTs = Date.now();
     const durMs = 220;
+    const originLon = d.curLon;
+    const originLat = d.curLat;
+    const targetLon = target.lon;
+    const targetLat = target.lat;
     const tracerEntity = viewer.entities.add({
       polyline: {
-        positions: new Cesium.CallbackProperty(() => [
-          Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 8),
-          Cesium.Cartesian3.fromDegrees(target.lon, target.lat, 8),
-        ], false),
+        positions: [
+          Cesium.Cartesian3.fromDegrees(originLon, originLat, 8),
+          Cesium.Cartesian3.fromDegrees(targetLon, targetLat, 8),
+        ],
         width: 2,
         material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
           const t = (Date.now() - startTs) / durMs;
@@ -3106,7 +3129,7 @@ async function main() {
       },
     });
     setTimeout(() => { if (tracerEntity) viewer.entities.remove(tracerEntity); }, durMs + 30);
-    _spawnFlashEntity(target.lon, target.lat, 200, '#ffdb4d', 4, 12);
+    _spawnFlashEntity(targetLon, targetLat, 200, '#ffdb4d', 4, 12);
   }
 
   // Small point flash — reused for muzzle + impact
