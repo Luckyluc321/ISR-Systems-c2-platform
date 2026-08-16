@@ -2596,11 +2596,23 @@ async function main() {
   }
 
   function _tickCounterDispatch(d, now) {
-    // Live target update — if threat is still moving, track it
+    // Live target update — if threat is still visible, track it
     const event = getEvent(d.eventId);
-    if (event?.lastPosition) {
+    const targetLost = event?.status === 'closed' || event?.trackLost === true;
+    if (event?.lastPosition && !targetLost) {
       d.targetLat = event.lastPosition.lat;
       d.targetLon = event.lastPosition.lon;
+    }
+
+    // Phase F: RTB behaviour when target lost signal before arrival
+    if (d.state === 'en_route' && targetLost && d.profile.supportsRTB) {
+      d.state = 'rtb_via_last_known';
+      d.rtbTargetLat = d.targetLat;   // last known coord we had
+      d.rtbTargetLon = d.targetLon;
+      d.rtbOrbitStartTs = null;
+      d.lastFrameTs = now;
+      toast(`${d.assetName} has lost signal on target. Proceeding to last known area.`, 'warn');
+      return;
     }
 
     if (d.state === 'en_route') {
@@ -2665,6 +2677,70 @@ async function main() {
         d.state = 'complete';
         _resolveEngagement(d);
       }
+    } else if (d.state === 'rtb_via_last_known') {
+      // Fly toward last known target coord
+      const dtSec = (now - d.lastFrameTs) / 1000;
+      d.lastFrameTs = now;
+      if (dtSec <= 0) return;
+      const brng = _bearingRad(d.curLat, d.curLon, d.rtbTargetLat, d.rtbTargetLon);
+      d.heading = brng;
+      const speedMps = (d.profile.cruiseKmh * 1000) / 3600;
+      const stepM = speedMps * dtSec;
+      d.curLat += (stepM * Math.cos(brng)) / 111000;
+      d.curLon += (stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
+      if (d.profile.trail) {
+        d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0));
+        if (d.trailPositions.length > 500) d.trailPositions.shift();
+      }
+      const distM = haversineM(d.curLat, d.curLon, d.rtbTargetLat, d.rtbTargetLon);
+      if (distM <= 250) {
+        if (!d.rtbOrbitStartTs) {
+          d.rtbOrbitStartTs = now;
+          toast(`${d.assetName} at last known location. Signal not reacquired. Perimeter established.`, 'info');
+          // Stash last-spotted for Phase G perimeter cordon
+          if (event) {
+            event.lastSpottedLocation = { lat: d.rtbTargetLat, lon: d.rtbTargetLon, at: new Date().toISOString() };
+          }
+        }
+        // Brief orbit at last-known (4s)
+        if ((now - d.rtbOrbitStartTs) / 1000 >= 4) {
+          d.state = 'rtb_home';
+          toast(`${d.assetName} returning to base.`, 'info');
+        }
+      }
+    } else if (d.state === 'rtb_home') {
+      // Fly back to origin base
+      const dtSec = (now - d.lastFrameTs) / 1000;
+      d.lastFrameTs = now;
+      if (dtSec <= 0) return;
+      const brng = _bearingRad(d.curLat, d.curLon, d.originLat, d.originLon);
+      d.heading = brng;
+      const speedMps = (d.profile.cruiseKmh * 1000) / 3600;
+      const stepM = speedMps * dtSec;
+      d.curLat += (stepM * Math.cos(brng)) / 111000;
+      d.curLon += (stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
+      if (d.profile.trail) {
+        d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0));
+        if (d.trailPositions.length > 500) d.trailPositions.shift();
+      }
+      const distM = haversineM(d.curLat, d.curLon, d.originLat, d.originLon);
+      if (distM <= 120) {
+        d.state = 'complete';
+        d.rtbCompleted = true;
+        // Auto-record outcome as target evaded before arrival
+        if (event) {
+          if (!event.dispatchOutcomes) event.dispatchOutcomes = {};
+          event.dispatchOutcomes[d.id] = {
+            outcomeId: 'target_evaded_before_arrival',
+            outcomeLabel: 'Target evaded before arrival',
+            notes: 'Interceptor lost signal on target before intercept. Patrolled last known area then returned to base.',
+            confirmedAt: new Date().toISOString(),
+            confirmedBy: 'system_auto',
+          };
+        }
+        toast(`${d.assetName} back at base. Target signal not reacquired.`, 'info');
+        _resolveEngagement(d);
+      }
     }
   }
 
@@ -2720,7 +2796,51 @@ async function main() {
 
   function _resolveEngagement(d) {
     const event = getEvent(d.eventId);
-    if (event && !d.profile.visualVerifyOnly) {
+
+    // Phase D · Counter-drone interceptor swarm engagement outcome.
+    // First group member to complete triggers the group-level effect.
+    // Downs all hostile swarm members EXCEPT the overwatch role (higher
+    // altitude, unknown control link, always escapes). Sets event
+    // outcome to partial_neutralisation. Wreckage location for Phase G
+    // perimeter cordon. Skips the generic neutralisation branch below.
+    if (d.kind === 'counter-drone-swarm' && event && d.state === 'complete' && !d.rtbCompleted) {
+      if (!event._interceptorGroupsCompleted) event._interceptorGroupsCompleted = new Set();
+      if (!event._interceptorGroupsCompleted.has(d.groupId)) {
+        event._interceptorGroupsCompleted.add(d.groupId);
+        const state = droneState.get(d.eventId);
+        let downedCount = 0;
+        let overwatchSurvived = false;
+        if (state?.swarmBillboards?.length) {
+          for (const sw of state.swarmBillboards) {
+            if (sw.role === 'overwatch') { overwatchSurvived = true; continue; }
+            sw.downed = true;
+            sw._downedAt = new Date().toISOString();
+            downedCount++;
+          }
+        }
+        // Wreckage marker for Phase G perimeter cordon
+        event.wreckageLocation = { lat: d.targetLat, lon: d.targetLon, at: new Date().toISOString(), downedCount };
+        // Auto-outcome on the dispatch group
+        if (!event.dispatchOutcomes) event.dispatchOutcomes = {};
+        const outcomeId = overwatchSurvived ? 'partial_neutralisation' : 'neutralised';
+        const outcomeLabel = overwatchSurvived
+          ? `Partial neutralisation. ${downedCount} hostile drones downed. Overwatch airframe escaped over Øresund.`
+          : `Hostile drones neutralised. ${downedCount} downed.`;
+        event.dispatchOutcomes[d.id] = {
+          outcomeId,
+          outcomeLabel,
+          notes: overwatchSurvived
+            ? 'Interceptor swarm engaged the hostile pack over Amager. Four DJI airframes downed. Overwatch drone with unknown control link continued east over Øresund and exited coverage. Signature exploitation pending on downed airframes. Wreckage location logged for perimeter response.'
+            : 'Interceptor swarm engaged the hostile pack over Amager. All targets confirmed down. Wreckage location logged for perimeter response.',
+          confirmedAt: new Date().toISOString(),
+          confirmedBy: 'system_auto',
+        };
+        event.outcome = overwatchSurvived ? 'partial_neutralisation' : 'neutralized';
+        toast(overwatchSurvived
+          ? `Partial neutralisation. ${downedCount} downed. Overwatch escaped.`
+          : `Threat neutralised. ${downedCount} downed.`, 'ok');
+      }
+    } else if (event && !d.profile.visualVerifyOnly && !d.rtbCompleted) {
       if (!event.outcome || event.outcome === 'awaiting_neutralization') {
         event.outcome = 'neutralized';
         event.neutralisedByDispatchId = d.id;
@@ -6130,6 +6250,15 @@ async function main() {
         }
         for (let i = 0; i < state.swarmBillboards.length; i++) {
           const sw = state.swarmBillboards[i];
+          // Phase D: if this swarm member was marked downed by an
+          // interceptor engagement, freeze it at the impact point and
+          // hide the billboard + trail so it visually reads as "gone".
+          if (sw.downed) {
+            sw.billboard.show = false;
+            if (sw.trail) sw.trail.show = false;
+            if (sw.projLine) sw.projLine.show = false;
+            continue;
+          }
           const pos = _interpolateWaypoints(sw.waypoints, tSec);
           if (!pos) {
             sw.billboard.show = false;
@@ -11737,14 +11866,19 @@ async function main() {
   // separately without needing a full re-render.
   let _lastReceiverViewSig = null;
   function _receiverViewSignature(role, wsEvent, selectedEvId, receivedEvents) {
-    // Include the latest status of every escalation on the workspace
-    // event so ack / delivered / read / responded transitions actually
-    // trigger a re-render (previously the sig stayed the same and Step
-    // 2 in the Mission Console never unlocked after ack).
+    // Track only user-visible ack + response state per escalation.
+    // Delivered / read transitions tick every ~800ms during the
+    // reacquisition cascade and were previously flipping the sig,
+    // forcing a full DOM rebuild every second (visible blink).
+    // Ack + response are the only escalation transitions that the
+    // Mission Console UI actually reacts to (Step 1 gate, sent-response
+    // confirmation). Everything else stays hidden until it matters.
     const escStatusHash = wsEvent
-      ? (wsEvent.escalations || []).map(e =>
-          `${e.id}:${e.statusHistory?.[e.statusHistory.length - 1]?.status || 'pending'}:${e.response ? 'r' : 'nr'}`
-        ).join(',')
+      ? (wsEvent.escalations || []).map(e => {
+          const acked = e.statusHistory?.some(h => h.status === 'acknowledged') ? 'a' : 'p';
+          const responded = e.response ? 'r' : 'nr';
+          return `${e.id}:${acked}:${responded}`;
+        }).join(',')
       : '';
     const parts = [
       role?.id || 'no-role',
