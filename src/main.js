@@ -2253,13 +2253,13 @@ async function main() {
     'army-c-uas': {
       cruiseKmh: 0, arriveAtM: null, engageSec: 12,
       icon: 'jammer', trail: false, airborne: false, radiationCone: true,
-      label: 'Army C-UAS jammer',
+      label: 'Army Counter-Drone Jammer',
     },
     'police-c-uas': {
       cruiseKmh: 80, arriveAtM: 500, engageSec: 10,
       icon: 'police-vehicle', trail: false, airborne: false, radiationCone: true,
       useRoadRouting: true,   // ground vehicle → follow real streets via OSRM
-      label: 'Police C-UAS patrol',
+      label: 'Police Counter-Drone Patrol',
     },
     'army-isr-drone': {
       cruiseKmh: 60, arriveAtM: 300, engageSec: 6,

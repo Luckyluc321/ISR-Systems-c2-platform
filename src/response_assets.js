@@ -376,7 +376,7 @@ export const RESPONSE_OPTION_DETAILS = {
     ],
   },
   'army-c-uas': {
-    displayName: 'Ground-Based Counter-UAS (Jammer)',
+    displayName: 'Army Counter-Drone Jammer',
     includes: [
       'Deployed C-UAS ground station activates on base',
       'RF disruption cone projected toward threat',
@@ -393,7 +393,7 @@ export const RESPONSE_OPTION_DETAILS = {
     ],
   },
   'police-c-uas': {
-    displayName: 'Police C-UAS Patrol Response',
+    displayName: 'Police Counter-Drone Patrol',
     includes: [
       'Patrol vehicle with mounted C-UAS gear from district HQ',
       'Drives to intercept point at ~80 km/h',
