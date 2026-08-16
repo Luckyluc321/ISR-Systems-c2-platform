@@ -12492,9 +12492,18 @@ async function main() {
     if (!opts.force && sig === _lastReceiverViewSig) return;
     _lastReceiverViewSig = sig;
 
+    // Parent role for hierarchy back-nav. E.g. rigspoliti → politi so
+    // the duty officer can go back UP one level (case inbox → parent
+    // chooser) after coming in via Politi → Rigspolitiet drill.
+    const parentRole = role.parentId ? RECEIVERS.find(r => r.id === role.parentId) : null;
+    const parentBackBtn = parentRole
+      ? `<button class="rcv-list-back" data-rcv="role-back-parent" title="Back to ${parentRole.org || parentRole.label}">← ${parentRole.org || parentRole.label}</button>`
+      : '';
+
     receiverView.innerHTML = `
       <aside class="rcv-list ${selectedEv ? '' : 'rcv-list--full'}">
         <div class="rcv-list-hdr">
+          ${parentBackBtn}
           <span class="rcv-list-title">Inbox</span>
           <span class="rcv-list-count">${receivedEvents.length}</span>
         </div>
@@ -12519,7 +12528,19 @@ async function main() {
       const id = el.dataset.id;
       const escId = el.dataset.esc;
       if (action === 'pick') { _selectedReceiverEventId = id; _respondingEscId = null; renderReceiverView(); }
-      else if (action === 'ack') { updateEscalationStatus(_selectedReceiverEventId, escId, 'acknowledged'); toast('Acknowledgment sent to operator', 'ok'); renderReceiverView(); }
+      else if (action === 'ack') {
+        // Event id resolution priority: button dataset (workspace case-
+        // file), then workspace event, then legacy inbox selection.
+        // Previously only used _selectedReceiverEventId, so acks fired
+        // from the workspace ack CTA silently dropped (nothing advanced
+        // past Step 1 in the Mission Console).
+        const evtId = id || _workspaceEventId || _selectedReceiverEventId;
+        if (!evtId) { toast('No event context for acknowledgement', 'err'); return; }
+        updateEscalationStatus(evtId, escId, 'acknowledged');
+        toast('Acknowledgment sent to operator', 'ok');
+        _lastReceiverViewSig = null;   // force re-render so Step 1 unlocks
+        renderReceiverView();
+      }
       else if (action === 'advisory-view') { toast(`Advisory only: track ${id} is projecting toward your site. Full escalation not yet sent.`, 'info'); }
       else if (action === 'qra-dispatch') { triggerQraIntercept(id); renderReceiverView(); }
       else if (action === 'confirm-outcome') {
@@ -12636,6 +12657,19 @@ async function main() {
         renderReceiverView();
       }
       else if (action === 'workspace-back' || action === 'workspace-close') { _workspaceEventId = null; _mistralFiredForEvent = null; _exitMapMode(); renderReceiverView(); }
+      else if (action === 'role-back-parent') {
+        // Hierarchy back-nav: switch active role UP one level so the
+        // duty officer returns to the parent chooser (e.g. Rigspoliti
+        // → Politi) without full logout. Bypasses memoization guard
+        // because setActiveRole doesn't itself invalidate the sig.
+        const cur = getActiveRole();
+        if (cur?.parentId) {
+          _selectedReceiverEventId = null;
+          _workspaceEventId = null;
+          _lastReceiverViewSig = null;
+          setActiveRole(cur.parentId);
+        }
+      }
       else if (action === 'workspace-mode') {
         _workspaceMode = el.dataset.mode;
         const ev = _lookupWorkspaceEvent(_workspaceEventId);

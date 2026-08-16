@@ -5021,12 +5021,37 @@ body.mode-receiver #receiver-view { display: flex; }
   display: flex; align-items: center; justify-content: space-between;
   padding: 14px 16px 8px;
   border-bottom: 1px solid var(--border);
+  gap: 10px;
 }
 .rcv-list-title {
   font-family: var(--font-mono);
   font-size: 11px; letter-spacing: 0.18em;
   color: var(--text); text-transform: uppercase;
   font-weight: 600;
+}
+/* Hierarchy back-nav: shown only on leaf roles that have a parentId
+   (e.g. Rigspoliti → Politi, haer-varde → Haeren). Sits at the far
+   left of the inbox header, flush with the Palantir-esque header
+   chrome. Clicking calls setActiveRole(parentId). */
+.rcv-list-back {
+  display: inline-flex; align-items: center;
+  padding: 4px 10px;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  border-left: 2px solid var(--accent);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 9px; letter-spacing: 0.16em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+  margin-right: auto;
+}
+.rcv-list-back:hover {
+  color: var(--text);
+  border-color: rgba(77, 210, 255, 0.35);
+  background: rgba(77, 210, 255, 0.04);
 }
 .rcv-list-count {
   font-family: var(--font-mono);
@@ -6901,13 +6926,24 @@ body.view-fleet #fleet-view { display: block; }
   opacity: 0.45;
   cursor: not-allowed;
 }
+/* Primary CTA = "recommended next action", NOT "pressed / done".
+   Palantir-style accent left-stripe signals priority without the
+   tinted-background look that previously read as "already clicked".
+   Actual pressed / done state is handled by rendering an inert
+   "Acknowledged at HH:MM:SSZ" pill in place of the button. */
 .rer-cta.primary {
-  background: var(--accent-soft);
-  border-color: rgba(77,210,255,0.35);
+  background: rgba(180,200,220,0.03);
+  border-color: var(--border);
+  border-left: 2px solid var(--accent);
+  padding-left: calc(var(--space-3) - 1px);
 }
 .rer-cta.primary:hover:not(:disabled) {
-  background: rgba(77,210,255,0.14);
-  border-color: var(--accent);
+  background: rgba(77,210,255,0.06);
+  border-left-color: var(--accent);
+  border-color: rgba(77,210,255,0.35);
+}
+.rer-cta.primary:active:not(:disabled) {
+  background: rgba(77,210,255,0.12);
 }
 .rer-cta.accent {
   background: rgba(255,90,80,0.06);
