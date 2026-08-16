@@ -1139,11 +1139,17 @@ async function main() {
       const t = e.properties && e.properties.type && e.properties.type.getValue
         ? e.properties.type.getValue()
         : null;
-      if (t !== 'target' && t !== 'site-rollup') continue;
-      if (e.label)     e.label.show     = overlayState.labels;
-      if (e.billboard) e.billboard.show = overlayState.icons;
-      if (e.point)     e.point.show     = overlayState.icons;
-      if (e.ellipse)   e.ellipse.show   = overlayState.icons;
+      // Labels toggle applies to EVERY labelled entity (drones, wreckage,
+      // interceptors, patrols, response assets, projected impacts,
+      // targets, site rollups). No entity gets a permanent label.
+      if (e.label) e.label.show = overlayState.labels;
+      // Icons toggle stays scoped to targets + site rollups — hiding
+      // drone icons or sensor pins mid-scenario is not a use case.
+      if (t === 'target' || t === 'site-rollup') {
+        if (e.billboard) e.billboard.show = overlayState.icons;
+        if (e.point)     e.point.show     = overlayState.icons;
+        if (e.ellipse)   e.ellipse.show   = overlayState.icons;
+      }
     }
     // Projections toggle: if off, remove existing trajectory entities.
     // They'll be recreated next tick if projections goes back on.
@@ -1153,6 +1159,7 @@ async function main() {
       }
     }
   }
+
 
   // ── Multi-site rollup markers (visible at country zoom, click to fly-in) ──
   const rollupEntities = new Map();
@@ -7533,8 +7540,27 @@ async function main() {
       overlayState[key] = !overlayState[key];
       btn.classList.toggle('active', overlayState[key]);
       applyOverlayVisibility();
+      if (key === 'labels') _syncLabelsChipState();
     });
   });
+
+  // Floating labels chip (receiver + admin views). Shares state with
+  // the operator control-panel button — both call the same flag and
+  // both reflect the same on/off style.
+  const _labelsChipEl = document.getElementById('labels-chip');
+  function _syncLabelsChipState() {
+    if (!_labelsChipEl) return;
+    _labelsChipEl.classList.toggle('is-on', overlayState.labels);
+    const cpBtn = document.querySelector('#control-panel .cp-btn[data-overlay="labels"]');
+    if (cpBtn) cpBtn.classList.toggle('active', overlayState.labels);
+  }
+  if (_labelsChipEl) {
+    _labelsChipEl.addEventListener('click', () => {
+      overlayState.labels = !overlayState.labels;
+      applyOverlayVisibility();
+      _syncLabelsChipState();
+    });
+  }
   document.querySelectorAll('#control-panel .cp-btn[data-fly]').forEach((btn) => {
     btn.addEventListener('click', () => flyTo(btn.dataset.fly));
   });

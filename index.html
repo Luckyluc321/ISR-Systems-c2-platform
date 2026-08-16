@@ -4,33 +4,236 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#06080b" />
-    <title>ISR Systems — C2 Platform</title>
+    <title>ISR Systems C2 Platform</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <div id="cesiumContainer"></div>
+    <canvas id="night-light-overlay-canvas"></canvas>
+    <div id="debrief-callout-layer" style="display:none;">
+      <svg id="debrief-callout-svg"></svg>
+    </div>
 
-    <!-- Control panel top-right -->
+    <!-- ─────────── TOP BAR ─────────── -->
+    <header id="top-bar">
+      <div class="tb-brand">
+        <img src="/isr-logo.png" alt="ISR Systems" class="brand-logo" />
+      </div>
+
+      <div class="tb-nav">
+        <button class="tb-nav-btn on" data-view="live">Live Ops</button>
+        <button class="tb-nav-btn" data-view="history">History</button>
+        <button class="tb-nav-btn" data-view="fleet">Fleet</button>
+        <button class="tb-nav-btn" data-view="config">Config</button>
+      </div>
+
+      <div class="tb-site">
+        <span class="tb-label">Context</span>
+        <span class="tb-site-name" id="site-name-display">Denmark, All Sites</span>
+        <span class="tb-site-code" id="site-code-display">DK · 55.6180°N 012.6470°E</span>
+      </div>
+
+      <div class="tb-threat">
+        <span class="threat-dot"></span>
+        <span class="threat-txt">Threat · Elevated</span>
+      </div>
+
+      <div class="tb-clocks">
+        <div class="clock-col"><div class="clock-k">UTC</div><div class="clock-v" id="clock-utc">-</div></div>
+        <div class="clock-col"><div class="clock-k">Local</div><div class="clock-v" id="clock-local">-</div></div>
+      </div>
+
+      <div class="tb-operator" id="tb-operator" title="Switch role">
+        <div class="op-avatar" id="op-avatar">LF</div>
+        <div class="op-meta">
+          <div class="op-name" id="op-name">L. Flindt</div>
+          <div class="op-role" id="op-role">Operator</div>
+        </div>
+        <div class="op-caret">▾</div>
+      </div>
+    </header>
+    <div id="role-menu" class="role-menu" style="display:none;"></div>
+
+    <!-- ─────────── RECEIVER DASHBOARD (hidden by default, shown when role = receiver) ─────────── -->
+    <div id="receiver-view" style="display:none;"></div>
+
+    <!-- ─────────── HISTORY VIEW (event browser + timeline) ─────────── -->
+    <div id="history-view" style="display:none;"></div>
+
+    <!-- ─────────── FLEET VIEW (sensor health dashboard) ─────────── -->
+    <div id="fleet-view" style="display:none;"></div>
+
+    <!-- ─────────── CONFIG VIEW (destinations + rules) ─────────── -->
+    <div id="config-view" style="display:none;"></div>
+
+    <!-- ─────────── LEFT ALERT STRIP ─────────── -->
+    <button id="alert-strip-toggle" class="edge-toggle" data-side="left" title="Collapse alerts">‹</button>
+    <aside id="alert-strip">
+      <div class="as-hdr">
+        <span class="as-title">Event Ledger</span>
+        <span class="as-count" id="alert-count">-</span>
+      </div>
+
+      <div class="as-filters" id="alert-filters">
+        <span class="chip on" data-filter="all">All</span>
+        <span class="chip" data-filter="hostile">Hostile</span>
+        <span class="chip" data-filter="friendly">Friendly</span>
+        <span class="chip" data-filter="resolved">Resolved</span>
+      </div>
+
+      <div class="as-body" id="alert-list"></div>
+    </aside>
+
+    <!-- ─────────── RIGHT DETAIL PANEL ─────────── -->
+    <button id="detail-panel-toggle" class="edge-toggle" data-side="right" title="Collapse detail">›</button>
+    <aside id="detail-panel">
+      <div id="detail-resize-handle" title="Drag to resize"></div>
+      <div id="detail-empty" class="dp-empty">
+        <div class="dp-empty-icon">◇</div>
+        <div class="dp-empty-title">No event selected</div>
+        <div class="dp-empty-sub">Click an event in the ledger or a live track on the map.</div>
+      </div>
+      <div id="detail-body" style="display:none;"></div>
+    </aside>
+
+    <!-- ─────────── SITE OVERVIEW CARD (bottom-left of map) ─────────── -->
+    <div id="site-overview" style="display:none;">
+      <div class="so-hdr">
+        <span class="so-eyebrow">Site</span>
+        <span class="so-name" id="site-overview-name">-</span>
+        <div class="so-hdr-tools">
+          <button class="so-range" data-range="24h">24h</button>
+          <button class="so-toggle" id="site-overview-toggle" title="Collapse">−</button>
+        </div>
+      </div>
+      <div class="so-body" id="site-overview-body">
+        <div class="so-stats" id="site-overview-stats"></div>
+      </div>
+    </div>
+
+    <!-- ─────────── SENSOR POPUP (positioned dynamically) ─────────── -->
+    <div id="sensor-popup" style="display:none;"></div>
+
+    <!-- ─────────── SENSOR POV CONTROLS (shown during POV mode) ─────────── -->
+    <div id="sensor-pov-controls">
+      <span class="pov-badge">POV</span>
+      <span class="pov-label" id="pov-label">-</span>
+      <button class="pov-exit-btn" id="pov-exit-btn">Exit POV</button>
+    </div>
+
+    <!-- Floating map-chrome chip: labels toggle. Visible in receiver +
+         admin modes (operator has the same control in #control-panel).
+         Sync driven by window.__toggleLabels / __labelsVisible. -->
+    <button id="labels-chip" class="labels-chip is-on" title="Toggle map labels">
+      <span class="labels-chip-dot"></span>
+      <span class="labels-chip-txt">Labels</span>
+    </button>
+
+    <!-- ─────────── CONTROL PANEL (imagery + fly-to) ─────────── -->
     <div id="control-panel">
-      <div class="cp-section">
-        <div class="cp-label">Imagery</div>
-        <div class="cp-group" role="group" aria-label="Imagery mode">
-          <button class="cp-btn active" data-mode="auto">Auto</button>
-          <button class="cp-btn" data-mode="day">Day</button>
+      <div class="cp-master-hdr">
+        <span class="cp-master-title">Map Controls</span>
+        <button class="cp-collapse" id="cp-master-toggle" title="Collapse">−</button>
+      </div>
+      <div id="cp-body">
+      <div class="cp-section" id="cp-imagery-section">
+        <div class="cp-hdr">
+          <span class="cp-label">Imagery</span>
+          <button class="cp-collapse" data-cp-collapse="cp-imagery-section" title="Collapse">−</button>
+        </div>
+        <div class="cp-group cp-collapsible">
+          <button class="cp-btn" data-mode="auto">Auto</button>
+          <button class="cp-btn active" data-mode="day">Day</button>
           <button class="cp-btn" data-mode="night">Night</button>
         </div>
       </div>
-
+      <div class="cp-section" id="cp-overlays-section">
+        <div class="cp-hdr">
+          <span class="cp-label">Overlays</span>
+          <button class="cp-collapse" data-cp-collapse="cp-overlays-section" title="Collapse">−</button>
+        </div>
+        <div class="cp-group cp-collapsible">
+          <button class="cp-btn active" data-overlay="labels">Labels</button>
+          <button class="cp-btn active" data-overlay="icons">Icons</button>
+          <button class="cp-btn active" data-overlay="projections">Projections</button>
+        </div>
+      </div>
       <div class="cp-section">
         <div class="cp-label">Fly to</div>
-        <div class="cp-group cp-group-vert">
+        <div class="cp-group cp-group-vert" id="fly-to-group">
           <button class="cp-btn wide" data-fly="cph">CPH Airport</button>
-          <button class="cp-btn wide" data-fly="alps">Swiss Alps</button>
+          <button class="cp-btn wide" data-fly="esbjerg">Esbjerg Harbour</button>
+          <div class="fly-group" id="fly-group-energinet">
+            <button class="cp-btn wide fly-group-hdr" data-fly-expand="energinet">
+              <span>Energinet</span>
+              <span class="fly-caret">▸</span>
+            </button>
+            <div class="fly-group-body" id="fly-group-energinet-body" style="display:none;">
+              <button class="cp-btn wide fly-sub" data-fly="energinet_hovegaard">Hovegård</button>
+              <button class="cp-btn wide fly-sub" data-fly="energinet_bjaeverskov">Bjæverskov HVDC</button>
+              <button class="cp-btn wide fly-sub" data-fly="energinet_landerupgaard">Landerupgård</button>
+              <button class="cp-btn wide fly-sub" data-fly="energinet_kassoe">Kassø</button>
+              <button class="cp-btn wide fly-sub" data-fly="energinet_ferslev">Ferslev</button>
+              <button class="cp-btn wide fly-sub" data-fly="energinet_amager_koblingsstation">Amager Koblingsstation</button>
+            </div>
+          </div>
           <button class="cp-btn wide" data-fly="denmark">Denmark</button>
           <button class="cp-btn wide" data-fly="globe">Globe</button>
         </div>
       </div>
+      <div class="cp-section">
+        <div class="cp-label">Simulate Threat</div>
+        <select class="sim-select" id="sim-site-select">
+          <option value="cph">CPH Airport</option>
+          <option value="esbjerg">Esbjerg Harbour</option>
+          <option value="energinet_hovegaard">Energinet · Hovegård</option>
+          <option value="energinet_bjaeverskov">Energinet · Bjæverskov HVDC</option>
+          <option value="energinet_landerupgaard">Energinet · Landerupgård</option>
+          <option value="energinet_kassoe">Energinet · Kassø</option>
+          <option value="energinet_ferslev">Energinet · Ferslev</option>
+        </select>
+        <div class="cp-group cp-group-vert sim-panel" id="sim-panel-active"></div>
+        <button class="cp-btn wide cancel-btn" id="cancel-threat" style="display:none;">Cancel active threat</button>
+      </div>
+      </div>
     </div>
+
+    <!-- ─────────── STATUS BAR ─────────── -->
+    <footer id="status-bar">
+      <div class="sb-cell" id="sb-sensors"><span class="sb-dot ok"></span>Sensors <b>-</b></div>
+      <div class="sb-cell" id="sb-site-scope">Scope <b>All sites</b></div>
+      <div class="sb-cell">Model <b>v0.2-mixed</b></div>
+      <div class="sb-cell">Detection latency <b>112 ms</b></div>
+      <div class="sb-cell">Backend <b>nominal</b></div>
+      <div class="sb-cell push">Uptime <b>47:23:15</b></div>
+      <div class="sb-cell">Session <b>lucasaflindt · site-op</b></div>
+    </footer>
+
+    <!-- ─────────── ESCALATE MODAL (hidden by default) ─────────── -->
+    <div id="escalate-modal" class="modal-backdrop" style="display:none;">
+      <div class="modal-card" id="escalate-modal-card"></div>
+    </div>
+
+    <!-- ─────────── CONFIG MODAL (destination editor) ─────────── -->
+    <div id="config-modal" class="modal-backdrop" style="display:none;">
+      <div class="modal-card wide" id="config-modal-card"></div>
+    </div>
+
+    <!-- ─────────── BRIEF PREVIEW MODAL ─────────── -->
+    <div id="brief-modal" class="modal-backdrop" style="display:none;">
+      <div class="brief-modal-card" id="brief-modal-card"></div>
+    </div>
+
+    <!-- ─────────── RUNBOOK DRAWER (slides in from right edge) ─────────── -->
+    <div id="runbook-drawer" style="display:none;"></div>
+
+    <!-- ─────────── RULES MODAL (auto-escalation rules editor) ─────────── -->
+    <div id="rules-modal" class="modal-backdrop" style="display:none;">
+      <div class="modal-card wide" id="rules-modal-card"></div>
+    </div>
+
+    <!-- ─────────── TOAST NOTIFICATION ─────────── -->
+    <div id="toast" style="display:none;"></div>
 
     <script type="module" src="/src/main.js"></script>
   </body>
