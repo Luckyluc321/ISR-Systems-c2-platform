@@ -12469,7 +12469,22 @@ async function main() {
   document.addEventListener('click', (ev) => {
     if (!roleMenu.contains(ev.target) && ev.target !== tbOperator) roleMenu.style.display = 'none';
   });
-  onRoleChange(() => { updateOperatorChip(); _selectedReceiverEventId = null; _respondingEscId = null; _workspaceEventId = null; _workspaceMode = 'report'; });
+  onRoleChange(() => {
+    updateOperatorChip();
+    _selectedReceiverEventId = null;
+    _respondingEscId = null;
+    _workspaceEventId = null;
+    _workspaceMode = 'report';
+    _mistralFiredForEvent = null;
+    _lastReceiverViewSig = null;
+    // Exit live map mode explicitly. Without this, the workspace-map-
+    // active body class + Cesium map state persist across role switch,
+    // and the new role's landing page (parent tile grid, or leaf inbox)
+    // renders layered ON TOP of the still-visible map — clicks pass
+    // through to the map, nothing responds. Fix: hard-clear map mode
+    // on every role change so the display state is clean.
+    _exitMapMode();
+  });
   onSelectionChange(() => { if (getActiveRole().kind === 'receiver') renderReceiverView(); });
   updateOperatorChip();
 
