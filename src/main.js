@@ -2660,6 +2660,11 @@ async function main() {
       arrivedTs: isStatic ? Date.now() : null,
       engageStartTs: isStatic ? Date.now() : null,
       curLat: originLat, curLon: originLon,
+      // Airborne cruise altitude (m AGL). Interceptor climbs from
+      // this baseline toward the enemy drone's altitude during chase.
+      // Ground vehicles ignore this — CLAMP_TO_GROUND on the billboard.
+      curAlt: profile.airborne ? 60 : 0,
+      targetAlt: profile.airborne ? 60 : 0,
       originLat, originLon,
       targetLat: threatLat, targetLon: threatLon,
       heading: _bearingRad(originLat, originLon, threatLat, threatLon),
@@ -2717,18 +2722,20 @@ async function main() {
     const iconUrl = iconCanvas.toDataURL();
     d.entity = viewer.entities.add({
       position: new Cesium.CallbackProperty(() => (
-        Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0)
+        // Airborne interceptors render at their tracked altitude
+        // (d.curAlt) so climbing/descending to match an enemy drone
+        // reads properly in 3D. Ground vehicles stay at 0 and use
+        // CLAMP_TO_GROUND on the billboard below.
+        Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? (d.curAlt || 60) : 0)
       ), false),
       billboard: {
         image: iconUrl,
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-        // Per-profile scale override (interceptor swarm is 0.5 so 3
-        // small icons read as a pack, not one blob). Default 0.85.
+        // Airborne → render at position.height. Ground → clamp.
+        heightReference: d.profile.airborne
+          ? Cesium.HeightReference.RELATIVE_TO_GROUND
+          : Cesium.HeightReference.CLAMP_TO_GROUND,
         scale: d.profile.billboardScale ?? 0.85,
-        // Keep the icon visible at Denmark-wide zoom (up to ~500km eye
-        // distance). Without this, the 56x56 canvas is <1px when zoomed
-        // out and the operator can't see the dispatch happen.
         scaleByDistance: new Cesium.NearFarScalar(1000, 1.4, 500000, 0.7),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
@@ -2904,10 +2911,35 @@ async function main() {
         const cA = Cesium.Cartographic.fromCartesian(cartAssigned);
         d.targetLat = Cesium.Math.toDegrees(cA.latitude);
         d.targetLon = Cesium.Math.toDegrees(cA.longitude);
+        // Track target altitude too so airborne interceptor can climb
+        // to match. Overwatch flies at 80-125m AGL — interceptor needs
+        // to lift from cruise (60m) up to that ceiling to reach it.
+        if (typeof cA.height === 'number' && !Number.isNaN(cA.height)) {
+          d.targetAlt = cA.height;
+        }
       }
     } else if (event?.lastPosition && !targetLost && !d.assignedWreckageId) {
       d.targetLat = event.lastPosition.lat;
       d.targetLon = event.lastPosition.lon;
+      if (typeof event.lastPosition.alt === 'number') d.targetAlt = event.lastPosition.alt;
+    }
+
+    // Altitude interpolation for airborne interceptors — climb or
+    // descend toward the target altitude at a limited climb rate so
+    // the icon visibly rises to reach a high-flying overwatch drone
+    // instead of teleporting vertically.
+    if (d.profile.airborne && (d.state === 'en_route' || d.state === 'engaging')) {
+      const dtAlt = Math.max(0.001, (now - (d._altLastFrameTs || now)) / 1000);
+      d._altLastFrameTs = now;
+      const climbRateMs = d.profile.climbRateMs || 6;   // ~6 m/s = 360 m/min, realistic for quadcopter
+      const desiredAlt = d.targetAlt || 60;
+      const altDelta = desiredAlt - (d.curAlt || 60);
+      const maxAltStep = climbRateMs * dtAlt;
+      if (Math.abs(altDelta) <= maxAltStep) {
+        d.curAlt = desiredAlt;
+      } else {
+        d.curAlt = (d.curAlt || 60) + Math.sign(altDelta) * maxAltStep;
+      }
     }
 
     // Phase F: RTB behaviour when target lost signal before arrival
@@ -3314,9 +3346,11 @@ async function main() {
       _cachedT = Math.min(1, (now - startTs) / travelMs);
       return _cachedT;
     };
-    // Origin altitude — interceptor drone is airborne too. Cap at 8m
-    // ground for wildlife/ground vehicles that don't have altitude.
-    const _originAlt = () => d.profile.airborne ? 60 : 8;
+    // Origin altitude — reads the interceptor's LIVE altitude
+    // (d.curAlt) so bullets fire from where the drone actually is.
+    // Airborne interceptors climb to match the enemy, so tracers rise
+    // with them. Ground vehicles stay at 8 m.
+    const _originAlt = () => d.profile.airborne ? (d.curAlt || 60) : 8;
 
     // Bullet-in-flight position: interpolated between LIVE origin
     // (interceptor at its cruise altitude) and LIVE target (enemy
