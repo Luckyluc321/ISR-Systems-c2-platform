@@ -2921,6 +2921,32 @@ async function main() {
       return;
     }
 
+    // PER-TARGET SIGNAL LOSS. Interceptor is chasing a specific
+    // hostile drone whose billboard just went hidden — the drone left
+    // ALL sensor coverage (billboard.show=false is set per tick when
+    // no sensor sees it). Even though the drone isn't neutralised and
+    // the event as a whole may still be active (other drones still
+    // tracked), THIS interceptor's target is gone from the mesh.
+    // Follow the last-known coord along the trajectory it was heading
+    // (rtb_via_last_known already flies to the coord and orbits),
+    // then rtb_home takes over from there — natural "hunt to the
+    // beach, then turn back" behaviour Lucas asked for.
+    if ((d.state === 'en_route' || d.state === 'engaging')
+        && d.profile.supportsRTB
+        && d.assignedSwarmMember
+        && !d.assignedSwarmMember.neutralised
+        && d.assignedSwarmMember.billboard
+        && d.assignedSwarmMember.billboard.show === false) {
+      d.state = 'rtb_via_last_known';
+      d.rtbTargetLat = d.targetLat;
+      d.rtbTargetLon = d.targetLon;
+      d.rtbOrbitStartTs = null;
+      d.lastFrameTs = now;
+      if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+      toast(`${d.assetName} lost signal on target. Following last known trajectory to edge of coverage.`, 'warn');
+      return;
+    }
+
     // Distance-based RTB, with pursuit override.
     //
     //   maxChaseKm      : soft cap (default 15). RTB at this range
