@@ -3230,9 +3230,7 @@ async function main() {
     // reassigned to downable[memberIndex] here — throwing away the
     // nearest-unchased pick the re-target logic made after its first
     // kill.
-    if (d.assignedSwarmMember
-        && !d.assignedSwarmMember.neutralised
-        && d.assignedSwarmMember.role !== 'overwatch') {
+    if (d.assignedSwarmMember && !d.assignedSwarmMember.neutralised) {
       return;
     }
     // Downable now includes the LEAD drone (via _allDownableHostiles).
@@ -3451,7 +3449,7 @@ async function main() {
       // engageRangeM (300m) of the target. Prevents the "drone
       // marked Downed without ever being hit" bug when the enemy
       // fled outside range before the 4s engagement timer expired.
-      if (sw && !sw.neutralised && sw.role !== 'overwatch' && d._firedAtLeastOnce) {
+      if (sw && !sw.neutralised && d._firedAtLeastOnce) {
         // Hit animation at THIS drone's live position
         const cart = sw.billboard?.position?.getValue?.(Cesium.JulianDate.now());
         if (cart) {
@@ -3566,16 +3564,19 @@ async function main() {
         event._interceptorGroupsCompleted.add(d.groupId);
         let downedCount = 0;
         let overwatchSurvived = false;
-        // Count LEAD too — it's a first-class hostile now.
+        // Count LEAD + swarm members. Overwatch is now a valid target,
+        // so it can either be killed (downedCount++) or escape
+        // (overwatchSurvived=true). Every dead entry counts toward
+        // downedCount regardless of role.
         if (state?.leadSwarmMember) {
           const ls = state.leadSwarmMember;
-          if (ls.role === 'overwatch') overwatchSurvived = overwatchSurvived || !ls.neutralised;
-          else if (ls.neutralised) downedCount++;
+          if (ls.neutralised) downedCount++;
+          else if (ls.role === 'overwatch') overwatchSurvived = true;
         }
         if (state?.swarmBillboards?.length) {
           for (const sw2 of state.swarmBillboards) {
-            if (sw2.role === 'overwatch') { overwatchSurvived = overwatchSurvived || !sw2.neutralised; continue; }
             if (sw2.neutralised) downedCount++;
+            else if (sw2.role === 'overwatch') overwatchSurvived = true;
           }
         }
         // Auto-outcome on the dispatch group
@@ -6702,21 +6703,25 @@ async function main() {
     });
   }
 
-  // Helper: every downable hostile in an event, LEAD + swarm members
-  // combined, filtered to non-overwatch non-neutralised. Interceptor
-  // re-target + assign + recovery logic all read through this so the
-  // LEAD drone is a first-class target.
+  // Helper: every live hostile in an event, LEAD + swarm members
+  // combined, filtered to non-neutralised. Overwatch is included so
+  // interceptors keep pursuing after the wingmen + lead are down —
+  // matches Lucas's rule "never head home unless all targets killed".
+  // Overwatch is still difficult to catch: it flies higher (interceptor
+  // must climb at 6 m/s) and speeds up when siblings die (see the
+  // overwatch-panic logic in the swarm tick). Narrative outcome
+  // ("overwatch escaped") stays realistic — pursuit ends at
+  // maxPursuitKm or coverage loss, not by hard-coded exclusion.
   function _allDownableHostiles(eventId) {
     const st = droneState.get(eventId);
     if (!st) return [];
     const arr = [];
-    if (st.leadSwarmMember && !st.leadSwarmMember.neutralised
-        && st.leadSwarmMember.role !== 'overwatch') {
+    if (st.leadSwarmMember && !st.leadSwarmMember.neutralised) {
       arr.push(st.leadSwarmMember);
     }
     if (st.swarmBillboards) {
       for (const sw of st.swarmBillboards) {
-        if (!sw.neutralised && sw.role !== 'overwatch') arr.push(sw);
+        if (!sw.neutralised) arr.push(sw);
       }
     }
     return arr;
@@ -7114,21 +7119,34 @@ async function main() {
             state._leadLastSampleMs = nowMs;
           }
         }
+        // PANIC MULTIPLIER — survivors pick up the pace as siblings
+        // die. Real-world doctrine: once the pack takes losses, the
+        // remaining airframes accelerate to break contact. deadRatio
+        // 0 → mult 1.0 (baseline). deadRatio 1.0 (all downable dead
+        // except this one) → mult 1.8 (60% faster to make escape
+        // realistic without teleporting). Applied via per-drone
+        // accumulated waypoint time so survivors advance faster than
+        // baseline tSec without disrupting other simulation timing.
+        let _totalDownable = state.swarmBillboards.length + (state.leadSwarmMember ? 1 : 0);
+        let _deadCount = state.swarmBillboards.filter(x => x.neutralised).length
+                        + ((state.leadSwarmMember?.neutralised) ? 1 : 0);
+        const _deadRatio = _totalDownable > 0 ? _deadCount / _totalDownable : 0;
+        const _panicMult = 1 + 0.8 * _deadRatio;
         for (let i = 0; i < state.swarmBillboards.length; i++) {
           const sw = state.swarmBillboards[i];
-          // Phase D: if this swarm member was neutralised by an
-          // interceptor engagement, hide EVERY render surface (billboard,
-          // trailLine polyline, projection line) and stop growing the
-          // position arrays. Kills the "ghost trajectory line still
-          // drawing after drone is gone" bug — property name was
-          // sw.trailLine (not sw.trail).
           if (sw.neutralised) {
             sw.billboard.show = false;
             if (sw.trailLine) sw.trailLine.show = false;
             if (sw.projLine) sw.projLine.show = false;
             continue;
           }
-          const pos = _interpolateWaypoints(sw.waypoints, tSec);
+          // Accumulated per-drone waypoint time, bumped by panicMult
+          // each tick. First tick just seeds tSec — no jump.
+          if (sw._prevTSec == null) { sw._prevTSec = tSec; sw._acumTSec = tSec; }
+          const _dtSec = tSec - sw._prevTSec;
+          sw._prevTSec = tSec;
+          sw._acumTSec += _dtSec * _panicMult;
+          const pos = _interpolateWaypoints(sw.waypoints, sw._acumTSec);
           if (!pos) {
             sw.billboard.show = false;
             if (sw.projLine) sw.projLine.show = false;
