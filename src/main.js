@@ -2886,6 +2886,21 @@ async function main() {
         toast(`${d.assetName} at edge of coverage, cannot maintain visual on target. Returning to base.`, 'warn');
         return;
       }
+      // COAST RTB. Never chase past the CPH east coast (Amager) into
+      // Øresund. Airborne interceptors would otherwise happily fly to
+      // Malmö on a hostile drone that fled to open water. 12.71°E is
+      // roughly Amager's east shoreline. Applies to any airborne
+      // dispatch that has supportsRTB regardless of origin base.
+      if (d.profile.airborne && d.curLon > 12.71) {
+        d.state = 'rtb_via_last_known';
+        d.rtbTargetLat = d.curLat;
+        d.rtbTargetLon = d.curLon;
+        d.rtbOrbitStartTs = null;
+        d.lastFrameTs = now;
+        if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+        toast(`${d.assetName} at coastline, target out over open water. Returning to base — cannot pursue into international airspace.`, 'warn');
+        return;
+      }
     }
 
     if (d.state === 'en_route') {
@@ -3367,6 +3382,7 @@ async function main() {
         d.engageStartTs = null;
         d._engageLastFrameTs = null;
         d._nextTracerTs = null;
+        d._firedAtLeastOnce = false;   // reset kill-gate for new target
         d.lastFrameTs = Date.now();
         const newCart = nearest.billboard?.position?.getValue?.(Cesium.JulianDate.now());
         if (newCart) {
@@ -3428,9 +3444,10 @@ async function main() {
     }
     if (getActiveRole().kind === 'receiver') {
       // Kill sets event.dispatchOutcomes → Step 4 (Confirm outcome)
-      // should appear. Invalidate the workspace-lock sig so the
-      // pillar re-renders past the pinned state.
-      _lastReceiverViewSig = null;
+      // should appear. Invalidate ONLY the console sig so the right
+      // pillar re-renders in place, without touching the center pane
+      // (Mistral streaming text stays intact) or the top bar.
+      _lastConsoleSig = null;
       renderReceiverView({ immediate: true });
     }
 
@@ -12631,6 +12648,33 @@ async function main() {
   // Live values (positions, ETAs, confidences) update via _patchLiveTelemetry
   // separately without needing a full re-render.
   let _lastReceiverViewSig = null;
+  // Zone-split render state for the workspace. Full-mount fires when
+  // the workspace opens or the event/mode changes. Otherwise only the
+  // Mission Console aside re-renders in place.
+  let _lastReceiverWorkspaceId = null;
+  let _lastReceiverWorkspaceMode = null;
+  let _lastConsoleSig = null;
+
+  function _consoleSignature(role, wsEvent) {
+    const roleDestSet = new Set(role?.destinationIds || []);
+    const escStatusHash = (wsEvent.escalations || [])
+      .filter(e => roleDestSet.has(e.destinationId))
+      .map(e => {
+        const acked = e.statusHistory?.some(h => h.status === 'acknowledged') ? 'a' : 'p';
+        const responded = e.response ? 'r' : 'nr';
+        return `${e.id}:${acked}:${responded}`;
+      }).join(',');
+    return [
+      role?.id || 'no-role',
+      wsEvent.id,
+      wsEvent.status,
+      wsEvent.outcome || 'n',
+      (wsEvent.counterDispatches || []).length > 0 ? 'cd1' : 'cd0',
+      Object.keys(wsEvent.dispatchOutcomes || {}).length > 0 ? 'o1' : 'o0',
+      (wsEvent.postIncidentDispatched || []).length > 0 ? 'h1' : 'h0',
+      escStatusHash,
+    ].join('|');
+  }
   function _receiverViewSignature(role, wsEvent, selectedEvId, receivedEvents) {
     // Strictly user-visible fields only. Auto-mutations that happen
     // per tick (escalations.length growing on reacquisition cascades,
@@ -12745,54 +12789,58 @@ async function main() {
       const wsEvent = receivedEvents.find(e => e.id === _workspaceEventId)
                     || EVENTS.find(e => e.id === _workspaceEventId);
       if (wsEvent) {
-        // WORKSPACE LOCK. Once the workspace is open, the pillar only
-        // re-renders when the caller EXPLICITLY forces it. User actions
-        // (ack, dispatch, respond, confirm outcome, close, workspace
-        // mode toggle, back) all pass opts.immediate=true. Automatic
-        // sig invalidation on state transitions (Step 3→4 kill
-        // resolution, Step 4→5 outcome confirmed, Step 5→6 handoff
-        // done, event closed) resets _lastReceiverViewSig to null,
-        // which passes the sig check below.
+        // ZONE-SPLIT RENDER. Full workspace innerHTML replace was the
+        // blink Lucas kept seeing — every kill / cascade / outcome
+        // transition rebuilt the whole DOM including the streaming
+        // Mistral text in the center pane, which cache-restore then
+        // repainted, flashing the whole screen.
         //
-        // Every OTHER trigger (NN detection tick, escalation
-        // delivered/read cascade, cross-cue auto-escalation to other
-        // agencies, patrol re-route, interceptor state chip flip,
-        // Mistral streaming completion, dispatch state transitions in
-        // other roles) is a NO-OP for the pillar. Live values that
-        // need to tick (position, ETA, elapsed) update via
-        // _patchLiveTelemetry direct textContent, no full re-render.
-        //
-        // This is the final fix for the recurring "post-summary
-        // pillar blinking constantly" bug — any residual sig-flip
-        // source is now inert while the workspace holds focus.
-        if (!opts.force && !opts.immediate && _lastReceiverViewSig !== null) {
+        // Now: full render only fires when the workspace SKELETON
+        // needs to change (first open, mode toggle, event switch,
+        // close). The Mission Console (right pillar) has its own
+        // signature and re-renders IN PLACE inside `.rws-console`
+        // without touching the center pane or top bar. Center pane
+        // (Report / Live Map) keeps its Mistral output intact through
+        // step transitions.
+        const isFullMount = _lastReceiverViewSig === null || _lastReceiverWorkspaceId !== wsEvent.id
+                          || _lastReceiverWorkspaceMode !== _workspaceMode;
+        if (isFullMount) {
+          const _priorScroll = {
+            center: receiverView.querySelector('.rws-center')?.scrollTop || 0,
+            console: receiverView.querySelector('.rws-console')?.scrollTop || 0,
+            report:  receiverView.querySelector('.rer-scroll')?.scrollTop || 0,
+          };
+          receiverView.innerHTML = renderEventWorkspace(wsEvent);
+          receiverView.style.display = 'block';
+          _lastReceiverWorkspaceId = wsEvent.id;
+          _lastReceiverWorkspaceMode = _workspaceMode;
+          _lastConsoleSig = _consoleSignature(role, wsEvent);
+          _lastReceiverViewSig = 'workspace-open';
+          requestAnimationFrame(() => {
+            const c = receiverView.querySelector('.rws-center');
+            const p = receiverView.querySelector('.rws-console');
+            const r = receiverView.querySelector('.rer-scroll');
+            if (c) c.scrollTop = _priorScroll.center;
+            if (p) p.scrollTop = _priorScroll.console;
+            if (r) r.scrollTop = _priorScroll.report;
+          });
+          _bindReceiverActions();
+          _fireMistralCaseFile(wsEvent);
           return;
         }
-        const sig = _receiverViewSignature(role, wsEvent, null, receivedEvents);
-        if (!opts.force && !opts.immediate && sig === _lastReceiverViewSig) return;
-        _lastReceiverViewSig = sig;
-        // Capture scroll positions of every scrollable pane BEFORE
-        // innerHTML replace so dispatch clicks don't fling the operator
-        // back to the top. Center pane, right pillar, left ledger.
-        const _priorScroll = {
-          center: receiverView.querySelector('.rws-center')?.scrollTop || 0,
-          console: receiverView.querySelector('.rws-console')?.scrollTop || 0,
-          report:  receiverView.querySelector('.rer-scroll')?.scrollTop || 0,
-        };
-        receiverView.innerHTML = renderEventWorkspace(wsEvent);
-        receiverView.style.display = 'block';
-        // Restore after the new DOM is in place. requestAnimationFrame
-        // ensures layout has flushed so scrollTop assignment sticks.
-        requestAnimationFrame(() => {
-          const c = receiverView.querySelector('.rws-center');
-          const p = receiverView.querySelector('.rws-console');
-          const r = receiverView.querySelector('.rer-scroll');
-          if (c) c.scrollTop = _priorScroll.center;
-          if (p) p.scrollTop = _priorScroll.console;
-          if (r) r.scrollTop = _priorScroll.report;
-        });
+        // Non-mount path: only the right pillar. Compute console sig.
+        // If unchanged, no work. If changed, replace ONLY the console
+        // aside HTML — center pane and top bar stay put. Mistral text
+        // in the center is preserved.
+        const consoleSig = _consoleSignature(role, wsEvent);
+        if (!opts.force && !opts.immediate && consoleSig === _lastConsoleSig) return;
+        _lastConsoleSig = consoleSig;
+        const consoleEl = receiverView.querySelector('.rws-console');
+        if (!consoleEl) return;
+        const priorScroll = consoleEl.scrollTop;
+        consoleEl.innerHTML = renderWorkspaceMissionConsole(wsEvent);
+        requestAnimationFrame(() => { consoleEl.scrollTop = priorScroll; });
         _bindReceiverActions();
-        _fireMistralCaseFile(wsEvent);
         return;
       }
       _workspaceEventId = null;   // event vanished, fall through to inbox
@@ -12954,12 +13002,11 @@ async function main() {
       const action = el.dataset.rcv;
       const id = el.dataset.id;
       const escId = el.dataset.esc;
-      // Every user click through the receiver router is a legit
-      // reason to re-render the workspace. Invalidate the lock sig up
-      // front so all downstream renderReceiverView() calls in the
-      // action handlers below pass through, without having to sprinkle
-      // { immediate: true } across every one of them.
-      _lastReceiverViewSig = null;
+      // Every user click through the receiver router should re-render
+      // the console (Step transitions, dispatch state, response state).
+      // Invalidate ONLY the console sig — full workspace mount stays
+      // stable so center pane Mistral output is preserved.
+      _lastConsoleSig = null;
       if (action === 'pick') { _selectedReceiverEventId = id; _respondingEscId = null; renderReceiverView(); }
       else if (action === 'ack') {
         // Event id resolution priority: button dataset (workspace case-
@@ -12971,8 +13018,8 @@ async function main() {
         if (!evtId) { toast('No event context for acknowledgement', 'err'); return; }
         updateEscalationStatus(evtId, escId, 'acknowledged');
         toast('Acknowledgment sent to operator', 'ok');
-        _lastReceiverViewSig = null;   // force re-render so Step 1 unlocks
-        renderReceiverView();
+        _lastConsoleSig = null;   // console-only re-render so Step 1 unlocks
+        renderReceiverView({ immediate: true });
       }
       else if (action === 'advisory-view') { toast(`Advisory only: track ${id} is projecting toward your site. Full escalation not yet sent.`, 'info'); }
       else if (action === 'qra-dispatch') { triggerQraIntercept(id); renderReceiverView(); }
@@ -13000,8 +13047,8 @@ async function main() {
           confirmedBy: getActiveRole()?.id || 'unknown',
         };
         toast(`Outcome confirmed: ${outcomeDef?.label || outcomeId}`, 'ok');
-        _lastReceiverViewSig = null;   // force re-render so Step 5 unlocks
-        renderReceiverView();
+        _lastConsoleSig = null;   // console-only re-render so Step 5 unlocks
+        renderReceiverView({ immediate: true });
       }
       else if (action === 'counter-dispatch') {
         // Level 3 counter-response dispatch. Uses the current event's
@@ -13071,15 +13118,27 @@ async function main() {
       }
       else if (action === 'dispatch-postinc') { dispatchPostIncident(id, el.dataset.dest); renderReceiverView(); }
       else if (action === 'close-event') { closePostIncidentEvent(id); renderReceiverView(); }
-      else if (action === 'respond-open') { _respondingEscId = escId; renderReceiverView(); setTimeout(() => document.getElementById('rcv-response-text')?.focus(), 20); }
-      else if (action === 'respond-cancel') { _respondingEscId = null; renderReceiverView(); }
+      else if (action === 'respond-open') {
+        // Composer lives in the center pane → needs full mount, not
+        // just console re-render.
+        _respondingEscId = escId;
+        _lastReceiverViewSig = null;
+        renderReceiverView({ immediate: true });
+        setTimeout(() => document.getElementById('rcv-response-text')?.focus(), 20);
+      }
+      else if (action === 'respond-cancel') {
+        _respondingEscId = null;
+        _lastReceiverViewSig = null;
+        renderReceiverView({ immediate: true });
+      }
       else if (action === 'respond-send') {
         const txt = document.getElementById('rcv-response-text').value;
         if (!txt.trim()) { toast('Response cannot be empty', 'err'); return; }
         respondToEscalation(_selectedReceiverEventId, escId, txt, `${getActiveRole().person} (${getActiveRole().org})`);
         _respondingEscId = null;
         toast('Response sent to operator', 'ok');
-        renderReceiverView();
+        _lastReceiverViewSig = null;
+        renderReceiverView({ immediate: true });
       }
       // ── Event Workspace routing ─────────────────────────────
       else if (action === 'open-report') { _workspaceEventId = id; _workspaceMode = 'report'; _exitMapMode(); renderReceiverView(); }
@@ -13089,7 +13148,15 @@ async function main() {
         if (ev) _enterMapMode(ev);
         renderReceiverView();
       }
-      else if (action === 'workspace-back' || action === 'workspace-close') { _workspaceEventId = null; _mistralFiredForEvent = null; _exitMapMode(); renderReceiverView(); }
+      else if (action === 'workspace-back' || action === 'workspace-close') {
+        _workspaceEventId = null;
+        _mistralFiredForEvent = null;
+        _lastReceiverWorkspaceId = null;
+        _lastReceiverWorkspaceMode = null;
+        _lastConsoleSig = null;
+        _exitMapMode();
+        renderReceiverView();
+      }
       else if (action === 'role-back-parent') {
         // Hierarchy back-nav: switch active role UP one level so the
         // duty officer returns to the parent chooser (e.g. Rigspoliti
@@ -13139,6 +13206,9 @@ async function main() {
     _workspaceMode = 'report';
     _mistralFiredForEvent = null;
     _lastReceiverViewSig = null;
+    _lastReceiverWorkspaceId = null;
+    _lastReceiverWorkspaceMode = null;
+    _lastConsoleSig = null;
     // Exit live map mode explicitly. Without this, the workspace-map-
     // active body class + Cesium map state persist across role switch,
     // and the new role's landing page (parent tile grid, or leaf inbox)
