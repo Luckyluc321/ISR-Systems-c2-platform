@@ -6797,22 +6797,20 @@ async function main() {
         // sensor coverage. If the track was neutralised, keep it hidden —
         // don't let the position update override the kill teardown.
         const beingChased = _friendlyMissile.active && _friendlyMissile.targetEventId === event.id;
-        // Lead drone was killed by interceptor — hide billboard, skip
-        // position updates. Matches the swarm-member neutralised path
-        // at line ~7080.
+        // Lead drone was killed by interceptor — hide the top-level
+        // lead billboard + shadow. Position callbacks below still run
+        // so the swarm-member update loop later in this forEach
+        // iteration is NOT skipped (that was the "last drone freezes,
+        // interceptors fly home" bug — returning here killed the swarm
+        // updates too). Interceptor stale-target detection fires from
+        // leadSwarmMember.neutralised flag, not from billboard show
+        // state, so hiding is sufficient.
         const leadDown = state.leadSwarmMember?.neutralised;
         const shouldShow = leadDown ? false : (state.closedAt
           ? false
           : (inAnyCoverage === null ? true : (inAnyCoverage || beingChased)));
         state.billboard.show = shouldShow;
         state.shadow.show = shouldShow;
-        if (leadDown) {
-          // Skip the rest of this tick for the lead — don't update
-          // position, don't trip fresh coverage rings, don't paint
-          // trail. It's dead. This callback is a forEach, so `return`
-          // exits this iteration only.
-          return;
-        }
         // Multi-site tracks fire ENTRY / EXIT / OUT OF RANGE markers per
         // site as the missile transits each coverage zone.
         if (event.multiSiteTrack || event.templateKey === 'cruise_missile_to_amalienborg') {
