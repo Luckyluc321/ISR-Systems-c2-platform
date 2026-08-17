@@ -8536,7 +8536,44 @@ async function main() {
     return { title, summary: core };
   }
 
+  // Sig memoization for the closed-event panel. Tick loops fire
+  // renderDetailPanel many times per second; on a closed event that
+  // routes to renderPalantirClosedPanel, each call would full-replace
+  // detailBodyEl.innerHTML and the whole summary flashed continuously
+  // (Lucas: admin live-telemetry pop-up "begins to blink" once it
+  // turns into a summary). Skip the innerHTML replace when nothing
+  // user-visible changed. Cleared on user click via _plToggled and on
+  // event selection change.
+  let _lastClosedPanelSig = null;
+  let _lastClosedPanelEventId = null;
+  function _closedPanelSig(e) {
+    return [
+      e.id,
+      e.status,
+      e.outcome || 'n',
+      e.neutralizedBy || '',
+      e.neutralizedAt || '',
+      (e.notes || []).length,
+      (e.linkedEventIds || []).length,
+      (e.contributingSensors || []).length,
+      Math.round((e.confidence || 0) * 100),
+      e.classification,
+      e.threat,
+      e.duration || 0,
+      // Toggle state hash — user opening/closing a section must
+      // re-render even though nothing on the event changed.
+      Array.from(_plToggled.entries())
+        .filter(([k]) => k.startsWith(e.id + '::'))
+        .map(([k, v]) => `${k}:${v ? 1 : 0}`)
+        .join(','),
+    ].join('|');
+  }
+
   function renderPalantirClosedPanel(e) {
+    const sig = _closedPanelSig(e);
+    if (sig === _lastClosedPanelSig && _lastClosedPanelEventId === e.id) return;
+    _lastClosedPanelSig = sig;
+    _lastClosedPanelEventId = e.id;
     const sev = _severityForEvent(e);
     const { title, summary } = _generateClosedEventSummary(e);
     const createdRel = _relativeTimeShort(e.startTime);
@@ -9001,9 +9038,11 @@ async function main() {
     if (!id) {
       // If no event selected, check for a target
       if (_selectedTargetId) {
+        _lastClosedPanelSig = null;   // routing away from closed panel
         const t = TARGETS.find(x => x.id === _selectedTargetId);
         if (t) return renderTargetInPanel(t);
       }
+      _lastClosedPanelSig = null;
       detailEmptyEl.style.display = 'flex';
       detailBodyEl.style.display = 'none';
       return;
@@ -9012,6 +9051,7 @@ async function main() {
     _selectedTargetId = null;
     const e = getEvent(id);
     if (!e) {
+      _lastClosedPanelSig = null;
       detailEmptyEl.style.display = 'flex';
       detailBodyEl.style.display = 'none';
       return;
@@ -9024,6 +9064,10 @@ async function main() {
     // keep the legacy dense telemetry layout since live response needs
     // every field visible without a click.
     if (!isActive) return renderPalantirClosedPanel(e);
+    // Active event path — invalidate closed-panel cache so a later
+    // transition back to closed (or a different closed event) forces
+    // a fresh render.
+    _lastClosedPanelSig = null;
     const first = e.startTime.slice(11, 19) + 'Z';
     const last = (e.endTime || e.startTime).slice(11, 19) + 'Z';
     const dur = formatDuration(e.duration);
