@@ -2737,6 +2737,9 @@ async function main() {
         heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
+      // Clickable — the click handler picks this and dispatches to
+      // showDispatchPopup with the dispatch id.
+      properties: { type: 'dispatch', dispatchId: d.id },
     });
 
     if (d.profile.trail) {
@@ -2754,27 +2757,43 @@ async function main() {
   function _createRadiationEntity(d) {
     // Pulsing green cone/ellipse emanating from the jammer position
     // toward the threat. Animated via CallbackProperty per frame.
+    //
+    // Radius is computed ONCE per frame and shared between semiMajor +
+    // semiMinor. Previously each was an independent CallbackProperty
+    // reading Date.now(), so if the two callbacks fired 1ms apart the
+    // minor could edge microscopically above the major and Cesium
+    // would throw "semiMajorAxis must be greater than or equal to the
+    // semiMinorAxis", killing the whole viewer.
+    let _radCachedFrame = 0, _radCachedR = 500;
+    const _radRadius = () => {
+      const now = Date.now();
+      if (now === _radCachedFrame) return _radCachedR;
+      _radCachedFrame = now;
+      const t = ((now - d.engageStartTs) / 1500) % 1;
+      _radCachedR = 500 + t * 900;
+      return _radCachedR;
+    };
+    let _radCachedAlphaFrame = 0, _radCachedAlpha = 0;
+    const _radT = () => {
+      const now = Date.now();
+      if (now === _radCachedAlphaFrame) return _radCachedAlpha;
+      _radCachedAlphaFrame = now;
+      _radCachedAlpha = ((now - d.engageStartTs) / 1500) % 1;
+      return _radCachedAlpha;
+    };
     d.radiationEntity = viewer.entities.add({
       position: new Cesium.CallbackProperty(() => (
         Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0)
       ), false),
       ellipse: {
-        semiMajorAxis: new Cesium.CallbackProperty(() => {
-          const t = ((Date.now() - d.engageStartTs) / 1500) % 1;
-          return 500 + t * 900;
-        }, false),
-        semiMinorAxis: new Cesium.CallbackProperty(() => {
-          const t = ((Date.now() - d.engageStartTs) / 1500) % 1;
-          return 500 + t * 900;
-        }, false),
+        semiMajorAxis: new Cesium.CallbackProperty(_radRadius, false),
+        semiMinorAxis: new Cesium.CallbackProperty(_radRadius, false),
         material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
-          const t = ((Date.now() - d.engageStartTs) / 1500) % 1;
-          return Cesium.Color.fromCssColorString('#4dff9c').withAlpha(0.22 * (1 - t));
+          return Cesium.Color.fromCssColorString('#4dff9c').withAlpha(0.22 * (1 - _radT()));
         }, false)),
         outline: true,
         outlineColor: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
-          const t = ((Date.now() - d.engageStartTs) / 1500) % 1;
-          return Cesium.Color.fromCssColorString('#4dff9c').withAlpha(0.55 * (1 - t));
+          return Cesium.Color.fromCssColorString('#4dff9c').withAlpha(0.55 * (1 - _radT()));
         }, false)),
         outlineWidth: 2,
         height: 0,
@@ -3099,37 +3118,80 @@ async function main() {
     _spawnFlashEntity(d.curLon, d.curLat, 180, '#ffdb4d', 3, 8);
   }
 
-  // Single tracer round + impact flash at target.
-  // Both endpoints snapshotted at fire time — no CallbackProperty.
-  // Previously the tracer polyline read d.curLon/d.curLat live via
-  // callback, and the interceptor position was being reassigned every
-  // tick — so the tracer origin whipped around, drawing a bent line
-  // that read as "green line going in circles". Now the tracer is a
-  // straight snapshot from interceptor-at-fire to target-at-fire.
-  // Both are stable during the 220 ms tracer lifetime.
+  // Single tracer round — modeled on the F-35 AMRAAM visual.
+  // A small bright point travels from interceptor to target over
+  // 220 ms with a short trailing streak. On impact, a yellow flash
+  // fires at the target. Both endpoints frozen at spawn time so the
+  // projectile flies a straight, stable path even if the drone or
+  // interceptor moves during the flight.
   function _fireSingleTracerRound(d, target) {
     const startTs = Date.now();
-    const durMs = 220;
+    const travelMs = 220;
     const originLon = d.curLon;
     const originLat = d.curLat;
     const targetLon = target.lon;
     const targetLat = target.lat;
-    const tracerEntity = viewer.entities.add({
+    const dLat = targetLat - originLat;
+    const dLon = targetLon - originLon;
+
+    // Shared per-frame progress read. Same discipline as the radiation
+    // ellipse — one Date.now() per frame so all callbacks read the
+    // same t and endpoints never inconsistent frame-to-frame.
+    let _cachedFrame = 0, _cachedT = 0;
+    const _t = () => {
+      const now = Date.now();
+      if (now === _cachedFrame) return _cachedT;
+      _cachedFrame = now;
+      _cachedT = Math.min(1, (now - startTs) / travelMs);
+      return _cachedT;
+    };
+
+    // Bullet head — small bright glowing point.
+    const bullet = viewer.entities.add({
+      position: new Cesium.CallbackProperty(() => {
+        const t = _t();
+        return Cesium.Cartesian3.fromDegrees(originLon + dLon * t, originLat + dLat * t, 8);
+      }, false),
+      point: {
+        pixelSize: 5,
+        color: Cesium.Color.fromCssColorString('#c8ff8a'),
+        outlineColor: Cesium.Color.fromCssColorString('#ffffb0'),
+        outlineWidth: 1,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+
+    // Short trailing streak — bullet-length segment growing from
+    // origin as the round flies, capped at ~25% of the path length so
+    // it never touches back to the muzzle (looks like a bullet, not a
+    // laser). Fades out with the bullet position progress.
+    const streak = viewer.entities.add({
       polyline: {
-        positions: [
-          Cesium.Cartesian3.fromDegrees(originLon, originLat, 8),
-          Cesium.Cartesian3.fromDegrees(targetLon, targetLat, 8),
-        ],
-        width: 2,
+        positions: new Cesium.CallbackProperty(() => {
+          const t = _t();
+          const headLat = originLat + dLat * t;
+          const headLon = originLon + dLon * t;
+          const streakBack = Math.max(0, t - 0.25);
+          const tailLat = originLat + dLat * streakBack;
+          const tailLon = originLon + dLon * streakBack;
+          return [
+            Cesium.Cartesian3.fromDegrees(tailLon, tailLat, 8),
+            Cesium.Cartesian3.fromDegrees(headLon, headLat, 8),
+          ];
+        }, false),
+        width: 2.2,
         material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
-          const t = (Date.now() - startTs) / durMs;
-          return Cesium.Color.fromCssColorString('#a3ff70').withAlpha(Math.max(0, 1 - t));
+          return Cesium.Color.fromCssColorString('#a3ff70').withAlpha(0.85 * (1 - _t() * 0.4));
         }, false)),
         arcType: Cesium.ArcType.NONE,
       },
     });
-    setTimeout(() => { if (tracerEntity) viewer.entities.remove(tracerEntity); }, durMs + 30);
-    _spawnFlashEntity(targetLon, targetLat, 200, '#ffdb4d', 4, 12);
+
+    setTimeout(() => {
+      if (bullet) viewer.entities.remove(bullet);
+      if (streak) viewer.entities.remove(streak);
+      _spawnFlashEntity(targetLon, targetLat, 220, '#ffdb4d', 5, 14);
+    }, travelMs + 20);
   }
 
   // Small point flash — reused for muzzle + impact
@@ -7044,6 +7106,14 @@ async function main() {
         selectTarget(targetId);
         return;
       }
+      if (type === 'dispatch') {
+        // Patrol / interceptor / static counter-response asset — show
+        // the dispatch popup with unit info + live state. Reuses the
+        // sensor-popup DOM chrome for consistency.
+        const dispatchId = picked.id.properties.dispatchId.getValue();
+        showDispatchPopup(dispatchId);
+        return;
+      }
     }
     // Empty click (or clicked something non-interactive) — deselect the
     // active site so its coverage rings hide. Palantir-style "click away
@@ -7135,10 +7205,95 @@ async function main() {
     popup.style.display = 'none';
     popup.style.pointerEvents = 'none';
     activePopupSensor = null;
+    activePopupDispatch = null;
+    if (_dispatchPopupPollTimer) {
+      clearInterval(_dispatchPopupPollTimer);
+      _dispatchPopupPollTimer = null;
+    }
     if (activeCoverageEntity) {
       viewer.entities.remove(activeCoverageEntity);
       activeCoverageEntity = null;
     }
+  }
+
+  // ── Dispatch popup ── Reuses the sensor-popup DOM chrome.
+  // Anchors to the dispatch's live position each frame (postRender
+  // handler reads activePopupDispatch), so a moving patrol keeps the
+  // popup pinned to its icon. Content re-renders on a 500ms poll so
+  // state chip and ETA update while the popup is open.
+  let activePopupDispatch = null;
+  let _dispatchPopupPollTimer = null;
+
+  function showDispatchPopup(dispatchId) {
+    const d = _counterDispatches.get(dispatchId);
+    if (!d) return;
+    activePopupSensor = null;
+    activePopupDispatch = { dispatchId };
+    if (activeCoverageEntity) {
+      viewer.entities.remove(activeCoverageEntity);
+      activeCoverageEntity = null;
+    }
+    _renderDispatchPopupContent(d);
+    popup.style.display = 'block';
+    popup.style.pointerEvents = 'auto';
+    updatePopupPosition();
+    if (_dispatchPopupPollTimer) clearInterval(_dispatchPopupPollTimer);
+    _dispatchPopupPollTimer = setInterval(() => {
+      const live = _counterDispatches.get(dispatchId);
+      if (!live) { hideSensorPopup(); clearInterval(_dispatchPopupPollTimer); _dispatchPopupPollTimer = null; return; }
+      _renderDispatchPopupContent(live);
+    }, 500);
+  }
+
+  function _renderDispatchPopupContent(d) {
+    const stateLabel = { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE', rtb_via_last_known: 'RTB · LAST KNOWN', rtb_home: 'RTB · HOME' }[d.state] || (d.state || '').toUpperCase();
+    const stateClass = d.state === 'complete' ? 'offline' : d.state === 'engaging' ? 'degraded' : 'online';
+    const elapsedSec = Math.max(0, Math.floor((Date.now() - d.dispatchedTs) / 1000));
+    const elapsedStr = elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
+    const kindLabel = RESPONSE_OPTION_DETAILS?.[d.kind]?.displayName || d.kind;
+    const unitStr = (d.memberCount || 1) > 1 ? `Unit ${(d.memberIndex || 0) + 1} of ${d.memberCount}` : 'Single unit';
+    const distToTarget = (d.targetLat != null && d.targetLon != null)
+      ? Math.round(haversineM(d.curLat, d.curLon, d.targetLat, d.targetLon))
+      : null;
+    const speedKmh = d.profile?.cruiseKmh || 0;
+    const etaLine = (d.state === 'en_route' && distToTarget != null && speedKmh > 0)
+      ? `${Math.max(1, Math.round((distToTarget / 1000) / speedKmh * 60))} min ETA · ${distToTarget} m out`
+      : d.state === 'engaging' ? 'On station, engaging target'
+      : d.state === 'complete' ? 'Engagement complete'
+      : d.state === 'rtb_via_last_known' ? 'Signal lost, RTB via last-known coord'
+      : d.state === 'rtb_home' ? 'Returning to base'
+      : '';
+    const payload = d.profile?.firesTracer ? 'Machine-gun tracer' :
+                    d.profile?.radiationCone ? 'RF jamming array' :
+                    d.profile?.airborne ? 'Kinetic interceptor' : 'Ground response kit';
+    popup.innerHTML = `
+      <div class="pop-hdr">
+        <span class="pop-id">${d.groupName || d.assetName}</span>
+        <span class="pop-status pop-status-${stateClass}">${stateLabel}</span>
+      </div>
+      <div class="pop-label">${kindLabel}</div>
+
+      <div class="pop-section">
+        <div class="pop-k">Formation</div>
+        <div class="pop-v">${unitStr}</div>
+      </div>
+      <div class="pop-section">
+        <div class="pop-k">Payload</div>
+        <div class="pop-v">${payload}</div>
+      </div>
+      <div class="pop-section">
+        <div class="pop-k">Cruise speed</div>
+        <div class="pop-v">${speedKmh} km/h</div>
+      </div>
+      <div class="pop-section">
+        <div class="pop-k">Status</div>
+        <div class="pop-v accent">${etaLine}</div>
+      </div>
+      <div class="pop-section">
+        <div class="pop-k">Elapsed since dispatch</div>
+        <div class="pop-v">${elapsedStr}</div>
+      </div>
+    `;
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -7331,16 +7486,26 @@ async function main() {
   });
 
   function updatePopupPosition() {
-    if (!activePopupSensor) return;
-    const site = SITES[activePopupSensor.siteId];
-    const sensor = site.sensors.find((s) => s.id === activePopupSensor.sensorId);
-    if (!sensor) return;
+    let anchorLat, anchorLon;
+    if (activePopupSensor) {
+      const site = SITES[activePopupSensor.siteId];
+      const sensor = site.sensors.find((s) => s.id === activePopupSensor.sensorId);
+      if (!sensor) return;
+      anchorLat = sensor.lat;
+      anchorLon = sensor.lon;
+    } else if (activePopupDispatch) {
+      const d = _counterDispatches.get(activePopupDispatch.dispatchId);
+      if (!d) { hideSensorPopup(); return; }
+      anchorLat = d.curLat;
+      anchorLon = d.curLon;
+    } else {
+      return;
+    }
 
-    const world = Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 40);
+    const world = Cesium.Cartesian3.fromDegrees(anchorLon, anchorLat, 40);
     const window = Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene, world);
     if (!window) { popup.style.display = 'none'; return; }
 
-    // Position popup to the upper-right of the sensor
     popup.style.left = `${window.x + 12}px`;
     popup.style.top = `${window.y - popup.offsetHeight / 2}px`;
   }
