@@ -10971,9 +10971,9 @@ async function main() {
     // than duplicating it here. Two ack buttons for the same action was
     // confusing UX. This block just tells them WHERE to look.
     const ackGateHtml = !isAcked && rec ? `
-      <div class="c-panel" style="border-top: 3px solid #ffb84d;">
+      <div class="c-panel c-panel-collapsible" style="border-top: 3px solid #ffb84d;">
         <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #ffb84d;">Step 1 · Acknowledge receipt</div>
-        <div style="font-size: var(--fs-xs); color: var(--text); line-height: 1.55;">Click <b style="color: #4dff9c;">Acknowledge receipt</b> in the case-file to the left. Response options unlock once acknowledged.</div>
+        <div class="c-panel-body"><div style="font-size: var(--fs-xs); color: var(--text); line-height: 1.55;">Click <b style="color: #4dff9c;">Acknowledge receipt</b> in the case-file to the left. Response options unlock once acknowledged.</div></div>
       </div>` : '';
 
     const ackedBadge = isAcked ? `<span style="font-size: var(--fs-2xs); color: var(--ok); letter-spacing: 0.10em; text-transform: uppercase; font-family: var(--font-mono);">✓ Acked ${ackTs ? ackTs.slice(11,19) + 'Z' : ''}</span>` : '';
@@ -10992,17 +10992,19 @@ async function main() {
       ${ackGateHtml}
 
       ${isAcked || !rec ? (mineList.length ? `
-        <div class="c-panel">
+        <div class="c-panel c-panel-collapsible">
           <div class="c-panel-title" style="margin-bottom: var(--space-2);">${isAcked ? 'Step 2 · Select response option' : 'Your Response Options'}</div>
+          <div class="c-panel-body">
           <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${mineList.length} option${mineList.length === 1 ? '' : 's'} available. Multiple can be dispatched concurrently. Recommended pick is the closest by ETA.</div>
           <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-3);">
             ${mineList.map((a, i) => `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: ${i === 0 ? 'rgba(77, 210, 255, 0.08)' : 'rgba(255, 255, 255, 0.03)'}; border: 1px solid ${i === 0 ? 'rgba(77, 210, 255, 0.35)' : 'var(--border)'}; border-radius: 2px; font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.10em; text-transform: uppercase; color: ${i === 0 ? 'var(--accent)' : 'var(--text-dim)'};">${i === 0 ? '◆' : '○'} ${(RESPONSE_OPTION_DETAILS[a.kind]?.displayName || a.kind).split(' ').slice(0, 3).join(' ')}</span>`).join('')}
           </div>
           ${mineList.map((a, i) => dispatchRow(a, i)).join('')}
+          </div>
         </div>` : `
-        <div class="c-panel">
+        <div class="c-panel c-panel-collapsible">
           <div class="c-panel-title" style="margin-bottom: var(--space-2);">Response Options</div>
-          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">No assets under your jurisdiction match this threat class. Other agencies below can act.</div>
+          <div class="c-panel-body"><div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">No assets under your jurisdiction match this threat class. Other agencies below can act.</div></div>
         </div>`) : ''}
 
       ${_renderStep3ActiveEngagement(event, activeRole)}
@@ -11048,10 +11050,12 @@ async function main() {
         </div>`;
     }).join('');
     return `
-      <div class="c-panel" style="border-top: 3px solid var(--accent);">
+      <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--accent);">
         <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--accent);">Step 3 · Monitor engagement</div>
-        <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-1);">${dispatches.length} dispatch${dispatches.length === 1 ? '' : 'es'} tracked. Live state above updates as assets progress.</div>
-        ${rows}
+        <div class="c-panel-body">
+          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-1);">${dispatches.length} dispatch${dispatches.length === 1 ? '' : 'es'} tracked. Live state above updates as assets progress.</div>
+          ${rows}
+        </div>
       </div>`;
   }
 
@@ -11100,10 +11104,12 @@ async function main() {
         </article>`;
     }).join('');
     return `
-      <div class="c-panel" style="border-top: 3px solid #ffb84d;">
+      <div class="c-panel c-panel-collapsible" style="border-top: 3px solid #ffb84d;">
         <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #ffb84d;">Step 4 · Confirm outcome</div>
-        <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${dispatches.length} completed dispatch${dispatches.length === 1 ? '' : 'es'} awaiting formal outcome. Outcomes lock into the audit trail and unlock handoff options.</div>
-        ${blocks}
+        <div class="c-panel-body">
+          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${dispatches.length} completed dispatch${dispatches.length === 1 ? '' : 'es'} awaiting formal outcome. Outcomes lock into the audit trail and unlock handoff options.</div>
+          ${blocks}
+        </div>
       </div>`;
   }
 
@@ -11131,10 +11137,12 @@ async function main() {
       </div>
     `).join('');
     return `
-      <div class="c-panel" style="border-top: 3px solid #4dd2ff;">
+      <div class="c-panel c-panel-collapsible" style="border-top: 3px solid #4dd2ff;">
         <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #4dd2ff;">Step 5 · Post-incident handoff</div>
-        <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-1);">${pending.length} ground-response destination${pending.length === 1 ? '' : 's'} available for cordon, evidence recovery, and civil handoff.</div>
-        ${rows}
+        <div class="c-panel-body">
+          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-1);">${pending.length} ground-response destination${pending.length === 1 ? '' : 's'} available for cordon, evidence recovery, and civil handoff.</div>
+          ${rows}
+        </div>
       </div>`;
   }
 
@@ -11149,9 +11157,9 @@ async function main() {
     if (!Object.keys(outcomes).length) return '';
     if (event.status === 'closed' || event.outcome === 'closed') {
       return `
-        <div class="c-panel" style="border-top: 3px solid var(--ok);">
+        <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--ok);">
           <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--ok);">Step 6 · Event closed</div>
-          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">Event archived to history. Full incident record retained for audit.</div>
+          <div class="c-panel-body"><div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">Event archived to history. Full incident record retained for audit.</div></div>
         </div>`;
     }
     const responders = postIncidentResponders(event.siteId);
@@ -11159,12 +11167,14 @@ async function main() {
     const handoffPending = responders.filter(r => !dispatched.has(r.id));
     if (handoffPending.length) return '';   // Step 5 still active
     return `
-      <div class="c-panel" style="border-top: 3px solid var(--ok);">
+      <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--ok);">
         <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--ok);">Step 6 · Close event</div>
-        <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">All outcomes confirmed. All applicable handoffs dispatched. Event ready for formal closure and archive.</div>
-        <div style="display: flex; justify-content: flex-end;">
-          <button class="pl-dispatch-btn" style="padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.08); color: var(--ok); border: 1px solid rgba(77, 255, 156, 0.4); border-left: 2px solid var(--ok); border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="close-event" data-id="${event.id}">Close event</button>
-      </div>
+        <div class="c-panel-body">
+          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">All outcomes confirmed. All applicable handoffs dispatched. Event ready for formal closure and archive.</div>
+          <div style="display: flex; justify-content: flex-end;">
+            <button class="pl-dispatch-btn" style="padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.08); color: var(--ok); border: 1px solid rgba(77, 255, 156, 0.4); border-left: 2px solid var(--ok); border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="close-event" data-id="${event.id}">Close event</button>
+          </div>
+        </div>
       </div>`;
   }
 
@@ -12456,19 +12466,28 @@ async function main() {
           return `${e.id}:${acked}:${responded}`;
         }).join(',')
       : '';
+    // Once the workspace event is CLOSED, freeze the sig. Post-close
+    // ticks (NN detections on linked events, escalation status flips
+    // on cascade advisories, counterDispatch state transitions from
+    // still-airborne interceptors returning to base) were flipping
+    // parts of the sig at ~1 Hz, forcing a full receiver-view rebuild
+    // every second — visible as the "post-summary pillar blinking
+    // forever" that Lucas keeps hitting. Nothing in the post-close
+    // right pillar reacts to further mutations, so we lock it.
+    const wsClosed = wsEvent && (wsEvent.status === 'closed' || wsEvent.outcome === 'closed');
+    const wsPart = wsEvent
+      ? (wsClosed
+          ? `${wsEvent.id}:closed`
+          : `${wsEvent.id}:${(wsEvent.escalations || []).length}:${wsEvent.outcome || 'n'}:${wsEvent.status}:${(wsEvent.counterDispatches || []).length}:o${Object.keys(wsEvent.dispatchOutcomes || {}).length}:h${(wsEvent.postIncidentDispatched || []).length}`)
+      : 'no-wsev';
     const parts = [
       role?.id || 'no-role',
       _workspaceEventId || 'no-ws',
       _workspaceMode || 'inbox',
       selectedEvId || 'no-sel',
       _respondingEscId || 'no-resp',
-      // Workspace-event specific: escalation count + outcome + status +
-      // active dispatch count + confirmed outcomes + handoffs done so
-      // Steps 3→4→5→6 transitions all trigger a re-render.
-      wsEvent ? `${wsEvent.id}:${(wsEvent.escalations || []).length}:${wsEvent.outcome || 'n'}:${wsEvent.status}:${(wsEvent.counterDispatches || []).length}:o${Object.keys(wsEvent.dispatchOutcomes || {}).length}:h${(wsEvent.postIncidentDispatched || []).length}` : 'no-wsev',
-      // Ack + response state per escalation
-      escStatusHash,
-      // Inbox-mode: cardinality of visible events so ledger updates re-render.
+      wsPart,
+      wsClosed ? '' : escStatusHash,   // ack changes irrelevant once closed
       `evc:${receivedEvents.length}`,
     ];
     return parts.join('|');
@@ -12659,9 +12678,37 @@ async function main() {
     _bindReceiverActions();
   }
 
+  // ── Collapsible step panels state (per step key) ──
+  // Persists across re-renders so a panel Lucas collapsed stays
+  // collapsed after Mistral streams, ack lands, dispatch state
+  // transitions, etc. Key is the panel title text (stable per step).
+  const _collapsedPanels = new Set();
+  function _applyCollapsedPanelState() {
+    receiverView.querySelectorAll('.c-panel-collapsible').forEach(panel => {
+      const titleEl = panel.querySelector(':scope > .c-panel-title');
+      if (!titleEl) return;
+      const key = titleEl.textContent.trim();
+      panel.classList.toggle('is-collapsed', _collapsedPanels.has(key));
+    });
+  }
+
   // Shared click delegation. Runs after every render (inbox view OR
   // workspace view) so buttons in either surface are wired.
   function _bindReceiverActions() {
+    // Collapse toggle on step panel titles. Delegated so it survives
+    // every re-render of the workspace/inbox view.
+    receiverView.querySelectorAll('.c-panel-collapsible > .c-panel-title').forEach(titleEl => {
+      titleEl.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        const panel = titleEl.parentElement;
+        const key = titleEl.textContent.trim();
+        const nowCollapsed = !panel.classList.contains('is-collapsed');
+        panel.classList.toggle('is-collapsed', nowCollapsed);
+        if (nowCollapsed) _collapsedPanels.add(key); else _collapsedPanels.delete(key);
+      });
+    });
+    _applyCollapsedPanelState();
+
     receiverView.querySelectorAll('[data-rcv]').forEach(el => el.addEventListener('click', (ev) => {
       ev.stopPropagation();
       const action = el.dataset.rcv;

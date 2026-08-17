@@ -6144,6 +6144,31 @@ body.view-fleet #fleet-view { display: block; }
   font-weight: 600;
 }
 
+/* Collapsible step panel. Clicking the title toggles is-collapsed on
+   the parent panel — body slides shut, only the title (with caret)
+   stays visible. Same pattern as the live-telemetry collapse. */
+.c-panel-collapsible > .c-panel-title {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: color 120ms ease;
+}
+.c-panel-collapsible > .c-panel-title::before {
+  content: '▾';
+  display: inline-block;
+  font-size: 10px;
+  opacity: 0.55;
+  transition: transform 140ms ease, opacity 120ms ease;
+}
+.c-panel-collapsible.is-collapsed > .c-panel-title::before {
+  transform: rotate(-90deg);
+}
+.c-panel-collapsible > .c-panel-title:hover::before { opacity: 1; }
+.c-panel-collapsible.is-collapsed > .c-panel-body { display: none; }
+.c-panel-collapsible.is-collapsed > .c-panel-title { margin-bottom: 0 !important; }
+
 /* ── Labels + values ────────────────────────────────────────── */
 .c-label {
   font-family: var(--font-mono);
