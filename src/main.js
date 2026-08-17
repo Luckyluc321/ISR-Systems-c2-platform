@@ -2929,26 +2929,50 @@ async function main() {
       }
     } else if (d.state === 'engaging') {
       const engageDur = (now - d.engageStartTs) / 1000;
-      // Interceptor is FROZEN at arrival position for the whole 4s
-      // engagement. d.curLat/d.curLon NEVER get written during this
-      // state — no teleport, no shadow-follow, no jump. Only the aim
-      // target updates so tracers can chase a moving drone.
+      const dtSecEng = Math.max(0.001, (now - (d._engageLastFrameTs || d.engageStartTs)) / 1000);
+      d._engageLastFrameTs = now;
+
+      // Interceptor CHASES the enemy drone smoothly. Every tick we
+      // compute a desired standoff position (enemy_live + 100m offset
+      // on a bearing unique to memberIndex), then step toward it at
+      // MAX cruise speed × dt. Because the step is capped, the
+      // interceptor cannot teleport even if the enemy hops a big
+      // waypoint. Trail grows one smooth segment per tick.
       //
-      // Previous version teleported the interceptor onto (enemy_pos +
-      // 100m offset) on the first engaging tick. That was the "2km
-      // jump" Lucas saw: the assigned enemy drone can be hundreds of
-      // metres from the abstract arrival coord, so the interceptor
-      // snapped hard across the map. Removed. Interceptor now stays
-      // exactly where it arrived; tracers travel from there to the
-      // enemy's live position each burst.
+      // Frozen-at-arrival (prior version) read as "the interceptor
+      // stopped in mid-air before firing". Live-teleport-to-enemy
+      // (version before that) was the 2km jump. Capped chase is the
+      // in-between: visible movement, no teleport.
       if (d.profile.airborne && d.assignedSwarmMember?.billboard?.position) {
         const cart = d.assignedSwarmMember.billboard.position.getValue?.(Cesium.JulianDate.now());
         if (cart) {
           const cartographic = Cesium.Cartographic.fromCartesian(cart);
-          d.assignedTargetCoord = {
-            lat: Cesium.Math.toDegrees(cartographic.latitude),
-            lon: Cesium.Math.toDegrees(cartographic.longitude),
-          };
+          const enemyLat = Cesium.Math.toDegrees(cartographic.latitude);
+          const enemyLon = Cesium.Math.toDegrees(cartographic.longitude);
+          d.assignedTargetCoord = { lat: enemyLat, lon: enemyLon };
+
+          const offsetM = d.profile.engageOffsetM || 100;
+          const bearing = ((d.memberIndex || 0) * (Math.PI * 2 / 3));
+          const desiredLat = enemyLat + (offsetM * Math.cos(bearing)) / 111000;
+          const desiredLon = enemyLon + (offsetM * Math.sin(bearing)) / (111000 * Math.cos(enemyLat * Math.PI / 180));
+          const distToDesiredM = haversineM(d.curLat, d.curLon, desiredLat, desiredLon);
+          // Cap chase step to 1.6x cruise so interceptor can close
+          // faster than en-route but still moves visibly instead of
+          // teleporting.
+          const maxStepM = ((d.profile.cruiseKmh * 1000) / 3600) * 1.6 * dtSecEng;
+          if (distToDesiredM <= maxStepM || distToDesiredM < 8) {
+            d.curLat = desiredLat;
+            d.curLon = desiredLon;
+          } else {
+            const frac = maxStepM / distToDesiredM;
+            d.curLat += (desiredLat - d.curLat) * frac;
+            d.curLon += (desiredLon - d.curLon) * frac;
+          }
+          d.heading = _bearingRad(d.curLat, d.curLon, enemyLat, enemyLon);
+          if (d.profile.trail) {
+            d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0));
+            if (d.trailPositions.length > 500) d.trailPositions.shift();
+          }
         }
       }
       // Fire additional machine-gun bursts every ~1.4s during
@@ -3095,25 +3119,28 @@ async function main() {
     _spawnFlashEntity(d.curLon, d.curLat, 180, '#ffdb4d', 3, 8);
   }
 
-  // Single tracer round — modeled on the F-35 AMRAAM visual.
-  // A small bright point travels from interceptor to target over
-  // 220 ms with a short trailing streak. On impact, a yellow flash
-  // fires at the target. Both endpoints frozen at spawn time so the
-  // projectile flies a straight, stable path even if the drone or
-  // interceptor moves during the flight.
+  // Single tracer round — small-arms fire visual.
+  //
+  // Bullet head travels from interceptor to enemy over 110ms (fast,
+  // reads as a real projectile not a laser). Endpoints tracked LIVE
+  // via CallbackProperty:
+  //   - origin follows the interceptor's smooth-chase position
+  //   - target follows the enemy drone's live billboard position
+  // So the tracer always hits the drone, even if it's moving. Impact
+  // spark spawns AT the drone's live pos at travel-end, not at a
+  // stale snapshot coord.
+  //
+  // Yellow-white glow (like a 5.56mm tracer round), not the green
+  // "big ball" flash Lucas hated.
   function _fireSingleTracerRound(d, target) {
     const startTs = Date.now();
-    const travelMs = 220;
-    const originLon = d.curLon;
-    const originLat = d.curLat;
-    const targetLon = target.lon;
-    const targetLat = target.lat;
-    const dLat = targetLat - originLat;
-    const dLon = targetLon - originLon;
+    const travelMs = 110;
 
-    // Shared per-frame progress read. Same discipline as the radiation
-    // ellipse — one Date.now() per frame so all callbacks read the
-    // same t and endpoints never inconsistent frame-to-frame.
+    // Live-target lookup: prefer the interceptor's assignedTargetCoord
+    // (updated per tick by the engaging loop). Fall back to the
+    // snapshot passed in.
+    const _liveTarget = () => d.assignedTargetCoord || target;
+    // Shared per-frame t so bullet head + streak agree
     let _cachedFrame = 0, _cachedT = 0;
     const _t = () => {
       const now = Date.now();
@@ -3122,43 +3149,51 @@ async function main() {
       _cachedT = Math.min(1, (now - startTs) / travelMs);
       return _cachedT;
     };
+    // Bullet-in-flight position: interpolated between LIVE origin (d)
+    // and LIVE target on each frame
+    const _headPos = () => {
+      const t = _t();
+      const tgt = _liveTarget();
+      return {
+        lat: d.curLat + (tgt.lat - d.curLat) * t,
+        lon: d.curLon + (tgt.lon - d.curLon) * t,
+      };
+    };
 
-    // Bullet head — small bright glowing point.
+    // Bullet head — small bright glowing dot, 3 px core.
     const bullet = viewer.entities.add({
       position: new Cesium.CallbackProperty(() => {
-        const t = _t();
-        return Cesium.Cartesian3.fromDegrees(originLon + dLon * t, originLat + dLat * t, 8);
+        const p = _headPos();
+        return Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 8);
       }, false),
       point: {
-        pixelSize: 5,
-        color: Cesium.Color.fromCssColorString('#c8ff8a'),
-        outlineColor: Cesium.Color.fromCssColorString('#ffffb0'),
+        pixelSize: 3,
+        color: Cesium.Color.fromCssColorString('#fff1a8'),
+        outlineColor: Cesium.Color.fromCssColorString('#ffb800'),
         outlineWidth: 1,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     });
 
-    // Short trailing streak — bullet-length segment growing from
-    // origin as the round flies, capped at ~25% of the path length so
-    // it never touches back to the muzzle (looks like a bullet, not a
-    // laser). Fades out with the bullet position progress.
+    // Short 20% streak trailing the head.
     const streak = viewer.entities.add({
       polyline: {
         positions: new Cesium.CallbackProperty(() => {
           const t = _t();
-          const headLat = originLat + dLat * t;
-          const headLon = originLon + dLon * t;
-          const streakBack = Math.max(0, t - 0.25);
-          const tailLat = originLat + dLat * streakBack;
-          const tailLon = originLon + dLon * streakBack;
+          const tgt = _liveTarget();
+          const headLat = d.curLat + (tgt.lat - d.curLat) * t;
+          const headLon = d.curLon + (tgt.lon - d.curLon) * t;
+          const back = Math.max(0, t - 0.20);
+          const tailLat = d.curLat + (tgt.lat - d.curLat) * back;
+          const tailLon = d.curLon + (tgt.lon - d.curLon) * back;
           return [
             Cesium.Cartesian3.fromDegrees(tailLon, tailLat, 8),
             Cesium.Cartesian3.fromDegrees(headLon, headLat, 8),
           ];
         }, false),
-        width: 2.2,
+        width: 1.6,
         material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
-          return Cesium.Color.fromCssColorString('#a3ff70').withAlpha(0.85 * (1 - _t() * 0.4));
+          return Cesium.Color.fromCssColorString('#ffe066').withAlpha(0.80 * (1 - _t() * 0.35));
         }, false)),
         arcType: Cesium.ArcType.NONE,
       },
@@ -3167,8 +3202,10 @@ async function main() {
     setTimeout(() => {
       if (bullet) viewer.entities.remove(bullet);
       if (streak) viewer.entities.remove(streak);
-      _spawnFlashEntity(targetLon, targetLat, 220, '#ffdb4d', 5, 14);
-    }, travelMs + 20);
+      // Impact spark at the drone's LIVE position, not the snapshot.
+      const impact = _liveTarget();
+      _spawnFlashEntity(impact.lon, impact.lat, 120, '#ffdb4d', 2, 5);
+    }, travelMs + 15);
   }
 
   // Small point flash — reused for muzzle + impact
@@ -3309,9 +3346,36 @@ async function main() {
     }
     if (getActiveRole().kind === 'receiver') renderReceiverView();
 
-    // Graceful fade-out instead of instant hard remove. Interceptor
-    // billboards fade over 1.5s so they don't just pop off the map.
-    // Full removal at 5s after fade completes.
+    // Post-engagement cleanup by dispatch kind.
+    //   1) Airborne with supportsRTB → transition to rtb_home. Fly
+    //      back to origin. Entity removed at rtb_home arrival, not
+    //      here. Previously interceptors just vanished mid-air 5s
+    //      after their kill — Lucas's "wtf" #3.
+    //   2) Ground vehicle pinned to a wreckage cordon → HOLD. Do not
+    //      fade, do not remove. Cars stay parked on their ingress
+    //      point until scenario reset or user closes the event. Lucas
+    //      #4 — police parked correctly then disappeared.
+    //   3) Everything else (helicopter after intercept, one-shot SOF,
+    //      etc) → existing 1.5s fade + 5s remove.
+    if (d.profile.airborne && d.profile.supportsRTB && !d.rtbCompleted) {
+      d.state = 'rtb_home';
+      d.rtbTargetLat = d.originLat;
+      d.rtbTargetLon = d.originLon;
+      d.lastFrameTs = Date.now();
+      // Radiation cone off — no longer engaging.
+      if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+      return;
+    }
+    if (d.profile.useRoadRouting && !d.profile.airborne && d.assignedWreckageId) {
+      // Ground patrol at cordon — stay parked. Turn off any remaining
+      // radiation/engage visuals. State stays 'engaging' visually so
+      // the popup keeps showing "On station" but the tick loop's
+      // engage timer no longer trips (rtbCompleted-style guard).
+      d.state = 'holding-cordon';
+      if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+      return;
+    }
+    // Fallback: graceful fade-out then full remove at 5s.
     const fadeStartTs = Date.now();
     const fadeDurMs = 1500;
     if (d.entity?.billboard) {
@@ -7223,7 +7287,7 @@ async function main() {
   }
 
   function _renderDispatchPopupContent(d) {
-    const stateLabel = { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE', rtb_via_last_known: 'RTB · LAST KNOWN', rtb_home: 'RTB · HOME' }[d.state] || (d.state || '').toUpperCase();
+    const stateLabel = { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE', rtb_via_last_known: 'RTB · LAST KNOWN', rtb_home: 'RTB · HOME', 'holding-cordon': 'HOLDING CORDON' }[d.state] || (d.state || '').toUpperCase();
     const stateClass = d.state === 'complete' ? 'offline' : d.state === 'engaging' ? 'degraded' : 'online';
     const elapsedSec = Math.max(0, Math.floor((Date.now() - d.dispatchedTs) / 1000));
     const elapsedStr = elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
@@ -7239,6 +7303,7 @@ async function main() {
       : d.state === 'complete' ? 'Engagement complete'
       : d.state === 'rtb_via_last_known' ? 'Signal lost, RTB via last-known coord'
       : d.state === 'rtb_home' ? 'Returning to base'
+      : d.state === 'holding-cordon' ? 'On cordon, securing wreckage perimeter'
       : '';
     const payload = d.profile?.firesTracer ? 'Machine-gun tracer' :
                     d.profile?.radiationCone ? 'RF jamming array' :
@@ -12477,13 +12542,18 @@ async function main() {
   // separately without needing a full re-render.
   let _lastReceiverViewSig = null;
   function _receiverViewSignature(role, wsEvent, selectedEvId, receivedEvents) {
-    // Track only user-visible ack + response state per escalation.
-    // Delivered / read transitions tick every ~800ms during the
-    // reacquisition cascade and were previously flipping the sig,
-    // forcing a full DOM rebuild every second (visible blink).
-    // Ack + response are the only escalation transitions that the
-    // Mission Console UI actually reacts to (Step 1 gate, sent-response
-    // confirmation). Everything else stays hidden until it matters.
+    // Strictly user-visible fields only. Auto-mutations that happen
+    // per tick (escalations.length growing on reacquisition cascades,
+    // counterDispatches state chip flipping en_route→engaging→complete,
+    // dispatchOutcomes auto-set on interceptor kill) are OUT of the
+    // sig. User actions that DO need immediate render (ack, respond,
+    // dispatch, confirm outcome, handoff, close) call renderReceiverView
+    // with opts.immediate=true which bypasses this sig entirely.
+    //
+    // Bools not counts. Anything that would only differ in cardinality
+    // (0 vs 1+) gets a boolean here — so a new dispatch spawning while
+    // out-of-range does not blink the pillar; the state chip inside
+    // Step 3 will refresh on the next user-triggered render.
     const escStatusHash = wsEvent
       ? (wsEvent.escalations || []).map(e => {
           const acked = e.statusHistory?.some(h => h.status === 'acknowledged') ? 'a' : 'p';
@@ -12491,19 +12561,19 @@ async function main() {
           return `${e.id}:${acked}:${responded}`;
         }).join(',')
       : '';
-    // Once the workspace event is CLOSED, freeze the sig. Post-close
-    // ticks (NN detections on linked events, escalation status flips
-    // on cascade advisories, counterDispatch state transitions from
-    // still-airborne interceptors returning to base) were flipping
-    // parts of the sig at ~1 Hz, forcing a full receiver-view rebuild
-    // every second — visible as the "post-summary pillar blinking
-    // forever" that Lucas keeps hitting. Nothing in the post-close
-    // right pillar reacts to further mutations, so we lock it.
     const wsClosed = wsEvent && (wsEvent.status === 'closed' || wsEvent.outcome === 'closed');
     const wsPart = wsEvent
       ? (wsClosed
           ? `${wsEvent.id}:closed`
-          : `${wsEvent.id}:${(wsEvent.escalations || []).length}:${wsEvent.outcome || 'n'}:${wsEvent.status}:${(wsEvent.counterDispatches || []).length}:o${Object.keys(wsEvent.dispatchOutcomes || {}).length}:h${(wsEvent.postIncidentDispatched || []).length}`)
+          : [
+              wsEvent.id,
+              wsEvent.status,
+              wsEvent.outcome || 'n',
+              // bool, not count — flipping from 0→1 matters, 1→2 does not
+              (wsEvent.counterDispatches || []).length > 0 ? 'cd1' : 'cd0',
+              Object.keys(wsEvent.dispatchOutcomes || {}).length > 0 ? 'o1' : 'o0',
+              (wsEvent.postIncidentDispatched || []).length > 0 ? 'h1' : 'h0',
+            ].join(':'))
       : 'no-wsev';
     const parts = [
       role?.id || 'no-role',
@@ -12524,7 +12594,13 @@ async function main() {
   // user actions bypass via opts.force / opts.immediate.
   let _rvvLastFireTs = 0;
   let _rvvPendingTimer = null;
-  const _RVV_MIN_INTERVAL_MS = 400;
+  // Background renders (tick loops, escalation listener fires) are
+  // aggressively throttled — 1.5s min. User actions bypass entirely
+  // via opts.immediate. Combined with the leaner sig (bools not
+  // counts) this suppresses the chronic "post-summary pillar blink"
+  // that appears while a drone is out-of-range but the event is
+  // still active (linked sensor keeps updating).
+  const _RVV_MIN_INTERVAL_MS = 1500;
   function renderReceiverView(opts = {}) {
     if (!opts.force && !opts.immediate) {
       const now = Date.now();
