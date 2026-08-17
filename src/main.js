@@ -2343,6 +2343,12 @@ async function main() {
       engageOffsetM: 100,        // interceptor shadows target at 100m (was 30m — caused jump)
       supportsRTB: true,         // late-dispatch return-to-base behaviour
       firesTracer: true,         // renders small-arms tracer + downed state on engage
+      // Max chase distance from the ORIGIN base. Beyond this the
+      // interceptor gives up, calls "signal lost", and RTBs. Keeps
+      // interceptors from flying out over Øresund forever chasing a
+      // drone that has left our coverage. Matches roughly the fuel /
+      // C2 range of a small quadcopter interceptor.
+      maxChaseKm: 15,
       label: 'Interceptor Swarm',
     },
   };
@@ -2843,6 +2849,25 @@ async function main() {
       d.lastFrameTs = now;
       toast(`${d.assetName} has lost signal on target across all tracking sites. Proceeding to last known area.`, 'warn');
       return;
+    }
+
+    // Max chase distance from ORIGIN base. Interceptor gives up if it
+    // has flown past its operational range without engaging — matches
+    // the fuel + C2 range of a small quadcopter interceptor. Without
+    // this, Varde interceptors chase a drone out over Øresund forever
+    // when the primary event stays "active" (linked sensor still
+    // tracking the drone over open water).
+    if (d.state === 'en_route' && d.profile.supportsRTB && d.profile.maxChaseKm) {
+      const chaseKm = haversineM(d.curLat, d.curLon, d.originLat, d.originLon) / 1000;
+      if (chaseKm >= d.profile.maxChaseKm) {
+        d.state = 'rtb_via_last_known';
+        d.rtbTargetLat = d.curLat;   // orbit at current position (edge of coverage)
+        d.rtbTargetLon = d.curLon;
+        d.rtbOrbitStartTs = null;
+        d.lastFrameTs = now;
+        toast(`${d.assetName} cannot maintain visual on target. Followed path to edge of coverage without engagement. Returning to base.`, 'warn');
+        return;
+      }
     }
 
     if (d.state === 'en_route') {
