@@ -2878,10 +2878,7 @@ async function main() {
         return;
       }
       if (!groupComplete) {
-        const st = droneState.get(d.eventId);
-        const remaining = st?.swarmBillboards?.filter(
-          sw2 => !sw2.neutralised && sw2.role !== 'overwatch'
-        ) || [];
+        const remaining = _allDownableHostiles(d.eventId);
         if (remaining.length > 0) {
           d._firedAtLeastOnce = false;
           _resolveEngagement(d);
@@ -3169,26 +3166,19 @@ async function main() {
   // escapes per doctrine). If more interceptors than downable drones,
   // assignment wraps modulo.
   function _assignInterceptorTarget(d) {
-    const state = droneState.get(d.eventId);
-    if (!state?.swarmBillboards?.length) {
-      // Fallback: no swarm structure known, target the abstract centroid
-      d.assignedTargetCoord = { lat: d.targetLat, lon: d.targetLon };
-      return;
-    }
     // If this interceptor already has a valid live target (from a
     // prior re-target), KEEP it. This function fires on arrival, and
     // an interceptor arriving at a re-targeted survivor was being
     // reassigned to downable[memberIndex] here — throwing away the
     // nearest-unchased pick the re-target logic made after its first
-    // kill. Sibling collisions ("both A and C now assigned to D2")
-    // followed, and one of them ended up firing at a drone already
-    // downed by the other.
+    // kill.
     if (d.assignedSwarmMember
         && !d.assignedSwarmMember.neutralised
         && d.assignedSwarmMember.role !== 'overwatch') {
       return;
     }
-    const downable = state.swarmBillboards.filter(sw => sw.role !== 'overwatch' && !sw.neutralised);
+    // Downable now includes the LEAD drone (via _allDownableHostiles).
+    const downable = _allDownableHostiles(d.eventId);
     if (!downable.length) {
       d.assignedTargetCoord = { lat: d.targetLat, lon: d.targetLon };
       return;
@@ -3458,15 +3448,11 @@ async function main() {
         sw._neutralisedAt = new Date().toISOString();
       }
       // RE-TARGET: any remaining non-neutralised non-overwatch hostile
-      // drones? If yes, pick the nearest unchased one and put this
-      // interceptor back into en_route to pursue. Only RTB when we
-      // have nothing left to chase OR we exceed maxChaseKm (handled
-      // in the en_route tick). Dedup vs other interceptors chasing so
-      // we don't dogpile one drone while another escapes.
-      const stateForReTarget = droneState.get(d.eventId);
-      const remainingHostiles = stateForReTarget?.swarmBillboards?.filter(
-        sw2 => !sw2.neutralised && sw2.role !== 'overwatch'
-      ) || [];
+      // drones? INCLUDES THE LEAD DRONE (previously invisible to the
+      // interceptor logic — see _allDownableHostiles). If yes, pick
+      // the nearest unchased one and put this interceptor back into
+      // en_route to pursue.
+      const remainingHostiles = _allDownableHostiles(d.eventId);
       if (remainingHostiles.length > 0) {
         const alreadyChased = new Set();
         for (const [, other] of _counterDispatches) {
@@ -3520,9 +3506,15 @@ async function main() {
         event._interceptorGroupsCompleted.add(d.groupId);
         let downedCount = 0;
         let overwatchSurvived = false;
+        // Count LEAD too — it's a first-class hostile now.
+        if (state?.leadSwarmMember) {
+          const ls = state.leadSwarmMember;
+          if (ls.role === 'overwatch') overwatchSurvived = overwatchSurvived || !ls.neutralised;
+          else if (ls.neutralised) downedCount++;
+        }
         if (state?.swarmBillboards?.length) {
           for (const sw2 of state.swarmBillboards) {
-            if (sw2.role === 'overwatch') { overwatchSurvived = true; continue; }
+            if (sw2.role === 'overwatch') { overwatchSurvived = overwatchSurvived || !sw2.neutralised; continue; }
             if (sw2.neutralised) downedCount++;
           }
         }
@@ -6613,9 +6605,30 @@ async function main() {
       }
     }
 
+    // LEAD-AS-SWARM-MEMBER wrapper. The lead drone (formation[0]) has
+    // its own top-level billboard tracked at state.billboard, and was
+    // NOT included in swarmBillboards (that array is only formation[1..N]).
+    // Interceptor re-target logic only saw swarmBillboards → LEAD was
+    // invisible as a target. Result: interceptors killed all wingmen
+    // then RTB'd while the LEAD drone flew home unharmed. This wrapper
+    // exposes the lead the same way as any other member so the
+    // interceptor code paths (kill, re-target, dedup) treat it
+    // uniformly. Kill sets .neutralised=true and hides the underlying
+    // Cesium billboard.
+    const leadTemplateSlot = template?.swarm?.formation?.[0];
+    const leadSwarmMember = leadTemplateSlot ? {
+      billboard,   // top-level Cesium billboard for the lead drone
+      role: leadTemplateSlot.role || 'lead',
+      model: leadTemplateSlot.model || 'Lead',
+      rfMHz: leadTemplateSlot.rfMHz || 2412,
+      neutralised: false,
+      isLead: true,   // marker so callers can tell it apart from swarmBillboards
+    } : null;
+
     droneState.set(event.id, {
       billboard, trail, shadow,
-      swarmBillboards,   // [] or [{ billboard, waypoints, offset, role, ... }]
+      swarmBillboards,   // formation[1..N] only — LEAD is state.leadSwarmMember
+      leadSwarmMember,   // formation[0] wrapper, same shape as swarmBillboards entries
       spawnMs: performance.now(),   // shared timing reference for swarm interpolation
       trailPositions, shadowPositions,
       stateHolder,      // { headingRad } — updated in tick, read by billboard rotation callback
@@ -6627,6 +6640,26 @@ async function main() {
       // Each entry: { entryDropped, exitDropped, oorDropped, wasInCoverage }
       perSite: new Map(),
     });
+  }
+
+  // Helper: every downable hostile in an event, LEAD + swarm members
+  // combined, filtered to non-overwatch non-neutralised. Interceptor
+  // re-target + assign + recovery logic all read through this so the
+  // LEAD drone is a first-class target.
+  function _allDownableHostiles(eventId) {
+    const st = droneState.get(eventId);
+    if (!st) return [];
+    const arr = [];
+    if (st.leadSwarmMember && !st.leadSwarmMember.neutralised
+        && st.leadSwarmMember.role !== 'overwatch') {
+      arr.push(st.leadSwarmMember);
+    }
+    if (st.swarmBillboards) {
+      for (const sw of st.swarmBillboards) {
+        if (!sw.neutralised && sw.role !== 'overwatch') arr.push(sw);
+      }
+    }
+    return arr;
   }
 
   function removeDroneEntities(eventId) {
@@ -6764,11 +6797,22 @@ async function main() {
         // sensor coverage. If the track was neutralised, keep it hidden —
         // don't let the position update override the kill teardown.
         const beingChased = _friendlyMissile.active && _friendlyMissile.targetEventId === event.id;
-        const shouldShow = state.closedAt
+        // Lead drone was killed by interceptor — hide billboard, skip
+        // position updates. Matches the swarm-member neutralised path
+        // at line ~7080.
+        const leadDown = state.leadSwarmMember?.neutralised;
+        const shouldShow = leadDown ? false : (state.closedAt
           ? false
-          : (inAnyCoverage === null ? true : (inAnyCoverage || beingChased));
+          : (inAnyCoverage === null ? true : (inAnyCoverage || beingChased)));
         state.billboard.show = shouldShow;
         state.shadow.show = shouldShow;
+        if (leadDown) {
+          // Skip the rest of this tick for the lead — don't update
+          // position, don't trip fresh coverage rings, don't paint
+          // trail. It's dead. This callback is a forEach, so `return`
+          // exits this iteration only.
+          return;
+        }
         // Multi-site tracks fire ENTRY / EXIT / OUT OF RANGE markers per
         // site as the missile transits each coverage zone.
         if (event.multiSiteTrack || event.templateKey === 'cruise_missile_to_amalienborg') {
