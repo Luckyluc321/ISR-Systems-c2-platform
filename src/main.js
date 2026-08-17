@@ -2838,6 +2838,24 @@ async function main() {
     });
     const targetLost = primaryClosed && !anyLinkedActive;
 
+    // STALE ASSIGNED TARGET. If this interceptor's assigned enemy drone
+    // was killed by a SIBLING interceptor while this one was still
+    // en_route or engaging, its billboard.position still returns the
+    // last-known coord (billboard.show=false but the position property
+    // callback keeps returning). Interceptor would fly to that coord
+    // and fire bullets at empty space — Lucas's "final interceptor
+    // shooting in empty space" bug. Force this interceptor to
+    // re-target immediately by short-circuiting to state=complete;
+    // _resolveEngagement's re-target block then picks a live hostile.
+    if (d.kind === 'counter-drone-swarm'
+        && (d.state === 'en_route' || d.state === 'engaging')
+        && d.assignedSwarmMember?.neutralised) {
+      d.state = 'complete';
+      d._firedAtLeastOnce = false;   // no live kill this pass
+      _resolveEngagement(d);
+      return;
+    }
+
     // Live target update priority:
     //   1. Interceptor with an ASSIGNED swarm member — chase that
     //      specific drone's live position (not the swarm centroid).
@@ -3121,6 +3139,19 @@ async function main() {
     if (!state?.swarmBillboards?.length) {
       // Fallback: no swarm structure known, target the abstract centroid
       d.assignedTargetCoord = { lat: d.targetLat, lon: d.targetLon };
+      return;
+    }
+    // If this interceptor already has a valid live target (from a
+    // prior re-target), KEEP it. This function fires on arrival, and
+    // an interceptor arriving at a re-targeted survivor was being
+    // reassigned to downable[memberIndex] here — throwing away the
+    // nearest-unchased pick the re-target logic made after its first
+    // kill. Sibling collisions ("both A and C now assigned to D2")
+    // followed, and one of them ended up firing at a drone already
+    // downed by the other.
+    if (d.assignedSwarmMember
+        && !d.assignedSwarmMember.neutralised
+        && d.assignedSwarmMember.role !== 'overwatch') {
       return;
     }
     const downable = state.swarmBillboards.filter(sw => sw.role !== 'overwatch' && !sw.neutralised);
