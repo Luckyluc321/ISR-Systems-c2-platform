@@ -2886,20 +2886,30 @@ async function main() {
         toast(`${d.assetName} at edge of coverage, cannot maintain visual on target. Returning to base.`, 'warn');
         return;
       }
-      // COAST RTB. Never chase past the CPH east coast (Amager) into
-      // Øresund. Airborne interceptors would otherwise happily fly to
-      // Malmö on a hostile drone that fled to open water. 12.71°E is
-      // roughly Amager's east shoreline. Applies to any airborne
-      // dispatch that has supportsRTB regardless of origin base.
+      // COAST RTB — only when NOT actively pursuing a live target.
+      // If the interceptor still has an assigned hostile drone that is
+      // airborne and not neutralised, allow chase past the coast up
+      // to maxChaseKm (already checked above). Only turn around at
+      // the beach when the target is dead or gone — otherwise it
+      // reads as the interceptor abandoning a chase that isn't over.
+      //
+      // "Gone" = no assignedSwarmMember at all, OR the assigned
+      // member has been neutralised (kill already registered so the
+      // interceptor is idling with nothing to do).
       if (d.profile.airborne && d.curLon > 12.71) {
-        d.state = 'rtb_via_last_known';
-        d.rtbTargetLat = d.curLat;
-        d.rtbTargetLon = d.curLon;
-        d.rtbOrbitStartTs = null;
-        d.lastFrameTs = now;
-        if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
-        toast(`${d.assetName} at coastline, target out over open water. Returning to base — cannot pursue into international airspace.`, 'warn');
-        return;
+        const hasLiveTarget = d.assignedSwarmMember && !d.assignedSwarmMember.neutralised;
+        if (!hasLiveTarget) {
+          d.state = 'rtb_via_last_known';
+          d.rtbTargetLat = d.curLat;
+          d.rtbTargetLon = d.curLon;
+          d.rtbOrbitStartTs = null;
+          d.lastFrameTs = now;
+          if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+          toast(`${d.assetName} past coastline with no active target. Returning to base.`, 'warn');
+          return;
+        }
+        // Live target still airborne past coast — keep chasing until
+        // maxChaseKm caps it. No RTB here.
       }
     }
 
@@ -3178,10 +3188,26 @@ async function main() {
     const startTs = Date.now();
     const travelMs = 110;
 
-    // Live-target lookup: prefer the interceptor's assignedTargetCoord
-    // (updated per tick by the engaging loop). Fall back to the
-    // snapshot passed in.
-    const _liveTarget = () => d.assignedTargetCoord || target;
+    // Live-target lookup reads the assigned enemy drone's billboard
+    // position DIRECTLY each frame — same source Cesium uses to draw
+    // the drone icon, so tracer endpoint and drone icon are always
+    // pixel-aligned. Previously read d.assignedTargetCoord (a cached
+    // snapshot updated only in the engaging tick + burst-fire), which
+    // could be stale by several frames — tracer visibly missed while
+    // the drone was mid-air between updates.
+    const _liveTarget = () => {
+      if (d.assignedSwarmMember?.billboard?.position) {
+        const cart = d.assignedSwarmMember.billboard.position.getValue?.(Cesium.JulianDate.now());
+        if (cart) {
+          const c = Cesium.Cartographic.fromCartesian(cart);
+          return {
+            lat: Cesium.Math.toDegrees(c.latitude),
+            lon: Cesium.Math.toDegrees(c.longitude),
+          };
+        }
+      }
+      return d.assignedTargetCoord || target;
+    };
     // Shared per-frame t so bullet head + streak agree
     let _cachedFrame = 0, _cachedT = 0;
     const _t = () => {
