@@ -2343,6 +2343,12 @@ async function main() {
       engageOffsetM: 100,        // interceptor shadows target at 100m (was 30m — caused jump)
       supportsRTB: true,         // late-dispatch return-to-base behaviour
       firesTracer: true,         // renders small-arms tracer + downed state on engage
+      // Allow re-dispatch (button relabels to "Dispatch more" after
+      // the first pack goes out). Each click spawns another swarmSize
+      // pack — no units picker, unlike police-c-uas. If the first
+      // three interceptors are engaged and Lucas wants more air power
+      // on the same event, he clicks again.
+      allowRepeatedDispatch: true,
       // Max chase distance from the ORIGIN base. Beyond this the
       // interceptor gives up, calls "signal lost", and RTBs. Keeps
       // interceptors from flying out over Øresund forever chasing a
@@ -2550,7 +2556,7 @@ async function main() {
     // Kinds with supportsMultiDispatch (police patrols, ground
     // reinforcement) can spawn multiple concurrent instances via the
     // units picker on the option card.
-    if (!profile.supportsMultiDispatch) {
+    if (!profile.supportsMultiDispatch && !profile.allowRepeatedDispatch) {
       for (const [, d] of _counterDispatches) {
         if (d.eventId === eventId && d.assetId === asset.id && d.state !== 'complete') {
           toast(`${asset.name} already dispatched.`, 'info');
@@ -2829,13 +2835,25 @@ async function main() {
     });
     const targetLost = primaryClosed && !anyLinkedActive;
 
-    // Live target update ONLY if the dispatch is not pinned to a
-    // wreckage cordon position. Ground patrols pinned via
-    // _rebalancePatrolsToWreckages hold their assigned ingress point
-    // — the live lastPosition would drag them back toward the airport
-    // while the drones the cars are supposed to cordon are already
-    // downed on the beach.
-    if (event?.lastPosition && !targetLost && !d.assignedWreckageId) {
+    // Live target update priority:
+    //   1. Interceptor with an ASSIGNED swarm member — chase that
+    //      specific drone's live position (not the swarm centroid).
+    //      Was defaulting to event.lastPosition which is the primary
+    //      tracked drone; interceptor re-targeted to a different
+    //      swarm member would then fly back to the primary instead.
+    //   2. Ground patrol pinned to a wreckage cordon — hold the
+    //      assigned ingress point. lastPosition would drag them back
+    //      to the airport.
+    //   3. Fallback — event.lastPosition (works for helicopter QRA,
+    //      army C-UAS chasing centroid).
+    if (d.assignedSwarmMember?.billboard?.position && !targetLost) {
+      const cartAssigned = d.assignedSwarmMember.billboard.position.getValue?.(Cesium.JulianDate.now());
+      if (cartAssigned) {
+        const cA = Cesium.Cartographic.fromCartesian(cartAssigned);
+        d.targetLat = Cesium.Math.toDegrees(cA.latitude);
+        d.targetLon = Cesium.Math.toDegrees(cA.longitude);
+      }
+    } else if (event?.lastPosition && !targetLost && !d.assignedWreckageId) {
       d.targetLat = event.lastPosition.lat;
       d.targetLon = event.lastPosition.lon;
     }
@@ -2851,21 +2869,21 @@ async function main() {
       return;
     }
 
-    // Max chase distance from ORIGIN base. Interceptor gives up if it
-    // has flown past its operational range without engaging — matches
-    // the fuel + C2 range of a small quadcopter interceptor. Without
-    // this, Varde interceptors chase a drone out over Øresund forever
-    // when the primary event stays "active" (linked sensor still
-    // tracking the drone over open water).
-    if (d.state === 'en_route' && d.profile.supportsRTB && d.profile.maxChaseKm) {
+    // Max chase distance from ORIGIN base. Applies in en_route AND
+    // engaging — an interceptor that engaged near the coast, killed
+    // its target, then re-targeted to a drone fleeing over Øresund
+    // would otherwise keep chasing forever. maxChaseKm caps total
+    // pursuit radius regardless of state.
+    if ((d.state === 'en_route' || d.state === 'engaging') && d.profile.supportsRTB && d.profile.maxChaseKm) {
       const chaseKm = haversineM(d.curLat, d.curLon, d.originLat, d.originLon) / 1000;
       if (chaseKm >= d.profile.maxChaseKm) {
         d.state = 'rtb_via_last_known';
-        d.rtbTargetLat = d.curLat;   // orbit at current position (edge of coverage)
+        d.rtbTargetLat = d.curLat;
         d.rtbTargetLon = d.curLon;
         d.rtbOrbitStartTs = null;
         d.lastFrameTs = now;
-        toast(`${d.assetName} cannot maintain visual on target. Followed path to edge of coverage without engagement. Returning to base.`, 'warn');
+        if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+        toast(`${d.assetName} at edge of coverage, cannot maintain visual on target. Returning to base.`, 'warn');
         return;
       }
     }
@@ -3119,12 +3137,12 @@ async function main() {
     const engageRangeM = d.profile.engageRangeM || 300;
     const distToTarget = haversineM(d.curLat, d.curLon, target.lat, target.lon);
     if (distToTarget > engageRangeM) return;
+    d._firedAtLeastOnce = true;   // gates the kill decision below
     const roundCount = 4;
-    const roundGap = 70;   // ms between rounds
+    const roundGap = 70;
     for (let r = 0; r < roundCount; r++) {
       setTimeout(() => _fireSingleTracerRound(d, target), r * roundGap);
     }
-    // Muzzle flash at interceptor (single, quick)
     _spawnFlashEntity(d.curLon, d.curLat, 180, '#ffdb4d', 3, 8);
   }
 
@@ -3249,7 +3267,12 @@ async function main() {
     // group's members completes.
     if (d.kind === 'counter-drone-swarm' && event && d.state === 'complete' && !d.rtbCompleted) {
       const sw = d.assignedSwarmMember;
-      if (sw && !sw.neutralised && sw.role !== 'overwatch') {
+      // Only credit the kill if at least ONE tracer burst actually
+      // fired. Bursts only fire when the interceptor was within
+      // engageRangeM (300m) of the target. Prevents the "drone
+      // marked Downed without ever being hit" bug when the enemy
+      // fled outside range before the 4s engagement timer expired.
+      if (sw && !sw.neutralised && sw.role !== 'overwatch' && d._firedAtLeastOnce) {
         // Hit animation at THIS drone's live position
         const cart = sw.billboard?.position?.getValue?.(Cesium.JulianDate.now());
         if (cart) {
@@ -3403,7 +3426,13 @@ async function main() {
     } else if (d.profile.visualVerifyOnly) {
       toast(`${d.assetName} visual verify complete. Standing by.`, 'info');
     }
-    if (getActiveRole().kind === 'receiver') renderReceiverView();
+    if (getActiveRole().kind === 'receiver') {
+      // Kill sets event.dispatchOutcomes → Step 4 (Confirm outcome)
+      // should appear. Invalidate the workspace-lock sig so the
+      // pillar re-renders past the pinned state.
+      _lastReceiverViewSig = null;
+      renderReceiverView({ immediate: true });
+    }
 
     // Post-engagement cleanup by dispatch kind.
     //   1) Airborne with supportsRTB → transition to rtb_home. Fly
@@ -11029,8 +11058,10 @@ async function main() {
       // of currently active units for this asset when > 0.
       const profile = CD_PROFILE[a.kind];
       const supportsMulti = profile?.supportsMultiDispatch;
+      const allowRepeat = profile?.allowRepeatedDispatch;
+      const canRepeat = supportsMulti || allowRepeat;   // for "Dispatch more" + counter
       const maxUnits = profile?.maxUnitsPerDispatch || 5;
-      const activeUnitsForThisAsset = supportsMulti
+      const activeUnitsForThisAsset = canRepeat
         ? Array.from(_counterDispatches.values()).filter(cd =>
             cd.eventId === event.id && cd.assetId === a.id && cd.state !== 'complete'
           ).length
@@ -11050,7 +11081,7 @@ async function main() {
              ${unitsCounter}
              <div style="display: flex; align-items: center;">
                ${unitsPickerHtml}
-               <button class="pl-dispatch-btn" style="padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.06); color: #4dff9c; border: 1px solid rgba(77, 255, 156, 0.35); border-left: 2px solid #4dff9c; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.20em; text-transform: uppercase; font-family: var(--font-mono); transition: background 120ms, border-color 120ms;" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">${supportsMulti && activeUnitsForThisAsset > 0 ? 'Dispatch more' : 'Dispatch'}</button>
+               <button class="pl-dispatch-btn" style="padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.06); color: #4dff9c; border: 1px solid rgba(77, 255, 156, 0.35); border-left: 2px solid #4dff9c; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.20em; text-transform: uppercase; font-family: var(--font-mono); transition: background 120ms, border-color 120ms;" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">${canRepeat && activeUnitsForThisAsset > 0 ? 'Dispatch more' : 'Dispatch'}</button>
              </div>
            </div>`;
 
@@ -12714,8 +12745,31 @@ async function main() {
       const wsEvent = receivedEvents.find(e => e.id === _workspaceEventId)
                     || EVENTS.find(e => e.id === _workspaceEventId);
       if (wsEvent) {
+        // WORKSPACE LOCK. Once the workspace is open, the pillar only
+        // re-renders when the caller EXPLICITLY forces it. User actions
+        // (ack, dispatch, respond, confirm outcome, close, workspace
+        // mode toggle, back) all pass opts.immediate=true. Automatic
+        // sig invalidation on state transitions (Step 3→4 kill
+        // resolution, Step 4→5 outcome confirmed, Step 5→6 handoff
+        // done, event closed) resets _lastReceiverViewSig to null,
+        // which passes the sig check below.
+        //
+        // Every OTHER trigger (NN detection tick, escalation
+        // delivered/read cascade, cross-cue auto-escalation to other
+        // agencies, patrol re-route, interceptor state chip flip,
+        // Mistral streaming completion, dispatch state transitions in
+        // other roles) is a NO-OP for the pillar. Live values that
+        // need to tick (position, ETA, elapsed) update via
+        // _patchLiveTelemetry direct textContent, no full re-render.
+        //
+        // This is the final fix for the recurring "post-summary
+        // pillar blinking constantly" bug — any residual sig-flip
+        // source is now inert while the workspace holds focus.
+        if (!opts.force && !opts.immediate && _lastReceiverViewSig !== null) {
+          return;
+        }
         const sig = _receiverViewSignature(role, wsEvent, null, receivedEvents);
-        if (!opts.force && sig === _lastReceiverViewSig) return;   // memoized, skip
+        if (!opts.force && !opts.immediate && sig === _lastReceiverViewSig) return;
         _lastReceiverViewSig = sig;
         // Capture scroll positions of every scrollable pane BEFORE
         // innerHTML replace so dispatch clicks don't fling the operator
@@ -12900,6 +12954,12 @@ async function main() {
       const action = el.dataset.rcv;
       const id = el.dataset.id;
       const escId = el.dataset.esc;
+      // Every user click through the receiver router is a legit
+      // reason to re-render the workspace. Invalidate the lock sig up
+      // front so all downstream renderReceiverView() calls in the
+      // action handlers below pass through, without having to sprinkle
+      // { immediate: true } across every one of them.
+      _lastReceiverViewSig = null;
       if (action === 'pick') { _selectedReceiverEventId = id; _respondingEscId = null; renderReceiverView(); }
       else if (action === 'ack') {
         // Event id resolution priority: button dataset (workspace case-
