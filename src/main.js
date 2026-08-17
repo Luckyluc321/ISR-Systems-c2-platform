@@ -2717,28 +2717,11 @@ async function main() {
         scaleByDistance: new Cesium.NearFarScalar(1000, 1.4, 500000, 0.7),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
-      label: {
-        text: new Cesium.CallbackProperty(() => {
-          const suffix = d.state === 'en_route' ? ' · en route'
-                       : d.state === 'engaging' ? ' · engaging'
-                       : d.state === 'complete' ? ' · complete'
-                       : '';
-          return d.assetName + suffix;
-        }, false),
-        font: '11px system-ui',
-        fillColor: Cesium.Color.fromCssColorString('#4dff9c'),
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 2,
-        pixelOffset: new Cesium.Cartesian2(0, -28),
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        showBackground: true,
-        backgroundColor: Cesium.Color.fromCssColorString('rgba(8, 11, 16, 0.85)'),
-        backgroundPadding: new Cesium.Cartesian2(6, 3),
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
-      // Clickable — the click handler picks this and dispatches to
-      // showDispatchPopup with the dispatch id.
+      // No default label — icon alone. Click the icon to open the
+      // dispatch popup (unit name, state, ETA, payload). Constant
+      // labels cluttered the map, especially in swarm dispatches
+      // where three "Unit N/3 · engaging" pills stacked on top of
+      // each other.
       properties: { type: 'dispatch', dispatchId: d.id },
     });
 
@@ -2755,45 +2738,29 @@ async function main() {
   }
 
   function _createRadiationEntity(d) {
-    // Pulsing green cone/ellipse emanating from the jammer position
-    // toward the threat. Animated via CallbackProperty per frame.
-    //
-    // Radius is computed ONCE per frame and shared between semiMajor +
-    // semiMinor. Previously each was an independent CallbackProperty
-    // reading Date.now(), so if the two callbacks fired 1ms apart the
-    // minor could edge microscopically above the major and Cesium
-    // would throw "semiMajorAxis must be greater than or equal to the
-    // semiMinorAxis", killing the whole viewer.
-    let _radCachedFrame = 0, _radCachedR = 500;
-    const _radRadius = () => {
-      const now = Date.now();
-      if (now === _radCachedFrame) return _radCachedR;
-      _radCachedFrame = now;
-      const t = ((now - d.engageStartTs) / 1500) % 1;
-      _radCachedR = 500 + t * 900;
-      return _radCachedR;
-    };
-    let _radCachedAlphaFrame = 0, _radCachedAlpha = 0;
-    const _radT = () => {
-      const now = Date.now();
-      if (now === _radCachedAlphaFrame) return _radCachedAlpha;
-      _radCachedAlphaFrame = now;
-      _radCachedAlpha = ((now - d.engageStartTs) / 1500) % 1;
-      return _radCachedAlpha;
-    };
+    // Green jamming ellipse at the counter-response position.
+    // Radius is STATIC (constant number, no callback) — Cesium has a
+    // strict semiMajor >= semiMinor invariant, and any tiny drift
+    // between two independent CallbackProperty reads killed the whole
+    // viewer with "semiMajorAxis must be greater than or equal to the
+    // semiMinorAxis". Only the FILL alpha pulses now, via one shared
+    // per-frame closure. Radius cannot drift because it never changes.
+    const RAD_RADIUS_M = 800;
     d.radiationEntity = viewer.entities.add({
       position: new Cesium.CallbackProperty(() => (
         Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0)
       ), false),
       ellipse: {
-        semiMajorAxis: new Cesium.CallbackProperty(_radRadius, false),
-        semiMinorAxis: new Cesium.CallbackProperty(_radRadius, false),
+        semiMajorAxis: RAD_RADIUS_M,
+        semiMinorAxis: RAD_RADIUS_M,
         material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
-          return Cesium.Color.fromCssColorString('#4dff9c').withAlpha(0.22 * (1 - _radT()));
+          const t = ((Date.now() - d.engageStartTs) / 1500) % 1;
+          return Cesium.Color.fromCssColorString('#4dff9c').withAlpha(0.22 * (1 - t));
         }, false)),
         outline: true,
         outlineColor: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
-          return Cesium.Color.fromCssColorString('#4dff9c').withAlpha(0.55 * (1 - _radT()));
+          const t = ((Date.now() - d.engageStartTs) / 1500) % 1;
+          return Cesium.Color.fromCssColorString('#4dff9c').withAlpha(0.55 * (1 - t));
         }, false)),
         outlineWidth: 2,
         height: 0,
@@ -2937,41 +2904,26 @@ async function main() {
       }
     } else if (d.state === 'engaging') {
       const engageDur = (now - d.engageStartTs) / 1000;
-      // On engagement entry, freeze the interceptor at a fixed standoff
-      // position relative to where the hostile drone is RIGHT NOW.
-      // Then hold that position for the whole engagement — no per-tick
-      // shadowing. Previously we hard-set d.curLat/curLon every tick
-      // to enemy_position + fixed compass bearing offset, which made
-      // the interceptor teleport around the map every time the enemy
-      // drone hopped a waypoint. It also fed the trail with jagged
-      // jump-points that read as "green line going in circles".
-      // The tracer target endpoint STILL follows the enemy drone live
-      // via d.assignedTargetCoord — tracers refresh their aim per
-      // burst, so a moving enemy is still hit visually.
+      // Interceptor is FROZEN at arrival position for the whole 4s
+      // engagement. d.curLat/d.curLon NEVER get written during this
+      // state — no teleport, no shadow-follow, no jump. Only the aim
+      // target updates so tracers can chase a moving drone.
+      //
+      // Previous version teleported the interceptor onto (enemy_pos +
+      // 100m offset) on the first engaging tick. That was the "2km
+      // jump" Lucas saw: the assigned enemy drone can be hundreds of
+      // metres from the abstract arrival coord, so the interceptor
+      // snapped hard across the map. Removed. Interceptor now stays
+      // exactly where it arrived; tracers travel from there to the
+      // enemy's live position each burst.
       if (d.profile.airborne && d.assignedSwarmMember?.billboard?.position) {
         const cart = d.assignedSwarmMember.billboard.position.getValue?.(Cesium.JulianDate.now());
         if (cart) {
           const cartographic = Cesium.Cartographic.fromCartesian(cart);
-          const targetLat = Cesium.Math.toDegrees(cartographic.latitude);
-          const targetLon = Cesium.Math.toDegrees(cartographic.longitude);
-          d.assignedTargetCoord = { lat: targetLat, lon: targetLon };
-          // ONE-SHOT: snap interceptor to standoff position on the
-          // first engaging tick, then never move it again during this
-          // engagement window. Standoff distance from profile (100m
-          // default). Bearing spread by member index so 3 interceptors
-          // don't overlap.
-          if (!d._engageStandoffLocked) {
-            const offsetM = d.profile.engageOffsetM || 100;
-            const bearing = ((d.memberIndex || 0) * (Math.PI * 2 / 3));
-            d.curLat = targetLat + (offsetM * Math.cos(bearing)) / 111000;
-            d.curLon = targetLon + (offsetM * Math.sin(bearing)) / (111000 * Math.cos(targetLat * Math.PI / 180));
-            d.heading = bearing + Math.PI;
-            d._engageStandoffLocked = true;
-            if (d.profile.trail) {
-              d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0));
-              if (d.trailPositions.length > 500) d.trailPositions.shift();
-            }
-          }
+          d.assignedTargetCoord = {
+            lat: Cesium.Math.toDegrees(cartographic.latitude),
+            lon: Cesium.Math.toDegrees(cartographic.longitude),
+          };
         }
       }
       // Fire additional machine-gun bursts every ~1.4s during

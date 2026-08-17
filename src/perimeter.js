@@ -9,10 +9,10 @@
 // perimeter is reused. Patrol re-route logic reads from this cache.
 
 const OVERPASS_ENDPOINT = 'https://overpass-api.de/api/interpreter';
-const CORDON_RADIUS_M = 380;        // ~5-block ring
+const CORDON_RADIUS_M = 150;        // ~1-2 city blocks — 4 to 6 patrols cover it
 const FETCH_TIMEOUT_MS = 4500;
-const COMPASS_POINTS = 8;           // fallback polygon vertex count
-const INGRESS_POINTS = 6;           // how many patrol positions on the ring
+const COMPASS_POINTS = 6;           // fewer vertices for a tighter ring
+const INGRESS_POINTS = 4;           // one car per compass sector (N/E/S/W)
 
 const _cache = new Map();           // wreckageId -> { perimeter, ingress, source }
 
@@ -121,8 +121,10 @@ function _buildStreetCordon(centerLat, centerLon, streetNodes) {
     let bestDist = Infinity;
     for (const n of streetNodes) {
       const d = _distM(ideal, n);
-      // Only consider nodes within 180m of the ideal (keeps sector tight)
-      if (d > 180) continue;
+      // Sector tolerance scales with cordon size — never wider than
+      // half the cordon radius so the polygon stays snug around the
+      // wreckage instead of sprawling into neighbouring blocks.
+      if (d > CORDON_RADIUS_M * 0.5) continue;
       if (d < bestDist) { bestDist = d; best = n; }
     }
     if (best) perimeter.push([best.lat, best.lon]);
