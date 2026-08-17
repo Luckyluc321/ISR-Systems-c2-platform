@@ -3110,6 +3110,15 @@ async function main() {
       }
     }
     const target = d.assignedTargetCoord || { lat: d.targetLat, lon: d.targetLon };
+    // FIRE-CONTROL RANGE. Small-arms C-UAS engagement envelope is short.
+    // If the interceptor is not within engageRangeM of the drone,
+    // holster — don't spray bullets across half a kilometre. This is
+    // what makes tracers actually connect visually: the interceptor
+    // has to be close enough that the 110ms bullet arrives at a drone
+    // that hasn't moved much. Default 300m, override per profile.
+    const engageRangeM = d.profile.engageRangeM || 300;
+    const distToTarget = haversineM(d.curLat, d.curLon, target.lat, target.lon);
+    if (distToTarget > engageRangeM) return;
     const roundCount = 4;
     const roundGap = 70;   // ms between rounds
     for (let r = 0; r < roundCount; r++) {
@@ -3295,6 +3304,56 @@ async function main() {
         }
         sw.neutralised = true;
         sw._neutralisedAt = new Date().toISOString();
+      }
+      // RE-TARGET: any remaining non-neutralised non-overwatch hostile
+      // drones? If yes, pick the nearest unchased one and put this
+      // interceptor back into en_route to pursue. Only RTB when we
+      // have nothing left to chase OR we exceed maxChaseKm (handled
+      // in the en_route tick). Dedup vs other interceptors chasing so
+      // we don't dogpile one drone while another escapes.
+      const stateForReTarget = droneState.get(d.eventId);
+      const remainingHostiles = stateForReTarget?.swarmBillboards?.filter(
+        sw2 => !sw2.neutralised && sw2.role !== 'overwatch'
+      ) || [];
+      if (remainingHostiles.length > 0) {
+        const alreadyChased = new Set();
+        for (const [, other] of _counterDispatches) {
+          if (other === d) continue;
+          if (other.eventId !== d.eventId) continue;
+          if (other.kind !== 'counter-drone-swarm') continue;
+          if (other.state === 'complete' || other.rtbCompleted) continue;
+          if (other.assignedSwarmMember && !other.assignedSwarmMember.neutralised) {
+            alreadyChased.add(other.assignedSwarmMember);
+          }
+        }
+        const unchased = remainingHostiles.filter(sw2 => !alreadyChased.has(sw2));
+        const pool = unchased.length ? unchased : remainingHostiles;
+        let nearest = pool[0], nearestDist = Infinity;
+        for (const sw2 of pool) {
+          const cart2 = sw2.billboard?.position?.getValue?.(Cesium.JulianDate.now());
+          if (!cart2) continue;
+          const c2 = Cesium.Cartographic.fromCartesian(cart2);
+          const lat2 = Cesium.Math.toDegrees(c2.latitude);
+          const lon2 = Cesium.Math.toDegrees(c2.longitude);
+          const dist2 = haversineM(d.curLat, d.curLon, lat2, lon2);
+          if (dist2 < nearestDist) { nearestDist = dist2; nearest = sw2; }
+        }
+        d.assignedSwarmMember = nearest;
+        d.state = 'en_route';
+        d.arrivedTs = null;
+        d.engageStartTs = null;
+        d._engageLastFrameTs = null;
+        d._nextTracerTs = null;
+        d.lastFrameTs = Date.now();
+        const newCart = nearest.billboard?.position?.getValue?.(Cesium.JulianDate.now());
+        if (newCart) {
+          const nc = Cesium.Cartographic.fromCartesian(newCart);
+          d.targetLat = Cesium.Math.toDegrees(nc.latitude);
+          d.targetLon = Cesium.Math.toDegrees(nc.longitude);
+          d.assignedTargetCoord = { lat: d.targetLat, lon: d.targetLon };
+        }
+        toast(`${d.assetName} kill confirmed. Pursuing remaining hostile.`, 'info');
+        return;   // Skip group-outcome + fade/RTB. Chase continues.
       }
       // Group-level outcome — set on last group member complete
       if (!event._interceptorGroupsCompleted) event._interceptorGroupsCompleted = new Set();
@@ -12554,12 +12613,20 @@ async function main() {
     // (0 vs 1+) gets a boolean here — so a new dispatch spawning while
     // out-of-range does not blink the pillar; the state chip inside
     // Step 3 will refresh on the next user-triggered render.
+    // Escalation hash FILTERED to escalations owned by THIS role.
+    // Previous version iterated the whole escalations array — every
+    // auto-reacquisition escalation to another agency added a new
+    // entry to the hash and flipped the sig, forcing a full DOM
+    // rebuild even though nothing changed for this receiver.
+    const roleDestSet = new Set(role?.destinationIds || []);
     const escStatusHash = wsEvent
-      ? (wsEvent.escalations || []).map(e => {
-          const acked = e.statusHistory?.some(h => h.status === 'acknowledged') ? 'a' : 'p';
-          const responded = e.response ? 'r' : 'nr';
-          return `${e.id}:${acked}:${responded}`;
-        }).join(',')
+      ? (wsEvent.escalations || [])
+          .filter(e => roleDestSet.has(e.destinationId))
+          .map(e => {
+            const acked = e.statusHistory?.some(h => h.status === 'acknowledged') ? 'a' : 'p';
+            const responded = e.response ? 'r' : 'nr';
+            return `${e.id}:${acked}:${responded}`;
+          }).join(',')
       : '';
     const wsClosed = wsEvent && (wsEvent.status === 'closed' || wsEvent.outcome === 'closed');
     const wsPart = wsEvent
@@ -12650,8 +12717,26 @@ async function main() {
         const sig = _receiverViewSignature(role, wsEvent, null, receivedEvents);
         if (!opts.force && sig === _lastReceiverViewSig) return;   // memoized, skip
         _lastReceiverViewSig = sig;
+        // Capture scroll positions of every scrollable pane BEFORE
+        // innerHTML replace so dispatch clicks don't fling the operator
+        // back to the top. Center pane, right pillar, left ledger.
+        const _priorScroll = {
+          center: receiverView.querySelector('.rws-center')?.scrollTop || 0,
+          console: receiverView.querySelector('.rws-console')?.scrollTop || 0,
+          report:  receiverView.querySelector('.rer-scroll')?.scrollTop || 0,
+        };
         receiverView.innerHTML = renderEventWorkspace(wsEvent);
         receiverView.style.display = 'block';
+        // Restore after the new DOM is in place. requestAnimationFrame
+        // ensures layout has flushed so scrollTop assignment sticks.
+        requestAnimationFrame(() => {
+          const c = receiverView.querySelector('.rws-center');
+          const p = receiverView.querySelector('.rws-console');
+          const r = receiverView.querySelector('.rer-scroll');
+          if (c) c.scrollTop = _priorScroll.center;
+          if (p) p.scrollTop = _priorScroll.console;
+          if (r) r.scrollTop = _priorScroll.report;
+        });
         _bindReceiverActions();
         _fireMistralCaseFile(wsEvent);
         return;
