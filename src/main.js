@@ -2349,12 +2349,15 @@ async function main() {
       // three interceptors are engaged and Lucas wants more air power
       // on the same event, he clicks again.
       allowRepeatedDispatch: true,
-      // Max chase distance from the ORIGIN base. Beyond this the
-      // interceptor gives up, calls "signal lost", and RTBs. Keeps
-      // interceptors from flying out over Øresund forever chasing a
-      // drone that has left our coverage. Matches roughly the fuel /
-      // C2 range of a small quadcopter interceptor.
+      // Two-tier RTB ranges from ORIGIN base.
+      //   maxChaseKm 15  — soft cap. Idle RTB point (no live target).
+      //   maxPursuitKm 30 — hard cap. Absolute fuel limit even
+      //                     mid-pursuit. Interceptor will chase past
+      //                     the soft cap and the coastline as long as
+      //                     it has a live target and this limit is
+      //                     not exceeded.
       maxChaseKm: 15,
+      maxPursuitKm: 30,
       label: 'Interceptor Swarm',
     },
   };
@@ -2869,47 +2872,57 @@ async function main() {
       return;
     }
 
-    // Max chase distance from ORIGIN base. Applies in en_route AND
-    // engaging — an interceptor that engaged near the coast, killed
-    // its target, then re-targeted to a drone fleeing over Øresund
-    // would otherwise keep chasing forever. maxChaseKm caps total
-    // pursuit radius regardless of state.
+    // Distance-based RTB, with pursuit override.
+    //
+    //   maxChaseKm      : soft cap (default 15). RTB at this range
+    //                     ONLY when idle — no assigned hostile OR the
+    //                     assigned one is already neutralised.
+    //   maxPursuitKm    : hard cap (default 30). RTB always, even in
+    //                     mid-pursuit. Absolute fuel / C2 limit.
+    //   coast RTB       : 12.71°E east — only when idle. When pursuing
+    //                     a live target the interceptor crosses the
+    //                     coast in hot pursuit.
+    //
+    // Lucas's rule: "never head home immediately unless kill all
+    // targets". Interceptors now stay in the fight through the coast
+    // and past soft-cap until they run out of hostiles or fuel.
     if ((d.state === 'en_route' || d.state === 'engaging') && d.profile.supportsRTB && d.profile.maxChaseKm) {
       const chaseKm = haversineM(d.curLat, d.curLon, d.originLat, d.originLon) / 1000;
-      if (chaseKm >= d.profile.maxChaseKm) {
+      const hasLiveTarget = d.assignedSwarmMember && !d.assignedSwarmMember.neutralised;
+      const maxPursuitKm = d.profile.maxPursuitKm || (d.profile.maxChaseKm * 2);
+
+      // Hard cap: always RTB past pursuit range, even in a chase.
+      if (chaseKm >= maxPursuitKm) {
         d.state = 'rtb_via_last_known';
         d.rtbTargetLat = d.curLat;
         d.rtbTargetLon = d.curLon;
         d.rtbOrbitStartTs = null;
         d.lastFrameTs = now;
         if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
-        toast(`${d.assetName} at edge of coverage, cannot maintain visual on target. Returning to base.`, 'warn');
+        toast(`${d.assetName} at fuel limit ${maxPursuitKm} km from base. Returning to base.`, 'warn');
         return;
       }
-      // COAST RTB — only when NOT actively pursuing a live target.
-      // If the interceptor still has an assigned hostile drone that is
-      // airborne and not neutralised, allow chase past the coast up
-      // to maxChaseKm (already checked above). Only turn around at
-      // the beach when the target is dead or gone — otherwise it
-      // reads as the interceptor abandoning a chase that isn't over.
-      //
-      // "Gone" = no assignedSwarmMember at all, OR the assigned
-      // member has been neutralised (kill already registered so the
-      // interceptor is idling with nothing to do).
-      if (d.profile.airborne && d.curLon > 12.71) {
-        const hasLiveTarget = d.assignedSwarmMember && !d.assignedSwarmMember.neutralised;
-        if (!hasLiveTarget) {
-          d.state = 'rtb_via_last_known';
-          d.rtbTargetLat = d.curLat;
-          d.rtbTargetLon = d.curLon;
-          d.rtbOrbitStartTs = null;
-          d.lastFrameTs = now;
-          if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
-          toast(`${d.assetName} past coastline with no active target. Returning to base.`, 'warn');
-          return;
-        }
-        // Live target still airborne past coast — keep chasing until
-        // maxChaseKm caps it. No RTB here.
+      // Soft cap: only RTB when idle.
+      if (chaseKm >= d.profile.maxChaseKm && !hasLiveTarget) {
+        d.state = 'rtb_via_last_known';
+        d.rtbTargetLat = d.curLat;
+        d.rtbTargetLon = d.curLon;
+        d.rtbOrbitStartTs = null;
+        d.lastFrameTs = now;
+        if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+        toast(`${d.assetName} at edge of coverage, no active target. Returning to base.`, 'warn');
+        return;
+      }
+      // Coast: only RTB when idle.
+      if (d.profile.airborne && d.curLon > 12.71 && !hasLiveTarget) {
+        d.state = 'rtb_via_last_known';
+        d.rtbTargetLat = d.curLat;
+        d.rtbTargetLon = d.curLon;
+        d.rtbOrbitStartTs = null;
+        d.lastFrameTs = now;
+        if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+        toast(`${d.assetName} past coastline with no active target. Returning to base.`, 'warn');
+        return;
       }
     }
 
@@ -3191,10 +3204,11 @@ async function main() {
     // Live-target lookup reads the assigned enemy drone's billboard
     // position DIRECTLY each frame — same source Cesium uses to draw
     // the drone icon, so tracer endpoint and drone icon are always
-    // pixel-aligned. Previously read d.assignedTargetCoord (a cached
-    // snapshot updated only in the engaging tick + burst-fire), which
-    // could be stale by several frames — tracer visibly missed while
-    // the drone was mid-air between updates.
+    // pixel-aligned. INCLUDES ALTITUDE now: enemy drones fly at
+    // 50-100 m AGL, tracer was previously drawn at 8 m — in a tilted
+    // 3D view the tracer visibly ran along the ground below the
+    // airborne drone. Reading .height gives the actual altitude so
+    // the tracer connects to the drone icon in 2D AND 3D.
     const _liveTarget = () => {
       if (d.assignedSwarmMember?.billboard?.position) {
         const cart = d.assignedSwarmMember.billboard.position.getValue?.(Cesium.JulianDate.now());
@@ -3203,10 +3217,12 @@ async function main() {
           return {
             lat: Cesium.Math.toDegrees(c.latitude),
             lon: Cesium.Math.toDegrees(c.longitude),
+            alt: c.height || 8,
           };
         }
       }
-      return d.assignedTargetCoord || target;
+      const fallback = d.assignedTargetCoord || target;
+      return { lat: fallback.lat, lon: fallback.lon, alt: fallback.alt || 8 };
     };
     // Shared per-frame t so bullet head + streak agree
     let _cachedFrame = 0, _cachedT = 0;
@@ -3217,22 +3233,25 @@ async function main() {
       _cachedT = Math.min(1, (now - startTs) / travelMs);
       return _cachedT;
     };
-    // Bullet-in-flight position: interpolated between LIVE origin (d)
-    // and LIVE target on each frame
-    const _headPos = () => {
-      const t = _t();
-      const tgt = _liveTarget();
-      return {
-        lat: d.curLat + (tgt.lat - d.curLat) * t,
-        lon: d.curLon + (tgt.lon - d.curLon) * t,
-      };
-    };
+    // Origin altitude — interceptor drone is airborne too. Cap at 8m
+    // ground for wildlife/ground vehicles that don't have altitude.
+    const _originAlt = () => d.profile.airborne ? 60 : 8;
 
-    // Bullet head — small bright glowing dot, 3 px core.
+    // Bullet-in-flight position: interpolated between LIVE origin
+    // (interceptor at its cruise altitude) and LIVE target (enemy
+    // drone at its billboard altitude) on each frame. Interpolating
+    // altitude too so the bullet visibly climbs/descends to meet the
+    // enemy — reads as an actual projectile in 3D view.
     const bullet = viewer.entities.add({
       position: new Cesium.CallbackProperty(() => {
-        const p = _headPos();
-        return Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 8);
+        const t = _t();
+        const tgt = _liveTarget();
+        const oa = _originAlt();
+        return Cesium.Cartesian3.fromDegrees(
+          d.curLon + (tgt.lon - d.curLon) * t,
+          d.curLat + (tgt.lat - d.curLat) * t,
+          oa + (tgt.alt - oa) * t,
+        );
       }, false),
       point: {
         pixelSize: 3,
@@ -3243,20 +3262,24 @@ async function main() {
       },
     });
 
-    // Short 20% streak trailing the head.
+    // Short 20% streak trailing the head — full 3D endpoints so it
+    // ends at the enemy icon, not underneath it.
     const streak = viewer.entities.add({
       polyline: {
         positions: new Cesium.CallbackProperty(() => {
           const t = _t();
           const tgt = _liveTarget();
+          const oa = _originAlt();
           const headLat = d.curLat + (tgt.lat - d.curLat) * t;
           const headLon = d.curLon + (tgt.lon - d.curLon) * t;
+          const headAlt = oa + (tgt.alt - oa) * t;
           const back = Math.max(0, t - 0.20);
           const tailLat = d.curLat + (tgt.lat - d.curLat) * back;
           const tailLon = d.curLon + (tgt.lon - d.curLon) * back;
+          const tailAlt = oa + (tgt.alt - oa) * back;
           return [
-            Cesium.Cartesian3.fromDegrees(tailLon, tailLat, 8),
-            Cesium.Cartesian3.fromDegrees(headLon, headLat, 8),
+            Cesium.Cartesian3.fromDegrees(tailLon, tailLat, tailAlt),
+            Cesium.Cartesian3.fromDegrees(headLon, headLat, headAlt),
           ];
         }, false),
         width: 1.6,
@@ -8573,6 +8596,16 @@ async function main() {
   let _lastClosedPanelSig = null;
   let _lastClosedPanelEventId = null;
   function _closedPanelSig(e) {
+    // Fields DELIBERATELY excluded: duration, contributingSensors
+    // count, confidence. All three get mutated per drone tick even
+    // AFTER the event closes (onDroneTick updates event.duration
+    // unconditionally at line 6761, sensors get pushed as the fading
+    // drone billboard trips more coverage rings). Any of those flips
+    // the sig at ~2 Hz → the summary rebuilds → visible blink,
+    // particularly noticeable when the user has scrolled inside the
+    // panel (Lucas: "begins to fire once you scroll down in the
+    // summary and back up"). The panel doesn't need to react to any
+    // of them post-close.
     return [
       e.id,
       e.status,
@@ -8581,13 +8614,8 @@ async function main() {
       e.neutralizedAt || '',
       (e.notes || []).length,
       (e.linkedEventIds || []).length,
-      (e.contributingSensors || []).length,
-      Math.round((e.confidence || 0) * 100),
       e.classification,
       e.threat,
-      e.duration || 0,
-      // Toggle state hash — user opening/closing a section must
-      // re-render even though nothing on the event changed.
       Array.from(_plToggled.entries())
         .filter(([k]) => k.startsWith(e.id + '::'))
         .map(([k, v]) => `${k}:${v ? 1 : 0}`)
