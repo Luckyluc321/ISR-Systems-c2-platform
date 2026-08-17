@@ -2843,17 +2843,51 @@ async function main() {
     // en_route or engaging, its billboard.position still returns the
     // last-known coord (billboard.show=false but the position property
     // callback keeps returning). Interceptor would fly to that coord
-    // and fire bullets at empty space — Lucas's "final interceptor
-    // shooting in empty space" bug. Force this interceptor to
-    // re-target immediately by short-circuiting to state=complete;
-    // _resolveEngagement's re-target block then picks a live hostile.
+    // and fire bullets at empty space. Force it to re-target by
+    // short-circuiting to state=complete; _resolveEngagement's re-
+    // target block then picks a live hostile.
     if (d.kind === 'counter-drone-swarm'
         && (d.state === 'en_route' || d.state === 'engaging')
         && d.assignedSwarmMember?.neutralised) {
       d.state = 'complete';
-      d._firedAtLeastOnce = false;   // no live kill this pass
+      d._firedAtLeastOnce = false;
       _resolveEngagement(d);
       return;
+    }
+    // RECOVERY when parked in state='complete'.
+    // Two paths depending on group status:
+    //   a) Group not complete + live hostiles remain → kick another
+    //      _resolveEngagement, re-target block picks and transitions
+    //      back to en_route. Restores pursuit after a stale-target
+    //      or gated-RTB hold.
+    //   b) Group just went complete (another interceptor killed the
+    //      last hostile and marked group done) → this interceptor is
+    //      still parked from an earlier gated hold. Transition to
+    //      rtb_home directly. Prevents "stuck idling forever" state.
+    if (d.kind === 'counter-drone-swarm'
+        && d.state === 'complete'
+        && !d.rtbCompleted
+        && event) {
+      const groupComplete = event._interceptorGroupsCompleted?.has(d.groupId);
+      if (groupComplete && d.profile.airborne && d.profile.supportsRTB) {
+        d.state = 'rtb_home';
+        d.rtbTargetLat = d.originLat;
+        d.rtbTargetLon = d.originLon;
+        d.lastFrameTs = now;
+        if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+        return;
+      }
+      if (!groupComplete) {
+        const st = droneState.get(d.eventId);
+        const remaining = st?.swarmBillboards?.filter(
+          sw2 => !sw2.neutralised && sw2.role !== 'overwatch'
+        ) || [];
+        if (remaining.length > 0) {
+          d._firedAtLeastOnce = false;
+          _resolveEngagement(d);
+          return;
+        }
+      }
     }
 
     // Live target update priority:
@@ -3543,11 +3577,35 @@ async function main() {
     //   3) Everything else (helicopter after intercept, one-shot SOF,
     //      etc) → existing 1.5s fade + 5s remove.
     if (d.profile.airborne && d.profile.supportsRTB && !d.rtbCompleted) {
-      d.state = 'rtb_home';
-      d.rtbTargetLat = d.originLat;
-      d.rtbTargetLon = d.originLon;
-      d.lastFrameTs = Date.now();
-      // Radiation cone off — no longer engaging.
+      // GATED RTB. For interceptor swarms, only RTB when the GROUP has
+      // been formally declared complete (event._interceptorGroupsCompleted
+      // contains this groupId). Group-outcome fires only once every
+      // group member has state='complete' AND the re-target block found
+      // no live hostiles. As long as ANY sibling interceptor is still
+      // en_route pursuing a survivor, this one holds — the next stale-
+      // target tick will re-run _resolveEngagement, find live hostiles
+      // in the re-target pool, and put this interceptor back into the
+      // chase. Without this gate an interceptor that killed the last
+      // AVAILABLE assigned target (but not the last swarm survivor)
+      // dropped straight to rtb_home while siblings were still hunting.
+      //
+      // Non-swarm airborne dispatches (helicopter QRA, etc.) don't
+      // participate in the group model — RTB normally.
+      const isSwarmMember = d.kind === 'counter-drone-swarm' && d.groupId;
+      const groupDone = !isSwarmMember
+        || (event?._interceptorGroupsCompleted?.has(d.groupId));
+      if (groupDone) {
+        d.state = 'rtb_home';
+        d.rtbTargetLat = d.originLat;
+        d.rtbTargetLon = d.originLon;
+        d.lastFrameTs = Date.now();
+        if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+        return;
+      }
+      // Group not done yet — hold in state='complete'. The stale-
+      // target check at tick-loop head will re-fire _resolveEngagement
+      // on the next tick; re-target block will pick a live hostile
+      // and transition back to en_route.
       if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
       return;
     }
