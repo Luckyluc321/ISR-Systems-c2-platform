@@ -7349,16 +7349,25 @@ async function main() {
           if (sw.trailLine) sw.trailLine.show = swShouldShow;
           // Track coverage transitions so we can drop indexed
           // out-of-range / reacquisition markers below.
-          if (sw._prevInCov === undefined) sw._prevInCov = swShouldShow;
-          if (sw._prevInCov && !swShouldShow) {
-            // Just LOST coverage — drop an indexed OUT-OF-RANGE marker
+          //
+          // Order matters here:
+          //   1. Initial spawn: _prevInCov undefined → seed it, NO
+          //      marker (the main event's ENTRY marker handles first
+          //      detection separately).
+          //   2. In→out transition: drop OUT OF RANGE, bump _oorCount.
+          //   3. Out→in transition, but ONLY if we've previously
+          //      dropped at least one OUT OF RANGE for this drone.
+          //      Prevents the "first-ever detection labelled
+          //      REACQUIRED" bug.
+          if (sw._prevInCov === undefined) {
+            sw._prevInCov = swShouldShow;
+          } else if (sw._prevInCov && !swShouldShow) {
             sw._oorCount = (sw._oorCount || 0) + 1;
             const stamp = new Date().toISOString().slice(11, 19);
             _dropMarker(pos.lat, pos.lon, '#ff5a5a',
               `OUT OF RANGE #${sw._oorCount} ${stamp}Z · signal lost on ${sw.model || 'drone'}`,
               event.id);
-          } else if (!sw._prevInCov && swShouldShow) {
-            // Just RE-ACQUIRED — drop an indexed REACQUIRED marker
+          } else if (!sw._prevInCov && swShouldShow && (sw._oorCount || 0) > 0) {
             sw._reacqCount = (sw._reacqCount || 0) + 1;
             const stamp = new Date().toISOString().slice(11, 19);
             _dropMarker(pos.lat, pos.lon, '#4dff9c',
