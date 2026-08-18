@@ -6986,15 +6986,32 @@ async function main() {
         // out over Øresund after the drone was neutralised at AMK.
         if (leadDown && state.trail) state.trail.show = false;
         // Multi-site tracks fire ENTRY / EXIT / OUT OF RANGE markers per
-        // site as the missile transits each coverage zone. SKIP once
-        // the LEAD is dead — the drone position `p` still advances
-        // along waypoints (drones.js has no kill hook), so per-site
-        // markers would fire at the lead's ghost trajectory instead
-        // of where any live drone actually is. Per-drone reacq/OOR
-        // markers in the swarm loop below cover the live members.
-        if ((event.multiSiteTrack || event.templateKey === 'cruise_missile_to_amalienborg')
-            && !state.leadSwarmMember?.neutralised) {
-          processPerSiteMarkers(state, p, event.id);
+        // site as the missile transits each coverage zone.
+        //
+        // When the LEAD is neutralised, drones.js keeps advancing its
+        // waypoints — the raw `p` becomes a ghost trajectory that
+        // dropped OOR markers at fake positions. Fall back to the
+        // FIRST live swarm member's live billboard position so the
+        // per-site markers keep firing at real drone coordinates
+        // (needed for AMK to log its own OUT OF RANGE once the last
+        // live drone crosses AMK sensor coverage).
+        if (event.multiSiteTrack || event.templateKey === 'cruise_missile_to_amalienborg') {
+          let anchorP = p;
+          if (state.leadSwarmMember?.neutralised) {
+            const liveSw = (state.swarmBillboards || []).find(sw => !sw.neutralised);
+            if (liveSw?.billboard?.position) {
+              const cart = liveSw.billboard.position.getValue?.(Cesium.JulianDate.now());
+              if (cart) {
+                const c = Cesium.Cartographic.fromCartesian(cart);
+                anchorP = {
+                  lat: Cesium.Math.toDegrees(c.latitude),
+                  lon: Cesium.Math.toDegrees(c.longitude),
+                  alt: c.height || 100,
+                };
+              } else { anchorP = null; }
+            } else { anchorP = null; }
+          }
+          if (anchorP) processPerSiteMarkers(state, anchorP, event.id);
         }
         state.billboard.position = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.alt);
 
@@ -7217,8 +7234,14 @@ async function main() {
             lat: p.lat, lon: p.lon, alt: p.alt,
             heading: leadHdgDeg, speed: p.speed || 25,
           };
-          // P5A: adaptive sample capture for the lead (same event-driven interval as wingmen)
-          if (state.recording && (!state._leadLastSampleMs || (nowMs - state._leadLastSampleMs) >= _sampleIntervalForEvent(event))) {
+          // P5A: adaptive sample capture for the lead (same event-driven interval as wingmen).
+          // SKIP once the lead is neutralised — drones.js keeps advancing
+          // its waypoints (no kill hook), so pushing more samples would
+          // mint ghost sensor data past the kill point. Replay + debrief
+          // then showed a "phantom lead" flying on across the map. State
+          // gets frozen at the last pre-kill sample instead.
+          if (state.recording && !state.leadSwarmMember?.neutralised
+              && (!state._leadLastSampleMs || (nowMs - state._leadLastSampleMs) >= _sampleIntervalForEvent(event))) {
             const _template_lead = TEMPLATES[event.templateKey];
             const _leadSlot = _template_lead?.swarm?.formation?.[0] || {};
             const _leadInCov = _shouldAutoDetect(p.lat, p.lon);
@@ -7407,20 +7430,26 @@ async function main() {
           //      dropped at least one OUT OF RANGE for this drone.
           //      Prevents the "first-ever detection labelled
           //      REACQUIRED" bug.
+          // Snapshot the last in-coverage position so OOR markers land
+          // AT the coverage boundary, not several ticks past it.
+          if (swShouldShow) sw._lastInCovPos = { lat: pos.lat, lon: pos.lon, alt: pos.alt };
           if (sw._prevInCov === undefined) {
             sw._prevInCov = swShouldShow;
           } else if (sw._prevInCov && !swShouldShow) {
             sw._oorCount = (sw._oorCount || 0) + 1;
             const stamp = new Date().toISOString().slice(11, 19);
-            _dropMarker(pos.lat, pos.lon, '#ff5a5a',
+            // Place the OOR marker at the LAST KNOWN in-coverage
+            // position, not at the current tick's position. The
+            // current pos has already advanced past the coverage
+            // boundary (typically 100-400 m depending on tick rate +
+            // drone speed), so using it puts the marker in open water
+            // instead of at the actual signal-loss coord. Falls back
+            // to current pos if we somehow never captured a prior
+            // in-cov position.
+            const oorPos = sw._lastInCovPos || pos;
+            _dropMarker(oorPos.lat, oorPos.lon, '#ff5a5a',
               `OUT OF RANGE #${sw._oorCount} ${stamp}Z · signal lost on ${sw.model || 'drone'}`,
               event.id);
-            // Clear the live trail polyline on OOR — otherwise the
-            // reacq-first position gets drawn as a straight line back
-            // to the last pre-OOR position, reading as a ghost
-            // "trendline from entry to exit" across the map. Historical
-            // trail data stays intact in state.recording.timeseries
-            // for debrief / replay.
             if (sw.trailPositions) sw.trailPositions.length = 0;
           } else if (!sw._prevInCov && swShouldShow && (sw._oorCount || 0) > 0) {
             sw._reacqCount = (sw._reacqCount || 0) + 1;
