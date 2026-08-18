@@ -7135,57 +7135,13 @@ async function main() {
             state._leadLastSampleMs = nowMs;
           }
         }
-        // OVERWATCH ESCAPE — gated on TWO conditions:
-        //   1. Swarm has reached the Amager Koblingsstation area
-        //      (within 2 km of AMK centroid).
-        //   2. At least one interceptor is close enough for the swarm
-        //      to visually / RF-detect it — within SWARM_DETECT_M of
-        //      any live swarm member. Interceptors airborne 200 km
-        //      away don't spook the swarm.
-        const AMK_LAT = 55.6410, AMK_LON = 12.6088, AMK_RADIUS_M = 2000;
-        const SWARM_DETECT_M = 1500;   // ~1.5 km visual/RF detection range
-        const leadPos = positions.find(pp => pp.eventId === event.id);
-        const swarmInAmk = leadPos
-          ? haversineM(leadPos.lat, leadPos.lon, AMK_LAT, AMK_LON) <= AMK_RADIUS_M
-          : false;
-        let interceptorSensed = false;
-        if (swarmInAmk) {
-          // Collect this event's live swarm-member positions (lead
-          // billboard + swarm billboards). Skip neutralised.
-          const swarmPositions = [];
-          if (leadPos && !state.leadSwarmMember?.neutralised) {
-            swarmPositions.push({ lat: leadPos.lat, lon: leadPos.lon });
-          }
-          if (state.swarmBillboards) {
-            for (const sw of state.swarmBillboards) {
-              if (sw.neutralised) continue;
-              const cart = sw.billboard?.position?.getValue?.(Cesium.JulianDate.now());
-              if (!cart) continue;
-              const c = Cesium.Cartographic.fromCartesian(cart);
-              swarmPositions.push({
-                lat: Cesium.Math.toDegrees(c.latitude),
-                lon: Cesium.Math.toDegrees(c.longitude),
-              });
-            }
-          }
-          for (const [, cd] of _counterDispatches) {
-            if (cd.eventId !== event.id) continue;
-            if (cd.kind !== 'counter-drone-swarm') continue;
-            if (cd.state !== 'en_route' && cd.state !== 'engaging') continue;
-            // Interceptor lat/lon vs any swarm member
-            let closest = Infinity;
-            for (const sp of swarmPositions) {
-              const dM = haversineM(cd.curLat, cd.curLon, sp.lat, sp.lon);
-              if (dM < closest) closest = dM;
-            }
-            if (closest <= SWARM_DETECT_M) {
-              interceptorSensed = true;
-              break;
-            }
-          }
-        }
-        const overwatchPanicActive = swarmInAmk && interceptorSensed;
-
+        // NO PANIC / NO OVERRIDES. Every swarm member — including
+        // overwatch — follows its own waypoints at raw tSec. The
+        // panic/flee overrides I wrote earlier were teleporting
+        // overwatch across the map and pulling interceptors on wild-
+        // goose chases inland. Reverted. Whether overwatch escapes
+        // now depends purely on: its waypoint trajectory + its
+        // altitude offset vs interceptor arrival time. Realistic.
         for (let i = 0; i < state.swarmBillboards.length; i++) {
           const sw = state.swarmBillboards[i];
           if (sw.neutralised) {
@@ -7194,68 +7150,15 @@ async function main() {
             if (sw.projLine) sw.projLine.show = false;
             continue;
           }
-          let pos;
-          if (sw.role === 'overwatch' && overwatchPanicActive) {
-            // Overwatch in panic mode — FLEE. Bearing away from the
-            // nearest interceptor, biased east toward Øresund (open
-            // water) so it exits Danish airspace like the narrative
-            // says. Speed ~180 km/h (50 m/s), faster than interceptor
-            // cruise. Climb toward 130 m ceiling for extra separation.
-            // Overrides waypoint interpolation entirely — this is a
-            // real evasion vector, not just accelerated formation.
-            if (!sw._panicPos) {
-              const startWp = _interpolateWaypoints(sw.waypoints, tSec);
-              if (startWp) {
-                sw._panicPos = { lat: startWp.lat, lon: startWp.lon, alt: startWp.alt || 100 };
-                sw._panicPrevMs = nowMs;
-              }
-            }
-            if (sw._panicPos) {
-              const dtSec = Math.max(0.001, (nowMs - (sw._panicPrevMs || nowMs)) / 1000);
-              sw._panicPrevMs = nowMs;
-              const speedMs = 50;   // ~180 km/h, faster than interceptor cruise (120)
-              const stepM = speedMs * dtSec;
-              // Bearing: FROM nearest interceptor TO this overwatch drone
-              // = the away vector. Blend 70/30 with due-east so overwatch
-              // still trends toward the sea instead of just orbiting the
-              // interceptor.
-              let brng = 0.5 * Math.PI;   // east default
-              let nearestDist = Infinity, nearestBrng = null;
-              for (const [, cd] of _counterDispatches) {
-                if (cd.eventId !== event.id) continue;
-                if (cd.kind !== 'counter-drone-swarm') continue;
-                if (cd.state !== 'en_route' && cd.state !== 'engaging') continue;
-                const dM = haversineM(cd.curLat, cd.curLon, sw._panicPos.lat, sw._panicPos.lon);
-                if (dM < nearestDist) {
-                  nearestDist = dM;
-                  // Bearing from interceptor to overwatch (radians, atan2(dLon, dLat))
-                  const M_PER_DEG_LON2 = 111320 * Math.cos(sw._panicPos.lat * Math.PI / 180);
-                  const dE = (sw._panicPos.lon - cd.curLon) * M_PER_DEG_LON2;
-                  const dN = (sw._panicPos.lat - cd.curLat) * 111320;
-                  nearestBrng = Math.atan2(dE, dN);
-                }
-              }
-              if (nearestBrng != null) {
-                // Blend: 70% away-from-interceptor + 30% due-east
-                brng = 0.7 * nearestBrng + 0.3 * (0.5 * Math.PI);
-              }
-              const M_PER_DEG_LON = 111320 * Math.cos(sw._panicPos.lat * Math.PI / 180);
-              sw._panicPos.lat += (stepM * Math.cos(brng)) / 111320;
-              sw._panicPos.lon += (stepM * Math.sin(brng)) / M_PER_DEG_LON;
-              sw._panicPos.alt = Math.min(130, (sw._panicPos.alt || 100) + 0.6 * dtSec);
-              pos = sw._panicPos;
-            } else {
-              pos = _interpolateWaypoints(sw.waypoints, tSec);
-            }
-          } else {
-            // Reset panic state so re-entering panic later seeds
-            // cleanly from current waypoint position.
-            if (sw.role === 'overwatch' && sw._panicPos) {
-              sw._panicPos = null;
-              sw._panicPrevMs = null;
-            }
-            pos = _interpolateWaypoints(sw.waypoints, tSec);
+          // Clean up any leftover panic state from prior versions so
+          // no stale _panicPos or _acumTSec skews the next tick.
+          if (sw._panicPos || sw._prevTSec != null) {
+            sw._panicPos = null;
+            sw._panicPrevMs = null;
+            sw._prevTSec = null;
+            sw._acumTSec = 0;
           }
+          const pos = _interpolateWaypoints(sw.waypoints, tSec);
           if (!pos) {
             sw.billboard.show = false;
             if (sw.projLine) sw.projLine.show = false;
