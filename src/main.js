@@ -7135,30 +7135,56 @@ async function main() {
             state._leadLastSampleMs = nowMs;
           }
         }
-        // OVERWATCH ESCAPE — gated on TWO conditions, otherwise no
-        // acceleration for anyone (formation flies exactly as before).
+        // OVERWATCH ESCAPE — gated on TWO conditions:
         //   1. Swarm has reached the Amager Koblingsstation area
         //      (within 2 km of AMK centroid).
-        //   2. At least one interceptor is airborne on this event.
-        // Only when BOTH are true does overwatch break formation and
-        // sprint. Every other drone (lead + wingmen + outer) uses
-        // raw tSec always — no panic, no formation drift.
+        //   2. At least one interceptor is close enough for the swarm
+        //      to visually / RF-detect it — within SWARM_DETECT_M of
+        //      any live swarm member. Interceptors airborne 200 km
+        //      away don't spook the swarm.
         const AMK_LAT = 55.6410, AMK_LON = 12.6088, AMK_RADIUS_M = 2000;
+        const SWARM_DETECT_M = 1500;   // ~1.5 km visual/RF detection range
         const leadPos = positions.find(pp => pp.eventId === event.id);
         const swarmInAmk = leadPos
           ? haversineM(leadPos.lat, leadPos.lon, AMK_LAT, AMK_LON) <= AMK_RADIUS_M
           : false;
-        let interceptorAirborne = false;
+        let interceptorSensed = false;
         if (swarmInAmk) {
+          // Collect this event's live swarm-member positions (lead
+          // billboard + swarm billboards). Skip neutralised.
+          const swarmPositions = [];
+          if (leadPos && !state.leadSwarmMember?.neutralised) {
+            swarmPositions.push({ lat: leadPos.lat, lon: leadPos.lon });
+          }
+          if (state.swarmBillboards) {
+            for (const sw of state.swarmBillboards) {
+              if (sw.neutralised) continue;
+              const cart = sw.billboard?.position?.getValue?.(Cesium.JulianDate.now());
+              if (!cart) continue;
+              const c = Cesium.Cartographic.fromCartesian(cart);
+              swarmPositions.push({
+                lat: Cesium.Math.toDegrees(c.latitude),
+                lon: Cesium.Math.toDegrees(c.longitude),
+              });
+            }
+          }
           for (const [, cd] of _counterDispatches) {
-            if (cd.eventId === event.id && cd.kind === 'counter-drone-swarm'
-                && (cd.state === 'en_route' || cd.state === 'engaging')) {
-              interceptorAirborne = true;
+            if (cd.eventId !== event.id) continue;
+            if (cd.kind !== 'counter-drone-swarm') continue;
+            if (cd.state !== 'en_route' && cd.state !== 'engaging') continue;
+            // Interceptor lat/lon vs any swarm member
+            let closest = Infinity;
+            for (const sp of swarmPositions) {
+              const dM = haversineM(cd.curLat, cd.curLon, sp.lat, sp.lon);
+              if (dM < closest) closest = dM;
+            }
+            if (closest <= SWARM_DETECT_M) {
+              interceptorSensed = true;
               break;
             }
           }
         }
-        const overwatchPanicActive = swarmInAmk && interceptorAirborne;
+        const overwatchPanicActive = swarmInAmk && interceptorSensed;
 
         for (let i = 0; i < state.swarmBillboards.length; i++) {
           const sw = state.swarmBillboards[i];
