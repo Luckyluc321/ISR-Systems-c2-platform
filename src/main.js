@@ -7135,19 +7135,31 @@ async function main() {
             state._leadLastSampleMs = nowMs;
           }
         }
-        // PANIC MULTIPLIER — survivors pick up the pace as siblings
-        // die. Real-world doctrine: once the pack takes losses, the
-        // remaining airframes accelerate to break contact. deadRatio
-        // 0 → mult 1.0 (baseline). deadRatio 1.0 (all downable dead
-        // except this one) → mult 1.8 (60% faster to make escape
-        // realistic without teleporting). Applied via per-drone
-        // accumulated waypoint time so survivors advance faster than
-        // baseline tSec without disrupting other simulation timing.
-        let _totalDownable = state.swarmBillboards.length + (state.leadSwarmMember ? 1 : 0);
-        let _deadCount = state.swarmBillboards.filter(x => x.neutralised).length
-                        + ((state.leadSwarmMember?.neutralised) ? 1 : 0);
-        const _deadRatio = _totalDownable > 0 ? _deadCount / _totalDownable : 0;
-        const _panicMult = 1 + 0.8 * _deadRatio;
+        // OVERWATCH ESCAPE — gated on TWO conditions, otherwise no
+        // acceleration for anyone (formation flies exactly as before).
+        //   1. Swarm has reached the Amager Koblingsstation area
+        //      (within 2 km of AMK centroid).
+        //   2. At least one interceptor is airborne on this event.
+        // Only when BOTH are true does overwatch break formation and
+        // sprint. Every other drone (lead + wingmen + outer) uses
+        // raw tSec always — no panic, no formation drift.
+        const AMK_LAT = 55.6410, AMK_LON = 12.6088, AMK_RADIUS_M = 2000;
+        const leadPos = positions.find(pp => pp.eventId === event.id);
+        const swarmInAmk = leadPos
+          ? haversineM(leadPos.lat, leadPos.lon, AMK_LAT, AMK_LON) <= AMK_RADIUS_M
+          : false;
+        let interceptorAirborne = false;
+        if (swarmInAmk) {
+          for (const [, cd] of _counterDispatches) {
+            if (cd.eventId === event.id && cd.kind === 'counter-drone-swarm'
+                && (cd.state === 'en_route' || cd.state === 'engaging')) {
+              interceptorAirborne = true;
+              break;
+            }
+          }
+        }
+        const overwatchPanicActive = swarmInAmk && interceptorAirborne;
+
         for (let i = 0; i < state.swarmBillboards.length; i++) {
           const sw = state.swarmBillboards[i];
           if (sw.neutralised) {
@@ -7156,21 +7168,28 @@ async function main() {
             if (sw.projLine) sw.projLine.show = false;
             continue;
           }
-          // Accumulated per-drone waypoint time, bumped by
-          // (panicMult × roleMult) each tick. First tick just seeds
-          // tSec — no jump.
-          // Overwatch flies inherently faster (recon airframe with
-          // burst egress capability) so it can plausibly OUTPACE an
-          // interceptor once its escape sprint starts. 1.35× baseline
-          // multiplied by up to 1.8× panic → up to 2.4× cruise when
-          // last one alive. That's the "sometimes escapes" gap Lucas
-          // asked for.
-          const _roleMult = sw.role === 'overwatch' ? 1.35 : 1.0;
-          if (sw._prevTSec == null) { sw._prevTSec = tSec; sw._acumTSec = tSec; }
-          const _dtSec = tSec - sw._prevTSec;
-          sw._prevTSec = tSec;
-          sw._acumTSec += _dtSec * _panicMult * _roleMult;
-          const pos = _interpolateWaypoints(sw.waypoints, sw._acumTSec);
+          let pos;
+          if (sw.role === 'overwatch' && overwatchPanicActive) {
+            // Overwatch in panic mode — accelerate waypoint time so
+            // it plausibly outruns interceptors. ~1.8× baseline. Only
+            // fires inside the AMK zone with active interceptors.
+            const overwatchMult = 1.8;
+            if (sw._prevTSec == null) { sw._prevTSec = tSec; sw._acumTSec = tSec; }
+            const _dtSec = tSec - sw._prevTSec;
+            sw._prevTSec = tSec;
+            sw._acumTSec += _dtSec * overwatchMult;
+            pos = _interpolateWaypoints(sw.waypoints, sw._acumTSec);
+          } else {
+            // Everyone else always, and overwatch when NOT panicking —
+            // raw tSec. Preserves the original formation exactly.
+            // Reset panic clock so a future overwatch panic re-seeds
+            // from the current tSec cleanly.
+            if (sw.role === 'overwatch' && sw._prevTSec != null) {
+              sw._prevTSec = null;
+              sw._acumTSec = 0;
+            }
+            pos = _interpolateWaypoints(sw.waypoints, tSec);
+          }
           if (!pos) {
             sw.billboard.show = false;
             if (sw.projLine) sw.projLine.show = false;
