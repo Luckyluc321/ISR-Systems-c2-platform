@@ -5427,11 +5427,53 @@ async function main() {
   }
 
   window.__isr_getRecording = (eventId) => {
+    // 1) Event's own live recording
     const st = droneState.get(eventId);
     if (st?.recording) return st.recording;
+    // 2) Event's own persisted recording
     try {
       const raw = localStorage.getItem(_P5A_STORAGE_PREFIX + eventId);
-      return raw ? JSON.parse(raw) : null;
+      if (raw) return JSON.parse(raw);
+    } catch (e) { /* fall through */ }
+    // 3) SHADOW FALLBACK. Linked/shadow events (AMK cross-cued from
+    //    CPH primary) have no droneState of their own — they piggyback
+    //    on the primary's tick loop. Fetch the primary's recording and
+    //    filter timeseries to this shadow event's active window so
+    //    replay / debrief / PDF / summary / intelligence all render
+    //    the AMK-window slice instead of coming up empty.
+    try {
+      const ev = EVENTS.find(e => e.id === eventId);
+      const primaryId = ev?.shadowOfEventId || ev?.linkedEventId;
+      if (!primaryId) return null;
+      const primarySt = droneState.get(primaryId);
+      let rec = primarySt?.recording || null;
+      if (!rec) {
+        const raw = localStorage.getItem(_P5A_STORAGE_PREFIX + primaryId);
+        if (raw) rec = JSON.parse(raw);
+      }
+      if (!rec?.timeseries?.length) return null;
+      const startMs = new Date(ev.startTime).getTime();
+      const endMs = ev.endTime ? new Date(ev.endTime).getTime() : Date.now();
+      const filtered = rec.timeseries.filter(s => {
+        const t = new Date(s.timestamp_utc).getTime();
+        return t >= startMs && t <= endMs;
+      });
+      if (!filtered.length) return null;
+      // Return a shadow-scoped clone so callers get event-scoped meta
+      // (event_id, event_type) instead of the primary's fields.
+      return {
+        meta: {
+          ...(rec.meta || {}),
+          event_id: eventId,
+          event_type: rec.meta?.event_type || 'quadcopter',
+          shadow_of: primaryId,
+          shadow_scoped: true,
+          started_at_utc: ev.startTime,
+          ended_at_utc: ev.endTime || null,
+          duration_sec: ev.duration || null,
+        },
+        timeseries: filtered,
+      };
     } catch (e) { return null; }
   };
   window.__isr_downloadRecording = (eventId) => {
@@ -6944,8 +6986,14 @@ async function main() {
         // out over Øresund after the drone was neutralised at AMK.
         if (leadDown && state.trail) state.trail.show = false;
         // Multi-site tracks fire ENTRY / EXIT / OUT OF RANGE markers per
-        // site as the missile transits each coverage zone.
-        if (event.multiSiteTrack || event.templateKey === 'cruise_missile_to_amalienborg') {
+        // site as the missile transits each coverage zone. SKIP once
+        // the LEAD is dead — the drone position `p` still advances
+        // along waypoints (drones.js has no kill hook), so per-site
+        // markers would fire at the lead's ghost trajectory instead
+        // of where any live drone actually is. Per-drone reacq/OOR
+        // markers in the swarm loop below cover the live members.
+        if ((event.multiSiteTrack || event.templateKey === 'cruise_missile_to_amalienborg')
+            && !state.leadSwarmMember?.neutralised) {
           processPerSiteMarkers(state, p, event.id);
         }
         state.billboard.position = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.alt);
@@ -7367,6 +7415,13 @@ async function main() {
             _dropMarker(pos.lat, pos.lon, '#ff5a5a',
               `OUT OF RANGE #${sw._oorCount} ${stamp}Z · signal lost on ${sw.model || 'drone'}`,
               event.id);
+            // Clear the live trail polyline on OOR — otherwise the
+            // reacq-first position gets drawn as a straight line back
+            // to the last pre-OOR position, reading as a ghost
+            // "trendline from entry to exit" across the map. Historical
+            // trail data stays intact in state.recording.timeseries
+            // for debrief / replay.
+            if (sw.trailPositions) sw.trailPositions.length = 0;
           } else if (!sw._prevInCov && swShouldShow && (sw._oorCount || 0) > 0) {
             sw._reacqCount = (sw._reacqCount || 0) + 1;
             const stamp = new Date().toISOString().slice(11, 19);
