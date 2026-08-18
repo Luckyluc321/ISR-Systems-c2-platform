@@ -1947,7 +1947,25 @@ async function main() {
               : pp2.to;
             return sampleWithAlt(pp2.from.lat, pp2.from.lon, endPt2.lat, endPt2.lon);
           }, false),
-          width: 3,
+          // Width scales with the number of live drones remaining in
+          // the swarm — 5 alive = width 4, 1 alive = width 1.5. As
+          // interceptors down drones, the aggregate projection line
+          // narrows so the visual reads as "reduced threat" not
+          // "growing blob". Lucas #3.
+          width: new Cesium.CallbackProperty(() => {
+            const st = droneState.get(event.id);
+            if (!st) return 3;
+            let live = st.leadSwarmMember && !st.leadSwarmMember.neutralised ? 1 : 0;
+            if (st.swarmBillboards) {
+              for (const sw of st.swarmBillboards) if (!sw.neutralised) live++;
+            }
+            if (live <= 0) return 1;
+            if (live === 1) return 1.5;
+            if (live === 2) return 2;
+            if (live === 3) return 2.5;
+            if (live === 4) return 3;
+            return Math.min(4, 3 + (live - 4) * 0.5);
+          }, false),
           material: new Cesium.PolylineDashMaterialProperty({
             color: Cesium.Color.fromCssColorString('#ffe600').withAlpha(0.85),
             dashLength: 16,
@@ -2669,6 +2687,13 @@ async function main() {
       targetLat: threatLat, targetLon: threatLon,
       heading: _bearingRad(originLat, originLon, threatLat, threatLon),
       entity: null, trail: null, trailPositions: [], radiationEntity: null,
+      // Battery / fuel. Decrements per tick based on flight time. When
+      // depleted the interceptor auto-RTBs and eventually removes.
+      // Baseline endurance per profile — small quadcopter interceptors
+      // run ~30 min flight time. Ground vehicles have a longer effective
+      // endurance (fuel not battery) — cap at 120 min for the demo.
+      batteryPct: 100,
+      enduranceMin: profile.airborne ? 30 : 120,
     };
     _counterDispatches.set(dispatchId, d);
     _createCounterDispatchEntities(d);
@@ -2810,6 +2835,28 @@ async function main() {
   }
 
   function _tickCounterDispatch(d, now) {
+    // Battery/fuel tick — linear drain over profile.enduranceMin
+    // minutes. Airborne interceptors run out at 100%→0 = enduranceMin
+    // minutes of flight. Skip on holding-cordon (parked ground unit
+    // idling, negligible fuel use). Once battery hits low reserve
+    // (15%), interceptor auto-RTBs so it can make it home.
+    if (d.enduranceMin && d.state !== 'holding-cordon' && d.state !== 'rtb_home') {
+      const _battDtMin = (now - (d._battLastMs || now)) / 60000;
+      d._battLastMs = now;
+      d.batteryPct = Math.max(0, (d.batteryPct ?? 100) - (100 / d.enduranceMin) * _battDtMin);
+      if (d.batteryPct <= 15 && d.profile.supportsRTB
+          && (d.state === 'en_route' || d.state === 'engaging')
+          && !d._lowBatRtbFired) {
+        d._lowBatRtbFired = true;
+        d.state = 'rtb_home';
+        d.rtbTargetLat = d.originLat;
+        d.rtbTargetLon = d.originLon;
+        d.lastFrameTs = now;
+        if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+        toast(`${d.assetName} low battery (${Math.round(d.batteryPct)}%). Returning to base.`, 'warn');
+      }
+    }
+
     // Live target update. Interceptor follows the freshest active
     // event tracking this same target across sites. Cross-site
     // handover is automatic — if the primary event closed but a
@@ -6892,6 +6939,10 @@ async function main() {
           : (inAnyCoverage === null ? true : (inAnyCoverage || beingChased)));
         state.billboard.show = shouldShow;
         state.shadow.show = shouldShow;
+        // Also hide the lead's trail polyline once the lead is dead —
+        // without this the DJI-1 trendline kept growing all the way
+        // out over Øresund after the drone was neutralised at AMK.
+        if (leadDown && state.trail) state.trail.show = false;
         // Multi-site tracks fire ENTRY / EXIT / OUT OF RANGE markers per
         // site as the missile transits each coverage zone.
         if (event.multiSiteTrack || event.templateKey === 'cruise_missile_to_amalienborg') {
@@ -6975,7 +7026,9 @@ async function main() {
         );
 
         _trailAppendCounter++;
-        if (_trailAppendCounter % 3 === 0) {
+        // Skip trail growth once the lead is dead — no ghost trendline
+        // continuing along the drone's remaining waypoints.
+        if (!leadDown && _trailAppendCounter % 3 === 0) {
           state.trailPositions.push(Cesium.Cartesian3.fromDegrees(p.lon, p.lat, _safeTrailAlt(p.alt)));
           if (state.trailPositions.length > 180) state.trailPositions.shift();
         }
@@ -7288,6 +7341,31 @@ async function main() {
           const swShouldShow = event.multiSiteTrack ? (inCov || tipInCov) : true;
           sw.billboard.position = Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, pos.alt);
           sw.billboard.show = swShouldShow;
+          // Trail visibility mirrors the drone billboard — as soon as
+          // the drone drops out of coverage (billboard hides), its
+          // trendline also hides. Prevents the "overwatch trail
+          // staying visible over Øresund" ghost effect after signal
+          // loss. Reappears when the drone re-enters coverage.
+          if (sw.trailLine) sw.trailLine.show = swShouldShow;
+          // Track coverage transitions so we can drop indexed
+          // out-of-range / reacquisition markers below.
+          if (sw._prevInCov === undefined) sw._prevInCov = swShouldShow;
+          if (sw._prevInCov && !swShouldShow) {
+            // Just LOST coverage — drop an indexed OUT-OF-RANGE marker
+            sw._oorCount = (sw._oorCount || 0) + 1;
+            const stamp = new Date().toISOString().slice(11, 19);
+            _dropMarker(pos.lat, pos.lon, '#ff5a5a',
+              `OUT OF RANGE #${sw._oorCount} ${stamp}Z · signal lost on ${sw.model || 'drone'}`,
+              event.id);
+          } else if (!sw._prevInCov && swShouldShow) {
+            // Just RE-ACQUIRED — drop an indexed REACQUIRED marker
+            sw._reacqCount = (sw._reacqCount || 0) + 1;
+            const stamp = new Date().toISOString().slice(11, 19);
+            _dropMarker(pos.lat, pos.lon, '#4dff9c',
+              `REACQUIRED #${sw._reacqCount} ${stamp}Z · signal returned on ${sw.model || 'drone'}`,
+              event.id);
+          }
+          sw._prevInCov = swShouldShow;
           // Rogue-drone tag: any wingman whose model is NOT a DJI platform
           // is treated as an unknown-provenance emitter. Its confidence is
           // held in the WEAK band (0.35-0.55) so its trail colour-codes
@@ -7808,6 +7886,10 @@ async function main() {
         <div class="pop-k">Elapsed since dispatch</div>
         <div class="pop-v">${elapsedStr}</div>
       </div>
+      ${d.enduranceMin ? `<div class="pop-section">
+        <div class="pop-k">${d.profile.airborne ? 'Battery' : 'Fuel'}</div>
+        <div class="pop-v ${(d.batteryPct ?? 100) < 25 ? 'warn' : ''}">${Math.round(d.batteryPct ?? 100)}% · ~${Math.max(0, Math.round((d.batteryPct ?? 100) / 100 * d.enduranceMin))} min remaining</div>
+      </div>` : ''}
     `;
   }
 
