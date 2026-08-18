@@ -5981,31 +5981,71 @@ async function main() {
 
   function _debriefRenderTrajectory(samples) {
     if (samples.length < 2) return [];
-    // Reuse the confidence-band + confirmed/projected segment logic from
-    // replay. Confirmed = solid, projected = dashed at 60% alpha. Tells
-    // the viewer at a glance which parts of the path are sensor-observed
-    // vs reconstructed from context.
-    const segments = _replayBuildTrailSegments(samples);
+    // GROUP BY DRONE first, then build segments per drone. Without
+    // grouping, all samples fed to _replayBuildTrailSegments produced
+    // ONE polyline that zig-zagged / bridged across every drone —
+    // when two drones ended in different places, the result was a
+    // huge stripe spanning the gap between them (Lucas: "absolutely
+    // HUGE band"). Per-drone rendering means DJI-1's line stays
+    // separate from Overwatch's line; if they're far apart, you see
+    // two thin lines with empty space between, not a bridge.
+    const byDrone = new Map();
+    for (const s of samples) {
+      const id = s.droneId || 'unknown';
+      if (!byDrone.has(id)) byDrone.set(id, []);
+      byDrone.get(id).push(s);
+    }
+    // ADAPTIVE BRIDGING. Within a single drone's samples, keep the
+    // line as one continuous polyline UNLESS consecutive samples are
+    // separated by more than BRIDGE_BREAK_M metres (e.g. a re-acq
+    // after a long sensor gap). Above that gap, split into a new
+    // segment so we don't draw a straight line across half the map.
+    // 800 m matches the "far apart, split them" heuristic — close
+    // enough that dense samples stay connected, far enough that a
+    // real re-acq across a gap breaks cleanly.
+    const BRIDGE_BREAK_M = 800;
     const entities = [];
-    for (const seg of segments) {
-      if (seg.positions.length < 2) continue;
-      const flat = seg.positions.flat();
-      const color = _confidenceColor(seg.avgConf);
-      const material = seg.confirmed
-        ? color
-        : new Cesium.PolylineDashMaterialProperty({
-            color: color.withAlpha(0.55),
-            dashLength: 14,
-          });
-      entities.push(viewer.entities.add({
-        polyline: {
-          positions: Cesium.Cartesian3.fromDegreesArrayHeights(flat),
-          width: seg.confirmed ? 4 : 2.5,
-          material,
-          clampToGround: false,
-        },
-        properties: { debrief: true, confirmed: seg.confirmed },
-      }));
+    for (const [, droneSamples] of byDrone) {
+      if (droneSamples.length < 2) continue;
+      // Split by big geographic gaps into sub-runs first.
+      const runs = [];
+      let currentRun = [droneSamples[0]];
+      for (let i = 1; i < droneSamples.length; i++) {
+        const prev = droneSamples[i - 1];
+        const cur = droneSamples[i];
+        const gapM = haversineM(prev.lat, prev.lon, cur.lat, cur.lon);
+        if (gapM > BRIDGE_BREAK_M) {
+          if (currentRun.length >= 2) runs.push(currentRun);
+          currentRun = [cur];
+        } else {
+          currentRun.push(cur);
+        }
+      }
+      if (currentRun.length >= 2) runs.push(currentRun);
+      // Each run → confidence-band segments → polylines.
+      for (const run of runs) {
+        const segments = _replayBuildTrailSegments(run);
+        for (const seg of segments) {
+          if (seg.positions.length < 2) continue;
+          const flat = seg.positions.flat();
+          const color = _confidenceColor(seg.avgConf);
+          const material = seg.confirmed
+            ? color
+            : new Cesium.PolylineDashMaterialProperty({
+                color: color.withAlpha(0.55),
+                dashLength: 14,
+              });
+          entities.push(viewer.entities.add({
+            polyline: {
+              positions: Cesium.Cartesian3.fromDegreesArrayHeights(flat),
+              width: seg.confirmed ? 4 : 2.5,
+              material,
+              clampToGround: false,
+            },
+            properties: { debrief: true, confirmed: seg.confirmed },
+          }));
+        }
+      }
     }
     return entities;
   }
