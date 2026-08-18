@@ -7331,12 +7331,12 @@ async function main() {
         // (not the waypoint position — no jump). Slight climb to
         // 130 m for altitude advantage.
         const AMK_LAT = 55.6410, AMK_LON = 12.6088, AMK_RADIUS_M = 2000;
-        // Quadcopter-vs-quadcopter visual/RF detection is short-range in
-        // reality — 400 m is the outer bound for reliable spot-and-flee
-        // by a small commercial drone. Previous 1500 m made overwatch
-        // "sense" interceptors from unrealistic distance and take off
-        // way too early.
-        const SWARM_DETECT_M = 400;
+        // Quadcopter-vs-quadcopter visual/RF detection range. 1000 m
+        // gives overwatch enough lead time to break off before the
+        // interceptor closes to kill range, but is tight enough that
+        // it doesn't panic while interceptors are still en_route from
+        // the Varde bay.
+        const SWARM_DETECT_M = 1000;
         const leadPos = positions.find(pp => pp.eventId === event.id);
         const swarmInAmk = leadPos
           ? haversineM(leadPos.lat, leadPos.lon, AMK_LAT, AMK_LON) <= AMK_RADIUS_M
