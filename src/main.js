@@ -4567,54 +4567,68 @@ async function main() {
     const prev = state.lastTickPos || { lat: p.lat, lon: p.lon };
     for (const sid of Object.keys(SITES)) {
       const site = SITES[sid];
-      // Prefer sub-area `perimeter` if defined; fall back to outer `siteBoundary`.
-      // Esbjerg has siteBoundary (15-vertex outer polygon) but perimeter=[]
-      // (sub-areas never filled). Without this fallback Esbjerg never fires
-      // entry/exit/OOR markers.
       const perim = site?.perimeter?.length ? site.perimeter
                   : (site?.siteBoundary?.length ? site.siteBoundary : null);
-      if (!perim) continue;   // only sites with a footprint polygon get markers
+      if (!perim) continue;
       const nowInside = pointInPolygon(p.lat, p.lon, perim);
+      const cov = nearestSensorInCoverage(p, site);
+      const nowInCov = !!(cov && cov.inCoverage);
       let ps = state.perSite.get(sid);
-      const relevant = nowInside || ps;
+      const relevant = nowInside || nowInCov || ps;
       if (!relevant) continue;
       if (!ps) {
-        ps = { entryDropped: false, exitDropped: false, oorDropped: false, wasInside: false };
+        // COUNTER-based state. wasInside / wasInCov track the last
+        // observed state; entryCount / exitCount / oorCount track
+        // how many times each transition has fired. Every genuine
+        // in/out transition drops a numbered marker — a drone that
+        // re-enters CPH after leaving, re-exits, re-enters again,
+        // fires ENTRY #2, EXIT #2, ENTRY #3, ...
+        ps = {
+          wasInside: false, wasInCov: false,
+          entryCount: 0, exitCount: 0, oorCount: 0,
+          lastInCovPos: null,
+        };
         state.perSite.set(sid, ps);
       }
+      // Snapshot last in-cov position so OOR marker can land at the
+      // coverage boundary instead of wherever the next tick lands.
+      if (nowInCov) ps.lastInCovPos = { lat: p.lat, lon: p.lon };
       const now = new Date().toISOString();
-      // ENTRY: perimeter crossing INBOUND — segment goes from outside to inside
-      if (nowInside && !ps.wasInside && !ps.entryDropped) {
-        ps.entryDropped = true;
+
+      // PERIMETER ENTRY (outside → inside)
+      if (nowInside && !ps.wasInside) {
+        ps.entryCount++;
         const hit = _segmentPolygonIntersection(prev.lat, prev.lon, p.lat, p.lon, perim)
                  || { lat: p.lat, lon: p.lon };
-        const lbl = `ENTRY ${now.slice(11,19)}Z · ${site.name || sid}`;
+        const suffix = ps.entryCount > 1 ? ` #${ps.entryCount}` : '';
+        const lbl = `ENTRY${suffix} ${now.slice(11,19)}Z · ${site.name || sid}`;
         _dropMarker(hit.lat, hit.lon, '#4dd2ff', lbl, eventId);
         _persistCrossing('entry', hit.lat, hit.lon, '#4dd2ff', lbl);
       }
-      // EXIT: perimeter crossing OUTBOUND — inside to outside
-      if (!nowInside && ps.wasInside && !ps.exitDropped) {
-        ps.exitDropped = true;
+      // PERIMETER EXIT (inside → outside)
+      if (!nowInside && ps.wasInside) {
+        ps.exitCount++;
         const hit = _segmentPolygonIntersection(prev.lat, prev.lon, p.lat, p.lon, perim)
                  || { lat: p.lat, lon: p.lon };
-        const lbl = `EXIT ${now.slice(11,19)}Z · ${site.name || sid}`;
+        const suffix = ps.exitCount > 1 ? ` #${ps.exitCount}` : '';
+        const lbl = `EXIT${suffix} ${now.slice(11,19)}Z · ${site.name || sid}`;
         _dropMarker(hit.lat, hit.lon, '#ffb84d', lbl, eventId);
         _persistCrossing('exit', hit.lat, hit.lon, '#ffb84d', lbl);
       }
       ps.wasInside = nowInside;
-      // OUT OF RANGE: track has exited perimeter and no sensor at this
-      // site can currently detect it. Uses cov.inCoverage which aggregates
-      // EVERY sensor's individual coverageRadius from metadata — if any
-      // sensor covers the position, still in range. No hardcoded thresholds.
-      if (ps.exitDropped && !ps.oorDropped) {
-        const cov = nearestSensorInCoverage(p, site);
-        if (cov?.nearest && !cov.inCoverage) {
-          ps.oorDropped = true;
-          const lbl = `OUT OF RANGE ${now.slice(11,19)}Z · ${site.name || sid} signal lost`;
-          _dropMarker(p.lat, p.lon, '#ff5a5a', lbl, eventId);
-          _persistCrossing('oor', p.lat, p.lon, '#ff5a5a', lbl);
-        }
+
+      // OUT OF RANGE (in-any-sensor-cov → out-of-any-sensor-cov).
+      // Marker lands at the LAST in-cov position so it sits on the
+      // sensor coverage boundary, not several kilometres past it.
+      if (ps.wasInCov && !nowInCov) {
+        ps.oorCount++;
+        const oorPos = ps.lastInCovPos || { lat: p.lat, lon: p.lon };
+        const suffix = ps.oorCount > 1 ? ` #${ps.oorCount}` : '';
+        const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.name || sid} signal lost`;
+        _dropMarker(oorPos.lat, oorPos.lon, '#ff5a5a', lbl, eventId);
+        _persistCrossing('oor', oorPos.lat, oorPos.lon, '#ff5a5a', lbl);
       }
+      ps.wasInCov = nowInCov;
     }
     state.lastTickPos = { lat: p.lat, lon: p.lon };
   }
@@ -7317,7 +7331,12 @@ async function main() {
         // (not the waypoint position — no jump). Slight climb to
         // 130 m for altitude advantage.
         const AMK_LAT = 55.6410, AMK_LON = 12.6088, AMK_RADIUS_M = 2000;
-        const SWARM_DETECT_M = 1500;
+        // Quadcopter-vs-quadcopter visual/RF detection is short-range in
+        // reality — 400 m is the outer bound for reliable spot-and-flee
+        // by a small commercial drone. Previous 1500 m made overwatch
+        // "sense" interceptors from unrealistic distance and take off
+        // way too early.
+        const SWARM_DETECT_M = 400;
         const leadPos = positions.find(pp => pp.eventId === event.id);
         const swarmInAmk = leadPos
           ? haversineM(leadPos.lat, leadPos.lon, AMK_LAT, AMK_LON) <= AMK_RADIUS_M
