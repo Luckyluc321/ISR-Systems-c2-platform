@@ -2753,7 +2753,10 @@ async function main() {
           positions: new Cesium.CallbackProperty(() => d.trailPositions, false),
           width: 2,
           material: Cesium.Color.fromCssColorString('#4dff9c').withAlpha(0.55),
-          clampToGround: true,
+          // Airborne trails render at their actual altitude so they
+          // stream from the interceptor's tail in 3D. Ground vehicles
+          // still clamp so their trail lays on the road surface.
+          clampToGround: !d.profile.airborne,
         },
       });
     }
@@ -3068,7 +3071,7 @@ async function main() {
         d.curLat += stepDegLat;
         d.curLon += stepDegLon;
         if (d.profile.trail) {
-          d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0));
+          d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? (d.curAlt || 60) : 0));
           if (d.trailPositions.length > 500) d.trailPositions.shift();
         }
         const distM = haversineM(d.curLat, d.curLon, d.targetLat, d.targetLon);
@@ -3133,7 +3136,7 @@ async function main() {
           }
           d.heading = _bearingRad(d.curLat, d.curLon, enemyLat, enemyLon);
           if (d.profile.trail) {
-            d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0));
+            d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? (d.curAlt || 60) : 0));
             if (d.trailPositions.length > 500) d.trailPositions.shift();
           }
         }
@@ -3161,7 +3164,7 @@ async function main() {
       d.curLat += (stepM * Math.cos(brng)) / 111000;
       d.curLon += (stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
       if (d.profile.trail) {
-        d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0));
+        d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? (d.curAlt || 60) : 0));
         if (d.trailPositions.length > 500) d.trailPositions.shift();
       }
       const distM = haversineM(d.curLat, d.curLon, d.rtbTargetLat, d.rtbTargetLon);
@@ -3192,7 +3195,7 @@ async function main() {
       d.curLat += (stepM * Math.cos(brng)) / 111000;
       d.curLon += (stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
       if (d.profile.trail) {
-        d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0));
+        d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? (d.curAlt || 60) : 0));
         if (d.trailPositions.length > 500) d.trailPositions.shift();
       }
       const distM = haversineM(d.curLat, d.curLon, d.originLat, d.originLon);
@@ -3265,7 +3268,8 @@ async function main() {
   // small-arms C-UAS engagement for civilian airspace (no missiles,
   // no explosions).
   function _fireMachineGunBurst(d) {
-    // Refresh target position (drone may have moved since engagement start)
+    // Refresh target position INCLUDING ALTITUDE — drone may have
+    // climbed since engagement start (overwatch does this constantly).
     if (d.assignedSwarmMember?.billboard?.position) {
       const cart = d.assignedSwarmMember.billboard.position.getValue?.(Cesium.JulianDate.now());
       if (cart) {
@@ -3273,10 +3277,11 @@ async function main() {
         d.assignedTargetCoord = {
           lat: Cesium.Math.toDegrees(cartographic.latitude),
           lon: Cesium.Math.toDegrees(cartographic.longitude),
+          alt: cartographic.height || d.targetAlt || 60,
         };
       }
     }
-    const target = d.assignedTargetCoord || { lat: d.targetLat, lon: d.targetLon };
+    const target = d.assignedTargetCoord || { lat: d.targetLat, lon: d.targetLon, alt: d.targetAlt || 60 };
     // FIRE-CONTROL RANGE. Small-arms C-UAS engagement envelope is short.
     // If the interceptor is not within engageRangeM of the drone,
     // holster — don't spray bullets across half a kilometre. This is
@@ -3284,8 +3289,19 @@ async function main() {
     // has to be close enough that the 110ms bullet arrives at a drone
     // that hasn't moved much. Default 300m, override per profile.
     const engageRangeM = d.profile.engageRangeM || 300;
-    const distToTarget = haversineM(d.curLat, d.curLon, target.lat, target.lon);
-    if (distToTarget > engageRangeM) return;
+    // 3D range gate — must be within the engage sphere, not just the
+    // horizontal disc. Overwatch flies 60-100 m above cruise; a 2D-
+    // only gate let the interceptor fire from ground while overwatch
+    // was hundreds of metres above, bullets missed by altitude. Now
+    // the interceptor must actually have CLIMBED close enough before
+    // its burst can fire — the "did they climb before firing?" check
+    // Lucas asked about is now enforced by fire-control.
+    const dist2D = haversineM(d.curLat, d.curLon, target.lat, target.lon);
+    const interceptorAlt = d.profile.airborne ? (d.curAlt || 60) : 8;
+    const targetAlt = (typeof target.alt === 'number') ? target.alt : (d.targetAlt || interceptorAlt);
+    const altDelta = targetAlt - interceptorAlt;
+    const dist3D = Math.sqrt(dist2D * dist2D + altDelta * altDelta);
+    if (dist3D > engageRangeM) return;
     d._firedAtLeastOnce = true;   // gates the kill decision below
     const roundCount = 4;
     const roundGap = 70;
@@ -7140,12 +7156,20 @@ async function main() {
             if (sw.projLine) sw.projLine.show = false;
             continue;
           }
-          // Accumulated per-drone waypoint time, bumped by panicMult
-          // each tick. First tick just seeds tSec — no jump.
+          // Accumulated per-drone waypoint time, bumped by
+          // (panicMult × roleMult) each tick. First tick just seeds
+          // tSec — no jump.
+          // Overwatch flies inherently faster (recon airframe with
+          // burst egress capability) so it can plausibly OUTPACE an
+          // interceptor once its escape sprint starts. 1.35× baseline
+          // multiplied by up to 1.8× panic → up to 2.4× cruise when
+          // last one alive. That's the "sometimes escapes" gap Lucas
+          // asked for.
+          const _roleMult = sw.role === 'overwatch' ? 1.35 : 1.0;
           if (sw._prevTSec == null) { sw._prevTSec = tSec; sw._acumTSec = tSec; }
           const _dtSec = tSec - sw._prevTSec;
           sw._prevTSec = tSec;
-          sw._acumTSec += _dtSec * _panicMult;
+          sw._acumTSec += _dtSec * _panicMult * _roleMult;
           const pos = _interpolateWaypoints(sw.waypoints, sw._acumTSec);
           if (!pos) {
             sw.billboard.show = false;
