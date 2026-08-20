@@ -4497,6 +4497,26 @@ async function main() {
   const _perEventMarkers = new Map(); // eventId → Cesium.Entity[]
 
   function _dropMarker(lat, lon, colorHex, labelText, eventId = null) {
+    // Stagger label y so overlapping markers (site-level OOR + per-drone
+    // OOR firing on top of each other at AMK, etc) don't collide into
+    // unreadable stacked text. Count markers within ~80 m of this new
+    // one across the same event AND across the whole board — bump the
+    // label up by 14 px per neighbour so each row reads cleanly.
+    const STACK_RADIUS_M = 80;
+    const STACK_STEP_PX  = 14;
+    const BASE_OFFSET_PX = -20;
+    let stackIdx = 0;
+    for (const [, list] of _perEventMarkers) {
+      for (const other of list) {
+        const c = other.position?.getValue?.(Cesium.JulianDate.now());
+        if (!c) continue;
+        const oCarto = Cesium.Cartographic.fromCartesian(c);
+        const oLat = Cesium.Math.toDegrees(oCarto.latitude);
+        const oLon = Cesium.Math.toDegrees(oCarto.longitude);
+        if (haversineM(lat, lon, oLat, oLon) <= STACK_RADIUS_M) stackIdx++;
+      }
+    }
+    const labelOffsetY = BASE_OFFSET_PX - (stackIdx * STACK_STEP_PX);
     const ent = viewer.entities.add({
       position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
       billboard: {
@@ -4511,7 +4531,7 @@ async function main() {
         fillColor: Cesium.Color.fromCssColorString(colorHex),
         outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
         style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        pixelOffset: new Cesium.Cartesian2(0, -20),
+        pixelOffset: new Cesium.Cartesian2(0, labelOffsetY),
         showBackground: true,
         backgroundColor: Cesium.Color.BLACK.withAlpha(0.75),
         backgroundPadding: new Cesium.Cartesian2(5, 2),
