@@ -4601,7 +4601,7 @@ async function main() {
   // the flight path crosses it. Segment-polygon intersection is computed
   // between the previous tick position and the current position, giving
   // pixel-accurate placement even at high update rates.
-  function processPerSiteMarkers(state, p, eventId = null) {
+  function processPerSiteMarkers(state, p, eventId = null, prevOverride = null) {
     // Persist per-site crossings ONTO the event so we can re-render them
     // on re-select (multi-site events don't populate event.entry/exit/OOR
     // — those are single-site only).
@@ -4613,8 +4613,10 @@ async function main() {
       ev.perSiteCrossings.push({ kind, lat, lon, color, label, timestamp: new Date().toISOString() });
     };
     // Store previous tick position so we can intersect the segment with
-    // each polygon edge.
-    const prev = state.lastTickPos || { lat: p.lat, lon: p.lon };
+    // each polygon edge. prevOverride wins so callers can pass the
+    // anchor drone's actual prev pos (avoids state.lastTickPos being
+    // stale by one tick vs the CURRENT swarm loop's real positions).
+    const prev = prevOverride || state.lastTickPos || { lat: p.lat, lon: p.lon };
     for (const sid of Object.keys(SITES)) {
       const site = SITES[sid];
       const perim = site?.perimeter?.length ? site.perimeter
@@ -7180,23 +7182,16 @@ async function main() {
         // per-site markers keep firing at real drone coordinates
         // (needed for AMK to log its own OUT OF RANGE once the last
         // live drone crosses AMK sensor coverage).
-        if (event.multiSiteTrack || event.templateKey === 'cruise_missile_to_amalienborg') {
-          let anchorP = p;
-          if (state.leadSwarmMember?.neutralised) {
-            const liveSw = (state.swarmBillboards || []).find(sw => !sw.neutralised);
-            if (liveSw?.billboard?.position) {
-              const cart = liveSw.billboard.position.getValue?.(Cesium.JulianDate.now());
-              if (cart) {
-                const c = Cesium.Cartographic.fromCartesian(cart);
-                anchorP = {
-                  lat: Cesium.Math.toDegrees(c.latitude),
-                  lon: Cesium.Math.toDegrees(c.longitude),
-                  alt: c.height || 100,
-                };
-              } else { anchorP = null; }
-            } else { anchorP = null; }
-          }
-          if (anchorP) processPerSiteMarkers(state, anchorP, event.id);
+        // Per-site markers run from HERE only while the lead is alive
+        // (anchor = lead's real-time position this tick). Once the
+        // lead is neutralised, the call is deferred to the END of the
+        // swarm loop below so it can use the first-live wingman's
+        // actual just-computed position + prev — the fallback path
+        // previously read wingman.billboard.position (one tick stale)
+        // which put OOR/REACQ markers off by a tick.
+        if ((event.multiSiteTrack || event.templateKey === 'cruise_missile_to_amalienborg')
+            && !state.leadSwarmMember?.neutralised) {
+          processPerSiteMarkers(state, p, event.id);
         }
         state.billboard.position = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.alt);
 
@@ -7512,6 +7507,10 @@ async function main() {
             if (sw.projLine) sw.projLine.show = false;
             continue;
           }
+          // Snapshot prev pos BEFORE this tick's updates so the
+          // deferred per-site marker call at the end of the swarm
+          // loop has an accurate segment to bisect against.
+          sw._markerPrevPos = sw.prevPos ? { lat: sw.prevPos.lat, lon: sw.prevPos.lon } : null;
           let pos;
           // STICKY panic activation: once overwatch enters panic, it
           // stays there. sw._panicActive latches to true.
@@ -7708,6 +7707,20 @@ async function main() {
           }
           sw.prevPos = { lat: pos.lat, lon: pos.lon };
           sw.prevTs = nowMs;
+        }
+        // Deferred per-site marker pass — when the lead is dead we
+        // couldn't run this in the lead callback because the fallback
+        // anchor (wingman.billboard.position) was a tick stale. Now
+        // every live wingman has just written its ACTUAL current pos
+        // to sw.stats, and its previous pos is snapshotted on
+        // sw._markerPrevPos. Use the first-live wingman as anchor.
+        if ((event.multiSiteTrack || event.templateKey === 'cruise_missile_to_amalienborg')
+            && state.leadSwarmMember?.neutralised) {
+          const anchor = (state.swarmBillboards || []).find(sw => !sw.neutralised && sw.stats?.lat != null);
+          if (anchor) {
+            const anchorCur = { lat: anchor.stats.lat, lon: anchor.stats.lon, alt: anchor.stats.alt };
+            processPerSiteMarkers(state, anchorCur, event.id, anchor._markerPrevPos);
+          }
         }
         // P21: universal per-site event lifecycle. Aggregate all drone
         // positions in the group (lead + swarm members), compute which
