@@ -4668,11 +4668,34 @@ async function main() {
       ps.wasInside = nowInside;
 
       // OUT OF RANGE (in-any-sensor-cov → out-of-any-sensor-cov).
-      // Marker lands at the LAST in-cov position so it sits on the
-      // sensor coverage boundary, not several kilometres past it.
+      // Bisect the anchor segment prev→p against THIS site's sensor
+      // circles to find the exact boundary crossing point. Falls back
+      // to lastInCovPos (tick-quantised) if the segment doesn't cleanly
+      // straddle (e.g. anchor jumped when a swarm member died).
       if (ps.wasInCov && !nowInCov) {
         ps.oorCount++;
-        const oorPos = ps.lastInCovPos || { lat: p.lat, lon: p.lon };
+        const anySiteInCov = (lat, lon) => {
+          for (const s of site.sensors) {
+            if (s.status === 'offline') continue;
+            if (haversineM(lat, lon, s.lat, s.lon) <= s.coverageRadius) return true;
+          }
+          return false;
+        };
+        let oorPos = null;
+        if (prev && anySiteInCov(prev.lat, prev.lon) && !anySiteInCov(p.lat, p.lon)) {
+          let tLo = 0, tHi = 1;
+          for (let i = 0; i < 22; i++) {
+            const tMid = (tLo + tHi) / 2;
+            const mLat = prev.lat + (p.lat - prev.lat) * tMid;
+            const mLon = prev.lon + (p.lon - prev.lon) * tMid;
+            if (anySiteInCov(mLat, mLon)) tLo = tMid; else tHi = tMid;
+          }
+          oorPos = {
+            lat: prev.lat + (p.lat - prev.lat) * tLo,
+            lon: prev.lon + (p.lon - prev.lon) * tLo,
+          };
+        }
+        oorPos = oorPos || ps.lastInCovPos || { lat: p.lat, lon: p.lon };
         const suffix = ps.oorCount > 1 ? ` #${ps.oorCount}` : '';
         const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.name || sid} signal lost`;
         _dropMarker(oorPos.lat, oorPos.lon, '#ff5a5a', lbl, eventId);
