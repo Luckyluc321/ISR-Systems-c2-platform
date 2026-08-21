@@ -4672,15 +4672,15 @@ async function main() {
       // circles to find the exact boundary crossing point. Falls back
       // to lastInCovPos (tick-quantised) if the segment doesn't cleanly
       // straddle (e.g. anchor jumped when a swarm member died).
+      const anySiteInCov = (lat, lon) => {
+        for (const s of site.sensors) {
+          if (s.status === 'offline') continue;
+          if (haversineM(lat, lon, s.lat, s.lon) <= s.coverageRadius) return true;
+        }
+        return false;
+      };
       if (ps.wasInCov && !nowInCov) {
         ps.oorCount++;
-        const anySiteInCov = (lat, lon) => {
-          for (const s of site.sensors) {
-            if (s.status === 'offline') continue;
-            if (haversineM(lat, lon, s.lat, s.lon) <= s.coverageRadius) return true;
-          }
-          return false;
-        };
         let oorPos = null;
         if (prev && anySiteInCov(prev.lat, prev.lon) && !anySiteInCov(p.lat, p.lon)) {
           let tLo = 0, tHi = 1;
@@ -4700,6 +4700,33 @@ async function main() {
         const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.name || sid} signal lost`;
         _dropMarker(oorPos.lat, oorPos.lon, '#ff5a5a', lbl, eventId);
         _persistCrossing('oor', oorPos.lat, oorPos.lon, '#ff5a5a', lbl);
+      }
+      // REACQUIRED (out-of-cov → in-cov) — fires when the anchor
+      // re-enters THIS site's sensor cov after previously exiting.
+      // Gated on ps.oorCount > 0 to prevent "first-ever detection
+      // labelled REACQUIRED" — first-time detection is handled by
+      // the ENTRY marker.
+      if (!ps.wasInCov && nowInCov && (ps.oorCount || 0) > 0) {
+        ps.reacqCount = (ps.reacqCount || 0) + 1;
+        let reacqPos = null;
+        if (prev && !anySiteInCov(prev.lat, prev.lon) && anySiteInCov(p.lat, p.lon)) {
+          let tLo = 0, tHi = 1;
+          for (let i = 0; i < 22; i++) {
+            const tMid = (tLo + tHi) / 2;
+            const mLat = prev.lat + (p.lat - prev.lat) * tMid;
+            const mLon = prev.lon + (p.lon - prev.lon) * tMid;
+            if (anySiteInCov(mLat, mLon)) tHi = tMid; else tLo = tMid;
+          }
+          reacqPos = {
+            lat: prev.lat + (p.lat - prev.lat) * tHi,
+            lon: prev.lon + (p.lon - prev.lon) * tHi,
+          };
+        }
+        reacqPos = reacqPos || { lat: p.lat, lon: p.lon };
+        const suffix = ps.reacqCount > 1 ? ` #${ps.reacqCount}` : '';
+        const lbl = `REACQUIRED${suffix} ${now.slice(11,19)}Z · ${site.name || sid} signal returned`;
+        _dropMarker(reacqPos.lat, reacqPos.lon, '#4dff9c', lbl, eventId);
+        _persistCrossing('reacq', reacqPos.lat, reacqPos.lon, '#4dff9c', lbl);
       }
       ps.wasInCov = nowInCov;
     }
@@ -7603,34 +7630,17 @@ async function main() {
             // the last known trajectory before giving up".
             sw._lastHeadingDeg = hdgDeg;
           }
+          // Per-drone OOR/REACQ markers were duplicating the per-site
+          // markers fired by processPerSiteMarkers (2 near-identical
+          // OOR labels on top of each other at every AMK exit). All
+          // gain/loss coordinates now come from the per-site marker
+          // system — one marker per site per cov cycle. We still
+          // track sw._prevInCov + sw._lastInCovPos + sw.trailPositions
+          // reset so the trail and interceptor logic stay accurate.
           if (sw._prevInCov === undefined) {
             sw._prevInCov = swShouldShow;
           } else if (sw._prevInCov && !swShouldShow) {
-            sw._oorCount = (sw._oorCount || 0) + 1;
-            const stamp = new Date().toISOString().slice(11, 19);
-            // Place OOR at the EXACT segment-boundary crossing via
-            // bisection of the drone's own prev→cur segment. Falls
-            // back to last in-cov position (previous behaviour) if
-            // the segment doesn't cleanly straddle the boundary.
-            const oorPos = _bisectAnyCovBoundary(sw.prevPos, pos, 'out')
-                        || sw._lastInCovPos
-                        || pos;
-            _dropMarker(oorPos.lat, oorPos.lon, '#ff5a5a',
-              `OUT OF RANGE #${sw._oorCount} ${stamp}Z · signal lost on ${sw.model || 'drone'}`,
-              event.id);
             if (sw.trailPositions) sw.trailPositions.length = 0;
-          } else if (!sw._prevInCov && swShouldShow && (sw._oorCount || 0) > 0) {
-            sw._reacqCount = (sw._reacqCount || 0) + 1;
-            const stamp = new Date().toISOString().slice(11, 19);
-            // Place REACQUIRED at the EXACT segment-boundary crossing —
-            // the point where the drone re-entered any sensor's coverage.
-            // Previous code used cur pos which was already several ticks
-            // inside the boundary, so the marker floated well past the
-            // true reacquisition point.
-            const reacqPos = _bisectAnyCovBoundary(sw.prevPos, pos, 'in') || pos;
-            _dropMarker(reacqPos.lat, reacqPos.lon, '#4dff9c',
-              `REACQUIRED #${sw._reacqCount} ${stamp}Z · signal returned on ${sw.model || 'drone'}`,
-              event.id);
           }
           sw._prevInCov = swShouldShow;
           // Rogue-drone tag: any wingman whose model is NOT a DJI platform
@@ -7686,6 +7696,11 @@ async function main() {
             sw.trailPositions.push(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, _safeTrailAlt(pos.alt)));
             if (sw.trailPositions.length > 400) sw.trailPositions.shift();
             sw.projLine.show = false;
+            // Wipe projPositions on re-entry so the NEXT out-of-cov
+            // cycle starts fresh. Otherwise the dashed projection line
+            // draws a straight segment from the previous cycle's last
+            // out-of-cov point across the map to the new re-exit point.
+            if (sw.projPositions && sw.projPositions.length) sw.projPositions.length = 0;
           } else {
             sw.projPositions.push(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, pos.alt));
             if (sw.projPositions.length > 300) sw.projPositions.shift();
