@@ -3020,8 +3020,26 @@ async function main() {
         && d.assignedSwarmMember.billboard
         && d.assignedSwarmMember.billboard.show === false) {
       d.state = 'rtb_via_last_known';
-      d.rtbTargetLat = d.targetLat;
-      d.rtbTargetLon = d.targetLon;
+      // Extend the last-known target 1 km along the target's last
+      // heading before signal loss. Interceptor keeps flying past
+      // the drop point in case the target is still moving on the
+      // same trajectory just beyond sensor coverage. If the drone
+      // reacquires mid-chase, rtb_via_last_known snaps back to
+      // en_route (handled below).
+      const PURSUIT_EXTENSION_M = 1000;
+      const sw = d.assignedSwarmMember;
+      const lastLat = sw._lastInCovPos?.lat ?? d.targetLat;
+      const lastLon = sw._lastInCovPos?.lon ?? d.targetLon;
+      const hdgDeg  = sw._lastHeadingDeg;
+      if (typeof hdgDeg === 'number') {
+        const brng = hdgDeg * Math.PI / 180;
+        const M_PER_DEG_LON = 111320 * Math.cos(lastLat * Math.PI / 180);
+        d.rtbTargetLat = lastLat + (PURSUIT_EXTENSION_M * Math.cos(brng)) / 111320;
+        d.rtbTargetLon = lastLon + (PURSUIT_EXTENSION_M * Math.sin(brng)) / M_PER_DEG_LON;
+      } else {
+        d.rtbTargetLat = lastLat;
+        d.rtbTargetLon = lastLon;
+      }
       d.rtbOrbitStartTs = null;
       d.lastFrameTs = now;
       if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
@@ -3200,6 +3218,18 @@ async function main() {
         _resolveEngagement(d);
       }
     } else if (d.state === 'rtb_via_last_known') {
+      // Mid-pursuit reacquisition — if the target reappears on the
+      // mesh (billboard.show flipped back true) while we're extending
+      // along the last-known trajectory, snap back to live pursuit
+      // instead of continuing to a stale coord.
+      if (d.assignedSwarmMember
+          && !d.assignedSwarmMember.neutralised
+          && d.assignedSwarmMember.billboard?.show === true) {
+        d.state = 'en_route';
+        d.rtbOrbitStartTs = null;
+        toast(`${d.assetName} reacquired target. Resuming intercept.`, 'info');
+        return;
+      }
       // Fly toward last known target coord
       const dtSec = (now - d.lastFrameTs) / 1000;
       d.lastFrameTs = now;
@@ -7511,7 +7541,14 @@ async function main() {
           //      REACQUIRED" bug.
           // Snapshot the last in-coverage position so OOR markers land
           // AT the coverage boundary, not several ticks past it.
-          if (swShouldShow) sw._lastInCovPos = { lat: pos.lat, lon: pos.lon, alt: pos.alt };
+          if (swShouldShow) {
+            sw._lastInCovPos = { lat: pos.lat, lon: pos.lon, alt: pos.alt };
+            // Also stash the drone's last known heading. Interceptors
+            // use this to project 1 km forward past the last known
+            // position when they lose signal — "keep chasing along
+            // the last known trajectory before giving up".
+            sw._lastHeadingDeg = hdgDeg;
+          }
           if (sw._prevInCov === undefined) {
             sw._prevInCov = swShouldShow;
           } else if (sw._prevInCov && !swShouldShow) {
