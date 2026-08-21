@@ -4934,6 +4934,37 @@ async function main() {
     return _anySensorSeesPoint(lat, lon);
   }
 
+  // Binary-search the segment prev→cur for the point where the drone
+  // crossed the any-sensor-any-site coverage boundary. `direction`
+  // is 'out' (prev in-cov, cur out-of-cov → returns exit point) or
+  // 'in' (prev out, cur in → returns entry point). Returns null if
+  // the segment doesn't actually straddle the boundary. 22 iterations
+  // gives sub-metre precision independent of tick rate.
+  function _bisectAnyCovBoundary(prev, cur, direction) {
+    if (!prev || !cur) return null;
+    const prevIn = _shouldAutoDetect(prev.lat, prev.lon);
+    const curIn  = _shouldAutoDetect(cur.lat, cur.lon);
+    if (direction === 'out' && (!prevIn || curIn)) return null;
+    if (direction === 'in'  && (prevIn || !curIn)) return null;
+    let tLo = 0, tHi = 1;
+    for (let i = 0; i < 22; i++) {
+      const tMid = (tLo + tHi) / 2;
+      const mLat = prev.lat + (cur.lat - prev.lat) * tMid;
+      const mLon = prev.lon + (cur.lon - prev.lon) * tMid;
+      const midIn = _shouldAutoDetect(mLat, mLon);
+      if (direction === 'out') {
+        if (midIn) tLo = tMid; else tHi = tMid;
+      } else {
+        if (midIn) tHi = tMid; else tLo = tMid;
+      }
+    }
+    const t = (direction === 'out') ? tLo : tHi;
+    return {
+      lat: prev.lat + (cur.lat - prev.lat) * t,
+      lon: prev.lon + (cur.lon - prev.lon) * t,
+    };
+  }
+
   // Generate an INDEPENDENT waypoint list for one swarm-member drone from
   // the master template waypoints + formation slot offset + per-waypoint
   // random perturbation. Result is a genuinely per-drone trajectory: the
@@ -7554,15 +7585,13 @@ async function main() {
           } else if (sw._prevInCov && !swShouldShow) {
             sw._oorCount = (sw._oorCount || 0) + 1;
             const stamp = new Date().toISOString().slice(11, 19);
-            // Place the OOR marker at the LAST KNOWN in-coverage
-            // position, not at the current tick's position. The
-            // current pos has already advanced past the coverage
-            // boundary (typically 100-400 m depending on tick rate +
-            // drone speed), so using it puts the marker in open water
-            // instead of at the actual signal-loss coord. Falls back
-            // to current pos if we somehow never captured a prior
-            // in-cov position.
-            const oorPos = sw._lastInCovPos || pos;
+            // Place OOR at the EXACT segment-boundary crossing via
+            // bisection of the drone's own prev→cur segment. Falls
+            // back to last in-cov position (previous behaviour) if
+            // the segment doesn't cleanly straddle the boundary.
+            const oorPos = _bisectAnyCovBoundary(sw.prevPos, pos, 'out')
+                        || sw._lastInCovPos
+                        || pos;
             _dropMarker(oorPos.lat, oorPos.lon, '#ff5a5a',
               `OUT OF RANGE #${sw._oorCount} ${stamp}Z · signal lost on ${sw.model || 'drone'}`,
               event.id);
@@ -7570,7 +7599,13 @@ async function main() {
           } else if (!sw._prevInCov && swShouldShow && (sw._oorCount || 0) > 0) {
             sw._reacqCount = (sw._reacqCount || 0) + 1;
             const stamp = new Date().toISOString().slice(11, 19);
-            _dropMarker(pos.lat, pos.lon, '#4dff9c',
+            // Place REACQUIRED at the EXACT segment-boundary crossing —
+            // the point where the drone re-entered any sensor's coverage.
+            // Previous code used cur pos which was already several ticks
+            // inside the boundary, so the marker floated well past the
+            // true reacquisition point.
+            const reacqPos = _bisectAnyCovBoundary(sw.prevPos, pos, 'in') || pos;
+            _dropMarker(reacqPos.lat, reacqPos.lon, '#4dff9c',
               `REACQUIRED #${sw._reacqCount} ${stamp}Z · signal returned on ${sw.model || 'drone'}`,
               event.id);
           }
