@@ -4533,7 +4533,7 @@ async function main() {
     // one across the same event AND across the whole board — bump the
     // label up by 14 px per neighbour so each row reads cleanly.
     const STACK_RADIUS_M = 80;
-    const STACK_STEP_PX  = 14;
+    const STACK_STEP_PX  = 22;
     const BASE_OFFSET_PX = -20;
     let stackIdx = 0;
     for (const [, list] of _perEventMarkers) {
@@ -4738,7 +4738,7 @@ async function main() {
           if (wasEmpty) {
             agg.entryCount++;
             const suffix = agg.entryCount > 1 ? ` #${agg.entryCount}` : '';
-            const lbl = `ENTRY${suffix} ${now.slice(11,19)}Z · ${site.name || sid}`;
+            const lbl = `ENTRY${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid}`;
             _dropMarker(hit.lat, hit.lon, '#4dd2ff', lbl, event.id);
             _persist('entry', hit.lat, hit.lon, '#4dd2ff', lbl);
           }
@@ -4746,7 +4746,7 @@ async function main() {
           const n = (agg.droneEntryCount.get(droneKey) || 0) + 1;
           agg.droneEntryCount.set(droneKey, n);
           const suffix = n > 1 ? ` #${n}` : '';
-          const lbl = `ENTRY${suffix} ${now.slice(11,19)}Z · ${site.name || sid} · ${droneLabel || droneKey}`;
+          const lbl = `ENTRY${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid} · ${droneLabel || droneKey}`;
           _dropMarker(hit.lat, hit.lon, '#4dd2ff', lbl, event.id);
           _persist('entry', hit.lat, hit.lon, '#4dd2ff', lbl);
         }
@@ -4761,7 +4761,7 @@ async function main() {
           if (nowEmpty) {
             agg.exitCount++;
             const suffix = agg.exitCount > 1 ? ` #${agg.exitCount}` : '';
-            const lbl = `EXIT${suffix} ${now.slice(11,19)}Z · ${site.name || sid}`;
+            const lbl = `EXIT${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid}`;
             _dropMarker(hit.lat, hit.lon, '#ffb84d', lbl, event.id);
             _persist('exit', hit.lat, hit.lon, '#ffb84d', lbl);
           }
@@ -4769,7 +4769,7 @@ async function main() {
           const n = (agg.droneExitCount.get(droneKey) || 0) + 1;
           agg.droneExitCount.set(droneKey, n);
           const suffix = n > 1 ? ` #${n}` : '';
-          const lbl = `EXIT${suffix} ${now.slice(11,19)}Z · ${site.name || sid} · ${droneLabel || droneKey}`;
+          const lbl = `EXIT${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid} · ${droneLabel || droneKey}`;
           _dropMarker(hit.lat, hit.lon, '#ffb84d', lbl, event.id);
           _persist('exit', hit.lat, hit.lon, '#ffb84d', lbl);
         }
@@ -4789,7 +4789,8 @@ async function main() {
             const suffix = isFirst ? '' : ` #${agg.detectCount}`;
             const kind = isFirst ? 'DETECTED' : 'REACQUIRED';
             const color = isFirst ? '#4dd2ff' : '#4dff9c';
-            const lbl = `${kind}${suffix} ${now.slice(11,19)}Z · ${site.name || sid} signal returned`;
+            const tail = isFirst ? '' : ' signal returned';
+            const lbl = `${kind}${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid}${tail}`;
             _dropMarker(hit.lat, hit.lon, color, lbl, event.id);
             _persist(isFirst ? 'detected' : 'reacq', hit.lat, hit.lon, color, lbl);
           }
@@ -4800,7 +4801,8 @@ async function main() {
           const suffix = isFirst ? '' : ` #${n}`;
           const kind = isFirst ? 'DETECTED' : 'REACQUIRED';
           const color = isFirst ? '#4dd2ff' : '#4dff9c';
-          const lbl = `${kind}${suffix} ${now.slice(11,19)}Z · ${site.name || sid} · ${droneLabel || droneKey}`;
+          const tail = isFirst ? '' : ' signal returned';
+          const lbl = `${kind}${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid} · ${droneLabel || droneKey}${tail}`;
           _dropMarker(hit.lat, hit.lon, color, lbl, event.id);
           _persist(isFirst ? 'detected' : 'reacq', hit.lat, hit.lon, color, lbl);
         }
@@ -4815,7 +4817,7 @@ async function main() {
           if (nowEmpty) {
             agg.oorCount++;
             const suffix = agg.oorCount > 1 ? ` #${agg.oorCount}` : '';
-            const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.name || sid} signal lost`;
+            const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid} signal lost`;
             _dropMarker(hit.lat, hit.lon, '#ff5a5a', lbl, event.id);
             _persist('oor', hit.lat, hit.lon, '#ff5a5a', lbl);
           }
@@ -4823,7 +4825,7 @@ async function main() {
           const n = (agg.droneOorCount.get(droneKey) || 0) + 1;
           agg.droneOorCount.set(droneKey, n);
           const suffix = n > 1 ? ` #${n}` : '';
-          const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.name || sid} · ${droneLabel || droneKey}`;
+          const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid} · ${droneLabel || droneKey}`;
           _dropMarker(hit.lat, hit.lon, '#ff5a5a', lbl, event.id);
           _persist('oor', hit.lat, hit.lon, '#ff5a5a', lbl);
         }
