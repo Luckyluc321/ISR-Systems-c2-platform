@@ -4595,145 +4595,113 @@ async function main() {
     _perEventMarkers.delete(eventId);
   }
 
-  // For multi-site tracks: drop ENTRY / EXIT / OUT OF RANGE markers per
-  // site the missile transits. Uses the site's actual perimeter polygon
-  // (not sensor coverage circles) so markers land ON the perimeter where
-  // the flight path crosses it. Segment-polygon intersection is computed
-  // between the previous tick position and the current position, giving
-  // pixel-accurate placement even at high update rates.
-  function processPerSiteMarkers(state, p, eventId = null, prevOverride = null) {
-    // Persist per-site crossings ONTO the event so we can re-render them
-    // on re-select (multi-site events don't populate event.entry/exit/OOR
-    // — those are single-site only).
-    const _persistCrossing = (kind, lat, lon, color, label) => {
-      if (!eventId) return;
-      const ev = getEvent(eventId);
-      if (!ev) return;
-      if (!ev.perSiteCrossings) ev.perSiteCrossings = [];
-      ev.perSiteCrossings.push({ kind, lat, lon, color, label, timestamp: new Date().toISOString() });
+  // Per-drone per-site coverage transitions, aggregated to event-level
+  // markers. Rules:
+  //   - Per drone, per site: track wasInCov (any online sensor at that
+  //     site sees this drone's position).
+  //   - On out→in transition, add drone to event._siteCovAgg[sid].
+  //     If aggregate was empty, fire DETECTED (first ever) or
+  //     REACQUIRED (subsequent) at the exact boundary bisected from
+  //     THIS drone's own prev→cur segment.
+  //   - On in→out transition, remove drone from aggregate. If
+  //     aggregate becomes empty, fire OUT OF RANGE at bisected
+  //     boundary of THIS drone's segment.
+  //   - Every drone always contributes; anchor pick / lead vs wingman
+  //     is irrelevant — no more one-tick-stale billboard, no more
+  //     misplaced markers when the anchor swaps mid-swarm.
+  //   - Perimeter polygon (fenced yard, ~100 m for AMK) is IGNORED.
+  //     The "site" is defined by its sensor coverage circles only.
+  //     This is Lucas's rule and it makes the same marker system
+  //     scale identically across every site.
+  function processDroneSiteMarkers(event, droneKey, curPos, prevPos, droneLabel = null) {
+    if (!event || !curPos) return;
+    if (!event._siteCovAgg) event._siteCovAgg = {};
+    if (!event._perSiteCrossings) event._perSiteCrossings = event.perSiteCrossings || [];
+    if (!event.perSiteCrossings) event.perSiteCrossings = event._perSiteCrossings;
+    if (!event._droneCovState) event._droneCovState = new Map();
+    let droneCov = event._droneCovState.get(droneKey);
+    if (!droneCov) { droneCov = new Map(); event._droneCovState.set(droneKey, droneCov); }
+
+    const _persist = (kind, lat, lon, color, label) => {
+      event.perSiteCrossings.push({ kind, lat, lon, color, label, timestamp: new Date().toISOString() });
     };
-    // Store previous tick position so we can intersect the segment with
-    // each polygon edge. prevOverride wins so callers can pass the
-    // anchor drone's actual prev pos (avoids state.lastTickPos being
-    // stale by one tick vs the CURRENT swarm loop's real positions).
-    const prev = prevOverride || state.lastTickPos || { lat: p.lat, lon: p.lon };
+    const now = new Date().toISOString();
+
     for (const sid of Object.keys(SITES)) {
       const site = SITES[sid];
-      const perim = site?.perimeter?.length ? site.perimeter
-                  : (site?.siteBoundary?.length ? site.siteBoundary : null);
-      if (!perim) continue;
-      const nowInside = pointInPolygon(p.lat, p.lon, perim);
-      const cov = nearestSensorInCoverage(p, site);
-      const nowInCov = !!(cov && cov.inCoverage);
-      let ps = state.perSite.get(sid);
-      const relevant = nowInside || nowInCov || ps;
-      if (!relevant) continue;
-      if (!ps) {
-        // COUNTER-based state. wasInside / wasInCov track the last
-        // observed state; entryCount / exitCount / oorCount track
-        // how many times each transition has fired. Every genuine
-        // in/out transition drops a numbered marker — a drone that
-        // re-enters CPH after leaving, re-exits, re-enters again,
-        // fires ENTRY #2, EXIT #2, ENTRY #3, ...
-        ps = {
-          wasInside: false, wasInCov: false,
-          entryCount: 0, exitCount: 0, oorCount: 0,
-          lastInCovPos: null,
-        };
-        state.perSite.set(sid, ps);
-      }
-      // Snapshot last in-cov position so OOR marker can land at the
-      // coverage boundary instead of wherever the next tick lands.
-      if (nowInCov) ps.lastInCovPos = { lat: p.lat, lon: p.lon };
-      const now = new Date().toISOString();
-
-      // PERIMETER ENTRY (outside → inside)
-      if (nowInside && !ps.wasInside) {
-        ps.entryCount++;
-        const hit = _segmentPolygonIntersection(prev.lat, prev.lon, p.lat, p.lon, perim)
-                 || { lat: p.lat, lon: p.lon };
-        const suffix = ps.entryCount > 1 ? ` #${ps.entryCount}` : '';
-        const lbl = `ENTRY${suffix} ${now.slice(11,19)}Z · ${site.name || sid}`;
-        _dropMarker(hit.lat, hit.lon, '#4dd2ff', lbl, eventId);
-        _persistCrossing('entry', hit.lat, hit.lon, '#4dd2ff', lbl);
-      }
-      // PERIMETER EXIT (inside → outside)
-      if (!nowInside && ps.wasInside) {
-        ps.exitCount++;
-        const hit = _segmentPolygonIntersection(prev.lat, prev.lon, p.lat, p.lon, perim)
-                 || { lat: p.lat, lon: p.lon };
-        const suffix = ps.exitCount > 1 ? ` #${ps.exitCount}` : '';
-        const lbl = `EXIT${suffix} ${now.slice(11,19)}Z · ${site.name || sid}`;
-        _dropMarker(hit.lat, hit.lon, '#ffb84d', lbl, eventId);
-        _persistCrossing('exit', hit.lat, hit.lon, '#ffb84d', lbl);
-      }
-      ps.wasInside = nowInside;
-
-      // OUT OF RANGE (in-any-sensor-cov → out-of-any-sensor-cov).
-      // Bisect the anchor segment prev→p against THIS site's sensor
-      // circles to find the exact boundary crossing point. Falls back
-      // to lastInCovPos (tick-quantised) if the segment doesn't cleanly
-      // straddle (e.g. anchor jumped when a swarm member died).
-      const anySiteInCov = (lat, lon) => {
+      if (!site?.sensors?.length) continue;
+      const anyOnlineSensorSees = (lat, lon) => {
         for (const s of site.sensors) {
           if (s.status === 'offline') continue;
           if (haversineM(lat, lon, s.lat, s.lon) <= s.coverageRadius) return true;
         }
         return false;
       };
-      if (ps.wasInCov && !nowInCov) {
-        ps.oorCount++;
-        let oorPos = null;
-        if (prev && anySiteInCov(prev.lat, prev.lon) && !anySiteInCov(p.lat, p.lon)) {
-          let tLo = 0, tHi = 1;
-          for (let i = 0; i < 22; i++) {
-            const tMid = (tLo + tHi) / 2;
-            const mLat = prev.lat + (p.lat - prev.lat) * tMid;
-            const mLon = prev.lon + (p.lon - prev.lon) * tMid;
-            if (anySiteInCov(mLat, mLon)) tLo = tMid; else tHi = tMid;
-          }
-          oorPos = {
-            lat: prev.lat + (p.lat - prev.lat) * tLo,
-            lon: prev.lon + (p.lon - prev.lon) * tLo,
-          };
-        }
-        oorPos = oorPos || ps.lastInCovPos || { lat: p.lat, lon: p.lon };
-        const suffix = ps.oorCount > 1 ? ` #${ps.oorCount}` : '';
-        const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.name || sid} signal lost`;
-        _dropMarker(oorPos.lat, oorPos.lon, '#ff5a5a', lbl, eventId);
-        _persistCrossing('oor', oorPos.lat, oorPos.lon, '#ff5a5a', lbl);
+      const nowInCov = anyOnlineSensorSees(curPos.lat, curPos.lon);
+      const wasInCov = droneCov.get(sid) || false;
+      if (!nowInCov && !wasInCov) continue;   // irrelevant to this site
+
+      let agg = event._siteCovAgg[sid];
+      if (!agg) {
+        agg = { inCovDrones: new Set(), detectCount: 0, oorCount: 0 };
+        event._siteCovAgg[sid] = agg;
       }
-      // REACQUIRED (out-of-cov → in-cov) — fires when the anchor
-      // re-enters THIS site's sensor cov after previously exiting.
-      // Gated on ps.oorCount > 0 to prevent "first-ever detection
-      // labelled REACQUIRED" — first-time detection is handled by
-      // the ENTRY marker.
-      if (!ps.wasInCov && nowInCov && (ps.oorCount || 0) > 0) {
-        ps.reacqCount = (ps.reacqCount || 0) + 1;
-        let reacqPos = null;
-        if (prev && !anySiteInCov(prev.lat, prev.lon) && anySiteInCov(p.lat, p.lon)) {
-          let tLo = 0, tHi = 1;
-          for (let i = 0; i < 22; i++) {
-            const tMid = (tLo + tHi) / 2;
-            const mLat = prev.lat + (p.lat - prev.lat) * tMid;
-            const mLon = prev.lon + (p.lon - prev.lon) * tMid;
-            if (anySiteInCov(mLat, mLon)) tHi = tMid; else tLo = tMid;
-          }
-          reacqPos = {
-            lat: prev.lat + (p.lat - prev.lat) * tHi,
-            lon: prev.lon + (p.lon - prev.lon) * tHi,
-          };
+
+      // Bisect drone's OWN prev→cur segment against this site's sensor
+      // coverage boundary. Sub-metre precision; independent of tick
+      // rate; uses this drone's real motion (never a stale anchor).
+      const bisect = (direction) => {
+        if (!prevPos) return null;
+        const prevIn = anyOnlineSensorSees(prevPos.lat, prevPos.lon);
+        const curIn  = anyOnlineSensorSees(curPos.lat, curPos.lon);
+        if (direction === 'out' && (!prevIn || curIn)) return null;
+        if (direction === 'in'  && (prevIn || !curIn)) return null;
+        let tLo = 0, tHi = 1;
+        for (let i = 0; i < 22; i++) {
+          const tMid = (tLo + tHi) / 2;
+          const mLat = prevPos.lat + (curPos.lat - prevPos.lat) * tMid;
+          const mLon = prevPos.lon + (curPos.lon - prevPos.lon) * tMid;
+          const midIn = anyOnlineSensorSees(mLat, mLon);
+          if (direction === 'out') { if (midIn) tLo = tMid; else tHi = tMid; }
+          else                     { if (midIn) tHi = tMid; else tLo = tMid; }
         }
-        reacqPos = reacqPos || { lat: p.lat, lon: p.lon };
-        const suffix = ps.reacqCount > 1 ? ` #${ps.reacqCount}` : '';
-        const lbl = `REACQUIRED${suffix} ${now.slice(11,19)}Z · ${site.name || sid} signal returned`;
-        _dropMarker(reacqPos.lat, reacqPos.lon, '#4dff9c', lbl, eventId);
-        _persistCrossing('reacq', reacqPos.lat, reacqPos.lon, '#4dff9c', lbl);
+        const t = (direction === 'out') ? tLo : tHi;
+        return { lat: prevPos.lat + (curPos.lat - prevPos.lat) * t,
+                 lon: prevPos.lon + (curPos.lon - prevPos.lon) * t };
+      };
+
+      if (nowInCov && !wasInCov) {
+        const wasEmpty = agg.inCovDrones.size === 0;
+        agg.inCovDrones.add(droneKey);
+        if (wasEmpty) {
+          agg.detectCount++;
+          const hit = bisect('in') || { lat: curPos.lat, lon: curPos.lon };
+          const isFirst = agg.detectCount === 1;
+          const kind    = isFirst ? 'DETECTED' : 'REACQUIRED';
+          const suffix  = isFirst ? '' : ` #${agg.detectCount}`;
+          const lbl = `${kind}${suffix} ${now.slice(11,19)}Z · ${site.name || sid}`;
+          _dropMarker(hit.lat, hit.lon, isFirst ? '#4dd2ff' : '#4dff9c', lbl, event.id);
+          _persist(isFirst ? 'detected' : 'reacq', hit.lat, hit.lon, isFirst ? '#4dd2ff' : '#4dff9c', lbl);
+        }
+      } else if (!nowInCov && wasInCov) {
+        agg.inCovDrones.delete(droneKey);
+        if (agg.inCovDrones.size === 0) {
+          agg.oorCount++;
+          const hit = bisect('out') || { lat: curPos.lat, lon: curPos.lon };
+          const suffix = agg.oorCount > 1 ? ` #${agg.oorCount}` : '';
+          const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.name || sid} signal lost`;
+          _dropMarker(hit.lat, hit.lon, '#ff5a5a', lbl, event.id);
+          _persist('oor', hit.lat, hit.lon, '#ff5a5a', lbl);
+        }
       }
-      ps.wasInCov = nowInCov;
+      droneCov.set(sid, nowInCov);
     }
-    state.lastTickPos = { lat: p.lat, lon: p.lon };
   }
+
+  // Legacy shim — old call sites still reference processPerSiteMarkers.
+  // No-op; the coverage-based logic now lives in processDroneSiteMarkers
+  // and runs per drone in the tick loop.
+  function processPerSiteMarkers(_state, _p, _eventId, _prevOverride) { /* no-op */ }
 
   function nearestSensorInCoverage(p, site) {
     if (!site || !site.sensors || !site.sensors.length) return null;
@@ -7163,9 +7131,13 @@ async function main() {
         // leadSwarmMember.neutralised flag, not from billboard show
         // state, so hiding is sufficient.
         const leadDown = state.leadSwarmMember?.neutralised;
+        // Lucas's rule: symbol visible IFF drone inside ANY sensor cov at ANY site.
+        // Uniform across every event type. beingChased keeps missile
+        // targets visible through terminal chase.
+        const leadInCov = _shouldAutoDetect(p.lat, p.lon);
         const shouldShow = leadDown ? false : (state.closedAt
           ? false
-          : (inAnyCoverage === null ? true : (inAnyCoverage || beingChased)));
+          : (leadInCov || beingChased));
         state.billboard.show = shouldShow;
         state.shadow.show = shouldShow;
         // Also hide the lead's trail polyline once the lead is dead —
@@ -7182,16 +7154,14 @@ async function main() {
         // per-site markers keep firing at real drone coordinates
         // (needed for AMK to log its own OUT OF RANGE once the last
         // live drone crosses AMK sensor coverage).
-        // Per-site markers run from HERE only while the lead is alive
-        // (anchor = lead's real-time position this tick). Once the
-        // lead is neutralised, the call is deferred to the END of the
-        // swarm loop below so it can use the first-live wingman's
-        // actual just-computed position + prev — the fallback path
-        // previously read wingman.billboard.position (one tick stale)
-        // which put OOR/REACQ markers off by a tick.
-        if ((event.multiSiteTrack || event.templateKey === 'cruise_missile_to_amalienborg')
-            && !state.leadSwarmMember?.neutralised) {
-          processPerSiteMarkers(state, p, event.id);
+        // Lead's own per-site coverage transitions — use lead's actual
+        // this-tick position and the previous tick's snapshot. Applies
+        // to every event type (not just multi-site).
+        if (!leadDown && state.leadSwarmMember) {
+          const leadCur  = { lat: p.lat, lon: p.lon };
+          const leadPrev = state._leadMarkerPrevPos || leadCur;
+          processDroneSiteMarkers(event, 'lead', leadCur, leadPrev, state.leadSwarmMember.model || 'lead');
+          state._leadMarkerPrevPos = leadCur;
         }
         state.billboard.position = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.alt);
 
@@ -7593,12 +7563,10 @@ async function main() {
           // tip-cue calculation below uses the drone's own position for
           // coverage entry, no forward projection needed.
           const inCov = _shouldAutoDetect(pos.lat, pos.lon);
-          // tipInCov retained for compatibility with the recording sample
-          // schema (detection_state 'tip_cued'); zero now that we no longer
-          // draw a forward tip. Post-demo: replace with an "approaching"
-          // heuristic based on sensor-proximity rather than tip cueing.
           const tipInCov = false;
-          const swShouldShow = event.multiSiteTrack ? (inCov || tipInCov) : true;
+          // Lucas's rule: symbol visible IFF drone inside ANY sensor cov
+          // at ANY site. Uniform. Every event type. Every drone.
+          const swShouldShow = inCov;
           sw.billboard.position = Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, pos.alt);
           sw.billboard.show = swShouldShow;
           // Trail visibility mirrors the drone billboard — as soon as
@@ -7705,22 +7673,16 @@ async function main() {
             if (sw.projPositions.length > 300) sw.projPositions.shift();
             sw.projLine.show = sw.projPositions.length >= 2;
           }
+          // Per-drone per-site coverage transitions. Uses THIS drone's
+          // own current + previous position (snapshotted BEFORE sw.prevPos
+          // gets overwritten). No anchor logic, no state.lastTickPos.
+          // Event-level aggregation ensures one marker per site per
+          // cov cycle even with 5 drones in a swarm.
+          const swKey = sw._id || (sw._id = `sw${i}`);
+          const swCur = { lat: pos.lat, lon: pos.lon };
+          processDroneSiteMarkers(event, swKey, swCur, sw._markerPrevPos, sw.model || sw.role);
           sw.prevPos = { lat: pos.lat, lon: pos.lon };
           sw.prevTs = nowMs;
-        }
-        // Deferred per-site marker pass — when the lead is dead we
-        // couldn't run this in the lead callback because the fallback
-        // anchor (wingman.billboard.position) was a tick stale. Now
-        // every live wingman has just written its ACTUAL current pos
-        // to sw.stats, and its previous pos is snapshotted on
-        // sw._markerPrevPos. Use the first-live wingman as anchor.
-        if ((event.multiSiteTrack || event.templateKey === 'cruise_missile_to_amalienborg')
-            && state.leadSwarmMember?.neutralised) {
-          const anchor = (state.swarmBillboards || []).find(sw => !sw.neutralised && sw.stats?.lat != null);
-          if (anchor) {
-            const anchorCur = { lat: anchor.stats.lat, lon: anchor.stats.lon, alt: anchor.stats.alt };
-            processPerSiteMarkers(state, anchorCur, event.id, anchor._markerPrevPos);
-          }
         }
         // P21: universal per-site event lifecycle. Aggregate all drone
         // positions in the group (lead + swarm members), compute which
