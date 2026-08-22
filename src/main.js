@@ -4595,65 +4595,123 @@ async function main() {
     _perEventMarkers.delete(eventId);
   }
 
-  // Per-drone per-site coverage transitions, aggregated to event-level
-  // markers. Rules:
-  //   - Per drone, per site: track wasInCov (any online sensor at that
-  //     site sees this drone's position).
-  //   - On out→in transition, add drone to event._siteCovAgg[sid].
-  //     If aggregate was empty, fire DETECTED (first ever) or
-  //     REACQUIRED (subsequent) at the exact boundary bisected from
-  //     THIS drone's own prev→cur segment.
-  //   - On in→out transition, remove drone from aggregate. If
-  //     aggregate becomes empty, fire OUT OF RANGE at bisected
-  //     boundary of THIS drone's segment.
-  //   - Every drone always contributes; anchor pick / lead vs wingman
-  //     is irrelevant — no more one-tick-stale billboard, no more
-  //     misplaced markers when the anchor swaps mid-swarm.
-  //   - Perimeter polygon (fenced yard, ~100 m for AMK) is IGNORED.
-  //     The "site" is defined by its sensor coverage circles only.
-  //     This is Lucas's rule and it makes the same marker system
-  //     scale identically across every site.
-  function processDroneSiteMarkers(event, droneKey, curPos, prevPos, droneLabel = null) {
+  // Per-drone per-site transitions. Two boundary types per site:
+  //   - PERIMETER (fenced yard polygon) → ENTRY (blue) / EXIT (yellow)
+  //   - SENSOR COVERAGE (union of sensor circles) → DETECTED (blue,
+  //     first ever) or REACQUIRED (green, subsequent) / OUT OF RANGE (red)
+  //
+  // Marker firing is aggregation-aware:
+  //   - SWARM MODE (this drone within SWARM_M of any other live drone
+  //     in the event): only fire the marker when the aggregate flips
+  //     empty↔non-empty for that (site, boundary-type) key. Prevents
+  //     5 stacked ENTRY labels for a tight formation.
+  //   - INDIVIDUAL MODE (this drone isolated): fire a per-drone marker
+  //     with the drone identity in the label so a spread-out group
+  //     produces one marker per drone.
+  //
+  // Every transition is ALWAYS logged to event._droneTransitionLog for
+  // per-drone summary reports (regardless of aggregation mode).
+  //
+  // Segment-boundary bisection uses this drone's own prev→cur segment
+  // (22 iterations, sub-metre). No shared anchor, no stale billboard,
+  // no state.lastTickPos.
+  const SWARM_PROXIMITY_M = 1000;
+
+  function _isDroneInSwarm(state, thisDroneKey, thisPos) {
+    if (!state) return false;
+    if (state.leadSwarmMember && !state.leadSwarmMember.neutralised && thisDroneKey !== 'lead') {
+      const cart = state.leadSwarmMember.billboard?.position?.getValue?.(Cesium.JulianDate.now());
+      if (cart) {
+        const c = Cesium.Cartographic.fromCartesian(cart);
+        const lat = Cesium.Math.toDegrees(c.latitude);
+        const lon = Cesium.Math.toDegrees(c.longitude);
+        if (haversineM(thisPos.lat, thisPos.lon, lat, lon) < SWARM_PROXIMITY_M) return true;
+      }
+    }
+    for (let i = 0; i < (state.swarmBillboards || []).length; i++) {
+      const sw = state.swarmBillboards[i];
+      if (sw.neutralised) continue;
+      const key = `sw${i}`;
+      if (key === thisDroneKey) continue;
+      if (sw.stats?.lat == null) continue;
+      if (haversineM(thisPos.lat, thisPos.lon, sw.stats.lat, sw.stats.lon) < SWARM_PROXIMITY_M) return true;
+    }
+    return false;
+  }
+
+  function processDroneSiteMarkers(event, state, droneKey, curPos, prevPos, droneLabel = null) {
     if (!event || !curPos) return;
-    if (!event._siteCovAgg) event._siteCovAgg = {};
-    if (!event._perSiteCrossings) event._perSiteCrossings = event.perSiteCrossings || [];
-    if (!event.perSiteCrossings) event.perSiteCrossings = event._perSiteCrossings;
+    if (!event.perSiteCrossings) event.perSiteCrossings = [];
     if (!event._droneCovState) event._droneCovState = new Map();
+    if (!event._droneInsideState) event._droneInsideState = new Map();
+    if (!event._siteAgg) event._siteAgg = {};
+    if (!event._droneTransitionLog) event._droneTransitionLog = [];
+
     let droneCov = event._droneCovState.get(droneKey);
     if (!droneCov) { droneCov = new Map(); event._droneCovState.set(droneKey, droneCov); }
+    let droneInside = event._droneInsideState.get(droneKey);
+    if (!droneInside) { droneInside = new Map(); event._droneInsideState.set(droneKey, droneInside); }
 
     const _persist = (kind, lat, lon, color, label) => {
       event.perSiteCrossings.push({ kind, lat, lon, color, label, timestamp: new Date().toISOString() });
     };
+    const _log = (siteId, kind, lat, lon) => {
+      event._droneTransitionLog.push({
+        droneKey, droneLabel: droneLabel || droneKey,
+        siteId, kind, lat, lon,
+        timestamp: new Date().toISOString(),
+      });
+    };
     const now = new Date().toISOString();
+    const inSwarm = _isDroneInSwarm(state, droneKey, curPos);
 
     for (const sid of Object.keys(SITES)) {
       const site = SITES[sid];
-      if (!site?.sensors?.length) continue;
-      const anyOnlineSensorSees = (lat, lon) => {
+      const perim = site?.perimeter?.length ? site.perimeter
+                  : (site?.siteBoundary?.length ? site.siteBoundary : null);
+      const hasSensors = site?.sensors?.length > 0;
+
+      const nowInside = perim ? pointInPolygon(curPos.lat, curPos.lon, perim) : false;
+      const wasInside = droneInside.get(sid) || false;
+
+      const anySensorSees = (lat, lon) => {
+        if (!hasSensors) return false;
         for (const s of site.sensors) {
           if (s.status === 'offline') continue;
           if (haversineM(lat, lon, s.lat, s.lon) <= s.coverageRadius) return true;
         }
         return false;
       };
-      const nowInCov = anyOnlineSensorSees(curPos.lat, curPos.lon);
+      const nowInCov = anySensorSees(curPos.lat, curPos.lon);
       const wasInCov = droneCov.get(sid) || false;
-      if (!nowInCov && !wasInCov) continue;   // irrelevant to this site
 
-      let agg = event._siteCovAgg[sid];
+      const relevantToSite = nowInside || wasInside || nowInCov || wasInCov;
+      if (!relevantToSite) continue;
+
+      let agg = event._siteAgg[sid];
       if (!agg) {
-        agg = { inCovDrones: new Set(), detectCount: 0, oorCount: 0 };
-        event._siteCovAgg[sid] = agg;
+        agg = {
+          insideDrones: new Set(), inCovDrones: new Set(),
+          entryCount: 0, exitCount: 0,
+          detectCount: 0, oorCount: 0,
+          droneEntryCount: new Map(), droneExitCount: new Map(),
+          droneDetectCount: new Map(), droneOorCount: new Map(),
+        };
+        event._siteAgg[sid] = agg;
       }
 
-      // Bisect drone's OWN prev→cur segment against this site's sensor
-      // coverage boundary. Sub-metre precision; independent of tick
-      // rate; uses this drone's real motion (never a stale anchor).
-      const bisect = (direction) => {
-        if (!prevPos) return null;
-        const prevIn = anyOnlineSensorSees(prevPos.lat, prevPos.lon);
-        const curIn  = anyOnlineSensorSees(curPos.lat, curPos.lon);
+      const bisectPoly = (direction) => {
+        if (!prevPos || !perim) return null;
+        const prevIn = pointInPolygon(prevPos.lat, prevPos.lon, perim);
+        const curIn  = pointInPolygon(curPos.lat, curPos.lon, perim);
+        if (direction === 'out' && (!prevIn || curIn)) return null;
+        if (direction === 'in'  && (prevIn || !curIn)) return null;
+        return _segmentPolygonIntersection(prevPos.lat, prevPos.lon, curPos.lat, curPos.lon, perim);
+      };
+      const bisectCov = (direction) => {
+        if (!prevPos || !hasSensors) return null;
+        const prevIn = anySensorSees(prevPos.lat, prevPos.lon);
+        const curIn  = anySensorSees(curPos.lat, curPos.lon);
         if (direction === 'out' && (!prevIn || curIn)) return null;
         if (direction === 'in'  && (prevIn || !curIn)) return null;
         let tLo = 0, tHi = 1;
@@ -4661,7 +4719,7 @@ async function main() {
           const tMid = (tLo + tHi) / 2;
           const mLat = prevPos.lat + (curPos.lat - prevPos.lat) * tMid;
           const mLon = prevPos.lon + (curPos.lon - prevPos.lon) * tMid;
-          const midIn = anyOnlineSensorSees(mLat, mLon);
+          const midIn = anySensorSees(mLat, mLon);
           if (direction === 'out') { if (midIn) tLo = tMid; else tHi = tMid; }
           else                     { if (midIn) tHi = tMid; else tLo = tMid; }
         }
@@ -4670,26 +4728,102 @@ async function main() {
                  lon: prevPos.lon + (curPos.lon - prevPos.lon) * t };
       };
 
-      if (nowInCov && !wasInCov) {
+      // PERIMETER ENTRY (drone crosses fenced-yard polygon inbound)
+      if (perim && nowInside && !wasInside) {
+        const hit = bisectPoly('in') || { lat: curPos.lat, lon: curPos.lon };
+        _log(sid, 'entry', hit.lat, hit.lon);
+        const wasEmpty = agg.insideDrones.size === 0;
+        agg.insideDrones.add(droneKey);
+        if (inSwarm) {
+          if (wasEmpty) {
+            agg.entryCount++;
+            const suffix = agg.entryCount > 1 ? ` #${agg.entryCount}` : '';
+            const lbl = `ENTRY${suffix} ${now.slice(11,19)}Z · ${site.name || sid}`;
+            _dropMarker(hit.lat, hit.lon, '#4dd2ff', lbl, event.id);
+            _persist('entry', hit.lat, hit.lon, '#4dd2ff', lbl);
+          }
+        } else {
+          const n = (agg.droneEntryCount.get(droneKey) || 0) + 1;
+          agg.droneEntryCount.set(droneKey, n);
+          const suffix = n > 1 ? ` #${n}` : '';
+          const lbl = `ENTRY${suffix} ${now.slice(11,19)}Z · ${site.name || sid} · ${droneLabel || droneKey}`;
+          _dropMarker(hit.lat, hit.lon, '#4dd2ff', lbl, event.id);
+          _persist('entry', hit.lat, hit.lon, '#4dd2ff', lbl);
+        }
+      }
+      // PERIMETER EXIT (drone crosses fenced-yard polygon outbound)
+      if (perim && !nowInside && wasInside) {
+        const hit = bisectPoly('out') || { lat: curPos.lat, lon: curPos.lon };
+        _log(sid, 'exit', hit.lat, hit.lon);
+        agg.insideDrones.delete(droneKey);
+        const nowEmpty = agg.insideDrones.size === 0;
+        if (inSwarm) {
+          if (nowEmpty) {
+            agg.exitCount++;
+            const suffix = agg.exitCount > 1 ? ` #${agg.exitCount}` : '';
+            const lbl = `EXIT${suffix} ${now.slice(11,19)}Z · ${site.name || sid}`;
+            _dropMarker(hit.lat, hit.lon, '#ffb84d', lbl, event.id);
+            _persist('exit', hit.lat, hit.lon, '#ffb84d', lbl);
+          }
+        } else {
+          const n = (agg.droneExitCount.get(droneKey) || 0) + 1;
+          agg.droneExitCount.set(droneKey, n);
+          const suffix = n > 1 ? ` #${n}` : '';
+          const lbl = `EXIT${suffix} ${now.slice(11,19)}Z · ${site.name || sid} · ${droneLabel || droneKey}`;
+          _dropMarker(hit.lat, hit.lon, '#ffb84d', lbl, event.id);
+          _persist('exit', hit.lat, hit.lon, '#ffb84d', lbl);
+        }
+      }
+      droneInside.set(sid, nowInside);
+
+      // SENSOR COVERAGE gain — DETECTED (first ever) / REACQUIRED
+      if (hasSensors && nowInCov && !wasInCov) {
+        const hit = bisectCov('in') || { lat: curPos.lat, lon: curPos.lon };
+        _log(sid, 'reacq_or_detect', hit.lat, hit.lon);
         const wasEmpty = agg.inCovDrones.size === 0;
         agg.inCovDrones.add(droneKey);
-        if (wasEmpty) {
-          agg.detectCount++;
-          const hit = bisect('in') || { lat: curPos.lat, lon: curPos.lon };
-          const isFirst = agg.detectCount === 1;
-          const kind    = isFirst ? 'DETECTED' : 'REACQUIRED';
-          const suffix  = isFirst ? '' : ` #${agg.detectCount}`;
-          const lbl = `${kind}${suffix} ${now.slice(11,19)}Z · ${site.name || sid}`;
-          _dropMarker(hit.lat, hit.lon, isFirst ? '#4dd2ff' : '#4dff9c', lbl, event.id);
-          _persist(isFirst ? 'detected' : 'reacq', hit.lat, hit.lon, isFirst ? '#4dd2ff' : '#4dff9c', lbl);
+        if (inSwarm) {
+          if (wasEmpty) {
+            agg.detectCount++;
+            const isFirst = agg.detectCount === 1;
+            const suffix = isFirst ? '' : ` #${agg.detectCount}`;
+            const kind = isFirst ? 'DETECTED' : 'REACQUIRED';
+            const color = isFirst ? '#4dd2ff' : '#4dff9c';
+            const lbl = `${kind}${suffix} ${now.slice(11,19)}Z · ${site.name || sid} signal returned`;
+            _dropMarker(hit.lat, hit.lon, color, lbl, event.id);
+            _persist(isFirst ? 'detected' : 'reacq', hit.lat, hit.lon, color, lbl);
+          }
+        } else {
+          const n = (agg.droneDetectCount.get(droneKey) || 0) + 1;
+          agg.droneDetectCount.set(droneKey, n);
+          const isFirst = n === 1;
+          const suffix = isFirst ? '' : ` #${n}`;
+          const kind = isFirst ? 'DETECTED' : 'REACQUIRED';
+          const color = isFirst ? '#4dd2ff' : '#4dff9c';
+          const lbl = `${kind}${suffix} ${now.slice(11,19)}Z · ${site.name || sid} · ${droneLabel || droneKey}`;
+          _dropMarker(hit.lat, hit.lon, color, lbl, event.id);
+          _persist(isFirst ? 'detected' : 'reacq', hit.lat, hit.lon, color, lbl);
         }
-      } else if (!nowInCov && wasInCov) {
+      }
+      // SENSOR COVERAGE loss — OUT OF RANGE
+      if (hasSensors && !nowInCov && wasInCov) {
+        const hit = bisectCov('out') || { lat: curPos.lat, lon: curPos.lon };
+        _log(sid, 'oor', hit.lat, hit.lon);
         agg.inCovDrones.delete(droneKey);
-        if (agg.inCovDrones.size === 0) {
-          agg.oorCount++;
-          const hit = bisect('out') || { lat: curPos.lat, lon: curPos.lon };
-          const suffix = agg.oorCount > 1 ? ` #${agg.oorCount}` : '';
-          const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.name || sid} signal lost`;
+        const nowEmpty = agg.inCovDrones.size === 0;
+        if (inSwarm) {
+          if (nowEmpty) {
+            agg.oorCount++;
+            const suffix = agg.oorCount > 1 ? ` #${agg.oorCount}` : '';
+            const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.name || sid} signal lost`;
+            _dropMarker(hit.lat, hit.lon, '#ff5a5a', lbl, event.id);
+            _persist('oor', hit.lat, hit.lon, '#ff5a5a', lbl);
+          }
+        } else {
+          const n = (agg.droneOorCount.get(droneKey) || 0) + 1;
+          agg.droneOorCount.set(droneKey, n);
+          const suffix = n > 1 ? ` #${n}` : '';
+          const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.name || sid} · ${droneLabel || droneKey}`;
           _dropMarker(hit.lat, hit.lon, '#ff5a5a', lbl, event.id);
           _persist('oor', hit.lat, hit.lon, '#ff5a5a', lbl);
         }
@@ -4699,8 +4833,6 @@ async function main() {
   }
 
   // Legacy shim — old call sites still reference processPerSiteMarkers.
-  // No-op; the coverage-based logic now lives in processDroneSiteMarkers
-  // and runs per drone in the tick loop.
   function processPerSiteMarkers(_state, _p, _eventId, _prevOverride) { /* no-op */ }
 
   function nearestSensorInCoverage(p, site) {
@@ -7154,13 +7286,12 @@ async function main() {
         // per-site markers keep firing at real drone coordinates
         // (needed for AMK to log its own OUT OF RANGE once the last
         // live drone crosses AMK sensor coverage).
-        // Lead's own per-site coverage transitions — use lead's actual
-        // this-tick position and the previous tick's snapshot. Applies
-        // to every event type (not just multi-site).
+        // Lead's own per-site transitions — polygon + coverage, with
+        // swarm-density aggregation applied inside the helper.
         if (!leadDown && state.leadSwarmMember) {
           const leadCur  = { lat: p.lat, lon: p.lon };
           const leadPrev = state._leadMarkerPrevPos || leadCur;
-          processDroneSiteMarkers(event, 'lead', leadCur, leadPrev, state.leadSwarmMember.model || 'lead');
+          processDroneSiteMarkers(event, state, 'lead', leadCur, leadPrev, state.leadSwarmMember.model || 'lead');
           state._leadMarkerPrevPos = leadCur;
         }
         state.billboard.position = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.alt);
@@ -7673,14 +7804,15 @@ async function main() {
             if (sw.projPositions.length > 300) sw.projPositions.shift();
             sw.projLine.show = sw.projPositions.length >= 2;
           }
-          // Per-drone per-site coverage transitions. Uses THIS drone's
-          // own current + previous position (snapshotted BEFORE sw.prevPos
-          // gets overwritten). No anchor logic, no state.lastTickPos.
-          // Event-level aggregation ensures one marker per site per
-          // cov cycle even with 5 drones in a swarm.
-          const swKey = sw._id || (sw._id = `sw${i}`);
+          // Per-drone per-site transitions (polygon + cov). Uses THIS
+          // drone's own current + previous position. Swarm-density
+          // aggregation is applied inside the helper — tight formation
+          // gets ONE marker per site per cycle; drones >1 km apart get
+          // per-drone markers.
+          const swKey = `sw${i}`;
+          sw._id = swKey;
           const swCur = { lat: pos.lat, lon: pos.lon };
-          processDroneSiteMarkers(event, swKey, swCur, sw._markerPrevPos, sw.model || sw.role);
+          processDroneSiteMarkers(event, state, swKey, swCur, sw._markerPrevPos, sw.model || sw.role);
           sw.prevPos = { lat: pos.lat, lon: pos.lon };
           sw.prevTs = nowMs;
         }
