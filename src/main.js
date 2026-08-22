@@ -4728,11 +4728,26 @@ async function main() {
                  lon: prevPos.lon + (curPos.lon - prevPos.lon) * t };
       };
 
+      // Empty check that IGNORES dead drones still lingering in the
+      // Set (purge is one tick late; also, a drone can die inside cov
+      // without ever transitioning out). "Empty" for marker semantics
+      // means "no LIVE drones contribute signal at this site any more".
+      const _liveOnly = (set) => {
+        let count = 0;
+        for (const key of set) {
+          if (key === 'lead') { if (!state.leadSwarmMember?.neutralised) count++; continue; }
+          const idx = parseInt(key.slice(2), 10);
+          const sw2 = state.swarmBillboards?.[idx];
+          if (sw2 && !sw2.neutralised) count++;
+        }
+        return count;
+      };
+
       // PERIMETER ENTRY (drone crosses fenced-yard polygon inbound)
       if (perim && nowInside && !wasInside) {
         const hit = bisectPoly('in') || { lat: curPos.lat, lon: curPos.lon };
         _log(sid, 'entry', hit.lat, hit.lon);
-        const wasEmpty = agg.insideDrones.size === 0;
+        const wasEmpty = _liveOnly(agg.insideDrones) === 0;
         agg.insideDrones.add(droneKey);
         if (inSwarm) {
           if (wasEmpty) {
@@ -4756,7 +4771,7 @@ async function main() {
         const hit = bisectPoly('out') || { lat: curPos.lat, lon: curPos.lon };
         _log(sid, 'exit', hit.lat, hit.lon);
         agg.insideDrones.delete(droneKey);
-        const nowEmpty = agg.insideDrones.size === 0;
+        const nowEmpty = _liveOnly(agg.insideDrones) === 0;
         if (inSwarm) {
           if (nowEmpty) {
             agg.exitCount++;
@@ -4780,8 +4795,10 @@ async function main() {
       if (hasSensors && nowInCov && !wasInCov) {
         const hit = bisectCov('in') || { lat: curPos.lat, lon: curPos.lon };
         _log(sid, 'reacq_or_detect', hit.lat, hit.lon);
-        const wasEmpty = agg.inCovDrones.size === 0;
+        const wasEmpty = _liveOnly(agg.inCovDrones) === 0;
         agg.inCovDrones.add(droneKey);
+        // New cov cycle starts — allow the next OOR to fire.
+        if (wasEmpty) agg._oorFiredThisCycle = false;
         if (inSwarm) {
           if (wasEmpty) {
             agg.detectCount++;
@@ -4812,7 +4829,12 @@ async function main() {
         const hit = bisectCov('out') || { lat: curPos.lat, lon: curPos.lon };
         _log(sid, 'oor', hit.lat, hit.lon);
         agg.inCovDrones.delete(droneKey);
-        const nowEmpty = agg.inCovDrones.size === 0;
+        const nowEmpty = _liveOnly(agg.inCovDrones) === 0;
+        // Remember this exit point in case a later death empties the
+        // aggregate — then delayed OOR sweep uses this remembered
+        // pos (the point where the surviving drone actually left cov)
+        // instead of the death location.
+        agg._pendingOorPos = { lat: hit.lat, lon: hit.lon };
         if (inSwarm) {
           if (nowEmpty) {
             agg.oorCount++;
@@ -4820,6 +4842,8 @@ async function main() {
             const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid} signal lost`;
             _dropMarker(hit.lat, hit.lon, '#ff5a5a', lbl, event.id);
             _persist('oor', hit.lat, hit.lon, '#ff5a5a', lbl);
+            agg._oorFiredThisCycle = true;
+            agg._pendingOorPos = null;
           }
         } else {
           const n = (agg.droneOorCount.get(droneKey) || 0) + 1;
@@ -4851,6 +4875,51 @@ async function main() {
       if (!agg) continue;
       if (agg.inCovDrones)  agg.inCovDrones.delete(droneKey);
       if (agg.insideDrones) agg.insideDrones.delete(droneKey);
+    }
+  }
+
+  // On alive→dead: after purge, check every site aggregate. If the
+  // aggregate is now empty of LIVE drones AND OOR was never fired
+  // for the current cov cycle, fire a delayed OOR at the CANDIDATE
+  // exit position — which is the last-known exit-cov transition
+  // point of any drone that exited cov while others were still
+  // alive (recorded on agg._pendingOorPos). Falls back to the
+  // dead drone's death position.
+  //
+  // This closes the exact scenario Lucas hit: overwatch exits AMK cov
+  // while wingmen still alive → no OOR fires (aggregate non-empty) →
+  // exit pos remembered on agg._pendingOorPos. Wingmen die, purged.
+  // On the last purge that empties the aggregate → fire OOR at the
+  // remembered overwatch exit pos.
+  function _fireDelayedOORForEmptiedSites(event, state, deathLat, deathLon) {
+    if (!event?._siteAgg) return;
+    const _liveCount = (set) => {
+      let n = 0;
+      for (const key of set) {
+        if (key === 'lead') { if (!state.leadSwarmMember?.neutralised) n++; continue; }
+        const idx = parseInt(key.slice(2), 10);
+        const sw2 = state.swarmBillboards?.[idx];
+        if (sw2 && !sw2.neutralised) n++;
+      }
+      return n;
+    };
+    for (const sid of Object.keys(event._siteAgg)) {
+      const agg = event._siteAgg[sid];
+      if (!agg) continue;
+      if (agg._oorFiredThisCycle) continue;   // already fired for this in→out cycle
+      if (!agg.inCovDrones || _liveCount(agg.inCovDrones) > 0) continue;
+      // Empty of live drones AND OOR hasn't fired. Fire now.
+      const site = SITES[sid];
+      const pos = agg._pendingOorPos || { lat: deathLat, lon: deathLon };
+      agg.oorCount = (agg.oorCount || 0) + 1;
+      const now = new Date().toISOString();
+      const suffix = agg.oorCount > 1 ? ` #${agg.oorCount}` : '';
+      const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site?.code || site?.name || sid} signal lost`;
+      _dropMarker(pos.lat, pos.lon, '#ff5a5a', lbl, event.id);
+      if (!event.perSiteCrossings) event.perSiteCrossings = [];
+      event.perSiteCrossings.push({ kind: 'oor', lat: pos.lat, lon: pos.lon, color: '#ff5a5a', label: lbl, timestamp: now });
+      agg._oorFiredThisCycle = true;
+      agg._pendingOorPos = null;
     }
   }
 
@@ -7261,7 +7330,25 @@ async function main() {
           event._prevCoverageSite = bestSid;
         }
         event._prevInCoverage = inAnyCoverage;
-        event.currentlyInCoverage = inAnyCoverage;
+        // Event-level currentlyInCoverage uses the LIVE-drones check
+        // (any live drone in any sensor cov at any site), NOT just
+        // the LEAD's position. Without this the "SIGNAL LOST" panel
+        // could flip on/off based on the dead lead's ghost waypoints
+        // while a surviving overwatch is clearly visible in cov
+        // elsewhere. Uses the per-site aggregate maintained by
+        // processDroneSiteMarkers so it stays consistent with markers.
+        let anyLiveInCov = false;
+        if (state.leadSwarmMember && !state.leadSwarmMember.neutralised && _shouldAutoDetect(p.lat, p.lon)) {
+          anyLiveInCov = true;
+        }
+        if (!anyLiveInCov && state.swarmBillboards) {
+          for (const sw of state.swarmBillboards) {
+            if (sw.neutralised) continue;
+            if (sw.stats?.lat == null) continue;
+            if (_shouldAutoDetect(sw.stats.lat, sw.stats.lon)) { anyLiveInCov = true; break; }
+          }
+        }
+        event.currentlyInCoverage = anyLiveInCov;
       }
 
       // Update position + rotation + label (still visible after close during ghost)
@@ -7301,6 +7388,7 @@ async function main() {
         if (leadDown && state.leadSwarmMember && !state.leadSwarmMember._deathPurged) {
           _purgeDroneFromAggregates(event, 'lead');
           state.leadSwarmMember._deathPurged = true;
+          _fireDelayedOORForEmptiedSites(event, state, p.lat, p.lon);
         }
         // Multi-site tracks fire ENTRY / EXIT / OUT OF RANGE markers per
         // site as the missile transits each coverage zone.
@@ -7637,6 +7725,18 @@ async function main() {
             if (!sw._deathPurged) {
               _purgeDroneFromAggregates(event, sw._id || `sw${i}`);
               sw._deathPurged = true;
+              // If the purge just emptied a site aggregate of live
+              // drones, fire the delayed OOR at the surviving drone's
+              // earlier exit point (or this drone's death pos as
+              // fallback).
+              const cart = sw.billboard?.position?.getValue?.(Cesium.JulianDate.now());
+              let dLat = null, dLon = null;
+              if (cart) {
+                const cc = Cesium.Cartographic.fromCartesian(cart);
+                dLat = Cesium.Math.toDegrees(cc.latitude);
+                dLon = Cesium.Math.toDegrees(cc.longitude);
+              }
+              _fireDelayedOORForEmptiedSites(event, state, dLat, dLon);
             }
             sw.billboard.show = false;
             if (sw.trailLine) sw.trailLine.show = false;
