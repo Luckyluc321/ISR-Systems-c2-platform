@@ -4837,6 +4837,23 @@ async function main() {
   // Legacy shim — old call sites still reference processPerSiteMarkers.
   function processPerSiteMarkers(_state, _p, _eventId, _prevOverride) { /* no-op */ }
 
+  // Purge a drone key from every site's aggregate sets. Called ONCE
+  // when a drone transitions alive → neutralised. Without this, dead
+  // drones stayed in agg.inCovDrones / agg.insideDrones — so the
+  // "last drone left" transition never fired (set stayed non-empty
+  // forever) and OUT OF RANGE / EXIT markers were suppressed for
+  // the surviving drone. Purge is silent (no marker fires): the
+  // drone was killed by an interceptor, not signal-lost.
+  function _purgeDroneFromAggregates(event, droneKey) {
+    if (!event?._siteAgg) return;
+    for (const sid of Object.keys(event._siteAgg)) {
+      const agg = event._siteAgg[sid];
+      if (!agg) continue;
+      if (agg.inCovDrones)  agg.inCovDrones.delete(droneKey);
+      if (agg.insideDrones) agg.insideDrones.delete(droneKey);
+    }
+  }
+
   function nearestSensorInCoverage(p, site) {
     if (!site || !site.sensors || !site.sensors.length) return null;
     let nearest = null, minDist = Infinity, inCoverage = false;
@@ -7278,6 +7295,13 @@ async function main() {
         // without this the DJI-1 trendline kept growing all the way
         // out over Øresund after the drone was neutralised at AMK.
         if (leadDown && state.trail) state.trail.show = false;
+        // Purge lead from aggregate sets ONCE on death so surviving
+        // wingmen's transitions can flip aggregates to empty and
+        // fire OUT OF RANGE / EXIT normally.
+        if (leadDown && state.leadSwarmMember && !state.leadSwarmMember._deathPurged) {
+          _purgeDroneFromAggregates(event, 'lead');
+          state.leadSwarmMember._deathPurged = true;
+        }
         // Multi-site tracks fire ENTRY / EXIT / OUT OF RANGE markers per
         // site as the missile transits each coverage zone.
         //
@@ -7605,6 +7629,15 @@ async function main() {
         for (let i = 0; i < state.swarmBillboards.length; i++) {
           const sw = state.swarmBillboards[i];
           if (sw.neutralised) {
+            // First tick after death: purge this drone from every
+            // site's aggregate sets so the surviving drone's next
+            // out-of-cov transition can flip the aggregate to empty
+            // and fire OUT OF RANGE. Otherwise dead drones linger
+            // in the sets forever and OOR never fires.
+            if (!sw._deathPurged) {
+              _purgeDroneFromAggregates(event, sw._id || `sw${i}`);
+              sw._deathPurged = true;
+            }
             sw.billboard.show = false;
             if (sw.trailLine) sw.trailLine.show = false;
             if (sw.projLine) sw.projLine.show = false;
