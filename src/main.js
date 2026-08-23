@@ -13300,6 +13300,13 @@ async function main() {
     // EVENTS array — same platform in 30d, same site in 90d, correlated
     // advisories from linkedEventIds.
     const pattern = _computeReceiverPatternMatch(event);
+    // Sparse-data disclaimer: if the platform has been live for a
+    // short period or the site is quiet, all four counts read low.
+    // Say so explicitly so 0/0/0/0 doesn't read as broken.
+    const _patternTotal = pattern.samePlatform30d + pattern.sameSite90d + pattern.sameBoth90d + pattern.correlated;
+    const _sparseNote = _patternTotal < 2
+      ? '<div class="rer-ctx-sparse" style="margin-top:var(--space-2);padding:var(--space-2);background:rgba(255,184,77,0.06);border-left:2px solid rgba(255,184,77,0.4);font-size:var(--fs-2xs);color:var(--text-dim);line-height:1.45;">Limited historical baseline at this stage. Pattern signal firms up as more events accumulate.</div>'
+      : '';
     const context = `
       <section class="rer-section rer-context">
         <div class="c-section-eyebrow">Historical context</div>
@@ -13311,7 +13318,8 @@ async function main() {
             <div class="rer-ctx-row"><span class="rer-ctx-k">Same site + same platform, 90d</span><span class="rer-ctx-v">${pattern.sameBoth90d}</span></div>
             <div class="rer-ctx-row"><span class="rer-ctx-k">Correlated advisories</span><span class="rer-ctx-v">${pattern.correlated > 0 ? pattern.correlated + ' active link' + (pattern.correlated === 1 ? '' : 's') : 'None active'}</span></div>
           </div>
-          <div class="rer-ctx-foot">Computed from live event registry · Tactical assets in Response Overlay →</div>
+          ${_sparseNote}
+          <div class="rer-ctx-foot">Computed from the live event registry · Tactical assets in Response Overlay →</div>
         </div>
       </section>`;
 
@@ -13483,19 +13491,22 @@ async function main() {
     const isFriendly = cls === 'friendly';
     const isMissile = event.platform === 'missile';
 
+    // Human-language recommendations — no tier numbers, no military
+    // acronyms (QRA, FE, PET spelled out where used). Reads like a
+    // duty officer briefing another human, not a tactical checklist.
     let body, recommendation;
     if (isMissile) {
-      body = `Track ${event.id} classified as cruise missile signature with ${conf}% confidence, projecting toward ${siteName}. RF, acoustic, and visual modalities in agreement across ${event.sensorsTop?.length || 3} sensors. No matching flight plan on file. Trajectory consistent with terrain-following ingress from the southwest. Estimated time to inner perimeter: sub-minute.`;
-      recommendation = `Immediate national escalation. Air Force dispatch QRA. All lower tiers acknowledge and prepare shelter posture.`;
+      body = `Track ${event.id} shows a cruise-missile-class signature moving toward ${siteName} with ${conf}% confidence. Radio, acoustic, and visual sensors agree across ${event.sensorsTop?.length || 3} independent nodes. No matching flight plan on file. Approach vector suggests a low-altitude ingress from the southwest. Under a minute to the inner perimeter.`;
+      recommendation = `Immediate national escalation warranted. Alert the on-call fighter squadron and prepare shelter posture at the affected site. Downstream agencies should acknowledge and stand by for coordination.`;
     } else if (isHostile) {
-      body = `Track ${event.id} classified as hostile ${platform} at ${siteName} with ${conf}% confidence. Fused RF, acoustic, and visual signals show consistent classification across ${event.sensorsTop?.length || 3} sensors. No corresponding transponder or flight plan match. Behavior pattern indicates deliberate incursion rather than off-course commercial traffic.`;
-      recommendation = `Dispatch site security immediately. Recommend Politi coordination within 90 seconds. Consider FE notification if platform capability suggests strategic intent.`;
+      body = `Track ${event.id} looks like a hostile ${platform} approaching ${siteName} with ${conf}% confidence. Radio, acoustic, and visual sensors give consistent readings across ${event.sensorsTop?.length || 3} nodes. No matching transponder or filed flight plan. The behaviour pattern reads as deliberate rather than accidental commercial drift.`;
+      recommendation = `Alert site security straight away. Loop in the local police district within the next minute or two. If the platform looks capable enough to suggest state-level intent, notify defence intelligence as well.`;
     } else if (isFriendly) {
-      body = `Track ${event.id} classified as friendly ${platform} at ${siteName} with ${conf}% confidence. Signature matches registered internal inspection asset. Cross-referenced with active flight plan and operator schedule.`;
-      recommendation = `Log for audit record. No response action required. Continue passive monitoring.`;
+      body = `Track ${event.id} looks like a friendly ${platform} at ${siteName} with ${conf}% confidence. The signature matches a registered inspection asset and cross-references cleanly against the active flight plan and operator schedule.`;
+      recommendation = `Log for the audit record. No response action needed. Continue passive monitoring in case behaviour changes.`;
     } else {
-      body = `Track ${event.id} at ${siteName} with ${conf}% confidence. Platform classification ambiguous based on current sensor return. Fused RF, acoustic, and visual signals show partial agreement.`;
-      recommendation = `Hold classification for additional sensor confirmation. Consider requesting supplemental optics if track persists beyond 60 seconds.`;
+      body = `Track ${event.id} at ${siteName} sits at ${conf}% confidence. Sensor picture is mixed — radio, acoustic, and visual agree in part but not enough to lock a classification.`;
+      recommendation = `Hold on classifying until another sensor read comes in. If the track persists past a minute, request additional optics from the nearest node.`;
     }
     return { body, recommendation, generatedAgo: 4 };
   }
