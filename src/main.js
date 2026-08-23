@@ -42,7 +42,7 @@ import { contextForSite, nearestCriticalArea, dwellZonesAtPoint } from './site_c
 import { responseBundle, responseBundleForSubject, RESPONSE_OPTION_DETAILS, outcomesForKind } from './response_assets.js';
 import { AIRCRAFT, aircraftAtBase, aircraftForResponseAsset } from './aircraft.js';
 import { playbookFor } from './response_playbook.js';
-import { ADMIN, OPERATORS, RECEIVERS, getActiveRole, setActiveRole, onRoleChange, getRoleChildren, getRoleDestinationIdsRolledUp } from './roles.js';
+import { ADMIN, OPERATORS, RECEIVERS, getActiveRole, setActiveRole, onRoleChange, getRoleChildren, getRoleDestinationIdsRolledUp, impactedRoles as _impactedRoles, canInitiate as _canInitiate, FLOW_TYPES } from './roles.js';
 import { runbookFor } from './runbooks.js';
 import { TARGETS as TARGETS_CORE } from './targets.js';
 import { HV_SUBSTATION_TARGETS } from './targets_hv.js';
@@ -5152,6 +5152,34 @@ async function main() {
     primary.linkedEventIds.push(spawnedId);
     // Correlator validates the link with signature match audit note
     _autoCorrelate(spawned);
+
+    // P0 audit item · shadow-spawn advisory. Push a scoped notification
+    // to every receiver profile in-scope at the new site so agencies
+    // like Flyvevåbnet or Vestegnens Politi see the shadow event even
+    // if the operator hasn't manually escalated it yet. See IDD IF-6.7
+    // (path source 2: cross-site cascade).
+    try {
+      const spawnedReceivers = _siteReceiversLookup(siteId) || [];
+      const spawnedSiteName = SITES[siteId]?.name || SITES[siteId]?.code || siteId;
+      for (const rcv of spawnedReceivers) {
+        // Advisory only — do not auto-elevate to actor here. Recipients
+        // can promote themselves via the observer-promote flow once
+        // the UI wires it (Phase 2).
+        pushScopedNotification(spawnedId, rcv.id, {
+          kind: 'shadow-spawn',
+          mode: 'observer',
+          priority: primary.classification === 'hostile' ? 'critical' : 'info',
+          payload: {
+            linkedFromEventId: primary.id,
+            spawnedSiteId: siteId,
+            spawnedSiteName,
+            primaryLabel: primary.droneType || 'track',
+            toast: `Advisory · ${primary.droneType || 'Track'} re-acquired at ${spawnedSiteName}. Linked from ${primary.id}.`,
+          },
+        });
+      }
+    } catch (err) { console.warn('[shadow-spawn advisory]', err); }
+
     renderAlertStrip();
     return spawnedId;
   }
@@ -8950,6 +8978,110 @@ async function main() {
     el.style.display = 'block';
     clearTimeout(el._t);
     el._t = setTimeout(() => { el.style.display = 'none'; }, 2600);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Phase 1 · Receiver-contract wiring
+  //
+  // Site-scope resolver + notification wrapper + observer helpers. See
+  // IDD IF-6.10 for the API surface. All Phase 1 helpers are additive
+  // — legacy toast() calls still fire in parallel. No existing caller
+  // needs to change to consume the new pipeline.
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Resolver injected into roles.js helpers so this module owns the
+  // SITES import boundary (roles.js stays free of SITES dependency).
+  function _siteReceiversLookup(siteId) {
+    return SITES[siteId]?.receivers || [];
+  }
+  function _linkedEventLookup(eventId) {
+    return getEvent(eventId) || null;
+  }
+
+  // Public helper for callers that want the impacted-roles view for
+  // an event, with cross-site cascade + participants folded in.
+  function impactedRolesFor(event) {
+    return _impactedRoles(event, _siteReceiversLookup, _linkedEventLookup);
+  }
+
+  // Push a notification onto an event's routingHistory + interactions
+  // audit trail. If the active role matches the target (i.e. this
+  // browser IS the recipient) also fire a UI toast. Callers keep any
+  // existing toast() they already fire — this wrapper is additive
+  // during the migration.
+  //
+  // pushNotification(role_id, {kind, event_id, payload, priority})
+  function pushNotification(roleId, { kind, event_id, payload = {}, priority = 'info' }) {
+    if (!roleId || !kind || !event_id) return null;
+    const event = getEvent(event_id);
+    if (!event) return null;
+    const nowIso = new Date().toISOString();
+    // Interaction record (audit)
+    if (!Array.isArray(event.interactions)) event.interactions = [];
+    const interaction = {
+      id: `NTF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+      timestamp: nowIso,
+      flow: FLOW_TYPES.NOTIFICATION,
+      from_role_id: 'system',
+      to_role_id: roleId,
+      payload: { kind, ...payload },
+      ackStatus: 'pending',
+      ackedAt: null,
+      ackedBy: null,
+    };
+    event.interactions.push(interaction);
+    // Routing history (per-recipient delivery journal)
+    if (!Array.isArray(event.routingHistory)) event.routingHistory = [];
+    event.routingHistory.push({
+      role_id: roleId,
+      notification_kind: kind,
+      deliveredAt: nowIso,
+      seenAt: null,
+      ackedAt: null,
+    });
+    // Toast if the active browser role is the recipient
+    const activeRoleId = getActiveRole?.();
+    if (activeRoleId === roleId && payload.toast) {
+      toast(payload.toast, priority === 'critical' ? 'warn' : priority);
+    }
+    return interaction;
+  }
+
+  // Add a role to event.participants as an observer (or actor). Used
+  // by cross-site advisories, coordination flows, and cascade. Silent
+  // by itself — pair with pushNotification for the recipient toast.
+  function pushObserver(event_id, roleId, { addedBy = 'system', reason = 'auto-scoped', mode = 'observer' } = {}) {
+    const event = getEvent(event_id);
+    if (!event) return null;
+    if (!(event.participants instanceof Map)) event.participants = new Map();
+    if (event.participants.has(roleId)) return event.participants.get(roleId);
+    const entry = {
+      mode,
+      addedAt: new Date().toISOString(),
+      addedBy,
+      addReason: reason,
+      promotedFromObserver: false,
+      ackedAt: null,
+      ackedBy: null,
+    };
+    event.participants.set(roleId, entry);
+    return entry;
+  }
+
+  // Convenience: fire a notification + add participant in one call.
+  function pushScopedNotification(event_id, roleId, { kind, payload = {}, priority = 'info', mode = 'observer' }) {
+    pushObserver(event_id, roleId, { addedBy: `notif:${kind}`, reason: kind, mode });
+    return pushNotification(roleId, { kind, event_id, payload, priority });
+  }
+
+  // Test hook: expose Phase 1 helpers on window.
+  if (typeof window !== 'undefined') {
+    window.__isrPhase1 = {
+      impactedRolesFor,
+      pushNotification, pushObserver, pushScopedNotification,
+      canInitiate: (a, b, f) => _canInitiate(a, b, f),
+      FLOW_TYPES,
+    };
   }
 
   function renderConfig() {

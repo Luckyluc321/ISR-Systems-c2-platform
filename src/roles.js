@@ -1748,31 +1748,91 @@ export function canInitiate(fromRoleId, toRoleId, flowType) {
     : { allowed: false, reason: `flow ${flowType} not allowed for relationship ${rel}` };
 }
 
-// Compute the set of roles impacted by an event at a given tick. Phase 0
-// returns the direct-scope receivers based on event.siteId. Phase 1+
-// extends with cross-site cascade, threat-type routing, observer chain,
-// coordination peers.
-export function impactedRoles(event, siteReceiversLookup = null) {
-  const impacted = [];
-  if (!event) return impacted;
-  const siteId = event.siteId;
-  if (!siteId) return impacted;
-  // siteReceiversLookup is expected to be a fn (siteId) => Array<{id,mode,tier,...}>
-  // populated by the SITES config (once the receivers block is wired in Phase 1).
-  // Falls back to legacy destinationIds scan when lookup not provided.
-  if (typeof siteReceiversLookup === 'function') {
+// Compute the set of roles impacted by an event. Aggregates from four
+// sources per IDD IF-6.7 (Phase 1 covers sources 1, 2, and 4; source 3
+// threat-type routing lands in Phase 3):
+//   1. Direct scope — SITES[event.siteId].receivers
+//   2. Cross-site cascade — receivers of any linked / shadow event's site
+//   4. Explicit participants — anything already on event.participants
+//      (added via handoff, observer-add, coordination, etc.)
+//
+// siteReceiversLookup: fn (siteId) => Array<{id, mode, role, tier, condition}>
+//   Populated by main.js at wire-up so this module stays free of a
+//   SITES import (roles.js is imported by many modules; SITES pulls in
+//   heavier config that we don't want to widen the dep graph on).
+//
+// linkedEventLookup: fn (eventId) => event | null
+//   Optional. When provided, cross-site cascade folds in receivers
+//   scoped to any linkedEventIds / shadowOfEventId sites.
+//
+// Every entry has: {role_id, mode, addedBy, reason, tier?, condition?}
+// Dedup: last-write wins per role_id, with mode elevation (an actor
+// entry always beats an observer entry for the same role).
+export function impactedRoles(event, siteReceiversLookup = null, linkedEventLookup = null) {
+  const impacted = new Map();   // role_id → entry
+  if (!event) return [];
+
+  const _addEntry = (roleId, entry) => {
+    const role = ACCOUNTS.find(r => r.id === roleId);
+    if (!role) return;   // silently skip unknown roles (guards against typos in SITES.receivers)
+    const existing = impacted.get(roleId);
+    if (!existing) { impacted.set(roleId, entry); return; }
+    // Mode elevation: actor beats observer.
+    if (existing.mode === 'observer' && entry.mode === 'actor') {
+      impacted.set(roleId, { ...entry, addedBy: `${existing.addedBy}+${entry.addedBy}` });
+    }
+  };
+
+  const _foldSite = (siteId, addedByLabel) => {
+    if (!siteId) return;
+    if (typeof siteReceiversLookup !== 'function') return;
     const entries = siteReceiversLookup(siteId) || [];
-    for (const entry of entries) {
-      const role = ACCOUNTS.find(r => r.id === entry.id);
-      if (!role) continue;
-      impacted.push({
-        role_id: entry.id, mode: entry.mode || 'actor',
-        addedBy: 'site-scope', reason: `siteScope:${siteId}`,
-        tier: entry.tier || null, condition: entry.condition || null,
+    for (const e of entries) {
+      _addEntry(e.id, {
+        role_id: e.id,
+        mode: e.mode || 'actor',
+        addedBy: addedByLabel,
+        reason: `siteScope:${siteId}`,
+        tier: e.tier ?? null,
+        condition: e.condition ?? null,
+      });
+    }
+  };
+
+  // Source 1: direct-scope receivers at this event's site.
+  _foldSite(event.siteId, 'site-scope');
+
+  // Source 2: cross-site cascade. Linked events' site receivers loop
+  // in as observers on the primary (and vice versa if this event is
+  // itself a shadow — its primary's site scope also applies).
+  if (typeof linkedEventLookup === 'function') {
+    const seenSites = new Set([event.siteId]);
+    const cascade = (linkedId) => {
+      const linked = linkedEventLookup(linkedId);
+      if (!linked || seenSites.has(linked.siteId)) return;
+      seenSites.add(linked.siteId);
+      _foldSite(linked.siteId, 'cross-site-cascade');
+    };
+    (event.linkedEventIds || []).forEach(cascade);
+    if (event.shadowOfEventId) cascade(event.shadowOfEventId);
+  }
+
+  // Source 4: explicit participants already added to the event by
+  // prior flows (handoff, observer-add, coordination, promotion).
+  if (event.participants instanceof Map) {
+    for (const [roleId, p] of event.participants) {
+      _addEntry(roleId, {
+        role_id: roleId,
+        mode: p.mode || 'actor',
+        addedBy: p.addedBy || 'explicit',
+        reason: p.addReason || 'participant',
+        tier: null,
+        condition: null,
       });
     }
   }
-  return impacted;
+
+  return Array.from(impacted.values());
 }
 
 // Test hook: expose helpers on window for browser console debugging.
