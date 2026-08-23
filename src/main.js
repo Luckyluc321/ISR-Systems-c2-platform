@@ -9119,7 +9119,8 @@ async function main() {
         description: r.description || '',
         branch: agencyBranchOf?.(r.id) || 'standalone',
       }));
-    pool.sort((a, b) => a.org.localeCompare(b.org));
+    // Danish A-Å collation so Æ, Ø, Å sort at the end where they belong.
+    pool.sort((a, b) => a.org.localeCompare(b.org, 'da'));
 
     const overlay = document.createElement('div');
     overlay.id = 'observer-picker-overlay';

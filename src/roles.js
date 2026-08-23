@@ -1600,8 +1600,23 @@ export function setActiveRole(id) {
   _listeners.forEach(fn => fn(_activeId));
 }
 export function onRoleChange(fn) { _listeners.add(fn); return () => _listeners.delete(fn); }
-export function receiverRoles() { return RECEIVERS; }
-export function operatorRoles() { return OPERATORS; }
+// Danish A-Å collation. Æ, Ø, Å sort correctly at the end of the
+// alphabet (Æ = 27, Ø = 28, Å = 29). Numeric option keeps numbered
+// entries in natural order.
+const _DA_COLLATOR = new Intl.Collator('da', { sensitivity: 'base', numeric: true });
+function _sortByOrgAZ(a, b) {
+  return _DA_COLLATOR.compare(a.org || a.label || a.id, b.org || b.label || b.id);
+}
+
+// receiverRoles() returns receivers sorted A-Å by org name (Danish
+// collation). Every consumer that renders a receiver list gets the
+// same intuitive ordering. Source-file order stays hierarchical for
+// maintainability; the sort is applied here on read.
+export function receiverRoles() { return [...RECEIVERS].sort(_sortByOrgAZ); }
+export function operatorRoles() { return [...OPERATORS].sort(_sortByOrgAZ); }
+// Raw hierarchical order — for callers that need parent/child navigation
+// intact (branch chooser tiles, etc).
+export function receiverRolesHierarchical() { return RECEIVERS; }
 
 // ══════════════════════════════════════════════════════════════════
 // RECEIVER-ROLE INTERACTION CONTRACT (Phase 0 · additive)
