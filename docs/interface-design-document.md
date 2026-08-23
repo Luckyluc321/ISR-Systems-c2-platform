@@ -2,7 +2,7 @@
 
 | Version | Date | Source of truth |
 |---|---|---|
-| 0.2 (working draft) | 2026-08-23 | Working tree at HEAD 1b9b909 |
+| 0.3 (working draft) | 2026-08-23 | Working tree at HEAD 2f24e8e |
 
 Status tags used throughout:
 
@@ -27,7 +27,7 @@ Where `[live]` and `[planned]` differ on a field name or shape, both are shown. 
 | IF-3 | Detection lifecycle and marker/aggregation contract | `[live]` |
 | IF-4 | Event data contract | pending |
 | IF-5 | Escalation, routing, tenant isolation | pending |
-| IF-6 | Receiver profile and interaction contract (v1) | `[partial]` |
+| IF-6 | Receiver profile and interaction contract (v1) | `[live]` (Phase 2 shipped) |
 | IF-7 | Response and dispatch | pending |
 | IF-8 | Recording and evidence export | pending |
 | IF-9 | Agentic (Mistral) interfaces | `[partial]` |
@@ -456,7 +456,7 @@ Status: pending. Will specify the event object, the DetectionSubject canonical s
 
 Status: pending. Will specify destinations, the rules engine, the escalation payload, and the query-layer isolation functions.
 
-## IF-6. Receiver profile and interaction contract (v1) `[partial]`
+## IF-6. Receiver profile and interaction contract (v1) `[live through Phase 2]`
 
 The receiver contract centralises how government and organisational profiles interact with events on the platform. Prior to this contract every role-scoped decision (which receivers get notified, which CTAs render, who can hand off to whom) was scattered across inline `if role === 'politi'` branches, hardcoded destination arrays, and per-site rules. The contract folds all of that into one registry + a small set of pure helpers so a new receiver plugs in by adding a row.
 
@@ -741,9 +741,9 @@ The receiver contract is rolling out in phases so each ship is small and verifia
 | Phase | Contents | Status |
 |---|---|---|
 | Phase 0 | Full registry (242 leaves) + `agencyBranchOf` + `relationshipBetween` + `canInitiate` + `impactedRoles`. Verifiable via `window.__isrRoles`. | `[live]` (commits `cd24117` + `410a68a` + `1b9b909`) |
-| Phase 1 | `event.participants` + `event.interactions` fields. `SITES[siteId].receivers` schema wired into `impactedRoles`. `pushNotification` wrapper alongside existing `toast()` calls (both fire in parallel until legacy calls retire). | `[planned]` |
-| Phase 2 | `availableCTAsForReceiver(role_id, event)` replaces every `if role === X` in main.js UI. Observer-mode UI (chip, hidden CTAs, "loop in" and "promote to actor" CTAs). Search-filter on receiver dropdowns (mandatory before exposing 242 profiles). | `[planned]` |
-| Phase 3 | P0-P3 audit patches on top of the new contract. Cross-site shadow-spawn receiver advisory. Cross-site backlink chip in receiver cards. Substation-specific playbook. Energinet night-mode rendering. | `[planned]` |
+| Phase 1 | `event.participants` + `event.interactions` + `event.routingHistory` fields. `SITES[siteId].receivers` schema wired into `impactedRoles`. `pushNotification` wrapper alongside existing `toast()` calls. Cross-site shadow-spawn advisory (P0 audit item) fires automatically. Verifiable via `window.__isrPhase1`. | `[live]` (commits `b78fcfc` + `35449a8`) |
+| Phase 2 | `availableCTAsForReceiver(role_id, event, ctx)` factory replaces the universal CTA list. Role-branch scoped action palette (Politi → patrol + cordon + AKS, Forsvaret → fighter + army, BRS → standby + deploy, Trafik → NOTAM, Kommune → crisis staff + shelter, Region → ambulance + triage, HJV → reinforce). Observer chip in receiver report header when mode=observer. Full-viewport observer picker overlay with client-side substring search over all 242 profiles. Router stubs for all new actions log to `event.interactions` even where the real dispatch backend lands in Phase 3. Verifiable via `window.__isrPhase2`. | `[live]` (commits `d76b38e` + `2f24e8e`) |
+| Phase 3 | Remaining audit patches on the new contract. Cross-site backlink chip in receiver cards. "Primary still active at X" surface on linked-event closure. Substation-specific playbook + Energinet DSO CTA in post-incident handoff. Energinet night-mode rendering. siteId validation against SITES keys. Real dispatch pipeline for Phase 2 CTAs (patrol dispatch, NOTAM push, ambulance service). | `[planned]` |
 | Phase 4 | Full flow palette in UI (`request-support` button between peer receivers, `coordination` workflow, `escalation` upward). | `[planned]` |
 
 Every phase can ship without the next. Phase 0 is complete and verifiable today. Phase 1 begins after the current marker regression pass lands green.
