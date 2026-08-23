@@ -12235,12 +12235,16 @@ async function main() {
 
       <div class="acct-group">
         <div class="acct-group-lbl">Operator accounts</div>
-        ${OPERATORS.map(opCard).join('')}
+        ${[...OPERATORS].sort((a,b) => (a.org||a.label||a.id).localeCompare(b.org||b.label||b.id, 'da')).map(opCard).join('')}
       </div>
 
       <div class="acct-group">
         <div class="acct-group-lbl">Receiver accounts</div>
-        ${RECEIVERS.map(rxCard).join('')}
+        <input id="role-menu-search" type="search" placeholder="Search 242 receiver profiles..." autocomplete="off" spellcheck="false"
+          style="width: 100%; padding: 8px 12px; margin-bottom: var(--space-2); background: rgba(0,0,0,0.35); border: 1px solid #1e2530; border-radius: 2px; color: var(--text); font-family: var(--font-body); font-size: var(--fs-sm); box-sizing: border-box;" />
+        <div id="role-menu-receivers">
+          ${[...RECEIVERS].sort((a,b) => (a.org||a.label||a.id).localeCompare(b.org||b.label||b.id, 'da')).map(rxCard).join('')}
+        </div>
       </div>
 
       <div class="acct-group">
@@ -12251,6 +12255,21 @@ async function main() {
     roleMenu.querySelectorAll('[data-role]').forEach(btn => {
       btn.addEventListener('click', () => { setActiveRole(btn.dataset.role); roleMenu.style.display = 'none'; });
     });
+
+    // Client-side substring filter over the receiver list. Keeps 242
+    // profiles navigable without scrolling forever.
+    const _searchInput = roleMenu.querySelector('#role-menu-search');
+    const _receiverListEl = roleMenu.querySelector('#role-menu-receivers');
+    if (_searchInput && _receiverListEl) {
+      _searchInput.addEventListener('input', (e) => {
+        const q = (e.target.value || '').toLowerCase().trim();
+        _receiverListEl.querySelectorAll('.acct-card').forEach(card => {
+          if (!q) { card.style.display = ''; return; }
+          const hay = (card.textContent || '').toLowerCase();
+          card.style.display = hay.includes(q) ? '' : 'none';
+        });
+      });
+    }
   }
 
   function updateOperatorChip() {
