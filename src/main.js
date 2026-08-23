@@ -42,7 +42,7 @@ import { contextForSite, nearestCriticalArea, dwellZonesAtPoint } from './site_c
 import { responseBundle, responseBundleForSubject, RESPONSE_OPTION_DETAILS, outcomesForKind } from './response_assets.js';
 import { AIRCRAFT, aircraftAtBase, aircraftForResponseAsset } from './aircraft.js';
 import { playbookFor } from './response_playbook.js';
-import { ADMIN, OPERATORS, RECEIVERS, getActiveRole, setActiveRole, onRoleChange, getRoleChildren, getRoleDestinationIdsRolledUp, impactedRoles as _impactedRoles, canInitiate as _canInitiate, FLOW_TYPES } from './roles.js';
+import { ADMIN, OPERATORS, RECEIVERS, getActiveRole, setActiveRole, onRoleChange, getRoleChildren, getRoleDestinationIdsRolledUp, impactedRoles as _impactedRoles, canInitiate as _canInitiate, agencyBranchOf, FLOW_TYPES } from './roles.js';
 import { runbookFor } from './runbooks.js';
 import { TARGETS as TARGETS_CORE } from './targets.js';
 import { HV_SUBSTATION_TARGETS } from './targets_hv.js';
@@ -13646,8 +13646,77 @@ async function main() {
   // Build the CTA rail. Deduplicates on role scope + current escalation
   // state. Each CTA has: label, sub, tooltip, action (matches router),
   // tone ('primary' | 'accent' | 'neutral' | 'danger'), icon.
+  //
+  // Phase 2: thin wrapper over availableCTAsForReceiver so all CTA
+  // logic is in one place. Old caller signature preserved.
   function _buildRecommendedCtas(event, rec, isAcked, isActive) {
+    const roleId = getActiveRole?.();
+    return availableCTAsForReceiver(roleId, event, { rec, isAcked, isActive });
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Phase 2 · availableCTAsForReceiver
+  //
+  // Role-scoped CTA generation. Given a receiver profile id + an event
+  // + context, returns the ordered list of CTAs THIS role sees on
+  // THIS event. Replaces every `if role === X` hardcode in the UI.
+  //
+  // Scope logic:
+  //   - Observers see no action CTAs (only Add note, Loop in another,
+  //     Promote to actor).
+  //   - Actors see role-branch-appropriate action CTAs plus universal
+  //     ones (Acknowledge, Add note, Respond, Cascade, Handoff peer).
+  //
+  // Branch → action map:
+  //   POLITI actors      → Deploy patrol, Perimeter cordon, Request AKS
+  //   BRS actors         → Standby, Full deployment
+  //   FORSVARET aviation → Scramble Air Force fighter (missile/hostile air)
+  //   FORSVARET army     → Deploy army C-UAS, Deploy ground force
+  //   FORSVARET intel    → Log to intel picture (no active response)
+  //   AGENCY regulator   → Issue airspace advisory, Restrict airspace
+  //   MUNICIPAL          → Alert crisis staff, Shelter-in-place
+  //   HJV                → Reinforce guard, Perimeter patrol
+  //   REGION             → Ambulance standby, Casualty triage prep
+  //
+  // Universal (all actors): Acknowledge, Add note, Respond, Cascade to
+  // FE/PET (if not self), Cascade to local Politi (if not self),
+  // Handoff to peer district, Escalate to parent, Loop in observer.
+  //
+  // Observers see: Promote to actor, Add note.
+  // ═══════════════════════════════════════════════════════════════════
+  function availableCTAsForReceiver(roleId, event, ctx = {}) {
+    const { rec, isAcked, isActive } = ctx;
     const ctas = [];
+    if (!event) return ctas;
+    if (!roleId) roleId = getActiveRole?.();
+    const role = RECEIVERS.find(r => r.id === roleId)
+              || OPERATORS.find(o => o.id === roleId)
+              || (roleId === ADMIN.id ? ADMIN : null);
+    if (!role) return ctas;
+
+    // Participant mode: default 'actor' if not explicitly observer.
+    const participant = event.participants instanceof Map
+      ? event.participants.get(roleId)
+      : null;
+    const mode = participant?.mode || 'actor';
+    const isObserver = mode === 'observer';
+
+    // OBSERVER short-circuit — only promotion + note.
+    if (isObserver) {
+      ctas.push({
+        label: 'Promote to actor', sub: 'Take response ownership', icon: '⇧', tone: 'primary',
+        action: 'observer-promote',
+        tooltip: 'Requests actor status on this event. Any current actor can approve.',
+      });
+      ctas.push({
+        label: 'Add note', sub: 'Append to audit trail', icon: '✎', tone: 'neutral',
+        action: 'add-note',
+        tooltip: 'Appends a note to the event audit trail. Visible to all participants.',
+      });
+      return ctas;
+    }
+
+    // ACTOR path. Universal actor CTAs first (acknowledge > branch-specific > cascade > respond).
     if (rec && !isAcked) {
       ctas.push({
         label: 'Acknowledge receipt', sub: 'Confirm you have the case', icon: '✓', tone: 'primary',
@@ -13655,25 +13724,173 @@ async function main() {
         tooltip: 'Sends acknowledgement to the operator. Records the acknowledgement in the audit trail.',
       });
     }
-    if (isActive && event.platform === 'missile') {
+
+    // Branch-specific CTAs
+    const branch = agencyBranchOf?.(roleId);
+    const isPolitiBranch    = branch === 'politi';
+    const isForsvaretBranch = branch === 'forsvaret';
+    const isBrsBranch       = branch === 'brs';
+    const isHjvBranch       = branch === 'hjv';
+    const isRegionBranch    = branch === 'region';
+    const isAgencyBranch    = branch === 'agency';
+    const isKommune         = roleId.startsWith('kom-');
+    const roleScope         = role.scope || '';
+
+    // Politi actors
+    if (isActive && isPolitiBranch) {
       ctas.push({
-        label: 'Dispatch QRA fighter', sub: 'Skrydstrup, 15 min alert', icon: '✈', tone: 'accent',
-        action: 'qra-dispatch',
-        tooltip: 'Requests QRA intercept from Air Force. Only available while the event is active.',
+        label: 'Deploy patrol', sub: 'Local district cars', icon: '🚔', tone: 'accent',
+        action: 'deploy-patrol',
+        tooltip: 'Dispatches district patrol cars to the incident site. Confirms via radio when on scene.',
+      });
+      ctas.push({
+        label: 'Set up perimeter cordon', sub: 'Afspær området', icon: '⚑', tone: 'accent',
+        action: 'set-cordon',
+        tooltip: 'Establishes a physical perimeter cordon around the affected area. Coordinates with local fire and medical.',
+      });
+      // Only regional Politi (not HQ, not specialty) requests AKS backup
+      if (role.parentId === 'politi' && !roleId.startsWith('politi-special')) {
+        ctas.push({
+          label: 'Request AKS backup', sub: 'Aktionsstyrken', icon: '⚡', tone: 'neutral',
+          action: 'request-aks',
+          tooltip: 'Requests AKS tactical intervention unit for armed or hostage-taking incidents.',
+        });
+      }
+    }
+
+    // BRS actors
+    if (isActive && isBrsBranch) {
+      ctas.push({
+        label: 'Standby response', sub: 'Teams on alert', icon: '⏳', tone: 'accent',
+        action: 'brs-standby',
+        tooltip: 'Places BRS response teams on active standby without deploying yet.',
+      });
+      ctas.push({
+        label: 'Full deployment', sub: 'CBRN + rescue + medical', icon: '🚨', tone: 'accent',
+        action: 'brs-deploy',
+        tooltip: 'Full BRS deployment. Hazmat, rescue, and medical teams en route.',
       });
     }
-    if (isActive) {
+
+    // Forsvaret aviation (Flyvevåbnet) actors
+    const isFlyv = roleId.startsWith('flv-') || role.parentId === 'flyvevaabnet';
+    if (isActive && isForsvaretBranch && isFlyv && (event.platform === 'missile' || (event.classification === 'hostile' && ['fixed-wing', 'jet', 'quadcopter'].includes(event.platform)))) {
       ctas.push({
-        label: 'Cascade to FE / PET', sub: 'Strategic intelligence', icon: '⇧', tone: 'neutral',
-        action: 'cascade-fe-pet',
-        tooltip: 'Cascades this event to Forsvarets Efterretningstjeneste (FE) + Politiets Efterretningstjeneste (PET). Records the cascade in the operator audit trail with your role as initiator.',
+        label: 'Scramble Air Force fighter', sub: 'On-call squadron', icon: '✈', tone: 'accent',
+        action: 'qra-dispatch',
+        tooltip: 'Requests fighter intercept from the on-call squadron. Only available while the event is active.',
       });
+    }
+
+    // Forsvaret army (Hæren) actors
+    const isHaer = roleId.startsWith('haer-') || role.parentId === 'haeren';
+    if (isActive && isForsvaretBranch && isHaer) {
+      ctas.push({
+        label: 'Deploy army C-UAS', sub: 'RF + electronic warfare', icon: '⚡', tone: 'neutral',
+        action: 'army-c-uas',
+        tooltip: 'Requests army counter-drone unit deployment. Radio frequency and electronic warfare capability.',
+      });
+      ctas.push({
+        label: 'Deploy ground force', sub: 'Rapid reinforcement', icon: '🪖', tone: 'neutral',
+        action: 'army-ground',
+        tooltip: 'Requests army ground reinforcement to hold cordon or protect infrastructure.',
+      });
+    }
+
+    // Forsvaret intel (FE, CFCS) — observer-style, no active response
+    const isIntel = roleId === 'fe' || roleId.startsWith('agency-cfcs') || roleId === 'forsvar-intel';
+    if (isActive && isForsvaretBranch && isIntel) {
+      ctas.push({
+        label: 'Log to intel picture', sub: 'Pattern-of-life analysis', icon: '📊', tone: 'neutral',
+        action: 'intel-log',
+        tooltip: 'Adds this event to the intelligence picture for pattern-of-life analysis. No active response.',
+      });
+    }
+
+    // Agency (Trafikstyrelsen — aviation regulator)
+    if (isActive && isAgencyBranch && roleId === 'agency-traf' && ['quadcopter', 'fixed-wing', 'jet', 'missile'].includes(event.platform)) {
+      ctas.push({
+        label: 'Issue airspace advisory', sub: 'NOTAM push', icon: '📡', tone: 'accent',
+        action: 'issue-notam',
+        tooltip: 'Issues NOTAM airspace advisory for the affected zone. Distributed to Eurocontrol.',
+      });
+      ctas.push({
+        label: 'Restrict airspace', sub: 'Full closure order', icon: '⛔', tone: 'danger',
+        action: 'restrict-airspace',
+        tooltip: 'Full airspace closure order for the affected zone. Requires ministerial sign-off in production.',
+      });
+    }
+
+    // Agency (Søfartsstyrelsen — maritime regulator)
+    if (isActive && isAgencyBranch && roleId === 'agency-sof' && (roleScope === 'maritime' || event.siteId === 'esbjerg')) {
+      ctas.push({
+        label: 'Issue maritime advisory', sub: 'Coast guard notice', icon: '📡', tone: 'accent',
+        action: 'issue-maritime-advisory',
+        tooltip: 'Issues advisory to coast guard and maritime traffic in affected zone.',
+      });
+    }
+
+    // Kommune (municipal crisis staff)
+    if (isActive && isKommune) {
+      ctas.push({
+        label: 'Alert kommune crisis staff', sub: 'Municipal war-room', icon: '🏛', tone: 'accent',
+        action: 'kom-crisis',
+        tooltip: 'Alerts the municipal crisis staff. Activates local emergency plan.',
+      });
+      if (event.classification === 'hostile' && event.threat === 'high') {
+        ctas.push({
+          label: 'Shelter-in-place notification', sub: 'Public alert', icon: '🏘', tone: 'danger',
+          action: 'kom-shelter',
+          tooltip: 'Broadcasts shelter-in-place notification to residents in affected zone via SMS + siren.',
+        });
+      }
+    }
+
+    // Hjemmeværnet actors
+    if (isActive && isHjvBranch) {
+      ctas.push({
+        label: 'Reinforce guard', sub: 'Volunteer callout', icon: '🛡', tone: 'neutral',
+        action: 'hjv-reinforce',
+        tooltip: 'Calls out Hjemmeværn volunteer patrols to reinforce perimeter or hold cordon.',
+      });
+    }
+
+    // Region (ambulance + hospital coordination)
+    if (isActive && isRegionBranch) {
+      ctas.push({
+        label: 'Ambulance standby', sub: 'Regional 112 alerted', icon: '🚑', tone: 'accent',
+        action: 'region-ambulance-standby',
+        tooltip: 'Puts regional ambulance service on active standby for casualty response.',
+      });
+      if (event.classification === 'hostile' && event.threat === 'high') {
+        ctas.push({
+          label: 'Casualty triage prep', sub: 'Regional hospitals', icon: '🏥', tone: 'danger',
+          action: 'region-triage-prep',
+          tooltip: 'Alerts regional hospitals to prepare mass-casualty triage.',
+        });
+      }
+    }
+
+    // Universal actor CTAs (cascade, handoff, respond, note, loop-in)
+    if (isActive && !isPolitiBranch) {
       ctas.push({
         label: 'Cascade to local Politi', sub: 'Politikreds coordination', icon: '⚑', tone: 'neutral',
         action: 'cascade-politi',
-        tooltip: 'Cascades this event to the local Politikreds responsible for this site. Operator sees the new escalation record with your role attribution.',
+        tooltip: 'Cascades this event to the local Politikreds responsible for this site.',
       });
     }
+    if (isActive && !isIntel && roleId !== 'fe' && roleId !== 'pet') {
+      ctas.push({
+        label: 'Cascade to FE / PET', sub: 'Strategic intelligence', icon: '⇧', tone: 'neutral',
+        action: 'cascade-fe-pet',
+        tooltip: 'Cascades this event to Forsvarets Efterretningstjeneste and Politiets Efterretningstjeneste.',
+      });
+    }
+    ctas.push({
+      label: 'Loop in observer', sub: 'Add role to case', icon: '👥', tone: 'neutral',
+      action: 'observer-add',
+      tooltip: 'Adds another role to this event as an observer. They receive notifications but no CTAs unless promoted.',
+    });
     if (rec) {
       ctas.push({
         label: 'Respond to operator', sub: 'Send back to source', icon: '↩', tone: 'neutral',
@@ -13681,7 +13898,24 @@ async function main() {
         tooltip: 'Opens the response composer. Reply is delivered to the operator inbox.',
       });
     }
+    ctas.push({
+      label: 'Add note', sub: 'Append to audit trail', icon: '✎', tone: 'neutral',
+      action: 'add-note',
+      tooltip: 'Appends a note to the event audit trail. Visible to all participants.',
+    });
+
     return ctas;
+  }
+
+  // Expose Phase 2 helpers on window for browser console testing.
+  if (typeof window !== 'undefined') {
+    window.__isrPhase2 = {
+      availableCTAsForReceiver,
+      // Convenience: peek at what a specific role would see for an event
+      ctasForRole: (roleId, eventId) => availableCTAsForReceiver(roleId, getEvent(eventId), {
+        rec: null, isAcked: false, isActive: getEvent(eventId)?.status === 'active',
+      }),
+    };
   }
 
   // Build audit trail from event + escalation history.
@@ -14286,6 +14520,71 @@ async function main() {
         if (records.length === 0) toast('Local Politi already coordinated for this event', 'info');
         else toast(`Cascaded to local Politikreds (${dests.find(d => d.id === politiIds[0])?.name || 'Politi'})`, 'ok');
         renderReceiverView();
+      }
+      // Phase 2 role-scoped CTA stubs. These fire the appropriate
+      // notification/audit record but the actual dispatch pipeline
+      // (real patrol dispatch, real NOTAM push, real Ambulance service
+      // integration) is wired in Phase 3+. For now they toast + log an
+      // interaction record so the operator sees the action land.
+      else if (
+        action === 'deploy-patrol' || action === 'set-cordon' || action === 'request-aks'
+        || action === 'brs-standby' || action === 'brs-deploy'
+        || action === 'army-c-uas' || action === 'army-ground'
+        || action === 'intel-log'
+        || action === 'issue-notam' || action === 'restrict-airspace' || action === 'issue-maritime-advisory'
+        || action === 'kom-crisis' || action === 'kom-shelter'
+        || action === 'hjv-reinforce'
+        || action === 'region-ambulance-standby' || action === 'region-triage-prep'
+      ) {
+        const eventId = id || _selectedReceiverEventId || _workspaceEventId;
+        const ev = getEvent(eventId);
+        if (!ev) { toast('Event not found', 'err'); return; }
+        const role = getActiveRole();
+        const roleId = role?.id || 'unknown';
+        // Record the action to the event's interaction audit trail so
+        // it shows up in the audit journal + PDF export.
+        if (!Array.isArray(ev.interactions)) ev.interactions = [];
+        ev.interactions.push({
+          id: `ACT-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          timestamp: new Date().toISOString(),
+          flow: 'action-dispatched',
+          from_role_id: roleId,
+          to_role_id: 'response-pipeline',
+          payload: { action, event_id: eventId },
+          ackStatus: 'pending',
+          ackedAt: null,
+          ackedBy: null,
+        });
+        toast(`${action.replace(/-/g, ' ')} · logged. Live dispatch pipeline wires in Phase 3.`, 'info');
+        renderReceiverView();
+      }
+      else if (action === 'add-note') {
+        const eventId = id || _selectedReceiverEventId || _workspaceEventId;
+        const ev = getEvent(eventId);
+        if (!ev) { toast('Event not found', 'err'); return; }
+        const text = window.prompt('Add note to event audit trail:');
+        if (!text || !text.trim()) return;
+        addNote(eventId, text.trim(), `${getActiveRole()?.person || getActiveRole()?.org || 'Receiver'}`);
+        toast('Note added to audit trail', 'ok');
+        _lastConsoleSig = null;
+        renderReceiverView({ immediate: true });
+      }
+      else if (action === 'observer-add') {
+        // Phase 2 stub — inline picker UI lands in Phase 2 Step 3.
+        toast('Observer picker UI wires in Phase 2 Step 3.', 'info');
+      }
+      else if (action === 'observer-promote') {
+        const eventId = id || _selectedReceiverEventId || _workspaceEventId;
+        const ev = getEvent(eventId);
+        const roleId = getActiveRole()?.id;
+        if (!ev || !roleId) return;
+        if (!(ev.participants instanceof Map)) ev.participants = new Map();
+        const cur = ev.participants.get(roleId);
+        if (cur) { cur.mode = 'actor'; cur.promotedFromObserver = true; }
+        else ev.participants.set(roleId, { mode: 'actor', addedAt: new Date().toISOString(), addedBy: roleId, addReason: 'self-promoted', promotedFromObserver: true });
+        toast('Promoted to actor. Response CTAs now available.', 'ok');
+        _lastConsoleSig = null;
+        renderReceiverView({ immediate: true });
       }
       else if (action === 'dispatch-postinc') { dispatchPostIncident(id, el.dataset.dest); renderReceiverView(); }
       else if (action === 'close-event') { closePostIncidentEvent(id); renderReceiverView(); }
