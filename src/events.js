@@ -191,6 +191,16 @@ export function nextEventId() {
 export function addEvent(event) {
   event.notes = event.notes || [];
   event.escalations = event.escalations || [];
+  // Phase 1 receiver contract fields (additive, defaults to empty).
+  // event.participants: Map<role_id, {mode, addedAt, addedBy, addReason, promotedFromObserver, ackedAt, ackedBy}>
+  //   Who is in the loop on this event and in what mode (actor/observer).
+  // event.interactions: Array<{id, timestamp, flow, from_role_id, to_role_id, payload, ackStatus, ackedAt, ackedBy}>
+  //   Every role-to-role interaction on this event. Audit trail for compliance.
+  // event.routingHistory: Array<{role_id, notification_kind, deliveredAt, seenAt, ackedAt}>
+  //   Per-recipient delivery journal. Populated by pushNotification.
+  if (!(event.participants instanceof Map)) event.participants = new Map();
+  event.interactions = event.interactions || [];
+  event.routingHistory = event.routingHistory || [];
   syncEventSubject(event);   // canonical DetectionSubject attached here
   EVENTS.push(event);
   _listeners.forEach(fn => fn(event.id));
