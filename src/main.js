@@ -4844,6 +4844,9 @@ async function main() {
             _persist('oor', hit.lat, hit.lon, '#ff5a5a', lbl);
             agg._oorFiredThisCycle = true;
             agg._pendingOorPos = null;
+            // P1: operator/receiver-visible notification. Mirrors the
+            // DETECTED toast pattern so signal-loss isn't silent.
+            toast(`OUT OF RANGE · ${event.droneType || 'track'} left ${site.name || site.code || sid} sensor coverage.`, 'warn');
           }
         } else {
           const n = (agg.droneOorCount.get(droneKey) || 0) + 1;
@@ -4852,6 +4855,7 @@ async function main() {
           const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid} · ${droneLabel || droneKey}`;
           _dropMarker(hit.lat, hit.lon, '#ff5a5a', lbl, event.id);
           _persist('oor', hit.lat, hit.lon, '#ff5a5a', lbl);
+          toast(`OUT OF RANGE · ${droneLabel || droneKey} left ${site.name || site.code || sid} sensor coverage.`, 'warn');
         }
       }
       droneCov.set(sid, nowInCov);
@@ -4920,6 +4924,7 @@ async function main() {
       event.perSiteCrossings.push({ kind: 'oor', lat: pos.lat, lon: pos.lon, color: '#ff5a5a', label: lbl, timestamp: now });
       agg._oorFiredThisCycle = true;
       agg._pendingOorPos = null;
+      toast(`OUT OF RANGE · ${event.droneType || 'track'} left ${site?.name || site?.code || sid} sensor coverage.`, 'warn');
     }
   }
 

@@ -294,7 +294,317 @@ export const RECEIVERS = [
     scope: 'esbjerg-only', destinationIds: ['esb-t2-politi'],
     description: 'Sydvestjylland district. Esbjerg C-UAS patrol.',
   },
+
+  // ── Politikredse (remaining 10 of Denmark's 12) ─────────────────
+  // Publicly stable list from politi.dk. Empty destinationIds until
+  // sites explicitly declare these districts in their receivers block.
+  {
+    id: 'politi-vestegn', kind: 'receiver', type: 'leaf', parentId: 'politi',
+    org: 'Vestegnens Politi', label: 'Vestegnens Politi', initials: 'VP',
+    scope: 'regional', destinationIds: [],
+    description: 'Vestegn district. Covers western Copenhagen + Amager. Includes CPH airport jurisdiction.',
+  },
+  {
+    id: 'politi-nordsj', kind: 'receiver', type: 'leaf', parentId: 'politi',
+    org: 'Nordsjællands Politi', label: 'Nordsjællands Politi', initials: 'NP',
+    scope: 'regional', destinationIds: [],
+    description: 'North Zealand district. Covers Helsingør, Hillerød, Fredensborg.',
+  },
+  {
+    id: 'politi-midtvestsjaelland', kind: 'receiver', type: 'leaf', parentId: 'politi',
+    org: 'Midt- og Vestsjællands Politi', label: 'Midt- og Vestsjællands Politi', initials: 'MV',
+    scope: 'regional', destinationIds: [],
+    description: 'Central + West Zealand district. Covers Roskilde, Holbæk, Kalundborg.',
+  },
+  {
+    id: 'politi-sydsjaelland', kind: 'receiver', type: 'leaf', parentId: 'politi',
+    org: 'Sydsjællands og Lolland-Falsters Politi', label: 'Sydsjællands og Lolland-Falsters Politi', initials: 'SL',
+    scope: 'regional', destinationIds: [],
+    description: 'South Zealand + Lolland-Falster district.',
+  },
+  {
+    id: 'politi-fyn', kind: 'receiver', type: 'leaf', parentId: 'politi',
+    org: 'Fyns Politi', label: 'Fyns Politi', initials: 'FP',
+    scope: 'regional', destinationIds: [],
+    description: 'Funen district. Covers Odense + Svendborg.',
+  },
+  {
+    id: 'politi-sydsonderjyl', kind: 'receiver', type: 'leaf', parentId: 'politi',
+    org: 'Syd- og Sønderjyllands Politi', label: 'Syd- og Sønderjyllands Politi', initials: 'SS',
+    scope: 'regional', destinationIds: [],
+    description: 'South + South Jutland district. Covers Esbjerg, Kolding, Haderslev.',
+  },
+  {
+    id: 'politi-sydostjyl', kind: 'receiver', type: 'leaf', parentId: 'politi',
+    org: 'Sydøstjyllands Politi', label: 'Sydøstjyllands Politi', initials: 'SØ',
+    scope: 'regional', destinationIds: [],
+    description: 'Southeast Jutland district. Covers Vejle, Horsens, Fredericia (Landerupgård).',
+  },
+  {
+    id: 'politi-midtvestjyl', kind: 'receiver', type: 'leaf', parentId: 'politi',
+    org: 'Midt- og Vestjyllands Politi', label: 'Midt- og Vestjyllands Politi', initials: 'MJ',
+    scope: 'regional', destinationIds: [],
+    description: 'Central + West Jutland district. Covers Herning, Holstebro, Viborg.',
+  },
+  {
+    id: 'politi-ostjyl', kind: 'receiver', type: 'leaf', parentId: 'politi',
+    org: 'Østjyllands Politi', label: 'Østjyllands Politi', initials: 'ØJ',
+    scope: 'regional', destinationIds: [],
+    description: 'East Jutland district. Covers Aarhus, Silkeborg, Randers.',
+  },
+  {
+    id: 'politi-nordjyl', kind: 'receiver', type: 'leaf', parentId: 'politi',
+    org: 'Nordjyllands Politi', label: 'Nordjyllands Politi', initials: 'NJ',
+    scope: 'regional', destinationIds: [],
+    description: 'North Jutland district. Covers Aalborg, Frederikshavn, Hjørring.',
+  },
+  {
+    id: 'politi-bornholm', kind: 'receiver', type: 'leaf', parentId: 'politi',
+    org: 'Bornholms Politi', label: 'Bornholms Politi', initials: 'BP',
+    scope: 'regional', destinationIds: [],
+    description: 'Bornholm district. Baltic strategic position.',
+  },
+
+  // ── Politi specialty units ──────────────────────────────────────
+  {
+    id: 'politi-nsk', kind: 'receiver', type: 'leaf', parentId: 'politi',
+    org: 'NSK', label: 'NSK — Nationalt Særligt Kriminalpoliti', initials: 'NS',
+    scope: 'all-sites', destinationIds: [],
+    description: 'National organised-crime + state-actor investigative unit.',
+  },
+  {
+    id: 'politi-aks', kind: 'receiver', type: 'leaf', parentId: 'politi',
+    org: 'AKS', label: 'AKS — Aktionsstyrken', initials: 'AK',
+    scope: 'all-sites', destinationIds: [],
+    description: 'Danish police tactical intervention unit. Armed hostage / active shooter response.',
+  },
+
+  // ══════════════════════════════════════════════════════════════
+  // BEREDSKABSSTYRELSEN — expand from single 'beredskab' node into
+  // HQ + 5 beredskabscentre + specialty units. The existing
+  // 'beredskab' role is aliased to 'brs-hq' below for backwards-compat.
+  // ══════════════════════════════════════════════════════════════
+  {
+    id: 'brs', kind: 'receiver', type: 'parent',
+    org: 'Beredskabsstyrelsen', label: 'Beredskabsstyrelsen — Danish Emergency Mgmt',
+    initials: 'BR', scope: 'all-sites',
+    childrenIds: ['brs-hedehusene', 'brs-herning', 'brs-haderslev', 'brs-allinge', 'brs-thisted', 'brs-kemisk', 'brs-nukleart'],
+    description: 'BRS umbrella. National + 5 centre + specialist units.',
+  },
+  {
+    id: 'brs-hedehusene', kind: 'receiver', type: 'leaf', parentId: 'brs',
+    org: 'BRS Hedehusene', label: 'Beredskabscenter Hedehusene', initials: 'BH',
+    scope: 'regional', destinationIds: [],
+    description: 'BRS national CBRN + rescue centre, Hedehusene (Sjælland).',
+  },
+  {
+    id: 'brs-herning', kind: 'receiver', type: 'leaf', parentId: 'brs',
+    org: 'BRS Herning', label: 'Beredskabscenter Herning', initials: 'BE',
+    scope: 'regional', destinationIds: [],
+    description: 'BRS centre, Herning (Midtjylland).',
+  },
+  {
+    id: 'brs-haderslev', kind: 'receiver', type: 'leaf', parentId: 'brs',
+    org: 'BRS Haderslev', label: 'Beredskabscenter Haderslev', initials: 'BD',
+    scope: 'regional', destinationIds: [],
+    description: 'BRS centre, Haderslev (Sønderjylland).',
+  },
+  {
+    id: 'brs-allinge', kind: 'receiver', type: 'leaf', parentId: 'brs',
+    org: 'BRS Allinge', label: 'Beredskabscenter Allinge', initials: 'BA',
+    scope: 'regional', destinationIds: [],
+    description: 'BRS centre, Allinge (Bornholm).',
+  },
+  {
+    id: 'brs-thisted', kind: 'receiver', type: 'leaf', parentId: 'brs',
+    org: 'BRS Thisted', label: 'Beredskabscenter Thisted', initials: 'BT',
+    scope: 'regional', destinationIds: [],
+    description: 'BRS centre, Thisted (Nordjylland).',
+  },
+  {
+    id: 'brs-kemisk', kind: 'receiver', type: 'leaf', parentId: 'brs',
+    org: 'BRS Kemisk Beredskab', label: 'BRS Kemisk Beredskab', initials: 'BK',
+    scope: 'all-sites', destinationIds: [],
+    description: 'National chemical incident response unit. Auto-observer on CBRN-flagged events.',
+  },
+  {
+    id: 'brs-nukleart', kind: 'receiver', type: 'leaf', parentId: 'brs',
+    org: 'BRS Nukleart Beredskab', label: 'BRS Nukleart Beredskab', initials: 'BN',
+    scope: 'all-sites', destinationIds: [],
+    description: 'National nuclear/radiological response. Auto-observer on nuclear-flagged events.',
+  },
+
+  // ══════════════════════════════════════════════════════════════
+  // REGIONER (5) — regional health services + ambulance ops
+  // ══════════════════════════════════════════════════════════════
+  {
+    id: 'region-hst', kind: 'receiver', type: 'leaf',
+    org: 'Region Hovedstaden', label: 'Region Hovedstaden', initials: 'RH',
+    scope: 'regional', destinationIds: [],
+    description: 'Capital region. Ambulance + hospital coordination. Auto-observer on casualty-flagged events at CPH.',
+  },
+  {
+    id: 'region-sjl', kind: 'receiver', type: 'leaf',
+    org: 'Region Sjælland', label: 'Region Sjælland', initials: 'RS',
+    scope: 'regional', destinationIds: [],
+    description: 'Zealand region. Ambulance + hospital coordination.',
+  },
+  {
+    id: 'region-syd', kind: 'receiver', type: 'leaf',
+    org: 'Region Syddanmark', label: 'Region Syddanmark', initials: 'RY',
+    scope: 'regional', destinationIds: [],
+    description: 'South Denmark region. Covers Esbjerg.',
+  },
+  {
+    id: 'region-midt', kind: 'receiver', type: 'leaf',
+    org: 'Region Midtjylland', label: 'Region Midtjylland', initials: 'RM',
+    scope: 'regional', destinationIds: [],
+    description: 'Central Jutland region.',
+  },
+  {
+    id: 'region-nord', kind: 'receiver', type: 'leaf',
+    org: 'Region Nordjylland', label: 'Region Nordjylland', initials: 'RN',
+    scope: 'regional', destinationIds: [],
+    description: 'North Jutland region.',
+  },
+
+  // ══════════════════════════════════════════════════════════════
+  // MINISTRIES (top-level observer nodes for command awareness)
+  // ══════════════════════════════════════════════════════════════
+  {
+    id: 'min-just', kind: 'receiver', type: 'leaf',
+    org: 'Justitsministeriet', label: 'Justitsministeriet', initials: 'MJ',
+    scope: 'national', destinationIds: [],
+    description: 'Ministry of Justice. Observer on tier-3+ hostile events.',
+  },
+  {
+    id: 'min-fors', kind: 'receiver', type: 'leaf',
+    org: 'Forsvarsministeriet', label: 'Forsvarsministeriet', initials: 'MF',
+    scope: 'national', destinationIds: [],
+    description: 'Ministry of Defence. Observer on tier-3+ hostile events + Forsvar-branch actor escalations.',
+  },
+  {
+    id: 'min-klim', kind: 'receiver', type: 'leaf',
+    org: 'Klima-, Energi- og Forsyningsministeriet', label: 'Klima-, Energi- og Forsyningsministeriet', initials: 'MK',
+    scope: 'national', destinationIds: [],
+    description: 'Ministry of Climate + Energy. Observer on substation + grid-critical events.',
+  },
+  {
+    id: 'min-erhverv', kind: 'receiver', type: 'leaf',
+    org: 'Erhvervsministeriet', label: 'Erhvervsministeriet', initials: 'ME',
+    scope: 'national', destinationIds: [],
+    description: 'Ministry of Business. Aviation + maritime regulator umbrella.',
+  },
+  {
+    id: 'min-sund', kind: 'receiver', type: 'leaf',
+    org: 'Sundhedsministeriet', label: 'Sundhedsministeriet', initials: 'MS',
+    scope: 'national', destinationIds: [],
+    description: 'Ministry of Health. Observer on mass-casualty scenarios.',
+  },
+
+  // ══════════════════════════════════════════════════════════════
+  // AGENCIES (styrelser)
+  // ══════════════════════════════════════════════════════════════
+  {
+    id: 'agency-traf', kind: 'receiver', type: 'leaf',
+    org: 'Trafikstyrelsen', label: 'Trafikstyrelsen', initials: 'TS',
+    scope: 'aviation', destinationIds: [],
+    description: 'Aviation + rail + road regulator. Auto-actor on airport events (airspace-restriction authority).',
+  },
+  {
+    id: 'agency-sof', kind: 'receiver', type: 'leaf',
+    org: 'Søfartsstyrelsen', label: 'Søfartsstyrelsen', initials: 'SF',
+    scope: 'maritime', destinationIds: [],
+    description: 'Maritime regulator. Auto-actor on harbour events.',
+  },
+  {
+    id: 'agency-ener', kind: 'receiver', type: 'leaf',
+    org: 'Energistyrelsen', label: 'Energistyrelsen', initials: 'ES',
+    scope: 'national', destinationIds: [],
+    description: 'National energy regulator. Observer on substation events.',
+  },
+  {
+    id: 'agency-cfcs', kind: 'receiver', type: 'leaf', parentId: 'fe',
+    org: 'CFCS', label: 'CFCS — Center for Cybersikkerhed', initials: 'CC',
+    scope: 'national', destinationIds: [],
+    description: 'Cyber security agency under FE. Observer on all critical infrastructure events.',
+  },
+
+  // ══════════════════════════════════════════════════════════════
+  // FORSVARET expansion — additional wings + special commands
+  // ══════════════════════════════════════════════════════════════
+  {
+    id: 'flv-aalborg', kind: 'receiver', type: 'leaf', parentId: 'flyvevaabnet',
+    org: 'Flyvevåbnet · Aalborg', label: 'Air Transport Wing Aalborg', initials: 'AA',
+    scope: 'aviation', destinationIds: [],
+    description: 'C-130J + Challenger 604 transport wing. Personnel + equipment lift.',
+  },
+  {
+    id: 'flv-karup-control', kind: 'receiver', type: 'leaf', parentId: 'flyvevaabnet',
+    org: 'Flyvevåbnet · Karup ACW', label: 'Air Control Wing Karup', initials: 'AC',
+    scope: 'aviation', destinationIds: [],
+    description: 'National air surveillance + control. NATO-integrated radar picture.',
+  },
+  {
+    id: 'forsvar-cyber', kind: 'receiver', type: 'leaf', parentId: 'forsvaret',
+    org: 'Cyber Kommandoen', label: 'Cyber Kommandoen (CCS)', initials: 'CY',
+    scope: 'national', destinationIds: [],
+    description: 'Forsvaret cyber operations command. Observer on cyber-cross events.',
+  },
+
+  // ══════════════════════════════════════════════════════════════
+  // HJEMMEVÆRNET (national volunteer defence)
+  // ══════════════════════════════════════════════════════════════
+  {
+    id: 'hjv', kind: 'receiver', type: 'parent',
+    org: 'Hjemmeværnet', label: 'Hjemmeværnet — Danish Home Guard',
+    initials: 'HV', scope: 'all-sites',
+    childrenIds: ['hjv-vest', 'hjv-ost', 'hjv-marine', 'hjv-flyver'],
+    description: 'National volunteer defence umbrella. Guard + patrol reinforcement.',
+  },
+  {
+    id: 'hjv-vest', kind: 'receiver', type: 'leaf', parentId: 'hjv',
+    org: 'Hjemmeværnet Vest', label: 'Landsdelsregion Vest', initials: 'HW',
+    scope: 'regional', destinationIds: [],
+    description: 'Home Guard, western Denmark. Distrikter under this region to be added.',
+  },
+  {
+    id: 'hjv-ost', kind: 'receiver', type: 'leaf', parentId: 'hjv',
+    org: 'Hjemmeværnet Øst', label: 'Landsdelsregion Øst', initials: 'HE',
+    scope: 'regional', destinationIds: [],
+    description: 'Home Guard, eastern Denmark. Distrikter under this region to be added.',
+  },
+  {
+    id: 'hjv-marine', kind: 'receiver', type: 'leaf', parentId: 'hjv',
+    org: 'Marinehjemmeværnet', label: 'Marinehjemmeværnet', initials: 'HM',
+    scope: 'maritime', destinationIds: [],
+    description: 'Naval Home Guard. Harbour + coastal reinforcement.',
+  },
+  {
+    id: 'hjv-flyver', kind: 'receiver', type: 'leaf', parentId: 'hjv',
+    org: 'Flyverhjemmeværnet', label: 'Flyverhjemmeværnet', initials: 'HF',
+    scope: 'aviation', destinationIds: [],
+    description: 'Air Home Guard. Airfield + air ops reinforcement.',
+  },
 ];
+
+// ── CANONICAL POPULATION TODO ──────────────────────────────────────
+// These branches are structurally defined above but need canonical
+// population from official DK government sources before shipping to
+// customers. Populate before external release:
+//
+//   - Kommuner (98 total). Source: kl.dk registry.
+//   - Kommunale beredskaber (~20 shared services). Source: brs.dk.
+//   - Akuthospitaler per region (~30 total). Source: regioner.dk /
+//     sundhed.dk.
+//   - Hjemmeværnet distrikter under hjv-vest / hjv-ost (~40 total).
+//     Source: hjv.dk.
+//   - Additional Forsvaret named units (regiments under Hærkommandoen,
+//     naval squadrons). Source: forsvaret.dk.
+//
+// Do NOT populate from memory — per no-hallucination protocol,
+// misnaming a district or unit is an external-facing embarrassment.
+// Dispatch a sourcing pass against the .dk registries above.
 
 // Compatibility shim: the old flat 'flv-qra' id no longer exists as a
 // direct role. Anywhere that looked up flv-qra should now look up
@@ -347,3 +657,184 @@ export function setActiveRole(id) {
 export function onRoleChange(fn) { _listeners.add(fn); return () => _listeners.delete(fn); }
 export function receiverRoles() { return RECEIVERS; }
 export function operatorRoles() { return OPERATORS; }
+
+// ══════════════════════════════════════════════════════════════════
+// RECEIVER-ROLE INTERACTION CONTRACT (Phase 0 · additive)
+//
+// Nothing in main.js reads these yet. Contract is populated for
+// downstream integration (Phase 1+). Safe to import + read without
+// affecting the current platform's behaviour.
+// ══════════════════════════════════════════════════════════════════
+
+// Top-level branches — used for cross-branch vs same-branch classification.
+// A role's agencyBranch is the id of its highest ancestor. Roles with no
+// parent are their own branch. Ministries are their own branch (siblings
+// to each other but not to their portfolio agencies unless explicitly
+// modelled — kept flat here to avoid over-nesting).
+export const AGENCY_BRANCHES = {
+  POLITI:      'politi',        // Rigspolitiet + 12 districts + PET, NSK, AKS
+  FORSVARET:   'forsvaret',     // Flyvevåbnet, Hæren, Søværnet, SOK, FE, CFCS, Cyber
+  BRS:         'brs',           // BRS national + centre + specialty
+  HJV:         'hjv',           // Hjemmeværnet regions + branches
+  REGION:      'region',        // 5 regioner (each own branch really — grouped for tree convenience)
+  MINISTRY:    'ministry',
+  AGENCY:      'agency',        // styrelser under any ministry
+  STANDALONE:  'standalone',    // beredskab (legacy), forsvarskmd (legacy)
+};
+
+// Resolve a role's top branch by walking parentId. Cached lazily.
+const _branchCache = new Map();
+export function agencyBranchOf(roleId) {
+  if (_branchCache.has(roleId)) return _branchCache.get(roleId);
+  let cur = RECEIVERS.find(r => r.id === roleId);
+  if (!cur) { _branchCache.set(roleId, null); return null; }
+  let branch = null;
+  // Walk to root
+  let cursor = cur;
+  const seen = new Set();
+  while (cursor && !seen.has(cursor.id)) {
+    seen.add(cursor.id);
+    if (!cursor.parentId) { branch = cursor.id; break; }
+    cursor = RECEIVERS.find(r => r.id === cursor.parentId);
+  }
+  // Bucket branch roots into AGENCY_BRANCHES
+  const rootId = branch || cur.id;
+  let bucket = AGENCY_BRANCHES.STANDALONE;
+  if (rootId === 'politi') bucket = AGENCY_BRANCHES.POLITI;
+  else if (rootId === 'forsvaret') bucket = AGENCY_BRANCHES.FORSVARET;
+  else if (rootId === 'brs') bucket = AGENCY_BRANCHES.BRS;
+  else if (rootId === 'hjv') bucket = AGENCY_BRANCHES.HJV;
+  else if (rootId.startsWith('region-')) bucket = AGENCY_BRANCHES.REGION;
+  else if (rootId.startsWith('min-')) bucket = AGENCY_BRANCHES.MINISTRY;
+  else if (rootId.startsWith('agency-')) bucket = AGENCY_BRANCHES.AGENCY;
+  _branchCache.set(roleId, bucket);
+  return bucket;
+}
+
+// Relationship classification between two roles. Feeds canInitiate + UI
+// affordance decisions ("show 'request support' button when peer is
+// sibling in same branch").
+//   self          — same role
+//   parent        — a is parent of b
+//   child         — a is child of b
+//   sibling       — same parentId (both non-null)
+//   same-branch   — same agencyBranch but not direct parent/child/sibling
+//                   (e.g. Vestegn ↔ PET — both under Politi)
+//   cross-branch  — different agencyBranch (Politi ↔ Flyvevåbnet)
+export function relationshipBetween(aId, bId) {
+  if (aId === bId) return 'self';
+  const a = RECEIVERS.find(r => r.id === aId);
+  const b = RECEIVERS.find(r => r.id === bId);
+  if (!a || !b) return 'unknown';
+  if (a.parentId === b.id) return 'child';   // a is child of b
+  if (b.parentId === a.id) return 'parent';  // a is parent of b
+  if (a.parentId && a.parentId === b.parentId) return 'sibling';
+  if (agencyBranchOf(aId) === agencyBranchOf(bId)) return 'same-branch';
+  return 'cross-branch';
+}
+
+// Flow types (canonical names for role-to-role interactions).
+export const FLOW_TYPES = Object.freeze({
+  NOTIFICATION:     'notification',     // system-generated push
+  ADVISORY:         'advisory',         // human FYI
+  CASCADE:          'cascade',          // top-down mandatory
+  ESCALATION:       'escalation',       // bottom-up authority request
+  HANDOFF:          'handoff',          // ownership transfer
+  REQUEST_SUPPORT:  'request-support',  // peer asks peer for help
+  COORDINATION:     'coordination',     // joint action, shared ownership
+  OBSERVER_ADD:     'observer-add',     // loop someone in
+  OBSERVER_PROMOTE: 'observer-promote', // observer asks for actor status
+  SIT_REP:          'situation-report', // downstream → upstream status
+});
+
+// Interaction matrix: which flows are allowed for each relationship type.
+// Keys are relationship classes returned by relationshipBetween().
+// Values are Sets of allowed FLOW_TYPES.
+const _rel = (arr) => new Set(arr);
+export const FLOW_MATRIX = Object.freeze({
+  self:          _rel([FLOW_TYPES.SIT_REP]),   // status update to self (log-only)
+  parent:        _rel([   // a is parent of b: can cascade, notify, loop-in
+    FLOW_TYPES.NOTIFICATION, FLOW_TYPES.ADVISORY, FLOW_TYPES.CASCADE,
+    FLOW_TYPES.HANDOFF, FLOW_TYPES.REQUEST_SUPPORT, FLOW_TYPES.COORDINATION,
+    FLOW_TYPES.OBSERVER_ADD,
+  ]),
+  child:         _rel([   // a is child of b: can escalate up, sit-rep, ask support
+    FLOW_TYPES.NOTIFICATION, FLOW_TYPES.ADVISORY, FLOW_TYPES.ESCALATION,
+    FLOW_TYPES.HANDOFF, FLOW_TYPES.REQUEST_SUPPORT, FLOW_TYPES.COORDINATION,
+    FLOW_TYPES.OBSERVER_ADD, FLOW_TYPES.SIT_REP,
+  ]),
+  sibling:       _rel([   // same-branch siblings: peer collaboration
+    FLOW_TYPES.NOTIFICATION, FLOW_TYPES.ADVISORY, FLOW_TYPES.HANDOFF,
+    FLOW_TYPES.REQUEST_SUPPORT, FLOW_TYPES.COORDINATION, FLOW_TYPES.OBSERVER_ADD,
+  ]),
+  'same-branch': _rel([   // same-branch non-sibling: peer-ish, no cascade
+    FLOW_TYPES.NOTIFICATION, FLOW_TYPES.ADVISORY,
+    FLOW_TYPES.REQUEST_SUPPORT, FLOW_TYPES.COORDINATION, FLOW_TYPES.OBSERVER_ADD,
+  ]),
+  'cross-branch': _rel([  // cross-branch: bilateral only, no cascade
+    FLOW_TYPES.NOTIFICATION, FLOW_TYPES.ADVISORY, FLOW_TYPES.HANDOFF,
+    FLOW_TYPES.REQUEST_SUPPORT, FLOW_TYPES.COORDINATION, FLOW_TYPES.OBSERVER_ADD,
+  ]),
+  unknown:       _rel([]),
+});
+
+// Gate: is this initiator allowed to initiate this flow to this target?
+// Returns { allowed: bool, reason?: string }. Phase 0 default: permissive —
+// Admin bypasses. Operator can push any flow to any receiver. Receiver-to-
+// receiver goes through the matrix. We tighten only after existing flows
+// are catalogued.
+export function canInitiate(fromRoleId, toRoleId, flowType) {
+  if (!fromRoleId || !toRoleId || !flowType) {
+    return { allowed: false, reason: 'missing-arg' };
+  }
+  // Admin always allowed
+  const fromRole = ACCOUNTS.find(r => r.id === fromRoleId);
+  if (fromRole?.kind === 'admin') return { allowed: true };
+  // Operator can push anything to any receiver (they own the escalation)
+  if (fromRole?.kind === 'operator') {
+    const toRole = ACCOUNTS.find(r => r.id === toRoleId);
+    if (toRole?.kind === 'receiver' || toRole?.kind === 'operator') return { allowed: true };
+  }
+  // Receiver-to-receiver via matrix
+  const rel = relationshipBetween(fromRoleId, toRoleId);
+  const allowed = FLOW_MATRIX[rel]?.has(flowType);
+  return allowed
+    ? { allowed: true }
+    : { allowed: false, reason: `flow ${flowType} not allowed for relationship ${rel}` };
+}
+
+// Compute the set of roles impacted by an event at a given tick. Phase 0
+// returns the direct-scope receivers based on event.siteId. Phase 1+
+// extends with cross-site cascade, threat-type routing, observer chain,
+// coordination peers.
+export function impactedRoles(event, siteReceiversLookup = null) {
+  const impacted = [];
+  if (!event) return impacted;
+  const siteId = event.siteId;
+  if (!siteId) return impacted;
+  // siteReceiversLookup is expected to be a fn (siteId) => Array<{id,mode,tier,...}>
+  // populated by the SITES config (once the receivers block is wired in Phase 1).
+  // Falls back to legacy destinationIds scan when lookup not provided.
+  if (typeof siteReceiversLookup === 'function') {
+    const entries = siteReceiversLookup(siteId) || [];
+    for (const entry of entries) {
+      const role = ACCOUNTS.find(r => r.id === entry.id);
+      if (!role) continue;
+      impacted.push({
+        role_id: entry.id, mode: entry.mode || 'actor',
+        addedBy: 'site-scope', reason: `siteScope:${siteId}`,
+        tier: entry.tier || null, condition: entry.condition || null,
+      });
+    }
+  }
+  return impacted;
+}
+
+// Test hook: expose helpers on window for browser console debugging.
+if (typeof window !== 'undefined') {
+  window.__isrRoles = {
+    ACCOUNTS, RECEIVERS, AGENCY_BRANCHES, FLOW_TYPES, FLOW_MATRIX,
+    getRole: (id) => ACCOUNTS.find(r => r.id === id),
+    agencyBranchOf, relationshipBetween, canInitiate, impactedRoles,
+  };
+}
