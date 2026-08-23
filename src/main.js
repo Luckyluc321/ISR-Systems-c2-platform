@@ -9084,6 +9084,146 @@ async function main() {
     };
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // Phase 2 Step 3 · Observer picker
+  //
+  // Full-viewport searchable overlay for looping in ANY of the 242
+  // receiver profiles. Search-filters by role id, org, label, and
+  // description. Client-side substring match. Excludes roles already
+  // in event.participants + the initiator's own role.
+  // ═══════════════════════════════════════════════════════════════════
+  let _observerPickerOpen = false;
+  function _openObserverPicker(eventId) {
+    if (_observerPickerOpen) return;
+    _observerPickerOpen = true;
+    const event = getEvent(eventId);
+    if (!event) { _observerPickerOpen = false; toast('Event not found', 'err'); return; }
+    const activeRoleId = getActiveRole?.();
+    const excludedIds = new Set([activeRoleId]);
+    if (event.participants instanceof Map) {
+      for (const rid of event.participants.keys()) excludedIds.add(rid);
+    }
+    // Also exclude roles already declared via SITES[siteId].receivers
+    // (they're already in the loop via site-scope).
+    const siteReceivers = SITES[event.siteId]?.receivers || [];
+    for (const r of siteReceivers) excludedIds.add(r.id);
+
+    // Full receiver pool minus excluded
+    const pool = RECEIVERS
+      .filter(r => r.type !== 'parent')   // pickable only, not branch nodes
+      .filter(r => !excludedIds.has(r.id))
+      .map(r => ({
+        id: r.id,
+        org: r.org || r.label || r.id,
+        label: r.label || r.org || r.id,
+        description: r.description || '',
+        branch: agencyBranchOf?.(r.id) || 'standalone',
+      }));
+    pool.sort((a, b) => a.org.localeCompare(b.org));
+
+    const overlay = document.createElement('div');
+    overlay.id = 'observer-picker-overlay';
+    overlay.style.cssText = `
+      position: fixed; inset: 0; background: rgba(0,0,0,0.72);
+      z-index: 10000; display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-body);
+    `;
+    overlay.innerHTML = `
+      <div id="observer-picker-card" style="width: min(680px, 92vw); max-height: 82vh; display: flex; flex-direction: column; background: #0a0d11; border: 1px solid #1e2530; border-radius: 4px; box-shadow: 0 8px 40px rgba(0,0,0,0.6);">
+        <div style="padding: var(--space-3) var(--space-4); border-bottom: 1px solid #1e2530; display: flex; align-items: center; justify-content: space-between;">
+          <div>
+            <div class="c-section-eyebrow" style="margin-bottom: 4px;">Loop in observer</div>
+            <div style="font-size: var(--fs-xs); color: var(--text-dim);">Recipient receives notifications on this event. No CTAs unless promoted.</div>
+          </div>
+          <button id="observer-picker-close" style="background: transparent; border: 1px solid #2a3340; color: var(--text-dim); padding: 4px 10px; border-radius: 2px; cursor: pointer; font-family: var(--font-mono); font-size: var(--fs-2xs);">CLOSE</button>
+        </div>
+        <div style="padding: var(--space-3) var(--space-4);">
+          <input id="observer-picker-search" type="search" placeholder="Search 242 receiver profiles — org, id, or description..." autocomplete="off" spellcheck="false"
+            style="width: 100%; padding: 10px 12px; background: rgba(0,0,0,0.35); border: 1px solid #1e2530; border-radius: 2px; color: var(--text); font-family: var(--font-body); font-size: var(--fs-sm); box-sizing: border-box;" />
+          <div id="observer-picker-count" style="font-size: var(--fs-2xs); color: var(--text-dim); margin-top: 6px; font-family: var(--font-mono); letter-spacing: 0.08em;">${pool.length} profiles available</div>
+        </div>
+        <div id="observer-picker-list" style="flex: 1; overflow-y: auto; padding: 0 var(--space-4) var(--space-4);"></div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    const listEl = overlay.querySelector('#observer-picker-list');
+    const searchEl = overlay.querySelector('#observer-picker-search');
+    const countEl = overlay.querySelector('#observer-picker-count');
+    const closeBtn = overlay.querySelector('#observer-picker-close');
+
+    const branchColor = (b) => ({
+      politi: '#4dd2ff', forsvaret: '#a678ff', brs: '#ffb84d', hjv: '#7ea79b',
+      region: '#4dff9c', ministry: '#c58fff', agency: '#88ccff', standalone: '#8f9aa8',
+    })[b] || '#8f9aa8';
+
+    const _render = (query) => {
+      const q = (query || '').toLowerCase().trim();
+      const filtered = q ? pool.filter(r =>
+        r.id.toLowerCase().includes(q)
+        || r.org.toLowerCase().includes(q)
+        || r.label.toLowerCase().includes(q)
+        || r.description.toLowerCase().includes(q)
+      ) : pool;
+      // Cap render to first 100 for perf on 242-row list. Search
+      // narrows further; if user needs a specific role beyond 100,
+      // they type it.
+      const capped = filtered.slice(0, 100);
+      countEl.textContent = `${filtered.length} profile${filtered.length === 1 ? '' : 's'} match${filtered.length === 1 ? 'es' : ''}${filtered.length > 100 ? ' · showing first 100' : ''}`;
+      listEl.innerHTML = capped.map(r => `
+        <div class="observer-picker-row" data-role-id="${r.id}" style="padding: 10px 12px; border-bottom: 1px solid #131820; cursor: pointer; display: flex; align-items: center; gap: 10px; transition: background 0.12s;"
+             onmouseover="this.style.background='rgba(77,210,255,0.06)'" onmouseout="this.style.background='transparent'">
+          <span style="width: 8px; height: 8px; border-radius: 50%; background: ${branchColor(r.branch)}; flex-shrink: 0;"></span>
+          <div style="flex: 1; min-width: 0;">
+            <div style="font-size: var(--fs-sm); color: var(--text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${r.org}</div>
+            <div style="font-size: var(--fs-2xs); color: var(--text-dim); font-family: var(--font-mono); margin-top: 2px;">${r.id} · ${r.branch}</div>
+          </div>
+          <button class="observer-picker-add" data-role-id="${r.id}" style="background: rgba(77,255,156,0.08); border: 1px solid rgba(77,255,156,0.4); color: var(--ok); padding: 5px 12px; border-radius: 2px; cursor: pointer; font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.08em;">ADD</button>
+        </div>
+      `).join('');
+    };
+
+    const _close = () => {
+      overlay.remove();
+      _observerPickerOpen = false;
+    };
+    closeBtn.addEventListener('click', _close);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) _close(); });
+    document.addEventListener('keydown', function escHandler(e) {
+      if (e.key === 'Escape' && _observerPickerOpen) {
+        _close();
+        document.removeEventListener('keydown', escHandler);
+      }
+    });
+    searchEl.addEventListener('input', (e) => _render(e.target.value));
+
+    // Delegated add-click: works for both the ADD button and any click
+    // on the row (the row is bigger, better target).
+    overlay.addEventListener('click', (e) => {
+      const btn = e.target.closest('.observer-picker-add') || e.target.closest('.observer-picker-row');
+      if (!btn) return;
+      const roleId = btn.dataset.roleId;
+      if (!roleId) return;
+      const role = RECEIVERS.find(r => r.id === roleId);
+      pushScopedNotification(eventId, roleId, {
+        kind: 'observer-add',
+        mode: 'observer',
+        priority: 'info',
+        payload: {
+          addedBy: activeRoleId,
+          reason: 'manual-loop-in',
+          toast: `Advisory · Looped into ${event.droneType || 'event'} at ${SITES[event.siteId]?.name || event.siteId}.`,
+        },
+      });
+      toast(`Looped in ${role?.org || roleId} as observer.`, 'ok');
+      _close();
+      renderReceiverView({ immediate: true });
+    });
+
+    _render('');
+    setTimeout(() => searchEl.focus(), 20);
+  }
+
   function renderConfig() {
     if (configBackdrop.style.display === 'none') return;
     const dests = destinationsForSite(_configSiteId);
@@ -13401,9 +13541,20 @@ async function main() {
         <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: var(--ok); font-size: var(--fs-2xs); margin-bottom: var(--space-1);">Your response sent ${rec.response.receivedAt ? rec.response.receivedAt.slice(11,19) + 'Z' : ''}</div>
         <div style="font-size: var(--fs-sm); color: var(--text); line-height: 1.5;">${rec.response.text}</div>
       </div>` : '';
+    // Phase 2 Step 2 · Observer chip. Shows when the active role is
+    // in observer mode on this event. Visually distinguishes "in the
+    // loop but not owning response" from "actor with CTAs".
+    const _participant = event.participants instanceof Map
+      ? event.participants.get(role.id)
+      : null;
+    const _isObserverOnThis = _participant?.mode === 'observer';
+    const observerChip = _isObserverOnThis
+      ? `<span class="rer-observer-chip" style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; background: rgba(255, 184, 77, 0.08); border: 1px solid rgba(255, 184, 77, 0.35); border-radius: 12px; font-size: var(--fs-2xs); letter-spacing: 0.12em; text-transform: uppercase; color: #ffb84d; font-family: var(--font-mono); margin-left: var(--space-2);"><span style="width: 6px; height: 6px; border-radius: 50%; background: #ffb84d;"></span>Observer</span>`
+      : '';
+
     const actions = `
       <section class="rer-section rer-actions">
-        <div class="c-section-eyebrow">Your Response · ${role.name || 'Receiver'}</div>
+        <div class="c-section-eyebrow" style="display: flex; align-items: center;">Your Response · ${role.name || 'Receiver'}${observerChip}</div>
         <div class="rer-cta-rail">
           ${ctas.map(c => `
             <button class="rer-cta ${c.tone}" data-rcv="${c.action}" data-id="${event.id}" ${c.esc ? `data-esc="${c.esc}"` : ''} title="${c.tooltip}" ${c.disabled ? 'disabled' : ''}>
@@ -14570,8 +14721,9 @@ async function main() {
         renderReceiverView({ immediate: true });
       }
       else if (action === 'observer-add') {
-        // Phase 2 stub — inline picker UI lands in Phase 2 Step 3.
-        toast('Observer picker UI wires in Phase 2 Step 3.', 'info');
+        const eventId = id || _selectedReceiverEventId || _workspaceEventId;
+        if (!eventId) { toast('No event context for observer add', 'err'); return; }
+        _openObserverPicker(eventId);
       }
       else if (action === 'observer-promote') {
         const eventId = id || _selectedReceiverEventId || _workspaceEventId;
