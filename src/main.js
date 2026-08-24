@@ -6627,6 +6627,8 @@ async function main() {
     // scoping handled it.
     if (scope && !scope._passthrough) {
       const entities = [];
+      // Track last position per drone for endpoint labels.
+      const lastPosByDrone = new Map();
       for (const seg of scope.segments) {
         if (seg.positions.length < 2) continue;
         const flat = [];
@@ -6650,6 +6652,30 @@ async function main() {
           },
           properties: { debrief: true, confirmed: !isInferred, scoped: true, droneId: seg.droneId },
         }));
+        if (!isInferred) {
+          const lastP = seg.positions[seg.positions.length - 1];
+          lastPosByDrone.set(seg.droneId, lastP);
+        }
+      }
+      // Endpoint labels — hidden by default, revealed on hover-to-isolate.
+      for (const [droneKey, lastP] of lastPosByDrone) {
+        entities.push(viewer.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(lastP.lon, lastP.lat, _safeTrailAlt(lastP.altitude_agl_m || lastP.alt || 100)),
+          label: {
+            text: droneKey,
+            font: '10px "IBM Plex Mono", monospace',
+            fillColor: Cesium.Color.WHITE,
+            outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            pixelOffset: new Cesium.Cartesian2(10, -8),
+            showBackground: true,
+            backgroundColor: Cesium.Color.BLACK.withAlpha(0.80),
+            backgroundPadding: new Cesium.Cartesian2(5, 2),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            show: false,
+          },
+          properties: { debrief: true, debriefLabel: true, droneId: droneKey },
+        }));
       }
       return entities;
     }
@@ -6664,7 +6690,7 @@ async function main() {
     }
     const BRIDGE_BREAK_M = 800;
     const entities = [];
-    for (const [, droneSamples] of byDrone) {
+    for (const [droneKey, droneSamples] of byDrone) {
       if (droneSamples.length < 2) continue;
       const runs = [];
       let currentRun = [droneSamples[0]];
@@ -6699,9 +6725,34 @@ async function main() {
               material,
               clampToGround: false,
             },
-            properties: { debrief: true, confirmed: seg.confirmed },
+            properties: { debrief: true, confirmed: seg.confirmed, droneId: droneKey },
           }));
         }
+      }
+      // Endpoint drone label — hidden by default. Reveals when the
+      // trajectory is isolated via hover-to-isolate (D). Position: last
+      // sample of the last run. Keeps map clean until operator explicitly
+      // wants to identify a specific drone.
+      const lastRun = runs[runs.length - 1];
+      const last = lastRun?.[lastRun.length - 1];
+      if (last) {
+        entities.push(viewer.entities.add({
+          position: Cesium.Cartesian3.fromDegrees(last.lon, last.lat, _safeTrailAlt(last.altitude_agl_m)),
+          label: {
+            text: droneKey,
+            font: '10px "IBM Plex Mono", monospace',
+            fillColor: Cesium.Color.WHITE,
+            outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+            pixelOffset: new Cesium.Cartesian2(10, -8),
+            showBackground: true,
+            backgroundColor: Cesium.Color.BLACK.withAlpha(0.80),
+            backgroundPadding: new Cesium.Cartesian2(5, 2),
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            show: false,   // hidden by default; hover reveals
+          },
+          properties: { debrief: true, debriefLabel: true, droneId: droneKey },
+        }));
       }
     }
     return entities;
@@ -6929,8 +6980,101 @@ async function main() {
     ];
     const narrativeEl = _debriefBuildNarrativePanel(event, narrativeHtml, moments);
     _debriefState = { eventId, entities, narrativeEl, sourceMode: resolved.source };
+    _setupDebriefHoverIsolation();
     _fireMistralDebrief(event, samples, analysis);
     toast(`Debrief on map · ${analysis.touched.length} assets touched, ${analysis.dwellZones.length} dwell zones triggered`, 'ok');
+  }
+
+  // Hover-to-isolate for debrief trajectories. On mouse hover for 3s
+  // over a drone's polyline, that drone becomes focused: its polylines
+  // stay full opacity + endpoint label reveals; other drones' polylines
+  // dim to 20% opacity + labels stay hidden. Move off any drone for
+  // 500ms → clear focus, restore all. 3s dwell prevents accidental
+  // isolation from mouse pass-throughs.
+  let _debriefHoverHandler = null;
+  let _debriefHoverTimer = null;
+  let _debriefHoverClearTimer = null;
+  let _debriefHoverPending = null;   // drone id we're dwelling on
+  let _debriefFocusedDroneId = null;
+  let _debriefOriginalMaterials = null;   // WeakMap<entity, originalMaterial>
+
+  function _applyDebriefFocus(droneId) {
+    if (!_debriefState) return;
+    _debriefFocusedDroneId = droneId;
+    if (!_debriefOriginalMaterials) _debriefOriginalMaterials = new WeakMap();
+    for (const ent of _debriefState.entities) {
+      if (!ent.properties?.debrief) continue;
+      const entDroneId = ent.properties.droneId?.getValue?.() ?? null;
+      const isLabel = !!ent.properties.debriefLabel?.getValue?.();
+      const focused = !droneId || entDroneId === droneId;
+      if (isLabel) {
+        // Only show the focused drone's endpoint label; hide others.
+        if (ent.label) ent.label.show = focused && !!droneId;
+        continue;
+      }
+      if (!ent.polyline) continue;
+      if (!_debriefOriginalMaterials.has(ent)) {
+        _debriefOriginalMaterials.set(ent, ent.polyline.material);
+      }
+      if (!droneId || focused) {
+        // Restore original material.
+        ent.polyline.material = _debriefOriginalMaterials.get(ent);
+      } else {
+        // Dim: 20% grey overlay.
+        ent.polyline.material = Cesium.Color.WHITE.withAlpha(0.20);
+      }
+    }
+    viewer.scene.requestRender();
+  }
+
+  function _setupDebriefHoverIsolation() {
+    if (_debriefHoverHandler) _debriefHoverHandler.destroy();
+    _debriefFocusedDroneId = null;
+    _debriefOriginalMaterials = new WeakMap();
+    const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+    handler.setInputAction((movement) => {
+      const pick = viewer.scene.pick(movement.endPosition);
+      const ent = pick?.id;
+      const isDebriefEnt = ent?.properties?.debrief?.getValue?.();
+      const isLabelEnt = !!ent?.properties?.debriefLabel?.getValue?.();
+      const droneId = (isDebriefEnt && !isLabelEnt) ? ent.properties.droneId?.getValue?.() : null;
+
+      if (droneId) {
+        // Hovering a drone polyline. Cancel any pending clear.
+        if (_debriefHoverClearTimer) { clearTimeout(_debriefHoverClearTimer); _debriefHoverClearTimer = null; }
+        // Same drone as before → do nothing.
+        if (_debriefHoverPending === droneId || _debriefFocusedDroneId === droneId) return;
+        // New drone → reset dwell timer.
+        if (_debriefHoverTimer) clearTimeout(_debriefHoverTimer);
+        _debriefHoverPending = droneId;
+        _debriefHoverTimer = setTimeout(() => {
+          _applyDebriefFocus(droneId);
+          _debriefHoverTimer = null;
+        }, 3000);
+      } else {
+        // Not hovering a drone. Cancel dwell timer (still pending).
+        if (_debriefHoverTimer) { clearTimeout(_debriefHoverTimer); _debriefHoverTimer = null; }
+        _debriefHoverPending = null;
+        // If focus is active, schedule a delayed clear so a quick mouse
+        // pass off the line doesn't immediately kill the isolation.
+        if (_debriefFocusedDroneId && !_debriefHoverClearTimer) {
+          _debriefHoverClearTimer = setTimeout(() => {
+            _applyDebriefFocus(null);
+            _debriefHoverClearTimer = null;
+          }, 500);
+        }
+      }
+    }, Cesium.ScreenSpaceEventType.MOUSE_MOVE);
+    _debriefHoverHandler = handler;
+  }
+
+  function _teardownDebriefHoverIsolation() {
+    if (_debriefHoverHandler) { _debriefHoverHandler.destroy(); _debriefHoverHandler = null; }
+    if (_debriefHoverTimer) { clearTimeout(_debriefHoverTimer); _debriefHoverTimer = null; }
+    if (_debriefHoverClearTimer) { clearTimeout(_debriefHoverClearTimer); _debriefHoverClearTimer = null; }
+    _debriefHoverPending = null;
+    _debriefFocusedDroneId = null;
+    _debriefOriginalMaterials = null;
   }
 
   // Fires the Mistral streaming call for the currently-mounted debrief.
@@ -6978,6 +7122,7 @@ async function main() {
 
   function stopDebrief() {
     if (!_debriefState) return;
+    _teardownDebriefHoverIsolation();
     for (const ent of _debriefState.entities) viewer.entities.remove(ent);
     if (_debriefState.narrativeEl?.parentNode) _debriefState.narrativeEl.remove();
     _clearDebriefCallouts();
