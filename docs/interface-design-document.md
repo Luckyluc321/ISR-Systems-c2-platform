@@ -2,7 +2,7 @@
 
 | Version | Date | Source of truth |
 |---|---|---|
-| 0.3 (working draft) | 2026-08-23 | Working tree at HEAD 2f24e8e |
+| 0.4 (working draft) | 2026-08-24 | Working tree at HEAD b292a27 |
 
 Status tags used throughout:
 
@@ -29,7 +29,7 @@ Where `[live]` and `[planned]` differ on a field name or shape, both are shown. 
 | IF-5 | Escalation, routing, tenant isolation | pending |
 | IF-6 | Receiver profile and interaction contract (v1) | `[live]` (Phase 2 shipped) |
 | IF-7 | Response and dispatch | pending |
-| IF-8 | Recording and evidence export | pending |
+| IF-8 | Recording and evidence export | `[partial]` (trajectory scoping live) |
 | IF-9 | Agentic (Mistral) interfaces | `[partial]` |
 | IF-10 | Runtime API, DOM mount, external services | pending |
 | A | Appendix: data dictionary, enums, ID formats, open gaps | pending |
@@ -752,9 +752,91 @@ Every phase can ship without the next. Phase 0 is complete and verifiable today.
 
 Status: pending. Internal coordination surface for the responding authority. Will specify the asset catalog, playbook and runbook schemas, the dispatch object, and the interceptor state machine.
 
-## IF-8. Recording and evidence export
+## IF-8. Recording and evidence export `[partial]`
 
-Status: pending. Will specify the recording sample schema, JSON and CSV export formats, the recording fetch contract with shadow fallback, and replay and debrief bundles.
+Two subsections written so far: the trajectory-scoping contract for the debrief, replay, and evidence-export surfaces (IF-8.1). The full recording sample schema, shadow-fallback fetch contract, and evidence bundle format are still pending.
+
+### IF-8.1 Trajectory scoping per viewer role `[live]`
+
+Different roles see different portions of a threat trajectory when opening the debrief, replay, or downloading JSON / CSV evidence. Scope is derived from the viewer's role kind + owned-site scope.
+
+**Rules.**
+
+| Viewer role kind | What they see |
+|---|---|
+| Admin | Full trajectory across every site. All segments solid. No scope banner. |
+| Receiver (state agency: Politi, PET, FE, Forsvaret, BRS, Region, kommune, HJV, ministry, agency) | Same as admin — full access for now. Reserved for tightening in a later phase if a customer restricts an agency's cross-site visibility. |
+| Operator (owns 1 site the threat crossed) | Trajectory samples inside owned site's sensor coverage only, rendered solid. All other segments hidden. Scope banner: "Trajectory scoped to your site perimeter. State agencies see the full path." |
+| Operator (owns 2+ sites the threat crossed) | Confirmed segments per owned site + INFERRED (dotted) bridges connecting consecutive confirmed segments. Segments outside all owned sites hidden. Scope banner: "Segments between your sites are inferred (dotted) — your sensors did not observe them directly." |
+| Operator (owns 0 sites the threat crossed) | Empty. Toast + banner: "Event outside your site scope." Replay aborts before rendering. Export writes zero rows and warns. |
+
+**Entry point.**
+
+```
+scopedTrajectoryFor(event, roleId, samples) -> {
+  segments: Array<{ positions: Sample[], visibility: 'confirmed' | 'inferred', droneId: string }>,
+  fullyVisible: boolean,
+  hiddenSegmentCount: number,
+  scopeNote: string | null,
+  ownedSiteIds: string[] | null,
+  _passthrough: boolean
+}
+```
+
+`_passthrough: true` signals full-access — legacy per-drone + 800 m gap-split renderer runs unchanged. `_passthrough: false` returns pre-scoped segments ready for direct render.
+
+**Site containment.**
+
+```
+_findSiteContainingPoint(lat, lon) -> siteId | null
+```
+
+Walks `SITES` online sensor coverage circles (per IF-2.4) and returns the first site whose union of circles contains the point. Null if outside all site coverage.
+
+**Confirmed vs inferred segments.**
+
+- `confirmed` — every sample is inside an owned-site sensor cov. Rendered as a solid polyline with confidence-band colour.
+- `inferred` — synthetic 2-point segment connecting the last confirmed sample of one run to the first confirmed sample of the next. Rendered as dashed line, dim alpha, thinner width. Only emitted when the operator owns MULTIPLE sites (single-site operators see no inferred bridges).
+
+**Where the contract applies.**
+
+| Surface | Function | Contract behaviour |
+|---|---|---|
+| Debrief map trajectory | `_debriefRenderTrajectory(samples, event)` | Operator sees scoped segments; admin/receiver sees legacy per-drone + gap-split render. |
+| Debrief narrative panel | `_debriefBuildNarrativePanel(event, ...)` | Prepends a warn-toned "Scoped view" banner with `scopeNote` and `hiddenSegmentCount` when scope is restricted. |
+| Replay overlay | `startReplay(eventId)` | `droneEntries` filtered to confirmed samples. Multi-site operators additionally get inferred-bridge polylines. Empty-scope aborts replay. |
+| JSON evidence export | `window.__isr_downloadRecording(eventId)` | Wraps raw recording through `_scopeRecordingForActiveRole`. Downloaded JSON carries `_scopeMeta` field describing the scope applied. |
+| CSV evidence export | `window.__isr_downloadRecordingCSV(eventId)` | Same scoping. Aborts + toasts on empty-scope condition to avoid downloading a blank CSV that reads as broken data. |
+
+**Scope metadata on exports.**
+
+Every scoped export carries `_scopeMeta` in the JSON envelope:
+
+```
+{
+  scopedForRole: string,
+  fullyVisible: false,
+  hiddenSegmentCount: number,
+  ownedSiteIds: string[],
+  scopeNote: string,
+  originalSampleCount: number,
+  scopedSampleCount: number
+}
+```
+
+Downstream analyst tooling (Excel, Python, R) can detect scope via this field. Full-access exports omit `_scopeMeta` entirely.
+
+**Safety defaults.**
+
+- Missing or unresolvable `roleId` → treated as full-access. Prevents accidental data suppression on caller error.
+- Missing `event` argument to `_debriefRenderTrajectory` → falls through to legacy path, unscoped. Existing call sites that don't pass event stay backward-compatible.
+- Unknown role kind → full-access with a `console.warn`. Fail-open on scope errors.
+
+**What's not yet wired.**
+
+- PDF evidence report — same scoping contract will apply when it lands.
+- Receiver-side inbox pre-listing (an operator viewing the receiver dashboard shouldn't see cross-scope events in the listing, only in the workspace view). Deferred to a follow-up commit.
+- Sub-site scoping (an operator with multiple sensors within one site limiting to specific sensor coverage) — not required for v1.
 
 ## IF-9. Agentic (Mistral) interfaces `[partial]`
 
