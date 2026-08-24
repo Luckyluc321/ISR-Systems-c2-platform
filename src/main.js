@@ -8029,6 +8029,10 @@ async function main() {
             const _template_lead = TEMPLATES[event.templateKey];
             const _leadSlot = _template_lead?.swarm?.formation?.[0] || {};
             const _leadInCov = _shouldAutoDetect(p.lat, p.lon);
+            // Sticky ever-detected flag on the lead wrapper (matches
+            // wingmen). Roster filter reads this to show only drones
+            // that have been detected at least once.
+            if (_leadInCov && state.leadSwarmMember) state.leadSwarmMember._everDetected = true;
             state.recording.timeseries.push(_buildDroneSample({
               event, droneId: 'DJI-1', droneIdx: 0,
               model: _leadSlot.model || 'DJI Matrice 300 RTK',
@@ -8219,6 +8223,11 @@ async function main() {
           // coverage entry, no forward projection needed.
           const inCov = _shouldAutoDetect(pos.lat, pos.lon);
           const tipInCov = false;
+          // Sticky "ever detected" flag — once a drone has been in any
+          // sensor coverage, it stays in the swarm roster even after it
+          // leaves coverage. Roster hides drones that have never been
+          // detected so operator sees the count grow as detection ramps.
+          if (inCov) sw._everDetected = true;
           // Lucas's rule: symbol visible IFF drone inside ANY sensor cov
           // at ANY site. Uniform. Every event type. Every drone.
           const swShouldShow = inCov;
@@ -10326,9 +10335,8 @@ async function main() {
         <button class="pl-cta" data-action="runbook">Response playbook</button>
         <button class="pl-cta" data-action="reclassify">Reclassify</button>
         <button class="pl-cta" data-action="note">Add note</button>
-        ${isNeutralised ? `
         <button class="pl-cta pl-cta-secondary" data-pir="dispatch-vera">Dispatch to Verá</button>
-        <button class="pl-cta pl-cta-secondary" data-pir="cordon">Cordon area</button>` : ''}
+        ${isNeutralised ? `<button class="pl-cta pl-cta-secondary" data-pir="cordon">Cordon area</button>` : ''}
       </div>
     `;
 
@@ -10885,17 +10893,25 @@ async function main() {
       // are momentarily null (tick hasn't run yet), the slot exists with
       // a placeholder — so clicking a row always resolves the same drone
       // and the header override doesn't fall through to e.droneType.
+      // Roster lists ONLY drones that have been detected at least once.
+      // Sticky per-drone _everDetected flag — set to true when the drone
+      // first enters sensor coverage. So "2 detected of 5" scales up to
+      // "5 detected" as detection ramps, no phantom rows for undetected
+      // drones. Once detected, they persist even if signal drops later.
       const droneList = [];
       const leadSlot = _template.swarm.formation[0] || {};
-      droneList.push({
-        id: 'DJI-1',
-        model: leadSlot.model || 'DJI Matrice 300 RTK',
-        role: 'lead',
-        stats: _swarmState.leadStats || { lat: 0, lon: 0, alt: 0, heading: 0, speed: 0, rfCarrierMHz: leadSlot.rfMHz || 2412 },
-        conf: e.confidence,
-        hasLiveTelemetry: !!_swarmState.leadStats,
-      });
+      if (_swarmState.leadSwarmMember?._everDetected) {
+        droneList.push({
+          id: 'DJI-1',
+          model: leadSlot.model || 'DJI Matrice 300 RTK',
+          role: 'lead',
+          stats: _swarmState.leadStats || { lat: 0, lon: 0, alt: 0, heading: 0, speed: 0, rfCarrierMHz: leadSlot.rfMHz || 2412 },
+          conf: e.confidence,
+          hasLiveTelemetry: !!_swarmState.leadStats,
+        });
+      }
       _swarmState.swarmBillboards.forEach((sw, idx) => {
+        if (!sw._everDetected) return;
         droneList.push({
           id: `DJI-${idx + 2}`,
           model: sw.model || 'DJI Matrice 300',
