@@ -3550,8 +3550,9 @@ async function main() {
           const dropLat = Cesium.Math.toDegrees(cartographic.latitude);
           const dropLon = Cesium.Math.toDegrees(cartographic.longitude);
           _spawnFlashEntity(dropLon, dropLat, 500, '#ff5a5a', 6, 22);
-          viewer.entities.add({
+          const _killEnt = viewer.entities.add({
             position: Cesium.Cartesian3.fromDegrees(dropLon, dropLat, 0),
+            properties: { markerEventId: event.id, markerKind: 'kill' },
             point: {
               pixelSize: 6,
               color: Cesium.Color.fromCssColorString('#8b0e0e'),
@@ -3575,6 +3576,12 @@ async function main() {
               disableDepthTestDistance: Number.POSITIVE_INFINITY,
             },
           });
+          // Route kill marker into _perEventMarkers so it participates
+          // in selection-driven visibility + the per-event filter chip
+          // UI. Was previously a raw viewer entity that lingered on the
+          // map forever regardless of event selection state.
+          if (!_perEventMarkers.has(event.id)) _perEventMarkers.set(event.id, []);
+          _perEventMarkers.get(event.id).push(_killEnt);
           // Append this kill to the wreckages ledger. Each downed
           // drone gets its own perimeter, its own patrol assignment.
           // wreckageLocation (singular) kept as an alias to the latest
@@ -4526,6 +4533,35 @@ async function main() {
   // forever after the drone was cleaned up.
   const _perEventMarkers = new Map(); // eventId → Cesium.Entity[]
 
+  // Derive marker category from label prefix. Feeds the per-event
+  // filter chip UI (kills / entry-exit / oor-reacq / detected).
+  function _markerKindFromLabel(labelText) {
+    const t = String(labelText || '');
+    if (t.startsWith('ENTRY'))        return 'entry';
+    if (t.startsWith('EXIT'))         return 'exit';
+    if (t.startsWith('OUT OF RANGE')) return 'oor';
+    if (t.startsWith('REACQUIRED'))   return 'reacq';
+    if (t.startsWith('DETECTED'))     return 'detected';
+    if (t.includes('DOWNED'))         return 'kill';
+    return 'other';
+  }
+  // Category buckets used by the filter chip UI.
+  const MARKER_CATEGORIES = {
+    kills:     ['kill'],
+    entryExit: ['entry', 'exit'],
+    oorReacq:  ['oor', 'reacq'],
+    detected:  ['detected', 'other'],
+  };
+  function _defaultMarkerFilters() {
+    return { kills: true, entryExit: true, oorReacq: true, detected: true, showIcons: true, showLabels: true };
+  }
+  function _kindCategory(kind) {
+    for (const [cat, kinds] of Object.entries(MARKER_CATEGORIES)) {
+      if (kinds.includes(kind)) return cat;
+    }
+    return 'detected';
+  }
+
   function _dropMarker(lat, lon, colorHex, labelText, eventId = null) {
     // Stagger label y so overlapping markers (site-level OOR + per-drone
     // OOR firing on top of each other at AMK, etc) don't collide into
@@ -4567,7 +4603,7 @@ async function main() {
         backgroundPadding: new Cesium.Cartesian2(5, 2),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
-      properties: { markerEventId: eventId || 'orphan' },
+      properties: { markerEventId: eventId || 'orphan', markerKind: _markerKindFromLabel(labelText) },
     });
     if (eventId) {
       if (!_perEventMarkers.has(eventId)) _perEventMarkers.set(eventId, []);
@@ -4579,10 +4615,25 @@ async function main() {
   function _setEventMarkersVisibility(eventId, show) {
     const list = _perEventMarkers.get(eventId);
     if (!list) return;
-    const val = !!show; // coerce so undefined → false (was defaulting to visible)
+    const val = !!show;
+    // Read per-event filters when showing. When hiding entirely, ignore
+    // filters — all markers off.
+    const ev = getEvent(eventId);
+    const filters = val ? (ev?._markerFilters || _defaultMarkerFilters()) : null;
     for (const ent of list) {
-      if (ent.billboard) ent.billboard.show = val;
-      if (ent.label) ent.label.show = val;
+      if (!val) {
+        if (ent.billboard) ent.billboard.show = false;
+        if (ent.point)     ent.point.show = false;
+        if (ent.label)     ent.label.show = false;
+        continue;
+      }
+      // Show path — respect per-event filters.
+      const kind = ent.properties?.markerKind?.getValue?.() || 'other';
+      const cat = _kindCategory(kind);
+      const catVisible = filters[cat] !== false;
+      if (ent.billboard) ent.billboard.show = catVisible && filters.showIcons !== false;
+      if (ent.point)     ent.point.show     = catVisible && filters.showIcons !== false;
+      if (ent.label)     ent.label.show     = catVisible && filters.showLabels !== false;
     }
   }
 
@@ -5955,6 +6006,17 @@ async function main() {
     const rec = window.__isr_getRecording(eventId);
     const scope = ev && rec ? scopedTrajectoryFor(ev, roleObj?.id, rec.timeseries) : null;
     const primaryId = ev?.shadowOfEventId || ev?.linkedEventId;
+    // Per-drone confirmed vs unconfirmed breakdown so we can see which
+    // samples render as solid vs dashed.
+    const perDrone = {};
+    if (rec?.timeseries) {
+      for (const s of rec.timeseries) {
+        const id = s.droneId || 'unknown';
+        if (!perDrone[id]) perDrone[id] = { detected: 0, sensor_gap: 0, pre_ingress: 0, tip_cued: 0, other: 0 };
+        const st = s.detection_state || 'other';
+        perDrone[id][st] = (perDrone[id][st] || 0) + 1;
+      }
+    }
     const info = {
       eventId,
       eventFound: !!ev,
@@ -5983,8 +6045,10 @@ async function main() {
       ownedSiteIds: scope?.ownedSiteIds,
     };
     console.table(info);
+    console.log('Detection state breakdown per drone (detected = solid, sensor_gap = dashed):');
+    console.table(perDrone);
     console.log('Full scope object:', scope);
-    return info;
+    return { ...info, perDrone };
   };
   window.__isr_listRecordings = () => {
     const keys = [];
@@ -6812,12 +6876,19 @@ async function main() {
         <button class="dbn-close" id="debrief-close-btn">Exit debrief</button>
       </div>
       ${scopeBanner}
+      ${_renderMarkerFilterChips(event)}
       <div class="dbn-body" data-debrief-body="${event.id}" data-debrief-reco="${event.id}">${narrativeHtml}</div>
       ${momentsList}
       <div class="dbn-footer" data-debrief-foot="${event.id}">${modelSubtitle}</div>
     `;
     document.body.appendChild(wrap);
     document.getElementById('debrief-close-btn').addEventListener('click', stopDebrief);
+    // Chip clicks in the debrief header — same handler as detail panel.
+    wrap.querySelectorAll('[data-mflt]').forEach(chip => {
+      chip.addEventListener('click', () => {
+        _applyMarkerFilterToggle(chip.dataset.id || event.id, chip.dataset.mflt);
+      });
+    });
     return wrap;
   }
 
@@ -11209,6 +11280,7 @@ async function main() {
           <span>DUR <b>${dur}</b></span>
         </div>
       </div>
+      ${_renderMarkerFilterChips(e)}
       ${telemetry}
       ${preIngress ? '' : missionConsole}
       ${preIngress ? '' : linkedEvents}
@@ -11263,6 +11335,13 @@ async function main() {
       row.addEventListener('click', () => {
         const lid = row.dataset.linkedId;
         if (lid && getEvent(lid)) selectEvent(lid);
+      });
+    });
+
+    // Marker filter chip clicks (per-event subevent visibility).
+    detailBodyEl.querySelectorAll('[data-mflt]').forEach(chip => {
+      chip.addEventListener('click', () => {
+        _applyMarkerFilterToggle(chip.dataset.id || e.id, chip.dataset.mflt);
       });
     });
 
@@ -12086,6 +12165,54 @@ async function main() {
     if (recreated > 0) {
       console.log(`[markers] recreated ${recreated} markers for event ${eventId} from saved data`);
     }
+  }
+
+  // Render the per-event marker filter chip row. Renders in the detail
+  // panel (compact) + debrief modal (same shape). Two rows: category
+  // chips (kills, entry/exit, oor/reacq, detected) + display style
+  // chips (icons, labels). Click toggles per-event state on
+  // event._markerFilters. Master "All" chip clears/sets all categories.
+  function _renderMarkerFilterChips(event) {
+    if (!event) return '';
+    if (!event._markerFilters) event._markerFilters = _defaultMarkerFilters();
+    const f = event._markerFilters;
+    const allOn = f.kills && f.entryExit && f.oorReacq && f.detected;
+    const chipStyle = (on, color) => `padding: 4px 10px; border-radius: 12px; font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.10em; text-transform: uppercase; cursor: pointer; user-select: none; ${on ? `background: rgba(${color}, 0.14); border: 1px solid rgba(${color}, 0.55); color: rgb(${color});` : 'background: transparent; border: 1px solid #1e2530; color: var(--text-dim);'}`;
+    const chip = (label, key, color, eventId) => `<span class="dp-mflt-chip" data-mflt="${key}" data-id="${eventId}" style="${chipStyle(f[key], color)}">${label}</span>`;
+    const chipMaster = (label, active, eventId) => `<span class="dp-mflt-chip" data-mflt="all" data-id="${eventId}" style="${chipStyle(active, '160, 200, 220')}">${label}</span>`;
+    return `
+      <div class="dp-section dp-mflt" style="padding: var(--space-2) var(--space-3); border-bottom: 1px solid #131820;">
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;">
+          <span style="font-size: var(--fs-2xs); color: var(--text-dim); font-family: var(--font-mono); letter-spacing: 0.10em; text-transform: uppercase; margin-right: 4px;">Subevents:</span>
+          ${chipMaster(allOn ? 'All ✓' : 'All', allOn, event.id)}
+          ${chip(`Kills ${f.kills ? '✓' : ''}`,           'kills',     '255, 90, 90',   event.id)}
+          ${chip(`Entry/Exit ${f.entryExit ? '✓' : ''}`,   'entryExit', '77, 210, 255',  event.id)}
+          ${chip(`OOR/Reacq ${f.oorReacq ? '✓' : ''}`,    'oorReacq',  '77, 255, 156',  event.id)}
+          ${chip(`Detected ${f.detected ? '✓' : ''}`,      'detected',  '77, 210, 255',  event.id)}
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <span style="font-size: var(--fs-2xs); color: var(--text-dim); font-family: var(--font-mono); letter-spacing: 0.10em; text-transform: uppercase; margin-right: 4px;">Display:</span>
+          ${chip(`Icons ${f.showIcons ? '✓' : ''}`,       'showIcons', '160, 200, 220', event.id)}
+          ${chip(`Labels ${f.showLabels ? '✓' : ''}`,     'showLabels','160, 200, 220', event.id)}
+        </div>
+      </div>`;
+  }
+
+  // Apply chip click. key ∈ {'all','kills','entryExit','oorReacq','detected','showIcons','showLabels'}.
+  function _applyMarkerFilterToggle(eventId, key) {
+    const ev = getEvent(eventId);
+    if (!ev) return;
+    if (!ev._markerFilters) ev._markerFilters = _defaultMarkerFilters();
+    const f = ev._markerFilters;
+    if (key === 'all') {
+      const allOn = f.kills && f.entryExit && f.oorReacq && f.detected;
+      const target = !allOn;   // if any was off, turn all on. else all off.
+      f.kills = f.entryExit = f.oorReacq = f.detected = target;
+    } else if (key in f) {
+      f[key] = !f[key];
+    }
+    _refreshEventMarkerVisibility();
+    if (getSelectedEventId() === eventId) renderDetailPanel();
   }
 
   function _refreshEventMarkerVisibility() {
