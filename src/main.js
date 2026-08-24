@@ -42,7 +42,7 @@ import { contextForSite, nearestCriticalArea, dwellZonesAtPoint } from './site_c
 import { responseBundle, responseBundleForSubject, RESPONSE_OPTION_DETAILS, outcomesForKind } from './response_assets.js';
 import { AIRCRAFT, aircraftAtBase, aircraftForResponseAsset } from './aircraft.js';
 import { playbookFor } from './response_playbook.js';
-import { ADMIN, OPERATORS, RECEIVERS, getActiveRole, setActiveRole, onRoleChange, getRoleChildren, getRoleDestinationIdsRolledUp, impactedRoles as _impactedRoles, canInitiate as _canInitiate, agencyBranchOf, FLOW_TYPES } from './roles.js';
+import { ADMIN, OPERATORS, RECEIVERS, ACCOUNTS, getActiveRole, setActiveRole, onRoleChange, getRoleChildren, getRoleDestinationIdsRolledUp, impactedRoles as _impactedRoles, canInitiate as _canInitiate, agencyBranchOf, FLOW_TYPES } from './roles.js';
 import { runbookFor } from './runbooks.js';
 import { TARGETS as TARGETS_CORE } from './targets.js';
 import { HV_SUBSTATION_TARGETS } from './targets_hv.js';
@@ -6347,35 +6347,175 @@ async function main() {
     return entities;
   }
 
-  function _debriefRenderTrajectory(samples) {
-    if (samples.length < 2) return [];
-    // GROUP BY DRONE first, then build segments per drone. Without
-    // grouping, all samples fed to _replayBuildTrailSegments produced
-    // ONE polyline that zig-zagged / bridged across every drone —
-    // when two drones ended in different places, the result was a
-    // huge stripe spanning the gap between them (Lucas: "absolutely
-    // HUGE band"). Per-drone rendering means DJI-1's line stays
-    // separate from Overwatch's line; if they're far apart, you see
-    // two thin lines with empty space between, not a bridge.
+  // ═══════════════════════════════════════════════════════════════════
+  // Phase 3 · Trajectory scoping per viewer role
+  //
+  // Different roles see different portions of a threat trajectory:
+  //   - Admin: full trajectory across every site (all segments solid).
+  //   - Receiver (state agency): same as admin — full access.
+  //   - Operator: only trajectory samples inside their owned sites'
+  //     sensor coverage. If they own MULTIPLE sites the threat crossed,
+  //     inferred (dotted) bridges connect their confirmed segments so
+  //     they see the "here's what happened between our sites" hint.
+  //     Segments outside owned scope are hidden entirely.
+  //
+  // Full spec in IDD IF-6 + IF-8. See safety notes at top of
+  // scopedTrajectoryFor for the default-to-admin fallback.
+  // ═══════════════════════════════════════════════════════════════════
+  function _findSiteContainingPoint(lat, lon) {
+    // Returns the first site whose online sensor coverage contains
+    // the point. Null if outside all coverage.
+    for (const sid of Object.keys(SITES)) {
+      const site = SITES[sid];
+      if (!site?.sensors?.length) continue;
+      const cov = nearestSensorInCoverage({ lat, lon }, site);
+      if (cov?.inCoverage) return sid;
+    }
+    return null;
+  }
+
+  function scopedTrajectoryFor(event, roleId, samples) {
+    if (!Array.isArray(samples) || samples.length === 0) {
+      return { segments: [], fullyVisible: true, hiddenSegmentCount: 0, scopeNote: null, ownedSiteIds: null };
+    }
+    const role = ACCOUNTS?.find?.(r => r.id === roleId) || null;
+    const kind = role?.kind || 'admin';
+    const isFullAccess = kind === 'admin' || kind === 'receiver' || !role;
+    if (isFullAccess) {
+      // Pass-through: preserve source order, all samples confirmed.
+      return {
+        segments: [{ positions: samples, visibility: 'confirmed' }],
+        fullyVisible: true,
+        hiddenSegmentCount: 0,
+        scopeNote: null,
+        ownedSiteIds: null,
+        _passthrough: true,   // signal to renderer: use legacy per-drone / gap-split path
+      };
+    }
+    // Operator path — scope to owned sites.
+    const ownedSiteIds = new Set(role.siteIds || []);
+    if (ownedSiteIds.size === 0) {
+      return {
+        segments: [], fullyVisible: false, hiddenSegmentCount: 0,
+        scopeNote: 'Your account has no site scope for this event.',
+        ownedSiteIds: [],
+      };
+    }
+    // Group samples by drone, then per-drone classify each sample as
+    // confirmed (in owned site cov) or hidden.
     const byDrone = new Map();
     for (const s of samples) {
       const id = s.droneId || 'unknown';
       if (!byDrone.has(id)) byDrone.set(id, []);
       byDrone.get(id).push(s);
     }
-    // ADAPTIVE BRIDGING. Within a single drone's samples, keep the
-    // line as one continuous polyline UNLESS consecutive samples are
-    // separated by more than BRIDGE_BREAK_M metres (e.g. a re-acq
-    // after a long sensor gap). Above that gap, split into a new
-    // segment so we don't draw a straight line across half the map.
-    // 800 m matches the "far apart, split them" heuristic — close
-    // enough that dense samples stay connected, far enough that a
-    // real re-acq across a gap breaks cleanly.
+    const segments = [];
+    let hiddenRunCount = 0;
+    const ownsMultipleSites = ownedSiteIds.size > 1;
+
+    for (const [droneId, droneSamples] of byDrone) {
+      const labeled = droneSamples.map(s => {
+        const inSite = _findSiteContainingPoint(s.lat, s.lon);
+        return { ...s, _inOwnedSite: inSite && ownedSiteIds.has(inSite) };
+      });
+      // Walk labeled samples, group into confirmed vs hidden runs.
+      const runs = [];
+      let curRun = [labeled[0]];
+      let curLabel = labeled[0]._inOwnedSite;
+      for (let i = 1; i < labeled.length; i++) {
+        const s = labeled[i];
+        if (s._inOwnedSite === curLabel) { curRun.push(s); }
+        else { runs.push({ label: curLabel, samples: curRun }); curRun = [s]; curLabel = s._inOwnedSite; }
+      }
+      runs.push({ label: curLabel, samples: curRun });
+      // Emit confirmed runs as solid segments. Between two confirmed
+      // runs (separated by a hidden run), inject an inferred bridge
+      // only if the operator owns multiple sites.
+      const confirmedRuns = runs.filter(r => r.label);
+      hiddenRunCount += runs.filter(r => !r.label).length;
+      for (let i = 0; i < confirmedRuns.length; i++) {
+        const run = confirmedRuns[i];
+        if (run.samples.length >= 2) {
+          segments.push({ positions: run.samples, visibility: 'confirmed', droneId });
+        }
+        if (ownsMultipleSites && i + 1 < confirmedRuns.length) {
+          const lastOfThis = run.samples[run.samples.length - 1];
+          const firstOfNext = confirmedRuns[i + 1].samples[0];
+          segments.push({
+            positions: [lastOfThis, firstOfNext],
+            visibility: 'inferred',
+            droneId,
+          });
+        }
+      }
+    }
+    const scopeNote = segments.length === 0
+      ? 'This event took place outside your site scope. No trajectory available.'
+      : (ownsMultipleSites
+        ? 'Segments between your sites are inferred (dotted) — your sensors did not observe them directly.'
+        : 'Trajectory scoped to your site perimeter. State agencies see the full path.');
+    return {
+      segments,
+      fullyVisible: false,
+      hiddenSegmentCount: hiddenRunCount,
+      scopeNote,
+      ownedSiteIds: Array.from(ownedSiteIds),
+    };
+  }
+
+  function _debriefRenderTrajectory(samples, event = null) {
+    if (samples.length < 2) return [];
+    // Phase 3 scoping — determine what THIS role is allowed to see.
+    // Admin/receiver → passthrough (all samples confirmed). Operator
+    // → scoped segments with inferred bridges between owned sites.
+    const activeRoleId = getActiveRole?.() || null;
+    const scope = event ? scopedTrajectoryFor(event, activeRoleId, samples) : null;
+
+    // OPERATOR PATH: render segments directly. Each segment already
+    // carries its visibility (confirmed = solid, inferred = dotted
+    // bridge between owned sites). No further gap-split needed since
+    // scoping handled it.
+    if (scope && !scope._passthrough) {
+      const entities = [];
+      for (const seg of scope.segments) {
+        if (seg.positions.length < 2) continue;
+        const flat = [];
+        let sumConf = 0;
+        for (const p of seg.positions) {
+          flat.push(p.lon, p.lat, _safeTrailAlt(p.altitude_agl_m || p.alt || 100));
+          sumConf += (p.confidence || 0.7);
+        }
+        const avgConf = sumConf / seg.positions.length;
+        const color = _confidenceColor(avgConf);
+        const isInferred = seg.visibility === 'inferred';
+        const material = isInferred
+          ? new Cesium.PolylineDashMaterialProperty({ color: color.withAlpha(0.55), dashLength: 14 })
+          : color;
+        entities.push(viewer.entities.add({
+          polyline: {
+            positions: Cesium.Cartesian3.fromDegreesArrayHeights(flat),
+            width: isInferred ? 2.5 : 4,
+            material,
+            clampToGround: false,
+          },
+          properties: { debrief: true, confirmed: !isInferred, scoped: true, droneId: seg.droneId },
+        }));
+      }
+      return entities;
+    }
+
+    // ADMIN / RECEIVER / no-role passthrough: original per-drone + 800m
+    // gap-split rendering path. Unchanged from previous behaviour.
+    const byDrone = new Map();
+    for (const s of samples) {
+      const id = s.droneId || 'unknown';
+      if (!byDrone.has(id)) byDrone.set(id, []);
+      byDrone.get(id).push(s);
+    }
     const BRIDGE_BREAK_M = 800;
     const entities = [];
     for (const [, droneSamples] of byDrone) {
       if (droneSamples.length < 2) continue;
-      // Split by big geographic gaps into sub-runs first.
       const runs = [];
       let currentRun = [droneSamples[0]];
       for (let i = 1; i < droneSamples.length; i++) {
@@ -6390,7 +6530,6 @@ async function main() {
         }
       }
       if (currentRun.length >= 2) runs.push(currentRun);
-      // Each run → confidence-band segments → polylines.
       for (const run of runs) {
         const segments = _replayBuildTrailSegments(run);
         for (const seg of segments) {
@@ -6567,12 +6706,26 @@ async function main() {
     const modelSubtitle = isMistralConfigured()
       ? 'Analysis derived from linked recordings + site context. Streaming from Mistral Large 2 · sovereign EU inference.'
       : `Analysis derived from ${event.linkedEventIds?.length ? 'linked recordings + ' : ''}site context. Mistral not configured — showing deterministic synthesis.`;
+
+    // Phase 3 · trajectory scope banner. Only renders when the viewer's
+    // role has a restricted trajectory view (operator with owned sites).
+    // Admin + state agency receivers see nothing here.
+    const _samples = (window.__isr_getRecording?.(event.id)?.timeseries) || [];
+    const _activeRoleId = getActiveRole?.();
+    const _scope = _samples.length ? scopedTrajectoryFor(event, _activeRoleId, _samples) : null;
+    const scopeBanner = (_scope && !_scope.fullyVisible && _scope.scopeNote) ? `
+      <div class="dbn-scope-banner" style="margin: 0 var(--space-3) var(--space-3); padding: 10px 12px; background: rgba(255, 184, 77, 0.06); border-left: 2px solid rgba(255, 184, 77, 0.5); font-size: var(--fs-2xs); color: var(--text-dim); line-height: 1.45; font-family: var(--font-body);">
+        <span style="display: block; letter-spacing: 0.10em; text-transform: uppercase; color: #ffb84d; font-family: var(--font-mono); margin-bottom: 4px;">Scoped view</span>
+        ${_scope.scopeNote}${_scope.hiddenSegmentCount > 0 ? ` <span style="color: var(--text-dim);">· ${_scope.hiddenSegmentCount} segment${_scope.hiddenSegmentCount === 1 ? '' : 's'} outside your scope hidden.</span>` : ''}
+      </div>` : '';
+
     wrap.innerHTML = `
       <div class="dbn-header">
         <span class="dbn-badge">DEBRIEF</span>
         <span class="dbn-eid pl-mono">${event.id}</span>
         <button class="dbn-close" id="debrief-close-btn">Exit debrief</button>
       </div>
+      ${scopeBanner}
       <div class="dbn-body" data-debrief-body="${event.id}" data-debrief-reco="${event.id}">${narrativeHtml}</div>
       ${momentsList}
       <div class="dbn-footer" data-debrief-foot="${event.id}">${modelSubtitle}</div>
@@ -6610,10 +6763,11 @@ async function main() {
         viewer.camera.lookAtTransform(Cesium.Matrix4.IDENTITY);
       }, 2500);
     }
-    // Render map annotations
+    // Render map annotations (event passed so trajectory scoping can
+    // resolve per-role visibility — see scopedTrajectoryFor).
     const entities = [
       ..._debriefRenderAssetHighlights(analysis.touched),
-      ..._debriefRenderTrajectory(samples),
+      ..._debriefRenderTrajectory(samples, event),
       ..._debriefRenderMoments(moments),
     ];
     const narrativeEl = _debriefBuildNarrativePanel(event, narrativeHtml, moments);
