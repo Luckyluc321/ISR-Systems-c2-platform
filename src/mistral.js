@@ -148,6 +148,19 @@ function buildCaseFileMessages(event, site) {
     OUTPUT_FORMAT,
   ].join('\n');
 
+  // Explicit platform count from droneType label (e.g. "5x DJI Matrice
+  // formation (recon swarm)" → count = 5). Subject-digest cardinality
+  // defaults to 1 when event.droneCount isn't set, so the model
+  // otherwise describes a swarm as a single drone. Give it the count
+  // directly.
+  const droneTypeStr = event.droneType || 'unknown platform';
+  const _countMatch = droneTypeStr.match(/^\s*(\d+)\s*x/i);
+  const parsedCount = _countMatch ? parseInt(_countMatch[1], 10) : null;
+  const platformLabelLine = `Platform label (as classified by operator): ${droneTypeStr}`;
+  const platformCountLine = parsedCount && parsedCount > 1
+    ? `Platform count: ${parsedCount} distinct drones in this event. This is a MULTI-DRONE FORMATION — describe it as a formation / swarm, not a single drone.`
+    : `Platform count: as indicated by platform label above.`;
+
   const userPrompt = [
     `Event ID: ${event.id}`,
     `Site: ${siteName}`,
@@ -155,10 +168,12 @@ function buildCaseFileMessages(event, site) {
     `Operator classification bucket: ${classification}`,
     `First detected: ${startedAt}`,
     `Correlated events at other sites: ${linked}`,
+    platformLabelLine,
+    platformCountLine,
     '',
     subjectDigest,
     '',
-    'Produce the operator briefing using the rules and format above. Lead the body with what the sensor mesh actually saw (class, cardinality, formation, behavior). Do not restate the site name in the recommendation.',
+    'Produce the operator briefing using the rules and format above. Lead the body with what the sensor mesh actually saw (class, cardinality, formation, behavior). Match the platform count exactly. Do not restate the site name in the recommendation.',
   ].join('\n');
 
   return [
@@ -203,12 +218,32 @@ function buildDebriefMessages(event, samples, analysis) {
   notableDwell.forEach(d => dwellLines.push(`  Notable dwell: ${d.name} (${d.durationSec}s, ${d.pctOfFlight}% of flight)`));
   if (!dwellLines.length) dwellLines.push('  No significant dwell. Track read as transit.');
 
+  // Explicit drone-count context. The subject-digest cardinality
+  // sometimes defaults to 1 when event.droneCount is unset. If the
+  // real recording shows 5 distinct droneIds tracked, tell Mistral
+  // that directly — otherwise it defaults to "single drone" language
+  // even for obvious swarm scenarios like the 5x DJI Matrice
+  // formation. droneType string also carried through verbatim so the
+  // model has both count and platform label.
+  const distinctDroneIds = new Set();
+  for (const s of samples) if (s.droneId) distinctDroneIds.add(s.droneId);
+  const observedCount = distinctDroneIds.size;
+  const droneTypeStr = event.droneType || 'unknown platform';
+  const platformCountLine = observedCount > 1
+    ? `Platform count: ${observedCount} distinct drones tracked in this event (drone IDs: ${Array.from(distinctDroneIds).sort().join(', ')}). This is a MULTI-DRONE FORMATION, not a single-drone event.`
+    : (observedCount === 1
+      ? `Platform count: 1 drone tracked.`
+      : `Platform count: not directly observed in recording.`);
+  const platformLabelLine = `Platform label (as classified by operator): ${droneTypeStr}`;
+
   const userPrompt = [
     `Event ID: ${event.id}`,
     `Site: ${siteName}`,
     `Total duration: ${dur} seconds`,
     `Outcome: ${event.outcome || 'no dispatch'}`,
     `Correlated events at other sites: ${linked}`,
+    platformLabelLine,
+    platformCountLine,
     '',
     subjectDigest,
     '',
@@ -222,7 +257,7 @@ function buildDebriefMessages(event, samples, analysis) {
     '─────────────────',
     ...classChangeLines,
     '',
-    'Produce the debrief narrative using the rules and format above. Focus on behavioral interpretation (reconnaissance, transit, deliberate loiter, indecisive path) rather than restating raw numbers. If the classification log shows a mid-event revision, address why that matters.',
+    'Produce the debrief narrative using the rules and format above. Focus on behavioral interpretation (reconnaissance, transit, deliberate loiter, indecisive path) rather than restating raw numbers. If the classification log shows a mid-event revision, address why that matters. Match the platform count exactly — if multiple drones were tracked, describe it as a formation / swarm; do not describe it as a single drone.',
   ].filter(Boolean).join('\n');
 
   return [

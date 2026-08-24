@@ -3868,7 +3868,10 @@ async function main() {
   function dispatchPostIncidentAction(eventId, tag) {
     const event = getEvent(eventId);
     if (!event) return;
-    if (event.outcome !== 'neutralized') return;
+    // Was gated on event.outcome === 'neutralized', but the Verá button
+    // is now visible on any closed event (see the closed-panel render).
+    // Silently-returning here made every click a no-op for non-
+    // neutralized outcomes. Ungated to match the button visibility.
     if (!Array.isArray(event.postIncidentDispatched)) event.postIncidentDispatched = [];
     if (event.postIncidentDispatched.includes(tag)) return;
     event.postIncidentDispatched.push(tag);
