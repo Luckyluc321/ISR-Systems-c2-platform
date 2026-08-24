@@ -8420,34 +8420,37 @@ async function main() {
   function updateContributingRings() {
     contributingRingEntities.forEach(e => viewer.entities.remove(e));
     contributingRingEntities = [];
-    for (const [eventId] of droneState) {
-      const event = getEvent(eventId);
-      if (!event || event.status !== 'active') continue;
-      const site = SITES[event.siteId];
-      if (!site) continue;
-      event.contributingSensors.filter(s => !s.offline).forEach(s => {
-        const sensor = site.sensors.find(x => x.id === s.id);
-        if (!sensor) return;
-        // Ring visibility is dynamic: only shown when a threat associated
-        // with this event is CURRENTLY inside this sensor's coverage
-        // radius. Prior behaviour left every contributing-sensor's ring
-        // pulsing forever, even after the drone had moved 800m away.
-        const _eventId = eventId;
+    // Iterate EVERY online sensor across every site. Any sensor that
+    // currently has a live-event drone inside its coverage radius gets
+    // the pulsing ring. Degraded (orange) and offline (red) sensors
+    // never pulse. Previously scoped to event.contributingSensors which
+    // was a subset — sensors on the same site whose radius the drone
+    // fell into but which weren't yet added to contributingSensors got
+    // no pulse. This iterates the ground truth.
+    for (const sid of Object.keys(SITES)) {
+      const site = SITES[sid];
+      if (!site?.sensors?.length) continue;
+      for (const sensor of site.sensors) {
+        if (sensor.status !== 'online') continue;   // skip degraded + offline
         const _sensorLat = sensor.lat, _sensorLon = sensor.lon, _covR = sensor.coverageRadius;
         const _showInRange = new Cesium.CallbackProperty(() => {
-          const evt = getEvent(_eventId);
-          if (!evt || evt.status !== 'active') return false;
-          const st = droneState.get(_eventId);
-          // Aggregate all drone positions currently tracked for this event
-          // (lead position from event.lastPosition + every swarm wingman)
-          if (evt.lastPosition?.lat != null) {
-            if (haversineM(evt.lastPosition.lat, evt.lastPosition.lon, _sensorLat, _sensorLon) <= _covR) return true;
-          }
-          if (st?.swarmBillboards) {
-            for (const sw of st.swarmBillboards) {
-              if (sw.stats?.lat != null
-                  && haversineM(sw.stats.lat, sw.stats.lon, _sensorLat, _sensorLon) <= _covR) {
-                return true;
+          // Walk every active event's live drone positions. Any drone
+          // inside this sensor's radius flips the pulse on.
+          for (const [eid] of droneState) {
+            const evt = getEvent(eid);
+            if (!evt || evt.status !== 'active') continue;
+            if (evt.lastPosition?.lat != null
+                && haversineM(evt.lastPosition.lat, evt.lastPosition.lon, _sensorLat, _sensorLon) <= _covR) {
+              return true;
+            }
+            const st = droneState.get(eid);
+            if (st?.swarmBillboards) {
+              for (const sw of st.swarmBillboards) {
+                if (sw.neutralised) continue;
+                if (sw.stats?.lat != null
+                    && haversineM(sw.stats.lat, sw.stats.lon, _sensorLat, _sensorLon) <= _covR) {
+                  return true;
+                }
               }
             }
           }
@@ -8468,7 +8471,7 @@ async function main() {
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
         }));
-      });
+      }
     }
   }
 
@@ -11280,7 +11283,6 @@ async function main() {
           <span>DUR <b>${dur}</b></span>
         </div>
       </div>
-      ${_renderMarkerFilterChips(e)}
       ${telemetry}
       ${preIngress ? '' : missionConsole}
       ${preIngress ? '' : linkedEvents}
@@ -12187,7 +12189,7 @@ async function main() {
           ${chipMaster(allOn ? 'All ✓' : 'All', allOn, event.id)}
           ${chip(`Kills ${f.kills ? '✓' : ''}`,           'kills',     '255, 90, 90',   event.id)}
           ${chip(`Entry/Exit ${f.entryExit ? '✓' : ''}`,   'entryExit', '77, 210, 255',  event.id)}
-          ${chip(`OOR/Reacq ${f.oorReacq ? '✓' : ''}`,    'oorReacq',  '77, 255, 156',  event.id)}
+          ${chip(`Reacquired ${f.oorReacq ? '✓' : ''}`,    'oorReacq',  '77, 255, 156',  event.id)}
           ${chip(`Detected ${f.detected ? '✓' : ''}`,      'detected',  '77, 210, 255',  event.id)}
         </div>
         <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
