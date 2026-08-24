@@ -5826,7 +5826,16 @@ async function main() {
         const t = new Date(s.timestamp_utc).getTime();
         return t >= startMs && t <= endMs;
       });
-      if (!filtered.length) return null;
+      if (!filtered.length) {
+        console.warn('[shadow-fallback] Zero samples in shadow window', {
+          eventId, primaryId,
+          shadowStart: ev.startTime, shadowEnd: ev.endTime,
+          primarySampleCount: rec.timeseries.length,
+          primaryFirstSample: rec.timeseries[0]?.timestamp_utc,
+          primaryLastSample: rec.timeseries[rec.timeseries.length - 1]?.timestamp_utc,
+        });
+        return null;
+      }
       // Return a shadow-scoped clone so callers get event-scoped meta
       // (event_id, event_type) instead of the primary's fields.
       return {
@@ -5852,7 +5861,7 @@ async function main() {
   // downstream tools know the export is scoped.
   function _scopeRecordingForActiveRole(rec, eventId) {
     const event = getEvent(eventId);
-    const roleId = getActiveRole?.();
+    const roleId = getActiveRole?.()?.id;
     if (!event || !rec?.timeseries) return rec;
     const scope = scopedTrajectoryFor(event, roleId, rec.timeseries);
     if (scope.fullyVisible) return rec;
@@ -5936,6 +5945,46 @@ async function main() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  };
+  // Diagnostic — dumps everything a debrief/replay would see for an
+  // event, from the perspective of the active role. Paste an event id
+  // in the browser console: __isr_debug_trajectory('DET-20260824-0001')
+  window.__isr_debug_trajectory = (eventId) => {
+    const ev = getEvent(eventId);
+    const roleObj = getActiveRole?.();
+    const rec = window.__isr_getRecording(eventId);
+    const scope = ev && rec ? scopedTrajectoryFor(ev, roleObj?.id, rec.timeseries) : null;
+    const primaryId = ev?.shadowOfEventId || ev?.linkedEventId;
+    const info = {
+      eventId,
+      eventFound: !!ev,
+      eventSiteId: ev?.siteId,
+      eventStart: ev?.startTime,
+      eventEnd: ev?.endTime,
+      isShadow: !!primaryId,
+      primaryId,
+      recordingFound: !!rec,
+      sampleCount: rec?.timeseries?.length || 0,
+      firstSampleTs: rec?.timeseries?.[0]?.timestamp_utc,
+      lastSampleTs: rec?.timeseries?.[rec?.timeseries?.length - 1]?.timestamp_utc,
+      sampleLatLonBounds: rec?.timeseries?.length ? {
+        minLat: Math.min(...rec.timeseries.map(s => s.lat)),
+        maxLat: Math.max(...rec.timeseries.map(s => s.lat)),
+        minLon: Math.min(...rec.timeseries.map(s => s.lon)),
+        maxLon: Math.max(...rec.timeseries.map(s => s.lon)),
+      } : null,
+      droneIds: rec ? Array.from(new Set(rec.timeseries.map(s => s.droneId))) : [],
+      activeRoleId: roleObj?.id,
+      activeRoleKind: roleObj?.kind,
+      scopeFullyVisible: scope?.fullyVisible,
+      scopeSegmentCount: scope?.segments?.length,
+      scopeHiddenCount: scope?.hiddenSegmentCount,
+      scopeNote: scope?.scopeNote,
+      ownedSiteIds: scope?.ownedSiteIds,
+    };
+    console.table(info);
+    console.log('Full scope object:', scope);
+    return info;
   };
   window.__isr_listRecordings = () => {
     const keys = [];
@@ -6505,7 +6554,7 @@ async function main() {
     // Phase 3 scoping — determine what THIS role is allowed to see.
     // Admin/receiver → passthrough (all samples confirmed). Operator
     // → scoped segments with inferred bridges between owned sites.
-    const activeRoleId = getActiveRole?.() || null;
+    const activeRoleId = getActiveRole?.()?.id || null;
     const scope = event ? scopedTrajectoryFor(event, activeRoleId, samples) : null;
 
     // OPERATOR PATH: render segments directly. Each segment already
@@ -6748,7 +6797,7 @@ async function main() {
     // role has a restricted trajectory view (operator with owned sites).
     // Admin + state agency receivers see nothing here.
     const _samples = (window.__isr_getRecording?.(event.id)?.timeseries) || [];
-    const _activeRoleId = getActiveRole?.();
+    const _activeRoleId = getActiveRole?.()?.id;
     const _scope = _samples.length ? scopedTrajectoryFor(event, _activeRoleId, _samples) : null;
     const scopeBanner = (_scope && !_scope.fullyVisible && _scope.scopeNote) ? `
       <div class="dbn-scope-banner" style="margin: 0 var(--space-3) var(--space-3); padding: 10px 12px; background: rgba(255, 184, 77, 0.06); border-left: 2px solid rgba(255, 184, 77, 0.5); font-size: var(--fs-2xs); color: var(--text-dim); line-height: 1.45; font-family: var(--font-body);">
@@ -7139,7 +7188,7 @@ async function main() {
     // For operators, filter timeseries to in-scope samples + build
     // inferred bridges between owned sites.
     const _replayEvent = getEvent(eventId);
-    const _activeRoleId = getActiveRole?.();
+    const _activeRoleId = getActiveRole?.()?.id;
     const _scope = _replayEvent
       ? scopedTrajectoryFor(_replayEvent, _activeRoleId, rec.timeseries)
       : null;
@@ -9276,7 +9325,7 @@ async function main() {
       ackedAt: null,
     });
     // Toast if the active browser role is the recipient
-    const activeRoleId = getActiveRole?.();
+    const activeRoleId = getActiveRole?.()?.id;
     if (activeRoleId === roleId && payload.toast) {
       toast(payload.toast, priority === 'critical' ? 'warn' : priority);
     }
@@ -9334,7 +9383,7 @@ async function main() {
     _observerPickerOpen = true;
     const event = getEvent(eventId);
     if (!event) { _observerPickerOpen = false; toast('Event not found', 'err'); return; }
-    const activeRoleId = getActiveRole?.();
+    const activeRoleId = getActiveRole?.()?.id;
     const excludedIds = new Set([activeRoleId]);
     if (event.participants instanceof Map) {
       for (const rid of event.participants.keys()) excludedIds.add(rid);
@@ -14057,7 +14106,7 @@ async function main() {
   // Phase 2: thin wrapper over availableCTAsForReceiver so all CTA
   // logic is in one place. Old caller signature preserved.
   function _buildRecommendedCtas(event, rec, isAcked, isActive) {
-    const roleId = getActiveRole?.();
+    const roleId = getActiveRole?.()?.id;
     return availableCTAsForReceiver(roleId, event, { rec, isAcked, isActive });
   }
 
@@ -14095,7 +14144,7 @@ async function main() {
     const { rec, isAcked, isActive } = ctx;
     const ctas = [];
     if (!event) return ctas;
-    if (!roleId) roleId = getActiveRole?.();
+    if (!roleId) roleId = getActiveRole?.()?.id;
     const role = RECEIVERS.find(r => r.id === roleId)
               || OPERATORS.find(o => o.id === roleId)
               || (roleId === ADMIN.id ? ADMIN : null);
