@@ -2498,7 +2498,7 @@ async function main() {
         .catch(() => { /* straight-line fallback in tick */ });
     }
     if (patrolDispatches.length) {
-      const wCount = wreckageIds.length;
+      const wCount = event.wreckages.length;
       toast(`${patrolDispatches.length} patrol${patrolDispatches.length === 1 ? '' : 's'} recalibrated across ${wCount} wreckage site${wCount === 1 ? '' : 's'}.`, 'info');
     }
   }
@@ -12250,19 +12250,59 @@ async function main() {
       </div>`;
   }
 
-  // Apply chip click. key ∈ {'all','kills','entryExit','oorReacq','detected','showIcons','showLabels'}.
-  function _applyMarkerFilterToggle(eventId, key) {
+  // Resolve the full chain of events linked to an event (primary +
+  // shadows + primary if this is a shadow). Used by chain-scoped chip
+  // filter propagation for admin + state agency roles.
+  function _eventChain(eventId) {
+    const seen = new Set();
+    const out = [];
+    const push = (e) => {
+      if (!e || seen.has(e.id)) return;
+      seen.add(e.id);
+      out.push(e);
+    };
     const ev = getEvent(eventId);
-    if (!ev) return;
-    if (!ev._markerFilters) ev._markerFilters = _defaultMarkerFilters();
-    const f = ev._markerFilters;
-    if (key === 'all') {
-      const allOn = f.kills && f.entryExit && f.oorReacq && f.detected;
-      const target = !allOn;   // if any was off, turn all on. else all off.
-      f.kills = f.entryExit = f.oorReacq = f.detected = target;
-    } else if (key in f) {
-      f[key] = !f[key];
+    if (!ev) return out;
+    push(ev);
+    if (ev.shadowOfEventId) push(getEvent(ev.shadowOfEventId));
+    (ev.linkedEventIds || []).forEach(lid => push(getEvent(lid)));
+    // If this is a shadow, also include the primary's other linked
+    // shadows so all siblings share the same filter state.
+    if (ev.shadowOfEventId) {
+      const primary = getEvent(ev.shadowOfEventId);
+      (primary?.linkedEventIds || []).forEach(lid => push(getEvent(lid)));
     }
+    return out;
+  }
+
+  // Apply chip click. key ∈ {'all','kills','entryExit','oorReacq','detected','showIcons','showLabels'}.
+  // Chain-scope rule: admin + state agency receivers propagate the
+  // toggle across every event in the chain (CPH + AMK together).
+  // Operators (site owners) stay per-event so one operator's chip
+  // never affects another operator's site.
+  function _applyMarkerFilterToggle(eventId, key) {
+    const activeRoleId = getActiveRole?.()?.id;
+    const activeRole = activeRoleId
+      ? (RECEIVERS.find(r => r.id === activeRoleId)
+        || OPERATORS.find(o => o.id === activeRoleId)
+        || (activeRoleId === ADMIN.id ? ADMIN : null))
+      : null;
+    const isChainScoped = !activeRole || activeRole.kind === 'admin' || activeRole.kind === 'receiver';
+    const targets = isChainScoped ? _eventChain(eventId) : [getEvent(eventId)].filter(Boolean);
+
+    const _flipOne = (ev) => {
+      if (!ev._markerFilters) ev._markerFilters = _defaultMarkerFilters();
+      const f = ev._markerFilters;
+      if (key === 'all') {
+        const allOn = f.kills && f.entryExit && f.oorReacq && f.detected;
+        const target = !allOn;
+        f.kills = f.entryExit = f.oorReacq = f.detected = target;
+      } else if (key in f) {
+        f[key] = !f[key];
+      }
+    };
+    for (const ev of targets) _flipOne(ev);
+
     _refreshEventMarkerVisibility();
     // Invalidate the closed-panel signature cache so the re-render
     // actually paints the updated chip state (Palantir closed panel
