@@ -5844,9 +5844,44 @@ async function main() {
       };
     } catch (e) { return null; }
   };
+  // Phase 3 · scope-filter for exports. Given a recording and the
+  // active role, returns a copy of the recording with timeseries
+  // filtered to what THIS role is allowed to export. Admin +
+  // receiver = untouched. Operator = confirmed samples only within
+  // their owned sites' cov. Adds _scopeMeta to the recording so
+  // downstream tools know the export is scoped.
+  function _scopeRecordingForActiveRole(rec, eventId) {
+    const event = getEvent(eventId);
+    const roleId = getActiveRole?.();
+    if (!event || !rec?.timeseries) return rec;
+    const scope = scopedTrajectoryFor(event, roleId, rec.timeseries);
+    if (scope.fullyVisible) return rec;
+    // Build the set of (droneId, t_sec) keys allowed through.
+    const allow = new Set();
+    for (const seg of scope.segments) {
+      if (seg.visibility !== 'confirmed') continue;
+      for (const p of seg.positions) allow.add(`${p.droneId}:${p.t_sec_from_event}`);
+    }
+    const filteredTs = rec.timeseries.filter(s => allow.has(`${s.droneId}:${s.t_sec_from_event}`));
+    return {
+      ...rec,
+      timeseries: filteredTs,
+      _scopeMeta: {
+        scopedForRole: roleId,
+        fullyVisible: false,
+        hiddenSegmentCount: scope.hiddenSegmentCount,
+        ownedSiteIds: scope.ownedSiteIds,
+        scopeNote: scope.scopeNote,
+        originalSampleCount: rec.timeseries.length,
+        scopedSampleCount: filteredTs.length,
+      },
+    };
+  }
+
   window.__isr_downloadRecording = (eventId) => {
-    const rec = window.__isr_getRecording(eventId);
-    if (!rec) { console.warn('[P5A] no recording for', eventId); return; }
+    const rawRec = window.__isr_getRecording(eventId);
+    if (!rawRec) { console.warn('[P5A] no recording for', eventId); return; }
+    const rec = _scopeRecordingForActiveRole(rawRec, eventId);
     const blob = new Blob([JSON.stringify(rec, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -5862,8 +5897,10 @@ async function main() {
   // sensor as "SENSOR_ID:CONFIDENCE:RANGE_M" so external tools can split
   // the field. Meta rows omitted (they'd break the tabular contract).
   window.__isr_downloadRecordingCSV = (eventId) => {
-    const rec = window.__isr_getRecording(eventId);
-    if (!rec || !rec.timeseries?.length) { console.warn('[P5C] no recording for', eventId); return; }
+    const rawRec = window.__isr_getRecording(eventId);
+    if (!rawRec || !rawRec.timeseries?.length) { console.warn('[P5C] no recording for', eventId); return; }
+    const rec = _scopeRecordingForActiveRole(rawRec, eventId);
+    if (!rec.timeseries.length) { console.warn('[P5C] no scoped rows for role', eventId); toast('No trajectory rows in your site scope.', 'info'); return; }
     const cols = [
       'droneId', 'timestamp_utc', 't_sec_from_event',
       'lat', 'lon', 'altitude_agl_m', 'altitude_msl_m',
@@ -7097,15 +7134,60 @@ async function main() {
     }
     if (_replayState) stopReplay();
     document.body.classList.add('mode-analysis');
+    // Phase 3 · trajectory scoping. Operator viewers see only their
+    // owned-site segments; admin + state agencies see full trajectory.
+    // For operators, filter timeseries to in-scope samples + build
+    // inferred bridges between owned sites.
+    const _replayEvent = getEvent(eventId);
+    const _activeRoleId = getActiveRole?.();
+    const _scope = _replayEvent
+      ? scopedTrajectoryFor(_replayEvent, _activeRoleId, rec.timeseries)
+      : null;
+    let _filteredSamples = rec.timeseries;
+    if (_scope && !_scope.fullyVisible) {
+      // Keep only confirmed samples for droneEntries (bridges rendered
+      // separately below as inferred polylines).
+      const _confirmedPositionSet = new Set();
+      for (const seg of _scope.segments) {
+        if (seg.visibility !== 'confirmed') continue;
+        for (const p of seg.positions) _confirmedPositionSet.add(`${p.droneId}:${p.t_sec_from_event}`);
+      }
+      _filteredSamples = rec.timeseries.filter(s => _confirmedPositionSet.has(`${s.droneId}:${s.t_sec_from_event}`));
+      if (_filteredSamples.length === 0) {
+        toast(_scope.scopeNote || 'Event outside your site scope.', 'info');
+        document.body.classList.remove('mode-analysis');
+        return;
+      }
+    }
     // Group timeseries by droneId, preserve chronological order per drone
     const droneEntries = new Map();
-    for (const s of rec.timeseries) {
+    for (const s of _filteredSamples) {
       if (!droneEntries.has(s.droneId)) droneEntries.set(s.droneId, []);
       droneEntries.get(s.droneId).push(s);
     }
     for (const [, arr] of droneEntries) arr.sort((a, b) => a.t_sec_from_event - b.t_sec_from_event);
     // Confidence-coloured trails (all drones, static)
     const trailEntities = _replayRenderTrails(droneEntries);
+    // Inferred bridges between owned sites (dotted) — operator scope only.
+    if (_scope && !_scope.fullyVisible) {
+      for (const seg of _scope.segments) {
+        if (seg.visibility !== 'inferred' || seg.positions.length < 2) continue;
+        const flat = [];
+        for (const p of seg.positions) flat.push(p.lon, p.lat, _safeTrailAlt(p.altitude_agl_m || 100));
+        trailEntities.push(viewer.entities.add({
+          polyline: {
+            positions: Cesium.Cartesian3.fromDegreesArrayHeights(flat),
+            width: 2.5,
+            material: new Cesium.PolylineDashMaterialProperty({
+              color: Cesium.Color.fromCssColorString('#ffb84d').withAlpha(0.55),
+              dashLength: 14,
+            }),
+            clampToGround: false,
+          },
+          properties: { replay: true, confirmed: false, scoped: true, droneId: seg.droneId },
+        }));
+      }
+    }
     // Ghost billboards — one per drone, translucent variant of platformIcon
     const event = getEvent(eventId);
     const platform = event?.platform || rec.meta?.event_type || 'quadcopter';
