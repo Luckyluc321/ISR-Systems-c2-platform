@@ -10369,6 +10369,7 @@ async function main() {
         ${sec('details', 'Details', detailsBody, true)}
         ${sec('intelligence', 'Intelligence', intelligenceBody)}
         ${sec('activity', 'Possible situation activity', activityBody)}
+        ${sec('subevents', 'Subevent visibility', _renderMarkerFilterChipsBody(e))}
         ${sec('download', 'Download data', downloadBody)}
         <!-- Reclassify + Add Note forms render into this slot. Empty until
              a form is opened; refilled by openReclassifyForm / openNoteForm.
@@ -10417,6 +10418,12 @@ async function main() {
           toast(`CSV evidence downloaded (${rec.timeseries.length} rows)`, 'ok');
         }
         else if (a === 'pl-open-pdf') generatePirReport(e.id);
+      });
+    });
+    // Marker filter chip clicks — subevent visibility section.
+    detailBodyEl.querySelectorAll('[data-mflt]').forEach(chip => {
+      chip.addEventListener('click', () => {
+        _applyMarkerFilterToggle(chip.dataset.id || e.id, chip.dataset.mflt);
       });
     });
     detailBodyEl.querySelectorAll('[data-pir]').forEach(btn => {
@@ -12200,6 +12207,33 @@ async function main() {
       </div>`;
   }
 
+  // Body-only variant of the chip row for use inside a Palantir-style
+  // collapsible section (renderPalantirClosedPanel's sec() helper
+  // provides the outer wrapper + caret).
+  function _renderMarkerFilterChipsBody(event) {
+    if (!event) return '';
+    if (!event._markerFilters) event._markerFilters = _defaultMarkerFilters();
+    const f = event._markerFilters;
+    const allOn = f.kills && f.entryExit && f.oorReacq && f.detected;
+    const chipStyle = (on, color) => `padding: 4px 10px; border-radius: 12px; font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.10em; text-transform: uppercase; cursor: pointer; user-select: none; ${on ? `background: rgba(${color}, 0.14); border: 1px solid rgba(${color}, 0.55); color: rgb(${color});` : 'background: transparent; border: 1px solid #1e2530; color: var(--text-dim);'}`;
+    const chip = (label, key, color, eventId) => `<span class="dp-mflt-chip" data-mflt="${key}" data-id="${eventId}" style="${chipStyle(f[key], color)}">${label}</span>`;
+    const chipMaster = (label, active, eventId) => `<span class="dp-mflt-chip" data-mflt="all" data-id="${eventId}" style="${chipStyle(active, '160, 200, 220')}">${label}</span>`;
+    return `
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
+        <span style="font-size: var(--fs-2xs); color: var(--text-dim); font-family: var(--font-mono); letter-spacing: 0.10em; text-transform: uppercase; margin-right: 4px;">Categories:</span>
+        ${chipMaster(allOn ? 'All ✓' : 'All', allOn, event.id)}
+        ${chip(`Kills ${f.kills ? '✓' : ''}`,           'kills',     '255, 90, 90',   event.id)}
+        ${chip(`Entry/Exit ${f.entryExit ? '✓' : ''}`,   'entryExit', '77, 210, 255',  event.id)}
+        ${chip(`Reacquired ${f.oorReacq ? '✓' : ''}`,    'oorReacq',  '77, 255, 156',  event.id)}
+        ${chip(`Detected ${f.detected ? '✓' : ''}`,      'detected',  '77, 210, 255',  event.id)}
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+        <span style="font-size: var(--fs-2xs); color: var(--text-dim); font-family: var(--font-mono); letter-spacing: 0.10em; text-transform: uppercase; margin-right: 4px;">Display:</span>
+        ${chip(`Icons ${f.showIcons ? '✓' : ''}`,       'showIcons', '160, 200, 220', event.id)}
+        ${chip(`Labels ${f.showLabels ? '✓' : ''}`,     'showLabels','160, 200, 220', event.id)}
+      </div>`;
+  }
+
   // Apply chip click. key ∈ {'all','kills','entryExit','oorReacq','detected','showIcons','showLabels'}.
   function _applyMarkerFilterToggle(eventId, key) {
     const ev = getEvent(eventId);
@@ -12214,6 +12248,11 @@ async function main() {
       f[key] = !f[key];
     }
     _refreshEventMarkerVisibility();
+    // Invalidate the closed-panel signature cache so the re-render
+    // actually paints the updated chip state (Palantir closed panel
+    // memoizes on sig — a chip flip wouldn't change any other field
+    // in the sig otherwise).
+    _lastClosedPanelSig = null;
     if (getSelectedEventId() === eventId) renderDetailPanel();
   }
 
