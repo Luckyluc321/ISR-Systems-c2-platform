@@ -369,6 +369,81 @@ sequenceDiagram
 
 ---
 
+## Flow 7: Event Transmission Relevance + Incident Report
+
+Two coupled additions on top of the Flow 6 escalation extensions. Same detection-only stance. Same accountability guarantees.
+
+### 7.1 Domain Relevance Filter
+
+Every destination declares operational domains (maritime, aviation, ground, intel, cyber, all). Every event carries a `domainScope` computed from site type plus platform, unioned across linked shadow events. `destinationsForEvent(event)` intersects the two so an inland Energinet substation event never routes to Kystvagten, and a drone that starts inland and crosses to the coastline picks up maritime destinations from the moment of the link.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Sensor as Sensor mesh
+    participant Ev as events.js addEvent
+    participant Site as Site registry
+    participant Dst as destinations.js
+    participant Modal as Escalate modal
+    participant Rules as rules.js fireRule
+
+    Sensor->>Ev: new detection at CPH (airport)
+    Ev->>Site: defaultDomainsForSite('cph')
+    Site-->>Ev: ['aviation', 'ground']
+    Ev->>Ev: event.domainScope = ['aviation', 'ground']
+    Ev->>Ev: platform=missile → adds 'aviation' (idempotent)
+
+    Note over Ev: Later: shadow event at Esbjerg links back
+    Ev->>Ev: unionLinkedEventDomains(cph.id)<br/>scope = ['aviation','ground','maritime']
+
+    Modal->>Dst: destinationsForEvent(event)
+    Dst->>Dst: filter site catalog by scope intersection
+    Dst-->>Modal: Kystvagten NOW included<br/>(scope now contains maritime)
+
+    Rules->>Dst: destinationsForEvent(event) inside fireRule
+    Rules-->>Ev: auto-rule dispatches to domain-relevant destinations only
+```
+
+**Invariant:** `destinationsForEvent` is a pure filter. Never calls `escalateEvent`. Never mutates the destination catalog. Never triggers auto-cascade. When `event.domainScope` is missing, it falls back to the unfiltered site list so older callers do not silently lose destinations.
+
+---
+
+### 7.2 Post-Incident Report + Receiver Library
+
+Every event that closes generates a Post-Incident Report attached as `event.postIncidentReport`. Cross-linked shadow events each close independently, so each site's receivers see their own site-scoped report the moment their portion of the incident concludes. The report is rendered inline in the case-file view as Step 7, and browsable persistently from the Reports tab in the receiver profile.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Op as Operator
+    participant Ev as events.js closeEvent
+    participant Gen as post_incident_report.js
+    participant Case as Receiver case-file view
+    participant Lib as Receiver profile · Reports tab
+
+    Op->>Ev: closeEvent(id)
+    Ev->>Ev: status = 'closed', endTime = now
+    Ev->>Gen: buildPostIncidentReport(event, {getDestination})
+    Gen-->>Ev: {id, event_snapshot, summary, timeline,<br/>escalations, dispatches, handoff_chain,<br/>acknowledgments, ...}
+    Note over Ev: event.postIncidentReport attached
+
+    Case->>Case: renderWorkspaceMissionConsole(event)
+    Case->>Case: _renderPostIncidentReportPanel<br/>emphasisForBranch(activeRole)
+    Note over Case: PET reads it as intel<br/>Politi reads it as ground evidence<br/>Trafikstyrelsen reads it as airspace impact
+
+    Lib->>Lib: filter EVENTS where postIncidentReport exists<br/>AND active role has an escalation on it
+    Lib-->>Op: browsable archive per receiver profile
+    Op->>Case: click card → open workspace → PIR panel visible
+```
+
+**Invariants:**
+- Generator is a pure state assembler. No calls to `escalateEvent`, dispatch adapters, or agents. Reads what already exists on the event at close.
+- Report attached in a `try/catch` so a generator failure never blocks close.
+- Reports tab filter uses the same `roleDestSet` axis as the Inbox tab, so receiver isolation matches inbox semantics.
+- Seed events (demo historical data) get a boot-time backfill so the panel is populated on demo events too.
+
+---
+
 ## Cross-Cutting States
 
 **Site scope:**

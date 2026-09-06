@@ -16922,6 +16922,11 @@ async function main() {
   // Live values (positions, ETAs, confidences) update via _patchLiveTelemetry
   // separately without needing a full re-render.
   let _lastReceiverViewSig = null;
+  // Receiver inbox list mode. 'inbox' = live/recent dispatched events (default).
+  // 'reports' = archive of every past event this role was on where a
+  // Post-Incident Report was generated. Toggled via header tabs; force
+  // re-renders bypass the sig cache. See Phase C of the receiver-flow work.
+  let _receiverListMode = 'inbox';
   // Zone-split render state for the workspace. Full-mount fires when
   // the workspace opens or the event/mode changes. Otherwise only the
   // Mission Console aside re-renders in place.
@@ -17000,6 +17005,9 @@ async function main() {
       wsPart,
       wsClosed ? '' : escStatusHash,   // ack changes irrelevant once closed
       `evc:${receivedEvents.length}`,
+      // Include the list-mode so future callers that flip _receiverListMode
+      // without manually nulling _lastReceiverViewSig still get a re-render.
+      `lm:${_receiverListMode}`,
     ];
     return parts.join('|');
   }
@@ -17220,6 +17228,36 @@ async function main() {
         </div>`;
     }).join('') : `<div class="rcv-empty">No events currently dispatched to ${role.label}.</div>`;
 
+    // Reports list — closed events this role was on that carry a PIR.
+    // Same filter axis as the inbox (roleDestSet against event escalations),
+    // narrowed to events with postIncidentReport attached. Click opens the
+    // workspace in report mode which auto-scrolls to the Step 7 PIR panel.
+    const reportEvents = EVENTS.filter(e => e.postIncidentReport
+      && Array.isArray(e.escalations)
+      && e.escalations.some(r => roleDestSet.has(r.destinationId)))
+      .sort((a, b) => (b.closedAt || b.endTime || b.startTime || '').localeCompare(a.closedAt || a.endTime || a.startTime || ''));
+    const reportsList = reportEvents.length ? reportEvents.map(e => {
+      const rpt = e.postIncidentReport;
+      const cls = e.classification;
+      const rec = e.escalations.find(r => roleDestSet.has(r.destinationId));
+      const closedAt = e.closedAt || e.endTime || '';
+      const site = SITES[e.siteId]?.name || e.siteId;
+      const summaryOneLine = (rpt.summary || '').replace(/\s+/g, ' ').slice(0, 160);
+      return `
+        <div class="rcv-card ${cls}" data-rcv="open-report" data-id="${e.id}" role="button" tabindex="0" title="Open incident report">
+          <div class="rcv-card-hdr">
+            <span class="rcv-card-cls rcv-cls-${cls}">${(cls || '').toUpperCase()}</span>
+            <span class="rcv-card-conf" style="color:#ffb84d;font-family:var(--font-mono);">REPORT</span>
+          </div>
+          <div class="rcv-card-drone">${e.droneType}</div>
+          <div class="rcv-card-meta">${e.id}  ·  ${site}  ·  Closed ${closedAt ? closedAt.slice(0,10) + ' ' + closedAt.slice(11,19) + 'Z' : 'time unknown'}</div>
+          <div class="rcv-card-status" style="color: var(--text-dim); line-height: 1.5; margin-top: 4px;">${summaryOneLine}${(rpt.summary || '').length > 160 ? '…' : ''}</div>
+          <div class="rcv-card-actions">
+            ${rec?.response ? `<span class="c-label" style="color:#4dff9c;">You responded ${(rec.response.receivedAt || '').slice(11,19)}Z</span>` : `<span class="c-label" style="color:var(--text-dim);">No response on file</span>`}
+          </div>
+        </div>`;
+    }).join('') : `<div class="rcv-empty">No incident reports yet. Reports appear here once an event you were on is closed.</div>`;
+
     // Detail-pane + response-overlay construction removed 2026-09-05.
     // Both were gated on `selectedEv` (i.e. `_selectedReceiverEventId`)
     // which was only ever set by the retired `pick` action. Inbox is
@@ -17244,18 +17282,37 @@ async function main() {
     // When NOT dispatched: swap the whole body for the full-viewport
     // standby hero (fills the black void the compact layout used to
     // leave behind).
-    const bodyContent = receivedEvents.length
+    // Reports mode swaps the body content only — advisory strip stays
+    // hidden in reports view since it's about live threats, not archive.
+    const inboxBody = receivedEvents.length
       ? `${advisoryStrip}<div class="rcv-list-body">${list}</div>`
       : standbyHero;
+    const reportsBody = `<div class="rcv-list-body">${reportsList}</div>`;
+    const bodyContent = _receiverListMode === 'reports' ? reportsBody : inboxBody;
+
+    // Tabs — Inbox + Reports switcher. Active tab gets accent bar; count
+    // chips show live cardinality per surface.
+    const tabsHtml = `
+      <div class="rcv-list-tabs" style="display:flex;gap:var(--space-2);padding:0 var(--space-3) var(--space-2);">
+        <button class="rcv-list-tab ${_receiverListMode === 'inbox' ? 'is-active' : ''}" data-rcv="tab-inbox"
+          style="background:transparent;border:none;padding:6px 10px;color:${_receiverListMode === 'inbox' ? 'var(--accent)' : 'var(--text-dim)'};border-bottom:2px solid ${_receiverListMode === 'inbox' ? 'var(--accent)' : 'transparent'};cursor:pointer;font-family:var(--font-mono);font-size:var(--fs-2xs);letter-spacing:0.12em;text-transform:uppercase;">
+          Inbox <span style="opacity:0.65;margin-left:4px;">${receivedEvents.length}</span>
+        </button>
+        <button class="rcv-list-tab ${_receiverListMode === 'reports' ? 'is-active' : ''}" data-rcv="tab-reports"
+          style="background:transparent;border:none;padding:6px 10px;color:${_receiverListMode === 'reports' ? '#ffb84d' : 'var(--text-dim)'};border-bottom:2px solid ${_receiverListMode === 'reports' ? '#ffb84d' : 'transparent'};cursor:pointer;font-family:var(--font-mono);font-size:var(--fs-2xs);letter-spacing:0.12em;text-transform:uppercase;">
+          Reports <span style="opacity:0.65;margin-left:4px;">${reportEvents.length}</span>
+        </button>
+      </div>`;
 
     receiverView.innerHTML = `
       <aside class="rcv-list rcv-list--full">
         <div class="rcv-list-hdr">
           ${parentBackBtn}
-          <span class="rcv-list-title">Inbox</span>
-          <span class="rcv-list-count">${receivedEvents.length}</span>
+          <span class="rcv-list-title">${_receiverListMode === 'reports' ? 'Reports' : 'Inbox'}</span>
+          <span class="rcv-list-count">${_receiverListMode === 'reports' ? reportEvents.length : receivedEvents.length}</span>
         </div>
         <div class="rcv-list-scope">${role.label} · Scope: ${role.scope === 'all-sites' ? 'All sites, Denmark' : role.scope === 'cph-only' ? 'CPH Airport only' : role.scope === 'esbjerg-only' ? 'Esbjerg Harbour only' : role.scope}</div>
+        ${tabsHtml}
         ${bodyContent}
       </aside>
     `;
@@ -17709,6 +17766,13 @@ async function main() {
         _exitMapMode();
         renderReceiverView();
       }
+      else if (action === 'tab-inbox' || action === 'tab-reports') {
+        const next = action === 'tab-reports' ? 'reports' : 'inbox';
+        if (_receiverListMode === next) return;
+        _receiverListMode = next;
+        _lastReceiverViewSig = null;
+        renderReceiverView({ immediate: true });
+      }
       else if (action === 'role-back-parent') {
         // Hierarchy back-nav: switch active role UP one level so the
         // duty officer returns to the parent chooser (e.g. Rigspoliti
@@ -17758,6 +17822,7 @@ async function main() {
     _workspaceMode = 'report';
     _mistralFiredForEvent = null;
     _lastReceiverViewSig = null;
+    _receiverListMode = 'inbox';   // reset to Inbox tab on role change
     _lastReceiverWorkspaceId = null;
     _lastReceiverWorkspaceMode = null;
     _lastConsoleSig = null;
