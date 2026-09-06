@@ -410,7 +410,7 @@ sequenceDiagram
 
 ### 7.2 Post-Incident Report + Receiver Library
 
-Every event that closes generates a Post-Incident Report attached as `event.postIncidentReport`. Cross-linked shadow events each close independently, so each site's receivers see their own site-scoped report the moment their portion of the incident concludes. The report is rendered inline in the case-file view as Step 7, and browsable persistently from the Reports tab in the receiver profile.
+Every event that closes generates a Post-Incident Report attached as `event.postIncidentReport`. Cross-linked shadow events each close independently, so each site's receivers see their own site-scoped report the moment their portion of the incident concludes. The report is rendered inline in the case-file view as Step 7. Historical reports are browsable in the receiver profile via a side-by-side Reports panel that sits next to the Inbox with a filter strip on top (site, kommune, politikreds, region, classification, domain, time range).
 
 ```mermaid
 sequenceDiagram
@@ -419,7 +419,7 @@ sequenceDiagram
     participant Ev as events.js closeEvent
     participant Gen as post_incident_report.js
     participant Case as Receiver case-file view
-    participant Lib as Receiver profile · Reports tab
+    participant Prof as Receiver profile (two-box view)
 
     Op->>Ev: closeEvent(id)
     Ev->>Ev: status = 'closed', endTime = now
@@ -431,15 +431,20 @@ sequenceDiagram
     Case->>Case: _renderPostIncidentReportPanel<br/>emphasisForBranch(activeRole)
     Note over Case: PET reads it as intel<br/>Politi reads it as ground evidence<br/>Trafikstyrelsen reads it as airspace impact
 
-    Lib->>Lib: filter EVENTS where postIncidentReport exists<br/>AND active role has an escalation on it
-    Lib-->>Op: browsable archive per receiver profile
-    Op->>Case: click card → open workspace → PIR panel visible
+    Prof->>Prof: two boxes rendered side-by-side<br/>Inbox (left, ~440px) + Reports (right, flex)
+    Prof->>Prof: reportsPool = filter EVENTS where PIR exists<br/>AND active role has an escalation on it
+    Prof->>Prof: chip strip renders filters from actual variation<br/>in the pool (single-value dims omitted)
+    Op->>Prof: change filter chip → re-render<br/>reportsFiltered = applyReportsFilter(pool)
+    Op->>Case: click report card → open workspace<br/>→ PIR panel visible
 ```
+
+**Layout:** Inbox is a fixed-width (440px) column on the left holding the live dispatched queue. Reports is a flex-fill column on the right holding the persistent archive with filter chips on top. Below a viewport width where the two would collide (Reports min-width 500px + Inbox 440px), CSS flex-wrap stacks Reports below Inbox. No media query needed. Filter state is session-only and resets on every role change so PET switching to Politi does not inherit PET's filter set.
 
 **Invariants:**
 - Generator is a pure state assembler. No calls to `escalateEvent`, dispatch adapters, or agents. Reads what already exists on the event at close.
 - Report attached in a `try/catch` so a generator failure never blocks close.
-- Reports tab filter uses the same `roleDestSet` axis as the Inbox tab, so receiver isolation matches inbox semantics.
+- Reports pool uses the same `roleDestSet` axis as Inbox, so receiver isolation matches inbox semantics.
+- Filter chips only render when the unfiltered pool has 2+ distinct values on that dimension. A dimension with one possible value is noise.
 - Seed events (demo historical data) get a boot-time backfill so the panel is populated on demo events too.
 
 ---

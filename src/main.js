@@ -16473,6 +16473,103 @@ async function main() {
     return caps.includes(action);
   }
 
+  // ── Reports filter helpers ──
+  // Apply _reportsFilter to a pool of report events. Returns the filtered
+  // subset. Wide-open state ('all' on every dimension) passes through
+  // untouched. Time-range uses Date.now() so demo data honours the
+  // filter based on real elapsed time from the calling browser.
+  function _applyReportsFilter(pool, f) {
+    if (!pool?.length) return pool || [];
+    const cutoffMs = ({
+      '7d': 7 * 24 * 60 * 60 * 1000,
+      '30d': 30 * 24 * 60 * 60 * 1000,
+      '90d': 90 * 24 * 60 * 60 * 1000,
+    })[f.timeRange];
+    const nowMs = Date.now();
+    return pool.filter(e => {
+      if (f.site !== 'all' && e.siteId !== f.site) return false;
+      if (f.kommune !== 'all' && (e.geoContext?.kommune || '') !== f.kommune) return false;
+      if (f.politikreds !== 'all' && (e.geoContext?.politikreds || '') !== f.politikreds) return false;
+      if (f.region !== 'all' && (e.geoContext?.region || '') !== f.region) return false;
+      if (f.classification !== 'all' && e.classification !== f.classification) return false;
+      if (f.domain !== 'all') {
+        const scope = Array.isArray(e.domainScope) ? e.domainScope : [];
+        if (!scope.includes(f.domain)) return false;
+      }
+      if (cutoffMs) {
+        const closed = e.closedAt || e.endTime;
+        if (!closed) return false;
+        const closedMs = new Date(closed).getTime();
+        if (Number.isNaN(closedMs)) return false;
+        if (nowMs - closedMs > cutoffMs) return false;
+      }
+      return true;
+    });
+  }
+
+  // Render the filter chip strip on top of the Reports box. Each chip
+  // only appears when the unfiltered pool actually has 2+ distinct
+  // values on that dimension — a filter for a dimension with only one
+  // possible value is noise. Chip change fires reports-filter-change
+  // which routes into the handler below and re-renders.
+  function _renderReportsFilterChips(pool, current) {
+    if (!pool?.length) return '';
+    const uniqueSorted = (arr) => [...new Set(arr.filter(Boolean))].sort();
+    const sites = uniqueSorted(pool.map(e => e.siteId));
+    const kommuner = uniqueSorted(pool.map(e => e.geoContext?.kommune));
+    const politikredse = uniqueSorted(pool.map(e => e.geoContext?.politikreds));
+    const regioner = uniqueSorted(pool.map(e => e.geoContext?.region));
+    const classifications = uniqueSorted(pool.map(e => e.classification));
+    const domains = uniqueSorted(pool.flatMap(e => Array.isArray(e.domainScope) ? e.domainScope : []));
+
+    const chip = (label, key, options, valueLabelFn = (v) => v) => {
+      if (options.length < 2) return '';   // dimension has no variation — omit chip
+      const opts = ['<option value="all">All ' + label + '</option>']
+        .concat(options.map(v => `<option value="${v}"${current[key] === v ? ' selected' : ''}>${valueLabelFn(v)}</option>`));
+      const dirty = current[key] !== 'all';
+      return `<label style="display:inline-flex;align-items:center;gap:4px;font-size:var(--fs-2xs);color:${dirty ? '#ffb84d' : 'var(--text-dim)'};font-family:var(--font-mono);letter-spacing:0.08em;text-transform:uppercase;">
+        ${label}
+        <select data-rcv="reports-filter-change" data-filter-key="${key}" style="background:${dirty ? 'rgba(255,184,77,0.10)' : 'rgba(255,255,255,0.03)'};border:1px solid ${dirty ? 'rgba(255,184,77,0.4)' : 'rgba(255,255,255,0.08)'};color:var(--text);padding:3px 8px;border-radius:2px;font-family:var(--font-body);font-size:var(--fs-xs);cursor:pointer;">
+          ${opts.join('')}
+        </select>
+      </label>`;
+    };
+
+    const timeChip = (() => {
+      const opts = [
+        { v: 'all',  l: 'Any time' },
+        { v: '7d',   l: 'Last 7 days' },
+        { v: '30d',  l: 'Last 30 days' },
+        { v: '90d',  l: 'Last 90 days' },
+      ];
+      const dirty = current.timeRange !== 'all';
+      return `<label style="display:inline-flex;align-items:center;gap:4px;font-size:var(--fs-2xs);color:${dirty ? '#ffb84d' : 'var(--text-dim)'};font-family:var(--font-mono);letter-spacing:0.08em;text-transform:uppercase;">
+        Time
+        <select data-rcv="reports-filter-change" data-filter-key="timeRange" style="background:${dirty ? 'rgba(255,184,77,0.10)' : 'rgba(255,255,255,0.03)'};border:1px solid ${dirty ? 'rgba(255,184,77,0.4)' : 'rgba(255,255,255,0.08)'};color:var(--text);padding:3px 8px;border-radius:2px;font-family:var(--font-body);font-size:var(--fs-xs);cursor:pointer;">
+          ${opts.map(o => `<option value="${o.v}"${current.timeRange === o.v ? ' selected' : ''}>${o.l}</option>`).join('')}
+        </select>
+      </label>`;
+    })();
+
+    const anyDirty = Object.keys(current).some(k => current[k] !== _REPORTS_FILTER_DEFAULTS[k]);
+    const clearBtn = anyDirty
+      ? `<button data-rcv="reports-filter-clear" style="background:transparent;border:1px solid rgba(255,184,77,0.4);color:#ffb84d;padding:3px 10px;border-radius:2px;cursor:pointer;font-family:var(--font-mono);font-size:var(--fs-2xs);letter-spacing:0.12em;text-transform:uppercase;">Clear</button>`
+      : '';
+
+    const chips = [
+      chip('Site', 'site', sites, (v) => SITES[v]?.name || v),
+      chip('Kommune', 'kommune', kommuner),
+      chip('Politikreds', 'politikreds', politikredse),
+      chip('Region', 'region', regioner),
+      chip('Class', 'classification', classifications, (v) => v.charAt(0).toUpperCase() + v.slice(1)),
+      chip('Domain', 'domain', domains, (v) => v.charAt(0).toUpperCase() + v.slice(1)),
+      timeChip,
+    ].filter(Boolean);
+
+    if (!chips.length) return '';
+    return `<div class="rcv-reports-filters" style="display:flex;flex-wrap:wrap;gap:8px;padding:var(--space-2) var(--space-3);align-items:center;border-bottom:1px solid var(--border);">${chips.join('')}${clearBtn}</div>`;
+  }
+
   // Compact badge for esc.progressStatus (post-ack progress axis).
   // Empty when no progress state set yet. Used by both operator log
   // renderers and the receiver inbox card so the state surfaces on
@@ -16922,11 +17019,20 @@ async function main() {
   // Live values (positions, ETAs, confidences) update via _patchLiveTelemetry
   // separately without needing a full re-render.
   let _lastReceiverViewSig = null;
-  // Receiver inbox list mode. 'inbox' = live/recent dispatched events (default).
-  // 'reports' = archive of every past event this role was on where a
-  // Post-Incident Report was generated. Toggled via header tabs; force
-  // re-renders bypass the sig cache. See Phase C of the receiver-flow work.
-  let _receiverListMode = 'inbox';
+  // Reports filter state — session-only, reset on role change so PET
+  // switching to Politi does not inherit PET's filter set. Wide open by
+  // default: every past event this role was on with a PIR shows until
+  // the receiver narrows. See Phase C of the receiver-flow work.
+  const _REPORTS_FILTER_DEFAULTS = {
+    site: 'all',
+    kommune: 'all',
+    politikreds: 'all',
+    region: 'all',
+    classification: 'all',
+    domain: 'all',
+    timeRange: 'all',
+  };
+  let _reportsFilter = { ..._REPORTS_FILTER_DEFAULTS };
   // Zone-split render state for the workspace. Full-mount fires when
   // the workspace opens or the event/mode changes. Otherwise only the
   // Mission Console aside re-renders in place.
@@ -17005,9 +17111,9 @@ async function main() {
       wsPart,
       wsClosed ? '' : escStatusHash,   // ack changes irrelevant once closed
       `evc:${receivedEvents.length}`,
-      // Include the list-mode so future callers that flip _receiverListMode
-      // without manually nulling _lastReceiverViewSig still get a re-render.
-      `lm:${_receiverListMode}`,
+      // Include the reports filter so chip changes trigger a re-render
+      // without callers having to null the sig manually.
+      `rf:${Object.values(_reportsFilter).join(',')}`,
     ];
     return parts.join('|');
   }
@@ -17228,21 +17334,27 @@ async function main() {
         </div>`;
     }).join('') : `<div class="rcv-empty">No events currently dispatched to ${role.label}.</div>`;
 
-    // Reports list — closed events this role was on that carry a PIR.
-    // Same filter axis as the inbox (roleDestSet against event escalations),
-    // narrowed to events with postIncidentReport attached. Click opens the
-    // workspace in report mode which auto-scrolls to the Step 7 PIR panel.
-    const reportEvents = EVENTS.filter(e => e.postIncidentReport
+    // Reports pool — closed events this role was on that carry a PIR.
+    // Same per-role isolation as inbox (roleDestSet against escalations),
+    // narrowed to events with postIncidentReport attached. Unfiltered
+    // pool is used to populate filter chip options (only show a chip if
+    // there is real variation to filter over). Filter is applied AFTER
+    // for card rendering + count display.
+    const reportsPool = EVENTS.filter(e => e.postIncidentReport
       && Array.isArray(e.escalations)
       && e.escalations.some(r => roleDestSet.has(r.destinationId)))
       .sort((a, b) => (b.closedAt || b.endTime || b.startTime || '').localeCompare(a.closedAt || a.endTime || a.startTime || ''));
-    const reportsList = reportEvents.length ? reportEvents.map(e => {
+    const reportsFiltered = _applyReportsFilter(reportsPool, _reportsFilter);
+    const filterChipsHtml = _renderReportsFilterChips(reportsPool, _reportsFilter);
+    const reportsList = reportsFiltered.length ? reportsFiltered.map(e => {
       const rpt = e.postIncidentReport;
       const cls = e.classification;
       const rec = e.escalations.find(r => roleDestSet.has(r.destinationId));
       const closedAt = e.closedAt || e.endTime || '';
       const site = SITES[e.siteId]?.name || e.siteId;
-      const summaryOneLine = (rpt.summary || '').replace(/\s+/g, ' ').slice(0, 160);
+      const summaryOneLine = (rpt.summary || '').replace(/\s+/g, ' ').slice(0, 200);
+      const kommune = e.geoContext?.kommune || '';
+      const metaSuffix = kommune ? `  ·  ${kommune}` : '';
       return `
         <div class="rcv-card ${cls}" data-rcv="open-report" data-id="${e.id}" role="button" tabindex="0" title="Open incident report">
           <div class="rcv-card-hdr">
@@ -17250,13 +17362,15 @@ async function main() {
             <span class="rcv-card-conf" style="color:#ffb84d;font-family:var(--font-mono);">REPORT</span>
           </div>
           <div class="rcv-card-drone">${e.droneType}</div>
-          <div class="rcv-card-meta">${e.id}  ·  ${site}  ·  Closed ${closedAt ? closedAt.slice(0,10) + ' ' + closedAt.slice(11,19) + 'Z' : 'time unknown'}</div>
-          <div class="rcv-card-status" style="color: var(--text-dim); line-height: 1.5; margin-top: 4px;">${summaryOneLine}${(rpt.summary || '').length > 160 ? '…' : ''}</div>
+          <div class="rcv-card-meta">${e.id}  ·  ${site}${metaSuffix}  ·  Closed ${closedAt ? closedAt.slice(0,10) + ' ' + closedAt.slice(11,19) + 'Z' : 'time unknown'}</div>
+          <div class="rcv-card-status" style="color: var(--text-dim); line-height: 1.5; margin-top: 4px;">${summaryOneLine}${(rpt.summary || '').length > 200 ? '…' : ''}</div>
           <div class="rcv-card-actions">
             ${rec?.response ? `<span class="c-label" style="color:#4dff9c;">You responded ${(rec.response.receivedAt || '').slice(11,19)}Z</span>` : `<span class="c-label" style="color:var(--text-dim);">No response on file</span>`}
           </div>
         </div>`;
-    }).join('') : `<div class="rcv-empty">No incident reports yet. Reports appear here once an event you were on is closed.</div>`;
+    }).join('') : (reportsPool.length
+      ? `<div class="rcv-empty">No reports match the current filters. <button class="c-btn compact" data-rcv="reports-filter-clear" style="margin-left:8px;">Clear filters</button></div>`
+      : `<div class="rcv-empty">No incident reports yet. Reports appear here once an event you were on is closed.</div>`);
 
     // Detail-pane + response-overlay construction removed 2026-09-05.
     // Both were gated on `selectedEv` (i.e. `_selectedReceiverEventId`)
@@ -17277,44 +17391,37 @@ async function main() {
       ? `<button class="rcv-list-back" data-rcv="role-back-parent" title="Back to ${parentRole.org || parentRole.label}">← ${parentRole.org || parentRole.label}</button>`
       : '';
 
-    // When events ARE dispatched: keep the compact advisory strip
-    // at the top of the inbox so the operator can scan cards below.
-    // When NOT dispatched: swap the whole body for the full-viewport
-    // standby hero (fills the black void the compact layout used to
-    // leave behind).
-    // Reports mode swaps the body content only — advisory strip stays
-    // hidden in reports view since it's about live threats, not archive.
+    // Two-box layout: Inbox on the left (fixed ~440px), Reports on the
+    // right (flex-fill). flex-wrap so on narrow viewports the Reports
+    // box wraps below Inbox — no media query needed. Inbox body swaps
+    // between advisory-strip+cards (live dispatches present) and the
+    // full-viewport standby hero (nothing active). Reports body always
+    // renders filter chips + filtered card list.
     const inboxBody = receivedEvents.length
       ? `${advisoryStrip}<div class="rcv-list-body">${list}</div>`
       : standbyHero;
-    const reportsBody = `<div class="rcv-list-body">${reportsList}</div>`;
-    const bodyContent = _receiverListMode === 'reports' ? reportsBody : inboxBody;
-
-    // Tabs — Inbox + Reports switcher. Active tab gets accent bar; count
-    // chips show live cardinality per surface.
-    const tabsHtml = `
-      <div class="rcv-list-tabs" style="display:flex;gap:var(--space-2);padding:0 var(--space-3) var(--space-2);">
-        <button class="rcv-list-tab ${_receiverListMode === 'inbox' ? 'is-active' : ''}" data-rcv="tab-inbox"
-          style="background:transparent;border:none;padding:6px 10px;color:${_receiverListMode === 'inbox' ? 'var(--accent)' : 'var(--text-dim)'};border-bottom:2px solid ${_receiverListMode === 'inbox' ? 'var(--accent)' : 'transparent'};cursor:pointer;font-family:var(--font-mono);font-size:var(--fs-2xs);letter-spacing:0.12em;text-transform:uppercase;">
-          Inbox <span style="opacity:0.65;margin-left:4px;">${receivedEvents.length}</span>
-        </button>
-        <button class="rcv-list-tab ${_receiverListMode === 'reports' ? 'is-active' : ''}" data-rcv="tab-reports"
-          style="background:transparent;border:none;padding:6px 10px;color:${_receiverListMode === 'reports' ? '#ffb84d' : 'var(--text-dim)'};border-bottom:2px solid ${_receiverListMode === 'reports' ? '#ffb84d' : 'transparent'};cursor:pointer;font-family:var(--font-mono);font-size:var(--fs-2xs);letter-spacing:0.12em;text-transform:uppercase;">
-          Reports <span style="opacity:0.65;margin-left:4px;">${reportEvents.length}</span>
-        </button>
-      </div>`;
 
     receiverView.innerHTML = `
-      <aside class="rcv-list rcv-list--full">
-        <div class="rcv-list-hdr">
-          ${parentBackBtn}
-          <span class="rcv-list-title">${_receiverListMode === 'reports' ? 'Reports' : 'Inbox'}</span>
-          <span class="rcv-list-count">${_receiverListMode === 'reports' ? reportEvents.length : receivedEvents.length}</span>
-        </div>
-        <div class="rcv-list-scope">${role.label} · Scope: ${role.scope === 'all-sites' ? 'All sites, Denmark' : role.scope === 'cph-only' ? 'CPH Airport only' : role.scope === 'esbjerg-only' ? 'Esbjerg Harbour only' : role.scope}</div>
-        ${tabsHtml}
-        ${bodyContent}
-      </aside>
+      <div class="rcv-lists-row" style="display:flex;flex-wrap:wrap;gap:var(--space-2);align-items:stretch;width:100%;height:100%;">
+        <aside class="rcv-list rcv-list--inbox" style="flex:0 0 440px;min-width:320px;display:flex;flex-direction:column;">
+          <div class="rcv-list-hdr">
+            ${parentBackBtn}
+            <span class="rcv-list-title">Inbox</span>
+            <span class="rcv-list-count">${receivedEvents.length}</span>
+          </div>
+          <div class="rcv-list-scope">${role.label} · Scope: ${role.scope === 'all-sites' ? 'All sites, Denmark' : role.scope === 'cph-only' ? 'CPH Airport only' : role.scope === 'esbjerg-only' ? 'Esbjerg Harbour only' : role.scope}</div>
+          ${inboxBody}
+        </aside>
+        <aside class="rcv-list rcv-list--reports" style="flex:1 1 700px;min-width:500px;display:flex;flex-direction:column;border-right:none;">
+          <div class="rcv-list-hdr">
+            <span class="rcv-list-title" style="color:#ffb84d;">Reports</span>
+            <span class="rcv-list-count">${reportsFiltered.length}${reportsPool.length !== reportsFiltered.length ? ` <span style="color:var(--text-dim);font-weight:normal;">of ${reportsPool.length}</span>` : ''}</span>
+          </div>
+          <div class="rcv-list-scope">Historical incident reports for cases you were on</div>
+          ${filterChipsHtml}
+          <div class="rcv-list-body">${reportsList}</div>
+        </aside>
+      </div>
     `;
 
     receiverView.style.display = 'flex';
@@ -17351,6 +17458,28 @@ async function main() {
       });
     });
     _applyCollapsedPanelState();
+
+    // Filter chip <select> elements fire on `change`, not click. Wire
+    // them separately so the shared handler below can route through the
+    // same reports-filter-change action. Also stopPropagation so the
+    // reports-list card underneath does not steal the event.
+    receiverView.querySelectorAll('select[data-rcv]').forEach(sel => {
+      sel.addEventListener('change', (ev) => {
+        ev.stopPropagation();
+        const action = sel.dataset.rcv;
+        if (action === 'reports-filter-change') {
+          const key = sel.dataset.filterKey;
+          if (!key || !(key in _reportsFilter)) return;
+          const val = sel.value;
+          if (_reportsFilter[key] === val) return;
+          _reportsFilter[key] = val;
+          renderReceiverView({ immediate: true });
+        }
+      });
+      // Also swallow clicks on the select so they do not bubble to the
+      // card row underneath (which would trigger open-report).
+      sel.addEventListener('click', (ev) => ev.stopPropagation());
+    });
 
     receiverView.querySelectorAll('[data-rcv]').forEach(el => el.addEventListener('click', (ev) => {
       ev.stopPropagation();
@@ -17766,11 +17895,16 @@ async function main() {
         _exitMapMode();
         renderReceiverView();
       }
-      else if (action === 'tab-inbox' || action === 'tab-reports') {
-        const next = action === 'tab-reports' ? 'reports' : 'inbox';
-        if (_receiverListMode === next) return;
-        _receiverListMode = next;
-        _lastReceiverViewSig = null;
+      else if (action === 'reports-filter-change') {
+        const key = el.dataset.filterKey;
+        if (!key || !(key in _reportsFilter)) return;
+        const val = el.value;
+        if (_reportsFilter[key] === val) return;
+        _reportsFilter[key] = val;
+        renderReceiverView({ immediate: true });
+      }
+      else if (action === 'reports-filter-clear') {
+        _reportsFilter = { ..._REPORTS_FILTER_DEFAULTS };
         renderReceiverView({ immediate: true });
       }
       else if (action === 'role-back-parent') {
@@ -17822,7 +17956,7 @@ async function main() {
     _workspaceMode = 'report';
     _mistralFiredForEvent = null;
     _lastReceiverViewSig = null;
-    _receiverListMode = 'inbox';   // reset to Inbox tab on role change
+    _reportsFilter = { ..._REPORTS_FILTER_DEFAULTS };   // session-only, reset per role
     _lastReceiverWorkspaceId = null;
     _lastReceiverWorkspaceMode = null;
     _lastConsoleSig = null;
