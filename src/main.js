@@ -85,6 +85,7 @@ import {
   registerPostIncidentReportGenerator,
 } from './events.js';
 import { buildPostIncidentReport, emphasisForBranch } from './post_incident_report.js';
+import { evaluateClassificationPipeline, evaluateAttackProfileDetector } from './classification_pipeline.js';
 import {
   destinationsForSite, destinationsForEvent, getDestination, destinationTypeLabel,
   destinationParent, destinationShortLabel, groupByParent,
@@ -10197,6 +10198,50 @@ async function main() {
         _handlePerSiteLifecycle(event, state, currentGroupSites);
       } } catch (err) { console.error('[SWARM tick error]', err); }
 
+      // ── Classification pipeline evaluation ──
+      // Runs per tick. No-op for events that don't opt in via the
+      // template's dynamicClassification flag. Firing every tick is
+      // safe (idempotent + only writes on threshold crossings). Passes
+      // cooperative-check + nearest-critical-asset distance so the
+      // state machine and attack detector have real ctx. Attack
+      // advisory toasts once per event via the hooks.onAdvisory
+      // callback, which also invalidates the alert-strip sig so the
+      // advisory chip appears without waiting for the next input.
+      try {
+        // Live-kinematics update into subject BEFORE pipeline eval, so
+        // the attack detector's low+fast+close-to-critical-asset rule
+        // reads real per-tick values rather than static spawn-time
+        // kinematics. Real NN plugs into applyNnTickToSubject; this
+        // mock path mirrors position/speed/altitude from the drone
+        // tick so the detector fires on the Shahed dive path etc.
+        if (event.subject?.kinematics && p?.speed != null) {
+          event.subject.kinematics.speed_ms = p.speed;
+          event.subject.kinematics.heading_deg = Math.round(p.heading || 0);
+          if (p.alt != null) event.subject.kinematics.altitude_m_agl = p.alt;
+        }
+        // Nearest critical asset distance for the attack detector's
+        // "low + fast + close-to-sensitive-asset" rule. Uses the
+        // site_context helper which returns distance in km — convert
+        // to meters here so the pipeline threshold constant stays in
+        // native units (meters).
+        let nearestDistM = null;
+        if (p?.lat != null && p?.lon != null && event.siteId) {
+          const nearest = nearestCriticalArea(event.siteId, p.lat, p.lon, 5);
+          if (nearest?.dist != null) nearestDistM = nearest.dist * 1000;
+        }
+        const pipelineCtx = {
+          nearestCriticalAssetDistanceM: nearestDistM,
+          cooperativeMatchInfo: event.cooperativeCheck || null,
+        };
+        evaluateClassificationPipeline(event, pipelineCtx);
+        evaluateAttackProfileDetector(event, pipelineCtx, {
+          onAdvisory: (ev, rules) => {
+            toast(`Attack profile advisory — ${ev.droneType || 'track'} · ${rules[0]}. Operator confirmation required to promote to red.`, 'warn');
+            renderAlertStrip();
+          },
+        });
+      } catch (err) { console.warn('[classification pipeline] tick eval failed:', err.message); }
+
       // On track completion: close event, start ghost timer for entity
       // cleanup. Multi-site tracks (swarm, cruise) also close here when
       // ALL waypoints are exhausted — the drone has finished its full
@@ -13538,6 +13583,26 @@ async function main() {
         </div>`
       : `<div class="dp-drone">${e.droneType} <span class="dim">(${Math.round(e.confidence*100)}%)</span></div>`;
 
+    // Attack profile advisory banner. Fires when the classification
+    // pipeline's attack detector triggered on this event AND the operator
+    // has not yet confirmed or dismissed. Detection-only: never auto-
+    // promotes to red — this is the operator's decision surface.
+    const _adv = e._attackProfileAdvisory;
+    const advisoryBanner = (_adv && !_adv.dismissedAt && !_adv.confirmedAt) ? `
+      <div class="dp-attack-advisory" style="margin: var(--space-2) 0; padding: var(--space-3); background: rgba(255, 90, 90, 0.08); border: 1px solid rgba(255, 90, 90, 0.5); border-left: 3px solid #ff5a5a; border-radius: 2px;">
+        <div style="display: flex; align-items: center; gap: var(--space-2); margin-bottom: 6px;">
+          <span style="width:8px;height:8px;border-radius:50%;background:#ff5a5a;"></span>
+          <span style="font-size: var(--fs-2xs); letter-spacing: 0.14em; text-transform: uppercase; color: #ff5a5a; font-family: var(--font-mono);">Attack profile advisory</span>
+        </div>
+        <div style="font-size: var(--fs-xs); color: var(--text); line-height: 1.5; margin-bottom: var(--space-2);">
+          ${_adv.rules.map(r => `• ${r}`).join('<br/>')}
+        </div>
+        <div style="display: flex; gap: 6px; justify-content: flex-end;">
+          <button class="c-btn compact" data-action="advisory-dismiss" data-id="${e.id}" title="Ignore advisory, keep current classification">Dismiss</button>
+          <button class="c-btn compact primary" data-action="advisory-confirm" data-id="${e.id}" style="background: rgba(255, 90, 90, 0.12); border-color: rgba(255, 90, 90, 0.6); color: #ff5a5a;" title="Promote to hostile-high (red)">Confirm → Red</button>
+        </div>
+      </div>` : '';
+
     detailBodyEl.innerHTML = `
       <div class="dp-hdr">
         <div class="dp-id">${e.id}${isActive ? ' <span class="dp-live">● LIVE</span>' : ''}</div>
@@ -13552,6 +13617,7 @@ async function main() {
           <span>DUR <b>${dur}</b></span>
         </div>
       </div>
+      ${advisoryBanner}
       ${telemetry}
       ${preIngress ? '' : missionConsole}
       ${preIngress ? '' : linkedEvents}
@@ -13623,6 +13689,31 @@ async function main() {
         if (btn.dataset.action === 'note') openNoteForm(e.id);
         if (btn.dataset.action === 'escalate') openEscalateModal(e.id);
         if (btn.dataset.action === 'runbook') openRunbookDrawer(e.id);
+        if (btn.dataset.action === 'advisory-confirm') {
+          // Operator confirms the attack profile advisory. Promotes to
+          // hostile-high with the advisory rules recorded as the reason
+          // so the reclassification audit trail explains WHY red.
+          const evId = btn.dataset.id || e.id;
+          const ev = getEvent(evId);
+          const adv = ev?._attackProfileAdvisory;
+          if (!ev || !adv) return;
+          const reason = `Operator confirmed attack profile advisory. Triggers: ${adv.rules.join('; ')}.`;
+          reclassifyEvent(evId, { classification: 'hostile', threat: 'high', reason });
+          adv.confirmedAt = new Date().toISOString();
+          toast('Promoted to hostile-high per operator confirmation.', 'warn');
+          renderAlertStrip();
+          renderDetailPanel();
+        }
+        if (btn.dataset.action === 'advisory-dismiss') {
+          const evId = btn.dataset.id || e.id;
+          const ev = getEvent(evId);
+          const adv = ev?._attackProfileAdvisory;
+          if (!ev || !adv) return;
+          adv.dismissedAt = new Date().toISOString();
+          addNote(evId, `Attack profile advisory dismissed by operator. Triggers surfaced: ${adv.rules.join('; ')}.`, 'L. Flindt');
+          toast('Advisory dismissed. Classification unchanged.', 'info');
+          renderDetailPanel();
+        }
         if (btn.dataset.action === 'view-summary') openDetectionSummary(btn.dataset.id || e.id);
         if (btn.dataset.action === 'download-evidence') {
           // P5A evidence pack: full recorded time-series JSON for this event.
