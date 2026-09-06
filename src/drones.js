@@ -138,6 +138,205 @@ export const TEMPLATES = {
     durationSec: 150,
   },
 
+  // ── Shahed-136 / Geran-2 attack profile ──
+  //
+  // One-way attack drone (loitering munition), Iranian design used
+  // extensively by Russia against Ukraine. Specs triangulated from
+  // CSIS Missile Threat Project, RUSI (Rubin 2023), Conflict Armament
+  // Research field examination of downed airframes (IPHR "Terror in
+  // the Details" Jul 2023), and ISIS teardown reports. Where specs
+  // vary between sources — cite the range, don't invent numbers.
+  //
+  //   Cruise speed: ~180-185 km/h (~50 m/s) — piston MD-550
+  //   Terminal dive: ~324 km/h (~90 m/s) from 1-2 km altitude
+  //   Altitude typical: 1,000-2,500 m; ceiling 4,000 m
+  //   Wingspan 2.5 m, length 3.5 m
+  //   Warhead: 50 kg BCh-50 standard (or 90 kg BCh-90 heavy variant)
+  //   Range 1,000-2,500 km
+  //   RF: original fire-and-forget GNSS-only; 2024+ Geran-2 also
+  //     emits cellular 4G (900-2600 MHz) and Iridium (1616 MHz uplink)
+  //   Acoustic: piston engine, "moped/lawnmower" signature
+  //
+  // Path: enters over Øresund from SE, crosses CPH airport airspace
+  // at 1200m cruise, passes near Amager Koblingsstation (crosses AMK
+  // sensor coverage → cross-site domain scope union pulls maritime +
+  // ground into scope for the parent event), terminal dive on
+  // Amalienborg palace (55.6844, 12.5931).
+  //
+  // Classification: hostile-high from spawn. Loitering munition is
+  // WEAPON_SIGNATURE_CLASSES, never downgrades even at high NN
+  // confidence. Attack advisory fires immediately (weapon signature
+  // + descent behavior + coordinated formation from taxonomy) and
+  // again on terminal dive (low-alt + high-speed + close-to-critical
+  // asset rule).
+  cph_shahed_amalienborg: {
+    siteId: 'cph',
+    classification: 'hostile',
+    threat: 'high',
+    platform: 'loitering-munition',
+    droneType: 'Shahed-136 / Geran-2 (loitering munition)',
+    confidence: 0.72,
+    confidenceTrend: 'Acoustic + RF (Iridium 1616 MHz + cellular 900 MHz), piston engine signature',
+    multiSite: true,
+    contributingSensors: [
+      { id: 'N09', confidence: 0.78 },
+      { id: 'N15', confidence: 0.72 },
+      { id: 'N20', confidence: 0.68 },
+      { id: 'N22', confidence: 0.63 },
+    ],
+    evidence: {
+      rfCarrier: 'Iridium 1616 MHz uplink + cellular 900/1800 MHz downlink',
+      rfBandwidth: 'narrowband',
+      rfMatch: 'Geran-2 modem signature 74%',
+      modality: 'RF + acoustic (moped-signature piston)',
+      evidenceSize: '156.4 MB',
+      note: 'Loitering munition class. Fire-and-forget flight profile with GNSS/INS guidance and Kometa CRPA anti-jam. 50 kg warhead. Real-world Geran-2 confirmed by Conflict Armament Research airframe exploitation (IPHR Jul 2023).',
+    },
+    waypoints: [
+      // Cruise from Øresund at 1200m, ~50 m/s piston cruise
+      { lat: 55.5950, lon: 12.7100, alt: 1200, heading: 315, tSec: 0   },
+      { lat: 55.6050, lon: 12.6900, alt: 1200, heading: 310, tSec: 12  },
+      { lat: 55.6120, lon: 12.6720, alt: 1200, heading: 310, tSec: 24  },
+      { lat: 55.6180, lon: 12.6580, alt: 1150, heading: 310, tSec: 36  },
+      // Crossing CPH airport airspace
+      { lat: 55.6240, lon: 12.6440, alt: 1100, heading: 305, tSec: 48  },
+      { lat: 55.6300, lon: 12.6300, alt: 1080, heading: 305, tSec: 60  },
+      // Near Amager Koblingsstation (55.6410, 12.6088) — cross-site link
+      { lat: 55.6370, lon: 12.6180, alt: 1050, heading: 305, tSec: 72  },
+      { lat: 55.6440, lon: 12.6080, alt: 1020, heading: 310, tSec: 84  },
+      // Northwest cruise, still 1km altitude
+      { lat: 55.6540, lon: 12.5980, alt: 1000, heading: 320, tSec: 96  },
+      { lat: 55.6650, lon: 12.5950, alt: 950,  heading: 335, tSec: 108 },
+      // Terminal dive begins ~1km out from Amalienborg
+      { lat: 55.6750, lon: 12.5940, alt: 700,  heading: 345, tSec: 118 },
+      { lat: 55.6800, lon: 12.5935, alt: 400,  heading: 350, tSec: 124 },
+      { lat: 55.6825, lon: 12.5932, alt: 200,  heading: 350, tSec: 128 },
+      // Impact at Amalienborg (55.6844, 12.5931)
+      { lat: 55.6844, lon: 12.5931, alt: 50,   heading: 350, tSec: 132 },
+    ],
+    durationSec: 132,
+  },
+
+  // ── Recon quadcopter, sustained loiter over CPH cargo apron ──
+  //
+  // Small commercial-class quadcopter, unclear operator, sustained
+  // loiter pattern over the cargo apron area. Photographs cargo ops.
+  // Different receiver mix than the Shahed: no Air Force, no PET
+  // strategic intel — this is a ground evidence + Politi case.
+  //
+  // Classification pipeline: spawns hostile-high (RED, precautionary).
+  // Confidence ramps 0.35 → 0.85 over ~20s via mockConfidenceRamp.
+  // When confidence crosses 0.6 with class 'quadcopter' in
+  // COMMERCIAL_IDENTIFIABLE_CLASSES, pipeline auto-downgrades to
+  // hostile-medium (YELLOW). No attack advisory fires (no descent,
+  // no weapon signature, altitude 80m not < 500m for the low+fast
+  // rule but SPEED is only 8 m/s so the AND-gate fails on speed).
+  cph_quad_recon_apron: {
+    siteId: 'cph',
+    classification: 'hostile',
+    threat: 'high',
+    platform: 'quadcopter',
+    droneType: 'Commercial-class quadcopter, operator unclear',
+    dynamicClassification: true,
+    mockConfidenceRamp: true,
+    confidence: 0.35,
+    confidenceTrend: 'Initial low confidence, RF beacon fragmentary. Ramping as more sensors contribute.',
+    contributingSensors: [
+      { id: 'N16', confidence: 0.42 },
+      { id: 'N17', confidence: 0.38 },
+      { id: 'N20', confidence: 0.35 },
+      { id: 'N09', confidence: 0.31 },
+    ],
+    evidence: {
+      rfCarrier: '2.412 GHz',
+      rfBandwidth: '20 MHz OFDM',
+      rfMatch: 'Consumer-class quadcopter control signature 62%',
+      modality: 'RF + acoustic',
+      evidenceSize: '48.3 MB',
+      note: 'Sustained loiter over cargo apron. Signature consistent with commercial quadcopter (DJI-class). Operator ground station not located at spawn. Could be inside airport perimeter or nearby residential.',
+    },
+    waypoints: [
+      // Entry from S perimeter, transit toward cargo apron area (N side)
+      { lat: 55.6020, lon: 12.6480, alt: 80, heading: 350, tSec: 0   },
+      { lat: 55.6080, lon: 12.6460, alt: 80, heading: 355, tSec: 15  },
+      { lat: 55.6140, lon: 12.6450, alt: 80, heading: 5,   tSec: 30  },
+      { lat: 55.6210, lon: 12.6480, alt: 80, heading: 45,  tSec: 45  },
+      { lat: 55.6250, lon: 12.6540, alt: 80, heading: 90,  tSec: 60  },
+      // Loiter pattern over cargo apron (~55.622, 12.658) — figure-8
+      { lat: 55.6230, lon: 12.6600, alt: 80, heading: 135, tSec: 75  },
+      { lat: 55.6210, lon: 12.6620, alt: 80, heading: 180, tSec: 90  },
+      { lat: 55.6180, lon: 12.6600, alt: 80, heading: 225, tSec: 105 },
+      { lat: 55.6200, lon: 12.6560, alt: 80, heading: 315, tSec: 120 },
+      { lat: 55.6230, lon: 12.6580, alt: 80, heading: 45,  tSec: 135 },
+      { lat: 55.6250, lon: 12.6620, alt: 80, heading: 90,  tSec: 150 },
+      { lat: 55.6230, lon: 12.6660, alt: 80, heading: 135, tSec: 165 },
+      { lat: 55.6200, lon: 12.6640, alt: 80, heading: 180, tSec: 180 },
+      // Egress E out of airport
+      { lat: 55.6180, lon: 12.6700, alt: 90, heading: 100, tSec: 195 },
+      { lat: 55.6170, lon: 12.6780, alt: 100, heading: 95, tSec: 210 },
+    ],
+    durationSec: 210,
+  },
+
+  // ── Unauthorized commercial DJI from Kastrup parking lot ──
+  //
+  // Amateur hobbyist who didn't file a NOTAM. Enters restricted CPH
+  // airspace briefly, low altitude, short duration. Real ISR product
+  // scenario — most reported airport drone events are hobbyists, not
+  // attackers. Populates a different receiver set than either the
+  // Shahed (aviation/intel emphasis) or the recon quadcopter (cargo
+  // ground evidence emphasis): this one is Politi København + local
+  // Trafikstyrelsen only.
+  //
+  // Classification pipeline: spawns hostile-high (RED, precautionary).
+  // Downgrades to hostile-medium (YELLOW) after platform identified
+  // as commercial quadcopter. Operator drives manual reclassification
+  // to 'resolved' after Politi locates the operator on the ground.
+  cph_dji_hobbyist: {
+    siteId: 'cph',
+    classification: 'hostile',
+    threat: 'high',
+    platform: 'quadcopter',
+    droneType: 'DJI Mini 3 (unauthorized hobbyist)',
+    dynamicClassification: true,
+    mockConfidenceRamp: true,
+    confidence: 0.35,
+    confidenceTrend: 'Signature fragmentary at spawn. Consumer OcuSync 3 emerging as more sensors align.',
+    contributingSensors: [
+      { id: 'N08', confidence: 0.44 },
+      { id: 'N07', confidence: 0.38 },
+      { id: 'N15', confidence: 0.32 },
+    ],
+    evidence: {
+      rfCarrier: '5.180 GHz',
+      rfBandwidth: '20 MHz OFDM',
+      rfMatch: 'OcuSync 3 (DJI consumer) 68%',
+      modality: 'RF + acoustic',
+      evidenceSize: '12.6 MB',
+      note: 'Small consumer-class DJI. No NOTAM filed for airspace. Operator likely on-airport ground (parking area, terminal frontage). Politi coordinates ground search for pilot.',
+    },
+    waypoints: [
+      // Launch from parking area near CPH terminal frontage (55.6180, 12.6570)
+      { lat: 55.6178, lon: 12.6572, alt: 20, heading: 60,  tSec: 0  },
+      { lat: 55.6182, lon: 12.6590, alt: 40, heading: 60,  tSec: 6  },
+      { lat: 55.6188, lon: 12.6612, alt: 60, heading: 65,  tSec: 12 },
+      { lat: 55.6196, lon: 12.6640, alt: 80, heading: 70,  tSec: 18 },
+      { lat: 55.6205, lon: 12.6670, alt: 90, heading: 75,  tSec: 24 },
+      { lat: 55.6215, lon: 12.6700, alt: 90, heading: 80,  tSec: 30 },
+      // Brief hover / photo pass
+      { lat: 55.6220, lon: 12.6720, alt: 90, heading: 135, tSec: 40 },
+      { lat: 55.6215, lon: 12.6710, alt: 90, heading: 225, tSec: 50 },
+      // Return toward launch area
+      { lat: 55.6205, lon: 12.6680, alt: 80, heading: 250, tSec: 58 },
+      { lat: 55.6195, lon: 12.6640, alt: 60, heading: 250, tSec: 66 },
+      { lat: 55.6185, lon: 12.6600, alt: 40, heading: 240, tSec: 74 },
+      { lat: 55.6180, lon: 12.6575, alt: 20, heading: 240, tSec: 82 },
+      // Ground — operator located by Politi
+      { lat: 55.6178, lon: 12.6570, alt: 2,  heading: 240, tSec: 88 },
+    ],
+    durationSec: 88,
+  },
+
   // ═══════════════════════════════════════════════════════════
   // ESBJERG HARBOUR THREATS
   // ═══════════════════════════════════════════════════════════

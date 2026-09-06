@@ -9468,11 +9468,21 @@ async function main() {
         const MULTISITE_AUTOCLOSE_GRACE_MS = 12000;
         const f35Chasing = _f35.airborne && _f35.targetEventId === event.id;
         const missileChasing = _friendlyMissile.active && _friendlyMissile.targetEventId === event.id;
+        // Weapon-signature exemption: NEVER auto-close a weapon-class
+        // track when it exits sensor coverage. That is precisely the
+        // moment where the threat becomes MOST dangerous (terminal
+        // dive on target, no interceptor). Auto-close was designed
+        // for "the drone fled the country, no one is chasing it" —
+        // a hobbyist / recon story, not a Shahed on terminal. Weapon
+        // tracks close only on p.completed (waypoints exhausted, i.e.
+        // impact) or when a QRA neutralization resolves.
+        const isWeaponSignature = event.subject?.threat_profile?.weaponized_signature === true;
         if (!state.closedAt
             && event.detected === true
             && !event.awaitingNeutralization
             && !f35Chasing
-            && !missileChasing) {
+            && !missileChasing
+            && !isWeaponSignature) {
           const noChase = !Array.isArray(event.counterDispatches)
             || event.counterDispatches.every(c => c.state === 'complete');
           const linkedActive = Array.isArray(event.linkedEventIds)
@@ -10394,6 +10404,13 @@ async function main() {
       evidence: template.evidence,
       notes: [],
       templateKey,
+      // Classification pipeline opt-in flags — see classification_pipeline.js.
+      // dynamicClassification enables the confidence-driven downgrade + attack
+      // detector state machine. mockConfidenceRamp bumps subject confidence by
+      // 0.025 per tick until 0.85 so demo templates can demonstrate the
+      // unknown → identified transition without real NN in the loop.
+      dynamicClassification: !!template.dynamicClassification,
+      mockConfidenceRamp: !!template.mockConfidenceRamp,
       // multiSiteTrack: object is invisible outside sensor coverage, visible
       // only when inside a sensor ring. Set by template.multiSite OR the
       // legacy cruise missile key. Any multi-site scenario (swarm, missile)
@@ -11482,6 +11499,9 @@ async function main() {
       { key: 'cph_missile_inbound_sw', label: 'Cruise missile inbound from SW (continuation)', cls: 'critical' },
       { key: 'swarm_recon_cph_amk', label: 'SWARM · 5-drone recon (CPH → Amager)', cls: 'critical' },
       { key: 'cph_unknown_contact', label: 'Non-identifiable contact (N perimeter)', cls: 'recon' },
+      { key: 'cph_shahed_amalienborg', label: 'Shahed-136 attack (Øresund → CPH → Amalienborg)', cls: 'critical' },
+      { key: 'cph_quad_recon_apron', label: 'Quadcopter recon over cargo apron (unknown → yellow)' },
+      { key: 'cph_dji_hobbyist', label: 'Unauthorized DJI hobbyist (unknown → yellow → resolved)' },
     ],
     esbjerg: [
       { key: 'esbjerg_quad_hostile', label: 'Quadcopter, hostile' },
