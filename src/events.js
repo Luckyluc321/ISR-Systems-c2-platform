@@ -279,8 +279,36 @@ export function closeEvent(id, exitPoint) {
     } catch (_) { /* leave as-is */ }
   }
   if (exitPoint) e.exit = exitPoint;
+  // Post-Incident Report generation. Fires per-event at close so that
+  // cross-linked shadow events each get their own site-scoped PIR the
+  // moment their portion of the incident concludes. Receivers on that
+  // site see the report inline; a persistent archive is exposed via
+  // the receiver profile library. See docs/user-flows.md Flow 7 and
+  // src/post_incident_report.js for the assembly logic. Detection-only:
+  // pure state, no dispatch action triggered here.
+  try {
+    if (!e.postIncidentReport) {
+      // getDestination is optionally injected by consumers that already
+      // have destinations loaded. events.js can't import it directly
+      // without creating a cycle, so we route through a window-scoped
+      // resolver that main.js populates at boot. Absent resolver falls
+      // back to raw destination IDs in the report, which is safe but
+      // less readable.
+      const resolver = (typeof window !== 'undefined' && window.__isr_getDestination) || null;
+      const report = _pirGenerator ? _pirGenerator(e, { getDestination: resolver }) : null;
+      if (report) e.postIncidentReport = report;
+    }
+  } catch (err) {
+    console.warn('[pir] generation failed at close:', err.message);
+  }
   _listeners.forEach(fn => fn(id));
 }
+
+// Lazy binding for the PIR generator so events.js doesn't have to
+// import post_incident_report.js directly (keeps the module free of
+// downstream consumer coupling). main.js wires it at boot.
+let _pirGenerator = null;
+export function registerPostIncidentReportGenerator(fn) { _pirGenerator = fn; }
 
 // Ensure every event has an escalations array + canonical subject.
 // Boot-time sync guarantees the invariant "every event in EVENTS has

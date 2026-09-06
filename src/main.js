@@ -38,6 +38,33 @@ for (const sid of Object.keys(SITES)) {
 // that the site registry is populated so historical CPH/Esbjerg events
 // carry their correct aviation/maritime scope instead of the fallback.
 refreshSeedDomainScopes();
+// PIR generator hookup. events.js.closeEvent invokes this at the moment
+// a per-site event record closes, producing the audit-grade report
+// receivers see inline + in the profile library. Kept lazy-bound so
+// events.js has no import-time dependency on destinations or the
+// generator module.
+registerPostIncidentReportGenerator((event, opts) => buildPostIncidentReport(event, opts));
+// Window-scoped destination resolver so the PIR generator (called from
+// events.js closeEvent) can look up display names without importing
+// destinations.js (would create a cycle). Present at load; consumers
+// that call getDestination directly still use the imported function.
+if (typeof window !== 'undefined') {
+  window.__isr_getDestination = (id) => getDestination(id);
+}
+// Backfill PIR on seed events that closed before this code existed.
+// Live-closed events pick up their PIR via events.js closeEvent hook;
+// seed data (historical demo events) never routes through that path,
+// so their PIR panel would otherwise be empty in the receiver case
+// file. Runs once at boot after destinations + PIR generator wired.
+EVENTS.forEach(ev => {
+  if (ev.status === 'closed' && !ev.postIncidentReport) {
+    try {
+      ev.postIncidentReport = buildPostIncidentReport(ev, { getDestination });
+    } catch (err) {
+      console.warn('[pir] seed backfill failed for', ev.id, err.message);
+    }
+  }
+});
 import {
   TEMPLATES, addLiveTrack, markTrackClosed, removeLiveTrack, anyTrackLive,
   onDroneUpdate, distanceToPerimeter, pointInPolygon, makeSubstationThreats,
@@ -55,7 +82,9 @@ import {
   addPostIncidentChainRoot, handoffPostIncidentChain,
   resolvePostIncidentChainEntry, postIncidentChainAllLeavesResolved,
   postIncidentChainLeaves, unionLinkedEventDomains,
+  registerPostIncidentReportGenerator,
 } from './events.js';
+import { buildPostIncidentReport, emphasisForBranch } from './post_incident_report.js';
 import {
   destinationsForSite, destinationsForEvent, getDestination, destinationTypeLabel,
   destinationParent, destinationShortLabel, groupByParent,
@@ -15425,6 +15454,7 @@ async function main() {
       ${_renderStep4OutcomeConfirm(event, activeRole)}
       ${_renderStep5PostIncidentHandoff(event, activeRole)}
       ${_renderStep6CloseEvent(event, activeRole)}
+      ${_renderPostIncidentReportPanel(event, activeRole)}
 
       ${otherList.length ? `
         <div class="c-panel">
@@ -15643,6 +15673,102 @@ async function main() {
           <div style="display: flex; justify-content: flex-end;">
             <button class="pl-dispatch-btn" style="padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.08); color: var(--ok); border: 1px solid rgba(77, 255, 156, 0.4); border-left: 2px solid var(--ok); border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="close-event" data-id="${event.id}">Close event</button>
           </div>
+        </div>
+      </div>`;
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // STEP 7 · Post-Incident Report panel
+  // ══════════════════════════════════════════════════════════════════
+  // Rendered whenever the event carries a postIncidentReport (generated
+  // by events.js closeEvent). Sits below Step 6 so it becomes the last
+  // panel a receiver sees after close. Section emphasis is shaped by
+  // the active role's agency branch: PET reads it as intel, Politi as
+  // ground evidence, Trafikstyrelsen as airspace impact, etc.
+  //
+  // Access: also linked from the receiver profile library (Reports tab
+  // in Phase C) so PET can browse past incidents they were looped in on
+  // without opening every case file individually.
+  function _renderPostIncidentReportPanel(event, activeRole) {
+    const report = event?.postIncidentReport;
+    if (!report) return '';
+    const branch = agencyBranchOf?.(activeRole?.id) || 'standalone';
+    const emphasis = emphasisForBranch(branch);
+    const snap = report.event_snapshot || {};
+    const ackCount = report.acknowledgments?.length || 0;
+    const dispatchCount = report.dispatches?.length || 0;
+    const chainCount = report.handoff_chain?.length || 0;
+    const timelineCount = report.timeline?.length || 0;
+
+    const timelineRows = (report.timeline || []).map(t => `
+      <div style="display:flex;gap:var(--space-3);padding:6px 0;border-top:1px solid var(--border);font-size:var(--fs-2xs);">
+        <span style="color:var(--text-dim);font-family:var(--font-mono);flex:0 0 90px;">${(t.ts || '').slice(11,19)}Z</span>
+        <span style="color:var(--accent);text-transform:uppercase;letter-spacing:0.1em;flex:0 0 140px;">${t.kind}</span>
+        <span style="color:var(--text);flex:1 1 auto;">${t.detail}</span>
+      </div>
+    `).join('');
+
+    const escalationRows = (report.escalations || []).map(r => `
+      <div style="display:flex;gap:var(--space-3);padding:6px 0;border-top:1px solid var(--border);font-size:var(--fs-2xs);">
+        <span style="color:var(--text);flex:1 1 auto;">${r.destinationName}${r.tier ? ' (T' + r.tier + ')' : ''}</span>
+        <span style="color:var(--text-dim);font-family:var(--font-mono);">${(r.status || '').toUpperCase()}</span>
+        ${r.overdue ? '<span style="color:#ff7878;font-family:var(--font-mono);">OVERDUE</span>' : ''}
+        ${r.progressStatus ? `<span style="color:#4dd2ff;font-family:var(--font-mono);">${r.progressStatus.toUpperCase()}</span>` : ''}
+        ${r.responded ? '<span style="color:#4dff9c;font-family:var(--font-mono);">RESPONDED</span>' : ''}
+      </div>
+    `).join('');
+
+    const dispatchRows = (report.dispatches || []).map(d => `
+      <div style="display:flex;gap:var(--space-3);padding:6px 0;border-top:1px solid var(--border);font-size:var(--fs-2xs);">
+        <span style="color:var(--text);flex:1 1 auto;">${d.assetName || d.kind || 'asset'}</span>
+        <span style="color:var(--text-dim);font-family:var(--font-mono);">${(d.state || '').toUpperCase()}</span>
+        ${d.outcomeLabel ? `<span style="color:#4dff9c;">${d.outcomeLabel}</span>` : ''}
+      </div>
+    `).join('');
+
+    const chainRows = (report.handoff_chain || []).map(c => `
+      <div style="display:flex;gap:var(--space-3);padding:6px 0;border-top:1px solid var(--border);font-size:var(--fs-2xs);">
+        <span style="color:var(--text);flex:1 1 auto;">${c.destName}${c.chainParentId ? ' (chained)' : ' (root)'}</span>
+        <span style="color:${c.status === 'resolved' ? '#4dff9c' : '#4dd2ff'};font-family:var(--font-mono);">${(c.status || '').toUpperCase()}</span>
+      </div>
+    `).join('');
+
+    const ackRows = (report.acknowledgments || []).map(a => `
+      <div style="padding:6px 0;border-top:1px solid var(--border);font-size:var(--fs-2xs);">
+        <div style="display:flex;gap:var(--space-2);"><span style="color:var(--text);flex:1 1 auto;">${a.destinationName}</span><span style="color:var(--text-dim);font-family:var(--font-mono);">${(a.receivedAt || '').slice(11,19)}Z</span></div>
+        <div style="color:var(--text-dim);margin-top:2px;line-height:1.5;">"${a.text}"</div>
+        <div style="color:var(--text-dim);font-family:var(--font-mono);margin-top:2px;">— ${a.respondedBy}</div>
+      </div>
+    `).join('');
+
+    return `
+      <div class="c-panel c-panel-collapsible" data-pir-panel="${report.id}" style="border-top: 3px solid #ffb84d;">
+        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #ffb84d;">Step 7 · Incident Report</div>
+        <div class="c-panel-body">
+          <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.14em; color: #ffb84d; font-size: var(--fs-2xs); margin-bottom: var(--space-1);">${emphasis.lead}</div>
+          <div style="font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${emphasis.focus}</div>
+
+          <div style="font-size: var(--fs-sm); color: var(--text); line-height: 1.6; margin-bottom: var(--space-3);">${report.summary}</div>
+          ${report.recommendation ? `<div style="font-size: var(--fs-sm); color: var(--text); line-height: 1.6; margin-bottom: var(--space-3); padding: var(--space-2); background: rgba(77, 210, 255, 0.05); border-left: 2px solid var(--accent);"><b>Recommendation:</b> ${report.recommendation}</div>` : ''}
+
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:var(--space-2);margin-bottom:var(--space-3);">
+            <div style="padding:var(--space-2);background:rgba(255,255,255,0.02);border-radius:2px;"><div class="c-label" style="color:var(--text-dim);">Classification</div><div style="color:var(--text);font-family:var(--font-mono);">${(snap.classification || 'unknown').toUpperCase()}</div></div>
+            <div style="padding:var(--space-2);background:rgba(255,255,255,0.02);border-radius:2px;"><div class="c-label" style="color:var(--text-dim);">Peak confidence</div><div style="color:var(--text);font-family:var(--font-mono);">${snap.confidence != null ? Math.round(snap.confidence * 100) + '%' : '—'}</div></div>
+            <div style="padding:var(--space-2);background:rgba(255,255,255,0.02);border-radius:2px;"><div class="c-label" style="color:var(--text-dim);">Duration</div><div style="color:var(--text);font-family:var(--font-mono);">${snap.duration ? formatDuration(snap.duration) : '—'}</div></div>
+            <div style="padding:var(--space-2);background:rgba(255,255,255,0.02);border-radius:2px;"><div class="c-label" style="color:var(--text-dim);">Outcome</div><div style="color:var(--text);font-family:var(--font-mono);">${(snap.outcome || 'closed').toUpperCase()}</div></div>
+          </div>
+
+          ${timelineCount ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Timeline · ${timelineCount}</div>${timelineRows}</div>` : ''}
+          ${(report.escalations?.length || 0) ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Dispatched to · ${report.escalations.length}</div>${escalationRows}</div>` : ''}
+          ${dispatchCount ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Counter-dispatches · ${dispatchCount}</div>${dispatchRows}</div>` : ''}
+          ${chainCount ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Ground handoff chain · ${chainCount}</div>${chainRows}</div>` : ''}
+          ${ackCount ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Acknowledgments · ${ackCount}</div>${ackRows}</div>` : ''}
+
+          <div style="display:flex;justify-content:flex-end;gap:var(--space-2);margin-top:var(--space-3);">
+            <button class="c-btn compact" data-rcv="pir-download" data-id="${event.id}" title="Download report as JSON">Download JSON</button>
+          </div>
+
+          <div class="c-label" style="margin-top: var(--space-2); text-align: right; color: var(--text-dim);">Generated ${(report.generatedAt || '').slice(0,19).replace('T', ' ')}Z · ${report.id}</div>
         </div>
       </div>`;
   }
@@ -17440,6 +17566,26 @@ async function main() {
         renderReceiverView({ immediate: true });
       }
       else if (action === 'dispatch-postinc') { dispatchPostIncident(id, el.dataset.dest); renderReceiverView(); }
+      else if (action === 'pir-download') {
+        const eventId = id;
+        const ev = getEvent(eventId);
+        if (!ev?.postIncidentReport) { toast('No report generated for this event.', 'err'); return; }
+        try {
+          const json = JSON.stringify(ev.postIncidentReport, null, 2);
+          const blob = new Blob([json], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${ev.postIncidentReport.id}.json`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          toast('Incident report downloaded.', 'ok');
+        } catch (err) {
+          toast(`Download failed: ${err.message || 'unknown'}`, 'err');
+        }
+      }
       else if (action === 'chain-handoff') {
         const eventId = id;
         const chainId = el.dataset.chain;
