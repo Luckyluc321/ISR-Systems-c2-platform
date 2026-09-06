@@ -9438,6 +9438,72 @@ async function main() {
           }
         }
         event.currentlyInCoverage = anyLiveInCov;
+
+        // ── Multi-site auto-close ──
+        // Terminal close for multi-site / cross-cued tracks that leave
+        // every sensor's coverage AND have nothing chasing them AND no
+        // linked event still active. Without this the simulation runs
+        // forever after the object flees the country, forcing the user
+        // to click Cancel simulation to end it. Same terminal semantics
+        // as the single-site out-of-range branch further down, adapted
+        // to the multi-site case where re-acquisition at another site
+        // is the reason multi-site tracks are exempted there.
+        //
+        // Gates (ALL must hold before close fires):
+        //   1. event.detected === true (never auto-close a track that
+        //      hasn't been seen yet — cruise-missile-to-amalienborg
+        //      spawns at Kassø and takes minutes to reach the first
+        //      sensor bubble, so a pre-detection kill would eat the
+        //      whole simulation before it starts)
+        //   2. inAnyCoverage === false (out of every sensor everywhere)
+        //   3. no F-35 airborne, no friendly-missile terminal chase,
+        //      and awaitingNeutralization unset (three separate chase
+        //      signals — awaitingNeutralization alone misses F-35 chase
+        //      because that path uses _f35.airborne, not the flag)
+        //   4. no counter-dispatch still en_route or engaging
+        //   5. no linked shadow event still active elsewhere
+        //   6. GRACE_MS of continuous out-of-coverage (short blips
+        //      between sites during handoff shouldn't kill the track)
+        const MULTISITE_AUTOCLOSE_GRACE_MS = 12000;
+        const f35Chasing = _f35.airborne && _f35.targetEventId === event.id;
+        const missileChasing = _friendlyMissile.active && _friendlyMissile.targetEventId === event.id;
+        if (!state.closedAt
+            && event.detected === true
+            && !event.awaitingNeutralization
+            && !f35Chasing
+            && !missileChasing) {
+          const noChase = !Array.isArray(event.counterDispatches)
+            || event.counterDispatches.every(c => c.state === 'complete');
+          const linkedActive = Array.isArray(event.linkedEventIds)
+            && event.linkedEventIds.some(lid => {
+              const le = getEvent(lid);
+              return le && le.status === 'active';
+            });
+          if (inAnyCoverage === false && noChase && !linkedActive) {
+            if (!state._outOfAllCoverageSinceMs) {
+              state._outOfAllCoverageSinceMs = performance.now();
+            } else if (performance.now() - state._outOfAllCoverageSinceMs >= MULTISITE_AUTOCLOSE_GRACE_MS) {
+              state.closedAt = performance.now();
+              const exitPoint = event.lastKnownPosition
+                ? { lat: event.lastKnownPosition.lat, lon: event.lastKnownPosition.lon,
+                    alt: event.lastKnownPosition.alt, timestamp: new Date().toISOString(),
+                    heading: event.lastKnownPosition.heading, leftCoverageOf: 'all-sites-auto' }
+                : (event.exit || null);
+              event.exit = exitPoint;
+              markTrackClosed(p.eventId);
+              closeEvent(p.eventId, exitPoint);
+              toast(`Sim auto-ended · ${event.droneType || 'track'} left all sensor coverage with no active pursuit.`, 'info');
+              updateContributingRings();
+              renderAlertStrip();
+              if (getSelectedEventId() === p.eventId) renderDetailPanel();
+            }
+          } else {
+            // Re-acquired coverage OR chase started OR linked event
+            // spawned — reset the timer so the countdown restarts if
+            // the object flees again.
+            state._outOfAllCoverageSinceMs = null;
+          }
+        }
       }
 
       // Update position + rotation + label (still visible after close during ghost)
