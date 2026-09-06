@@ -1,0 +1,31 @@
+{
+  "fixtureId": "agent-b-marginal-esbjerg",
+  "agent": "agent_b_debrief",
+  "expectedTier": "marginal",
+  "siteContextRef": "esbjerg",
+  "event": {
+    "id": "DET-20260906-MARGINAL-1",
+    "siteId": "esbjerg",
+    "startTime": "2026-09-06T09:00:00Z",
+    "endTime":   "2026-09-06T09:06:00Z",
+    "classification": "unknown",
+    "threat": "medium",
+    "platform": "quadcopter",
+    "droneType": "1x DJI Mavic 3",
+    "droneCount": 1,
+    "confidence": 0.74,
+    "entry": { "lat": 55.4700, "lon": 8.4400 },
+    "lastPosition": { "lat": 55.4680, "lon": 8.4500 }
+  },
+  "samples": [],
+  "analysis": {
+    "dwellProfile": { "hotspotIds": ["ow_o_and_m"], "peakDwellSeconds": 90 },
+    "closestAssetApproach": { "assetId": "installation_vessel_berth", "assetName": "Installation vessel berth", "minDistanceM": 180 },
+    "classChangeLog": []
+  },
+  "signalsJsonBlock": "{\"signals\":[{\"id\":\"dwell_hotspot\",\"assetId\":\"ow_o_and_m\",\"value\":90,\"threshold\":60,\"outlier\":true}]}",
+  "signalsProseBlock": "Mavic-class quadcopter approached from west (sea vector), dwelled 90 seconds over the offshore wind O&M base — above baseline but not exceptional. Passed within 180m of installation vessel berth on exit.",
+  "subjectFidelity": { "requiredPlatformFamily": "quadcopter" },
+  "assertions": ["writing_rules", "delimiter", "tier_caps", "subject_fidelity", "model_version"],
+  "notes": "Marginal-tier debrief at Esbjerg. Some signals present (dwell) but nothing above notable threshold. Agent B should write a restrained 1-2 paragraph body under 1000 chars without inventing doctrine implications. Tests the middle tier (previously only transit + notable were covered)."
+}

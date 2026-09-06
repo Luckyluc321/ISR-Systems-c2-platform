@@ -1,0 +1,48 @@
+{
+  "site_id": "billund",
+  "name": "Billund Airport (BLL)",
+  "site_type": "commercial_airport",
+  "schema_version": "1.0",
+  "generated_at": "2026-08-05T00:00:00Z",
+  "generated_by": "Compact eval snapshot derived from src/site_context.js billund record. Do not treat as authoritative.",
+  "airport_reference_point": { "lat": 55.7404, "lon": 9.1518 },
+
+  "critical_areas": [
+    { "id": "runway_09_27", "name": "Runway 09/27", "center": { "lat": 55.7404, "lon": 9.1518 }, "criticality": "critical",
+      "reason": "Single runway airport. Any obstruction closes the airfield." },
+    { "id": "cargo_apron_chba", "name": "CHBA cargo apron", "center": { "lat": 55.7420, "lon": 9.1650 }, "criticality": "high",
+      "reason": "Cargo Handling Billund Airport — largest DK air cargo hub. Night-hours peak activity." },
+    { "id": "passenger_terminal", "name": "Passenger terminal", "center": { "lat": 55.7396, "lon": 9.1553 }, "criticality": "high",
+      "reason": "Second-busiest passenger airport in Denmark." }
+  ],
+
+  "high_value_assets": [
+    { "id": "atc_tower_bll", "name": "ATC tower", "location": { "lat": 55.7402, "lon": 9.1540 }, "asset_type": "atc_control_tower", "criticality": "critical",
+      "reason": "Single point of airspace control for the airfield." },
+    { "id": "ils_09", "name": "ILS Glideslope 09", "location": { "lat": 55.7402, "lon": 9.1400 }, "asset_type": "ils_ground_installation", "criticality": "high",
+      "reason": "Primary approach guidance. Any interference triggers ILS re-certification." }
+  ],
+
+  "response_doctrine": {
+    "authority": "Sydøstjyllands Politi holds primary response. Naviair coordinates ATC-side airspace closure. Trafikstyrelsen for NOTAM issuance.",
+    "triggers": [
+      "Any airborne unknown inside CTR triggers immediate ATC notification.",
+      "Sustained dwell over cargo apron during night-hours window → coordinated recon suspicion.",
+      "Direct overflight of LEGO HQ / Legoland from BLL airspace → corporate-target reconnaissance vector."
+    ]
+  },
+
+  "site_red_flags": [
+    "Approach-corridor axis with descending altitude = ILS-interference profile.",
+    "Sustained dwell over CHBA cargo apron in night-hours window = coordinated cargo-theft reconnaissance.",
+    "Direct overflight of LEGO HQ/Legoland from BLL airspace = corporate-target reconnaissance vector."
+  ],
+
+  "cooperative_traffic": {
+    "expected": true,
+    "source": "mock",
+    "match_radius_m": 800,
+    "match_time_window_s": 31536000,
+    "bbox_padding_deg": 0.15
+  }
+}

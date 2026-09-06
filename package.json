@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "eval": "node eval/runner.js",
+    "eval:json": "node eval/runner.js --json"
   },
   "devDependencies": {
     "vite": "^8.1.1"

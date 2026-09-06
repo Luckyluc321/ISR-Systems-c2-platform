@@ -1,0 +1,34 @@
+{
+  "fixtureId": "agent-b-transit-cph",
+  "agent": "agent_b_debrief",
+  "expectedTier": "transit",
+  "siteContextRef": "cph",
+  "event": {
+    "id": "DET-20260904-TRANSIT-1",
+    "siteId": "cph",
+    "startTime": "2026-09-04T14:00:00Z",
+    "endTime":   "2026-09-04T14:03:00Z",
+    "classification": "unknown",
+    "threat": "low",
+    "platform": "quadcopter",
+    "droneType": "1x DJI Mavic",
+    "droneCount": 1,
+    "confidence": 0.82,
+    "entry": { "lat": 55.6300, "lon": 12.6400 },
+    "lastPosition": { "lat": 55.6100, "lon": 12.6700 }
+  },
+  "samples": [],
+  "analysis": {
+    "dwellProfile": { "hotspotIds": [], "peakDwellSeconds": 0 },
+    "closestAssetApproach": null,
+    "classChangeLog": []
+  },
+  "signalsJsonBlock": null,
+  "signalsProseBlock": "The track transited the CPH control zone from northwest to southeast at 90 m AGL, 12 m/s. No dwell over any critical area. No approach corridor incursion.",
+  "highlightsJson": null,
+  "subjectFidelity": {
+    "requiredPlatformFamily": "quadcopter"
+  },
+  "assertions": ["writing_rules", "delimiter", "tier_caps", "subject_fidelity", "model_version"],
+  "notes": "Single Mavic transit, no dwell, no proximity to critical assets. Agent B should produce a short transit-tier narrative (under 500 chars) with no doctrine speculation."
+}

@@ -1,0 +1,35 @@
+{
+  "fixtureId": "agent-b-cooperative-match-billund",
+  "agent": "agent_b_debrief",
+  "expectedTier": "marginal",
+  "siteContextRef": "billund",
+  "event": {
+    "id": "DET-20260906-COOPMATCH-1",
+    "siteId": "billund",
+    "startTime": "2026-09-06T11:20:00Z",
+    "endTime":   "2026-09-06T11:24:00Z",
+    "classification": "unknown",
+    "threat": "low",
+    "platform": "fixed_wing_commercial",
+    "droneType": "1x fixed-wing (commercial airliner class)",
+    "droneCount": 1,
+    "confidence": 0.86,
+    "entry": { "lat": 55.7500, "lon": 9.1400 },
+    "lastPosition": { "lat": 55.7404, "lon": 9.1518 }
+  },
+  "samples": [],
+  "analysis": {
+    "dwellProfile": { "hotspotIds": [], "peakDwellSeconds": 0 },
+    "closestAssetApproach": null,
+    "classChangeLog": []
+  },
+  "signalsJsonBlock": null,
+  "signalsProseBlock": "Fixed-wing track approaching Billund on the standard 09 approach corridor. Altitude 900m descending. Speed 80 m/s. No dwell, transit only.",
+  "cooperativeCheckBlock": "COOPERATIVE TRAFFIC CROSS-CHECK\n─────────────────────────────────\nSite expectation: cooperative traffic normally present.\nFeed status: live (7 cooperative tracks in site bubble at detection time).\nMatch result: 1 cooperative track compatible with observed class + trajectory:\n  - RYR2A (fixed_wing_commercial, 40m away, 2s offset, score 0.95)\nConfidence uplift on FRIENDLY / cooperative classification: HIGH.",
+  "grounding": {
+    "expectedCoopSignals": ["cooperative", "RYR2A"]
+  },
+  "subjectFidelity": { "requiredPlatformFamily": "fixed_wing" },
+  "assertions": ["writing_rules", "delimiter", "tier_caps", "cooperative_grounding", "subject_fidelity", "model_version"],
+  "notes": "Fixed-wing track on final approach to Billund with a matching cooperative ADS-B track (RYR2A). Agent B should ground its narrative in the MATCH — surface the cooperative classification, name the callsign. Previously only had a no-match fixture; this covers the positive-match case."
+}

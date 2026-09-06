@@ -1,0 +1,21 @@
+{
+  "fixtureId": "agent-3-live-multi-drone-esbjerg",
+  "agent": "agent_case_file",
+  "siteContextRef": "esbjerg",
+  "event": {
+    "id": "DET-20260906-LIVE-SWARM-1",
+    "siteId": "esbjerg",
+    "startTime": "2026-09-06T15:30:00Z",
+    "classification": "unknown",
+    "threat": "elevated",
+    "platform": "quadcopter",
+    "droneType": "3x DJI Matrice formation",
+    "droneCount": 3,
+    "confidence": 0.89,
+    "lastPosition": { "lat": 55.4690, "lon": 8.4470 },
+    "linkedEventIds": []
+  },
+  "subjectFidelity": { "requiredPlatformFamily": "quadcopter", "requiredMinimumCount": 3 },
+  "assertions": ["writing_rules", "delimiter", "tier_caps", "subject_fidelity", "model_version"],
+  "notes": "Live case-file for a 3-drone Matrice formation at Esbjerg port. Non-CPH site + multi-drone. Verifies Agent 3 describes the swarm as a formation (not single drone) and uses port site context via Agent A digest injection. Base contract caps (500 char body, 200 char reco)."
+}

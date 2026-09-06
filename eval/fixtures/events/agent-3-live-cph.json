@@ -1,0 +1,23 @@
+{
+  "fixtureId": "agent-3-live-cph",
+  "agent": "agent_case_file",
+  "siteContextRef": "cph",
+  "event": {
+    "id": "DET-20260904-LIVE-1",
+    "siteId": "cph",
+    "startTime": "2026-09-04T16:20:00Z",
+    "classification": "unknown",
+    "threat": "elevated",
+    "platform": "quadcopter",
+    "droneType": "1x DJI Matrice 300",
+    "droneCount": 1,
+    "confidence": 0.88,
+    "lastPosition": { "lat": 55.6270, "lon": 12.6450 },
+    "linkedEventIds": []
+  },
+  "subjectFidelity": {
+    "requiredPlatformFamily": "quadcopter"
+  },
+  "assertions": ["writing_rules", "delimiter", "tier_caps", "subject_fidelity", "model_version"],
+  "notes": "Live case-file for an in-progress single Matrice 300 detection. Agent 3 uses base contract (500-char body, 200-char reco). Verifies the digest gets injected (fixture uses cph site context) without breaking the delimited output shape."
+}

@@ -1,0 +1,60 @@
+# ═════════════════════════════════════════════════════════════════════════
+# DHM → quantized-mesh terrain build
+# ═════════════════════════════════════════════════════════════════════════
+#
+# Runs the ctb-quantized-mesh tiler over ./input/ GeoTIFFs, writes
+# quantized-mesh + layer.json to ./output/. Deploy the output dir to
+# Scaleway Object Storage via scripts/deploy-scaleway.sh.
+#
+# Usage:
+#   1. Populate ./input/ via scripts/fetch-dhm-wcs.sh (or manual FTP order)
+#   2. docker compose run --rm build
+#   3. bash scripts/deploy-scaleway.sh
+# ═════════════════════════════════════════════════════════════════════════
+
+# Verify against live source: `docker pull tumgis/ctb-quantized-mesh` +
+# `docker inspect` for ENTRYPOINT before running this compose. Some ctb
+# images ship a strict ENTRYPOINT that this compose command line
+# overrides via `entrypoint: /bin/sh -c`. Pin to a digest for reproducible
+# builds: `tumgis/ctb-quantized-mesh@sha256:...`.
+
+services:
+  build:
+    image: tumgis/ctb-quantized-mesh:latest
+    volumes:
+      - ./input:/data/input:ro
+      - ./output:/data/output
+    environment:
+      MIN_ZOOM: ${MIN_ZOOM:-0}
+      MAX_ZOOM: ${MAX_ZOOM:-15}
+    working_dir: /data
+    # Use /bin/sh (guaranteed to exist in Alpine + Debian bases) not
+    # /bin/bash which may not be present on minimal Alpine variants.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        # ctb-tile builds from HIGH zoom DOWN to LOW zoom, so
+        # -s (start) must be > -e (end). Defaults: start=15, end=0.
+        START_Z=$${MAX_ZOOM:-15}
+        END_Z=$${MIN_ZOOM:-0}
+        # ctb-tile takes ONE GDAL datasource. Merge all input tiles into a
+        # virtual raster (VRT) first — cheap, no data copy.
+        echo "Merging input GeoTIFFs into VRT..."
+        gdalbuildvrt /data/output/merged.vrt /data/input/*.tif
+        echo "Building tile pyramid from zoom $${START_Z} down to $${END_Z}..."
+        ctb-tile -f Mesh -C -N \
+          -o /data/output \
+          -s $${START_Z} -e $${END_Z} \
+          /data/output/merged.vrt
+        echo "Emitting layer.json..."
+        ctb-tile -f Mesh -C -N -l \
+          -o /data/output \
+          /data/output/merged.vrt
+        echo "Gzipping .terrain tiles in place..."
+        find /data/output -name '*.terrain' -not -name '*.gz' \
+          -exec sh -c 'gzip -n "$$1" && mv "$$1.gz" "$$1"' _ {} \;
+        echo "Cleaning up VRT..."
+        rm -f /data/output/merged.vrt
+        echo "Done."
+        du -sh /data/output

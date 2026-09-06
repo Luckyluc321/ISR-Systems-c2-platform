@@ -1,0 +1,42 @@
+{
+  "fixtureId": "agent-b-precedent-cph",
+  "agent": "agent_b_debrief",
+  "expectedTier": "notable",
+  "siteContextRef": "cph",
+  "event": {
+    "id": "DET-20260904-PRECEDENT-1",
+    "siteId": "cph",
+    "startTime": "2026-09-04T18:00:00Z",
+    "endTime":   "2026-09-04T18:07:00Z",
+    "classification": "hostile",
+    "threat": "elevated",
+    "platform": "quadcopter",
+    "droneType": "1x DJI Mavic 3",
+    "droneCount": 1,
+    "confidence": 0.89,
+    "entry": { "lat": 55.6330, "lon": 12.6400, "heading": 200 },
+    "lastPosition": { "lat": 55.6188, "lon": 12.6689 }
+  },
+  "samples": [],
+  "analysis": {
+    "dwellProfile": { "hotspotIds": ["terminal_2"], "peakDwellSeconds": 190 },
+    "closestAssetApproach": {
+      "assetId": "terminal_2",
+      "assetName": "Terminal 2",
+      "minDistanceM": 60
+    },
+    "classChangeLog": []
+  },
+  "signalsJsonBlock": "{\"signals\":[{\"id\":\"dwell_hotspot\",\"assetId\":\"terminal_2\",\"value\":190,\"threshold\":60,\"outlier\":true}]}",
+  "signalsProseBlock": "Mavic-class quadcopter dwelled 3+ minutes over Terminal 2 airside, well beyond doctrine threshold.",
+  "precedentBlock": "PRIOR SIMILAR EVENTS AT THIS SITE\n─────────────────────────────────\n1. DET-20260814-0417 — 22 days ago — similarity 0.84 [same site + same asset targeted]\n   DJI Mavic 3, dwelled over Terminal 2 airside for 240 seconds. Classified hostile. Outcome: neutralised by police patrol.\n2. DET-20260722-0311 — 45 days ago — similarity 0.78 [same site]\n   Autel Evo, entered from Øresund side, exited without dwell. Classified hostile. Outcome: no dispatch (out of coverage before response arrived).\n\nUse these as contextual reference only. Do NOT extrapolate or recommend action based on prior outcomes. Highlight pattern similarity only if it clearly exists in the current event's signals.",
+  "grounding": {
+    "expectedAssetMentions": ["Terminal 2"],
+    "expectedPrecedentSignals": ["DET-20260814-0417", "Mavic"]
+  },
+  "subjectFidelity": {
+    "requiredPlatformFamily": "quadcopter"
+  },
+  "assertions": ["writing_rules", "delimiter", "tier_caps", "grounding", "precedent_grounding", "subject_fidelity", "model_version"],
+  "notes": "Mavic 3 dwelling over Terminal 2 with two similar prior events at the same site. Agent B should surface the pattern (mention 'similar', 'prior', or the prior event IDs) WITHOUT recommending dispatch based on the previous outcome. The precedent_grounding assertion checks both: (a) precedent surfaced, (b) no forbidden action-from-precedent phrases used."
+}

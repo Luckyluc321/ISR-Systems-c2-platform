@@ -281,13 +281,146 @@ The following remain manual per site today and are non-blocking for real ingest:
 
 ---
 
-## IF-1. Sensor node to C2 ingest
+## IF-1. Sensor node to C2 ingest `[live]`
 
-Status: pending. Next to populate. Will specify the `NnOutputSource` adapter, `SensorNodeDescriptor`, the per-tick detection message, node health, and the reconciliation between the live mock tick shape and the target `NnDetectionBatch` schema.
+The C2 platform is source-agnostic. Every downstream layer (tick loop, event lifecycle, correlator, UI, agents) consumes detections from an abstract `NnOutputSource` interface. Two implementations ship today: `MockNnOutputSource` (drives every simulation, demo, training run, and internal test) and `WebSocketNnOutputSource` (consumes real field sensor node streams). A per-site registry decides which source owns which siteId. This is the single seam through which real hardware plugs in without touching downstream code.
+
+The simulation layer (drones.js, TEMPLATES, waypoint interpolation, swarm formations) is **not** replaced by real hardware. It is a permanent, first-class subsystem — used for demos, training, edge-case regression, and side-by-side sim/real customer visits. The registry decides per-site which detection stream reaches the tick loop; the simulation engine keeps feeding the mock source at whatever sites route to it.
+
+### IF-1.1 Source-selection decision tree
+
+```
+Per detection tick, for each siteId:
+
+    ┌────────────────────────────────────────┐
+    │  nnRegistry.getSourceFor(siteId)       │
+    └────────────────────────────────────────┘
+                     │
+                     ▼
+     ┌──────────────────────────────────┐
+     │  FORCE_ALL_MOCK global override? │
+     └──────────────────────────────────┘
+              │              │
+             YES             NO
+              │              │
+              ▼              ▼
+     ┌──────────────┐   ┌────────────────────────────────┐
+     │ MockNnOutput │   │ SITE_SOURCE_CONFIG[siteId]     │
+     │    Source    │   │   .source === 'websocket'?     │
+     └──────────────┘   └────────────────────────────────┘
+                                 │              │
+                                YES             NO / undefined
+                                 │              │
+                                 ▼              ▼
+                        ┌────────────────┐  ┌──────────────┐
+                        │ WebSocketNn    │  │ MockNnOutput │
+                        │  OutputSource  │  │    Source    │
+                        │  (wss://...)   │  └──────────────┘
+                        └────────────────┘
+```
+
+Route matrix for every operating mode:
+
+| Mode | `FORCE_ALL_MOCK` | Per-site config | Result |
+|---|---|---|---|
+| Pure simulation / demo recording | `true` | ignored | Every site → mock. Simulation-engine drones flow through mock source as today. |
+| Mixed sim + live (customer visit, staged rollout) | `false` | some sites `websocket`, others `mock` (or undefined) | Websocket sites consume real sensor streams; mock sites keep running scripted templates on the same map. |
+| Full production | `false` | every site `websocket` | Every site consumes real hardware. Mock code stays in the bundle (available for on-demand replays and post-incident sim). |
+| Development default | `false` | all undefined | Every site → mock. Zero-config behaviour matches today's build byte-for-byte. |
+
+### IF-1.2 `NnOutputSource` interface
+
+```
+interface NnOutputSource {
+  siteId: string
+  start(): void
+  stop(): void
+  onDetection(callback: (batch: NnDetectionBatch) => void): void
+  ingestPositions(positions): void   // simulation push path, real sources ignore it
+}
+```
+
+- `start()` / `stop()` control the source's lifecycle. Mock starts a no-op subscription to the sim tick; WebSocket opens the connection. Both are idempotent.
+- `onDetection(cb)` registers a listener. Sources may emit many callbacks per tick (one per detection); the tick loop batches downstream.
+- All emitted batches share the same schema (IF-1.4). The tick loop, correlator, and UI cannot tell which source the batch came from.
+- `ingestPositions(positions)` is the simulation push path. The tick loop calls it each tick with the current drone positions for the site. The mock source runs the coverage math inside it and emits a batch. A real source ignores it, because real batches arrive over the wire (main.js calls it on every source at line 5221).
+
+### IF-1.3 Implementations
+
+**`MockNnOutputSource(siteId)`** — reads live sim state (`SITES[siteId].sensors` + current drone positions per event from the simulation engine), computes per-sensor coverage + confidence exactly as `_updateContributingSensorsForPosition` does today, and emits an `NnDetectionBatch` per tick. This is the same math the C2 currently runs inline; the extraction is pure-refactor with no behavioural change. Keeps every simulation feature — waypoint interpolation, swarm formations, RF signature generation, template scenarios — permanently functional.
+
+**`WebSocketNnOutputSource(siteId, url, opts)`** — connects to a real field sensor node stream. Contract:
+- Reconnect with exponential backoff on drop (base 1 s, max 30 s).
+- On disconnect, mark all sensors at that site `status: 'offline'` in the emitted batch so downstream degradation logic is uniform between mock and real sources.
+- Accept a bearer token via `opts.auth` for authenticated node streams.
+- Enforce site-scoped delivery: reject batches whose `siteId` field does not match this source's siteId (prevents cross-site injection from a compromised node).
+
+Both implementations live in `src/nn_source.js`. The registry (`src/nn_registry.js`) owns the per-site source map + the `FORCE_ALL_MOCK` global.
+
+### IF-1.4 `NnDetectionBatch` shape
+
+```
+type NnDetectionBatch = {
+  siteId: string
+  tickTs: string                    // ISO-8601 wall clock of the emitting tick
+  sensors: Array<{
+    sensorId: string                // must exist in SITES[siteId].sensors
+    status: 'online' | 'offline'    // per-tick health from the source
+    detections: Array<{
+      lat: number
+      lon: number
+      alt?: number
+      confidence: number            // 0..1 in the emitting source's frame
+      droneKey?: string             // 'lead' | 'sw{i}' | opaque real-hardware ID
+      modalityMix?: string[]        // ['RF','Acoustic','Visual'] subset that fired
+    }>
+  }>
+}
+```
+
+Same shape from mock and real sources. Downstream code aggregates by (siteId, sensorId) with per-tick MAX across drones (the same monotonic-tick reset behaviour landed in `_updateContributingSensorsForPosition`).
+
+### IF-1.5 Configuration surface
+
+**Global override (env / bootstrap):**
+```
+window.__ISR_FORCE_ALL_MOCK = true   // wins over per-site config; used for
+                                     // demo recording sessions and offline
+                                     // simulation runs
+```
+
+**Per-site (`src/nn_registry.js`):**
+```
+SITE_SOURCE_CONFIG = {
+  // Every site ships against mock today. No field hardware is wired yet.
+  cph:      { source: 'mock' },
+  esbjerg:  { source: 'mock' },
+  amk:      { source: 'mock' },
+  // Flip a site to live when its field node ships, for example:
+  //   cph: { source: 'websocket', url: 'wss://cph-node-01.field.isr/nn', auth: '<token>' }
+  // Sites not listed default to mock, so a new site in SITES works with no registry update.
+}
+```
+
+### IF-1.6 Migration + rollback contract
+
+- Adding a real sensor node to a site is one registry entry. Zero downstream code changes.
+- Rolling back a misbehaving field deployment: change the site's registry entry to `{ source: 'mock' }`. Downstream code keeps running against the mock source until the field is stable again.
+- Adding a whole new site: create the entry in `SITES` (sensors, coordinates, receivers, boundary). The registry defaults to mock; live wiring is added when the field node ships.
+- Multi-source composition (Phase 4 of the agentic architecture doc) is supported by construction — each site's source is independent.
+
+### IF-1.7 What this unlocks
+
+- Netcompany integration can plug in as a `WebSocketNnOutputSource` variant (or a sibling source that consumes their aggregated feed) without touching the tick loop.
+- Customers running their own detection stack can write an adapter that maps their output to `NnDetectionBatch` (IF-1.4). Their infra plugs into the same downstream pipeline.
+- New NN model versions can be A/B tested at the adapter layer without redeploying the C2.
+- Sim-only demo installs (trade shows, sales demos, training environments) run the same C2 build with `FORCE_ALL_MOCK = true`.
 
 ## IF-3. Detection lifecycle and marker/aggregation contract `[live]`
 
 The detection lifecycle contract defines how the platform turns per-drone sensor coverage transitions into on-map markers and audit records. It is coordinate-only (no threat classification here) and is the single source of truth for the visual timeline of any event. Every rule below is enforced per-drone and aggregated at event level.
+
+Detections reach this layer as `NnDetectionBatch` batches from the source in IF-1. This section covers what happens to the coverage transitions inside those batches, not where they come from. The source is abstract, so the rules below run identically whether a detection came from the mock source or a real field node.
 
 ### IF-3.1 Design invariants
 
@@ -450,7 +583,13 @@ A real sensor mesh integrates by populating `droneState` on tick — the marker 
 
 ## IF-4. Event data contract
 
-Status: pending. Will specify the event object, the DetectionSubject canonical shape, droneState runtime schema, and multi-site shadow linking.
+Status: pending full spec. Will specify the event object, the DetectionSubject canonical shape, droneState runtime schema, and multi-site shadow linking.
+
+Interim note (2026-08-30): Two new fields added to the event object by `events.js` `addEvent`:
+- `event.narrativeCache` — Agent B output cache. Shape `{ body, recommendation, model_version, at, signalHash }`. Initialized `null`. Persisted per-event to `localStorage[isr:narrativeCache:${eventId}]` on write. Rehydrated on PDF export, closed-panel render, and debrief open.
+- `event._preprocessed` — trajectory signal extractor output cache. Shape defined in `docs/agentic-preprocessing-architecture.md` §5. Initialized `null`. Same persistence pattern.
+
+Full agentic preprocessing pipeline (including the ranking rule and signal shapes) is specified in `docs/agentic-preprocessing-architecture.md`.
 
 ## IF-5. Escalation, routing, tenant isolation
 
@@ -846,6 +985,8 @@ The pipeline is deterministic where a response decision depends on it and genera
 
 If the model endpoint is unreachable, slow, or unconfigured, the caller keeps its already-rendered deterministic text. The model narrative replaces that text only when it arrives. A partner integrating here must treat every model output as best-effort enrichment, never as a gate.
 
+Agent B consumes the same source-agnostic detection stream as everything else (IF-1). Whether a detection came from the mock source or a real field node is invisible here, so the narrative reads the same in a demo and in production.
+
 Two agents are model-relevant. Agent A is deterministic today and target-generative. Agent B is generative today via Mistral.
 
 | Agent | Role | Model status |
@@ -900,11 +1041,23 @@ Agent B reads a detection against Agent A context and produces a two-part analys
 
 ```
 {
-  body: string,            // briefing, under 500 chars, max two paragraphs
-  recommendation: string,  // one sentence, action verb, under 200 chars
+  body: string,            // briefing, length caps vary by tier — see below
+  recommendation: string,  // one sentence, action verb, length caps vary by tier
   model_version: string    // the model id that produced it
 }
 ```
+
+**Tiered length caps.** `streamCaseFileNarrative` (live) always uses the base contract. `streamDebriefNarrative` (post-event) applies a notability tier resolved by the preprocessing pipeline (see `agentic-preprocessing-architecture.md`) and overlays the caps below.
+
+| Tier | Entry point | Body cap | Body paragraphs | Recommendation cap |
+|---|---|---|---|---|
+| Base / live case-file | `streamCaseFileNarrative` | 500 chars | 2 max | 200 chars |
+| `identify-only` | (deterministic, no LLM call) | template | — | template |
+| `transit` | `streamDebriefNarrative` | 500 chars | 1 | 200 chars |
+| `marginal` | `streamDebriefNarrative` | 1000 chars | 1-2 | 250 chars |
+| `notable` | `streamDebriefNarrative` | 2000 chars | up to 4 | 400 chars |
+
+Source of truth: `src/mistral_client.js` `WRITING_RULES` for the base contract, `src/agents/agent_b_debrief.js` `DEBRIEF_TIER_RULES` for tier overlays.
 
 The DetectionSubject the narrative is grounded in is specified in IF-4. Agent B is told to trust the labeled subject fields as fused NN output and not confabulate around missing ones.
 
@@ -914,8 +1067,9 @@ The client is a single streaming call over server-sent events. Source is mistral
 
 | Property | Value |
 |---|---|
-| Endpoint | `https://api.mistral.ai/v1/chat/completions` |
-| Model | `mistral-large-latest` |
+| Endpoint (current, transitional) | `https://api.mistral.ai/v1/chat/completions` — browser calls Mistral directly. Dev/demo only. Target moves this behind an Azure sovereign proxy per IF-9.7. |
+| Endpoint (target production) | Azure sovereign proxy URL (from `VITE_MISTRAL_ENDPOINT`). Proxy forwards to Scaleway Mistral (primary) or Azure Foundry Mistral (failover). Same OpenAI-compatible SSE contract from the browser's point of view. |
+| Model | `mistral-large-latest` today. In production, pin a specific catalog SKU (see IF-9.7 for Foundry SKUs and Scaleway model names). |
 | Transport | HTTPS POST, `Accept: text/event-stream`, bearer token |
 | Streaming | SSE. Each `data:` line is a JSON chunk. Content read from `choices[0].delta.content`. Terminator line is `data: [DONE]`. |
 | Request body | `{model, messages, stream: true, temperature, max_tokens}` |
@@ -940,7 +1094,7 @@ The client is a single streaming call over server-sent events. Source is mistral
 
 Both entry points build a system prompt plus a user prompt. The house style is enforced in the prompt, not only in post-processing.
 
-**Writing rules injected into every system prompt:**
+**Base writing rules injected into every system prompt** (source: `mistral_client.js` `WRITING_RULES`):
 
 - Write in English. Use Danish characters æ, ø, å only for proper nouns such as site or agency names, never for body text.
 - Two short paragraphs maximum for the body.
@@ -949,6 +1103,8 @@ Both entry points build a system prompt plus a user prompt. The house style is e
 - No markdown. No bold, italic, headers, or bullets.
 - Body under 500 characters.
 - Recommendation is one sentence, starts with an action verb, under 200 characters.
+
+**Tier overlay for `streamDebriefNarrative`** (source: `agent_b_debrief.js` `DEBRIEF_TIER_RULES`). When a debrief runs at `marginal` or `notable` notability, the body / paragraph / recommendation caps in the base rules above are superseded per the table in IF-9.3. `transit` inherits the base caps. `identify-only` bypasses the LLM entirely.
 
 **Strict output format:**
 
@@ -971,9 +1127,21 @@ The user prompt carries the DetectionSubject digest (IF-4) plus, for debriefs, a
 
 The deterministic path is never blocked by this layer. This is the single most important property for a partner to preserve when they re-home the endpoint.
 
-### IF-9.7 Target cloud architecture (Azure) `[planned]`
+### IF-9.7 Target cloud architecture (Azure + Scaleway) `[planned]`
 
-The target moves model inference off the browser and onto Azure, behind a sovereign proxy that removes the browser-side token. The client contract in IF-9.4 does not change. Only the endpoint and the auth boundary move. This subsection supersedes earlier references to Scaleway or OVH hosting. Azure is the intended host.
+**KNOWN GAP (2026-09-06): the Scaleway→Foundry failover described below is NOT IMPLEMENTED.** The current `src/mistral_client.js` is single-endpoint — one URL, no fallback code. If the configured endpoint degrades, agent narratives stop rendering. This is parked pending the Azure sovereign proxy binary (see "canonical hosting split" below). The failover belongs server-side at the proxy, not client-side in the browser — building browser-side dual-endpoint would be throwaway work once the proxy lands. Priority: bump when Azure infra is provisioned OR if a customer explicitly requires runtime provider resilience before then.
+
+**Canonical hosting split.** Azure carries the platform spine — identity (Entra ID), secrets (Key Vault), event and evidence persistence (Blob with WORM immutability + customer-managed key), correlation index (AI Search), tenant isolation (subscription and resource-group boundaries), telemetry (App Insights), network isolation (Private Link and Private Endpoints), and the sovereign proxy service (Container Apps or Functions behind API Management). Scaleway is plugged into that spine as the primary sovereign inference provider — the Azure proxy holds the Scaleway API token in Key Vault and forwards agent requests to Scaleway's Mistral endpoint. Azure Foundry Mistral is the failover inference endpoint when Scaleway degrades. Data plane concerns beyond the request/response never leave Azure.
+
+**What moves off the browser.** The token. The client contract in IF-9.4 does not change from the browser's point of view. Only the endpoint and the auth boundary move server-side. `VITE_MISTRAL_ENDPOINT` in production points at the Azure proxy URL, never at Scaleway or Mistral directly.
+
+**Inference provider matrix.**
+
+| Role | Provider | Endpoint | When |
+|---|---|---|---|
+| Primary sovereign inference | Scaleway Generative APIs (Mistral, EU-hosted) | `https://api.scaleway.ai/v1/chat/completions` | Default in production. Sovereignty story rests here. |
+| Failover inference | Azure Foundry Models — Mistral serverless (France Central / Sweden Central) | Foundry-issued endpoint per deployment | When Scaleway is unreachable or degraded. Same OpenAI-compatible SSE contract. |
+| Dev/demo (transitional) | Mistral API direct | `https://api.mistral.ai/v1/chat/completions` | Today only. Browser-exposed token. Not shippable to production. |
 
 Facts below were verified against Microsoft documentation on 2026-08-23. This is a fast-moving catalog on a 90-day update cycle. Confirm live in the Foundry portal at deploy time. Sources are listed at the end of this subsection.
 
@@ -986,7 +1154,7 @@ Facts below were verified against Microsoft documentation on 2026-08-23. This is
 | Platform need | Azure service | Note |
 |---|---|---|
 | Model inference | Microsoft Foundry Models, Mistral serverless deployment (or managed compute) | EU serverless regions include France Central and Sweden Central. |
-| Sovereign proxy (removes browser token) | Azure Container Apps or Functions behind Azure API Management | Holds the key server-side. Browser calls the proxy, not `api.mistral.ai`. Streams SSE straight through. |
+| Sovereign proxy (removes browser token) | Azure Container Apps or Functions behind Azure API Management | Holds provider API keys server-side (Scaleway primary, Foundry failover). Browser calls the proxy, not `api.mistral.ai` or `api.scaleway.ai`. Streams SSE straight through. |
 | Event and evidence persistence | Azure Blob Storage with immutability (WORM) policy, optional customer-managed key | Signed evidence hashes and chain of custody. |
 | Correlation index | Azure AI Search | Cross-site correlation index. |
 | Identity and tenant isolation | Microsoft Entra ID, with subscription and resource-group boundaries per tenant | Enforces the three-tenant isolation from Section 1. |
@@ -996,13 +1164,13 @@ Facts below were verified against Microsoft documentation on 2026-08-23. This is
 **Data residency posture.** Three separate axes, do not conflate them.
 
 - Data at rest stays in the designated Azure geography. Choosing EU regions keeps at-rest data in Europe.
-- Inference processing residency is the caveat. Serverless Mistral is offered as Global Standard only today, and Global Standard may process prompts and responses in any region where the model is deployed. Data Zone Standard, which would pin processing to the EU Data Boundary, is currently listed as "Not available" for Mistral models. Strict EU-only processing residency therefore requires one of: managed compute (dedicated in-region GPU), a later addition of Data Zone support for Mistral, or the on-premises path below. This must be verified in-portal before any residency claim is made to a customer.
+- Inference processing residency. For the Scaleway primary path, Mistral inference runs in Scaleway's EU regions (Paris / Amsterdam) with EU-sovereign processing guarantees. For the Azure Foundry failover path, serverless Mistral is offered as Global Standard only today, and Global Standard may process prompts and responses in any region where the model is deployed. Data Zone Standard, which would pin processing to the EU Data Boundary, is currently listed as "Not available" for Mistral models. Strict EU-only processing residency on Foundry therefore requires one of: managed compute (dedicated in-region GPU), a later addition of Data Zone support for Mistral, or the on-premises path below. This must be verified in-portal before any residency claim is made to a customer.
 - On-premises and disconnected path. Foundry Local on Azure Local runs models locally under Microsoft Sovereign Private Cloud, which Microsoft markets specifically for critical infrastructure and national security. This is the fallback when public-cloud processing residency is insufficient. It removes the processing-residency caveat by keeping inference in-country or fully disconnected.
 - Training and sharing. Microsoft acts as data processor. Per Microsoft documentation, prompts and outputs are not used to train Microsoft, model-provider, or third-party models, models are stateless and do not store prompts or outputs, and prompts and outputs are not shared with the model provider. Commercial and usage metadata may be shared with the provider for billing and contact.
 
 **Broader sovereignty envelope.** The Microsoft EU Data Boundary was completed on 2025-02-26 and covers Azure, keeping customer data and pseudonymized personal data stored and processed in the EU and EFTA (EU 27 plus Iceland, Liechtenstein, Norway, Switzerland). Denmark is a named boundary country with a Danish datacenter, so a standard EU-region deployment already places customer data and pseudonymized logs in the EU. On top of that, Microsoft Sovereign Cloud (announced 2025) offers two tiers relevant here. Sovereign Public Cloud adds customer-managed keys, External Key Management, and Data Guardian (access controlled by Europe-based personnel). Sovereign Private Cloud, delivered through Azure Local and Foundry Local, is the customer- or partner-operated tier Microsoft positions for defence and critical infrastructure. One honest caveat: the strongest of these controls (Data Guardian, the full EU AI-processing commitment, disconnected operation) are still rolling out across late 2025 into 2026 and are not all GA. Verify the service matrix at contract time rather than assuming it is live.
 
-**Migration from the live state.** Today the browser calls `api.mistral.ai` directly with `VITE_MISTRAL_API_TOKEN` baked into the build, which exposes the key and is dev and demo only. The target has the browser call the ISR sovereign proxy on Azure. The proxy holds the key, calls the Foundry endpoint, and streams SSE back unchanged. The IF-9.4 client contract stays identical from the browser's point of view. Only `ENDPOINT` and the auth header move server-side.
+**Migration from the live state.** Today the browser calls `api.mistral.ai` directly with `VITE_MISTRAL_API_TOKEN` baked into the build, which exposes the key and is dev and demo only. The target has the browser call the ISR sovereign proxy on Azure. The proxy holds the provider keys (Scaleway primary, Foundry failover) and forwards SSE back unchanged. The IF-9.4 client contract stays identical from the browser's point of view. Only `ENDPOINT` and the auth header move server-side.
 
 **Sources.**
 

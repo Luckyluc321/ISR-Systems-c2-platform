@@ -290,4 +290,136 @@ export const SITES = {
       { id: 'hjv-distrikt-kbh',        mode: 'observer', condition: 'sustained-incident' },
     ],
   },
+
+  // ── Billund Airport (BLL / EKBI) ────────────────────────────────────
+  // Municipal-owned public limited (Billund Lufthavn A/S). Denmark's
+  // second-busiest passenger airport. Home of Sun-Air of Scandinavia,
+  // Jettime, and Denmark's largest air cargo hub (CHBA). Adjacent to
+  // Legoland Billund Resort + LEGO Group HQ. ARP verified against
+  // Naviair AIP EK_AD_2_EKBI. Perimeter approximated (rectangular
+  // around ARP + runway 09/27); refine from OSM way EKBI aerodrome
+  // polygon post-onboarding.
+  billund: {
+    id: 'billund',
+    name: 'Billund Airport',
+    code: 'BLL',
+    coordinates: { lat: 55.740511, lon: 9.158056 },   // ARP verified: Naviair AIP EKBI
+    // Aerodrome boundary — hand-traced by Lucas in geojson.io, 43 vertices,
+    // closed. Matches the real fenced perimeter around runway 09/27,
+    // terminals, apron, and cargo area.
+    perimeter: [
+      [9.1920722, 55.7386624],
+      [9.1918332, 55.7427828],
+      [9.1867545, 55.7443131],
+      [9.1805703, 55.7458770],
+      [9.1757903, 55.7468523],
+      [9.1713389, 55.7473231],
+      [9.1675747, 55.7477267],
+      [9.1654834, 55.7480629],
+      [9.1601358, 55.7483824],
+      [9.1523085, 55.7484665],
+      [9.1394215, 55.7485506],
+      [9.1383759, 55.7481975],
+      [9.1363444, 55.7453052],
+      [9.1346116, 55.7439936],
+      [9.1320723, 55.7424464],
+      [9.1275910, 55.7397892],
+      [9.1253205, 55.7384942],
+      [9.1243645, 55.7377878],
+      [9.1243346, 55.7374346],
+      [9.1282781, 55.7364591],
+      [9.1319826, 55.7355004],
+      [9.1331776, 55.7349285],
+      [9.1335660, 55.7346762],
+      [9.1340739, 55.7340370],
+      [9.1350000, 55.7340370],
+      [9.1368522, 55.7340874],
+      [9.1387941, 55.7343566],
+      [9.1398696, 55.7344575],
+      [9.1441716, 55.7342052],
+      [9.1452770, 55.7341211],
+      [9.1470927, 55.7339925],
+      [9.1487358, 55.7338579],
+      [9.1499308, 55.7339420],
+      [9.1515441, 55.7342616],
+      [9.1527092, 55.7342784],
+      [9.1552785, 55.7340429],
+      [9.1568021, 55.7339420],
+      [9.1579672, 55.7339252],
+      [9.1595506, 55.7341775],
+      [9.1678944, 55.7362346],
+      [9.1728835, 55.7372774],
+      [9.1736583, 55.7380000],
+      [9.1920016, 55.7385214],
+      [9.1920722, 55.7386624],   // close ring
+    ],
+    subLines: [],
+    // 19 nodes designed for DUAL COVERAGE: every point inside the
+    // aerodrome polygon is within 1000m of at least TWO sensors.
+    // Layout: 3 rows (south perimeter / centreline / north perimeter)
+    // × 5 columns spanning the main body (lon 9.130 → 9.175) + 2 columns
+    // covering the east protrusion (lon 9.180 → 9.188). Spacing ~600m
+    // ensures adjacent-sensor circles overlap by 400m radius, giving
+    // ~800m of dual-coverage strip between any two neighbours.
+    // Core node (HackRF-equipped) sits at the centreline hub near the
+    // passenger terminal + runway midpoint.
+    sensors: [
+      // Row 1 — South perimeter (aprons + terminal + cargo)
+      { id: 'BLL-N01', label: 'SW perimeter',                lat: 55.73600, lon: 9.13000, status: 'online', hardware: 'Radxa Rock 4SE', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 1, issues: null },
+      { id: 'BLL-N02', label: 'S apron (W terminal side)',   lat: 55.73620, lon: 9.14000, status: 'online', hardware: 'Radxa Rock 4SE', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 3, issues: null },
+      { id: 'BLL-N03', label: 'Passenger terminal apron',    lat: 55.73700, lon: 9.15000, status: 'online', hardware: 'Radxa Rock 4SE', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 5, issues: null },
+      { id: 'BLL-N04', label: 'Cargo apron (CHBA)',          lat: 55.73780, lon: 9.16000, status: 'online', hardware: 'Radxa Rock 4SE', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 4, issues: null },
+      { id: 'BLL-N05', label: 'GA / Business apron',         lat: 55.73780, lon: 9.17000, status: 'online', hardware: 'Radxa Rock 4SE', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 2, issues: null },
+      // Row 2 — Centreline (runway 09/27, includes Core node)
+      { id: 'BLL-N06', label: 'Runway 09 threshold (W)',     lat: 55.74050, lon: 9.13500, status: 'online', hardware: 'Radxa Rock 4SE', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 2, issues: null },
+      { id: 'BLL-N07', label: 'Runway mid-W',                lat: 55.74050, lon: 9.14500, status: 'online', hardware: 'Radxa Rock 4SE', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 3, issues: null },
+      { id: 'BLL-N08', label: 'Runway centre (Core)',        lat: 55.74050, lon: 9.15500, status: 'online', hardware: 'Radxa Rock 4SE + HackRF', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 7, issues: null, isCore: true },
+      { id: 'BLL-N09', label: 'Runway mid-E',                lat: 55.74050, lon: 9.16500, status: 'online', hardware: 'Radxa Rock 4SE', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 3, issues: null },
+      { id: 'BLL-N10', label: 'Runway 27 threshold (E)',     lat: 55.74050, lon: 9.17500, status: 'online', hardware: 'Radxa Rock 4SE', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 4, issues: null },
+      // Row 3 — North perimeter (bulge follows polygon curve N)
+      { id: 'BLL-N11', label: 'NW perimeter',                lat: 55.74450, lon: 9.13800, status: 'online', hardware: 'Radxa Rock 4SE', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 0, issues: null },
+      { id: 'BLL-N12', label: 'N side airside W',            lat: 55.74600, lon: 9.14800, status: 'online', hardware: 'Radxa Rock 4SE', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 1, issues: null },
+      { id: 'BLL-N13', label: 'N side airside centre',       lat: 55.74750, lon: 9.15500, status: 'online', hardware: 'Radxa Rock 4SE', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 2, issues: null },
+      { id: 'BLL-N14', label: 'N side airside E',            lat: 55.74750, lon: 9.16500, status: 'online', hardware: 'Radxa Rock 4SE', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 1, issues: null },
+      { id: 'BLL-N15', label: 'NE perimeter',                lat: 55.74700, lon: 9.17400, status: 'online', hardware: 'Radxa Rock 4SE', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 0, issues: null },
+      // East protrusion (2 columns, mid + north row only — polygon narrow here)
+      { id: 'BLL-N16', label: 'E protrusion centre (W)',     lat: 55.74000, lon: 9.18200, status: 'online', hardware: 'Radxa Rock 4SE', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 1, issues: null },
+      { id: 'BLL-N17', label: 'E protrusion N (W)',          lat: 55.74250, lon: 9.18400, status: 'online', hardware: 'Radxa Rock 4SE', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 0, issues: null },
+      { id: 'BLL-N18', label: 'E protrusion centre (E)',     lat: 55.73950, lon: 9.18900, status: 'online', hardware: 'Radxa Rock 4SE', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 1, issues: null },
+      { id: 'BLL-N19', label: 'E protrusion N (E)',          lat: 55.74200, lon: 9.19000, status: 'online', hardware: 'Radxa Rock 4SE', modalities: ['RF','Acoustic','Visual'], coverageRadius: 1000, detectionsLast24h: 0, issues: null },
+    ],
+    stats: {
+      sensorsOnline: 19,
+      sensorsTotal: 19,
+      flaggedEvents24h: 2,
+      hostileEvents24h: 0,
+      falseAlarms24h: 1,
+    },
+    // Sydøstjyllands Politi covers Billund Kommune per politi.dk.
+    // Trekantområdets Brandvæsen (TrekantBrand) is the municipal fire
+    // service; brs-haderslev is the nearest national BRS unit for
+    // Tier-2 escalation. Karup is the nearest Flyvevåbnet base for
+    // air response (~90km NW). HJV Vest covers Syd- og Sønderjylland.
+    receivers: [
+      // Actors
+      { id: 'politi-sydostjyl',        mode: 'actor',    role: 'primary-response',   tier: 1 },
+      { id: 'brs-haderslev',           mode: 'actor',    role: 'emergency-response', tier: 2 },
+      { id: 'flv-karup',               mode: 'actor',    role: 'air-response',       tier: 3 },
+      { id: 'agency-traf',             mode: 'actor',    role: 'regulator',          tier: 4 },
+      { id: 'kom-billund',             mode: 'actor',    role: 'municipal-crisis',   tier: 4 },
+      // Observers
+      { id: 'rigspoliti',              mode: 'observer' },
+      { id: 'pet',                     mode: 'observer' },
+      { id: 'forsvaret',               mode: 'observer' },
+      { id: 'fe',                      mode: 'observer' },
+      { id: 'agency-cfcs',             mode: 'observer' },
+      { id: 'min-just',                mode: 'observer' },
+      { id: 'min-erhverv',             mode: 'observer' },
+      // Conditional observers
+      { id: 'region-syd',              mode: 'observer', condition: 'casualty-scenario' },
+      { id: 'brs-kemisk',              mode: 'observer', condition: 'cbrn-threat' },
+      { id: 'brs-nukleart',            mode: 'observer', condition: 'nuclear-threat' },
+      { id: 'hjv-vest',                mode: 'observer', condition: 'sustained-incident' },
+    ],
+  },
 };

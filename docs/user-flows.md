@@ -2,7 +2,7 @@
 
 Internal reference. The connective tissue between every module. Every feature must slot into a flow or explicitly extend one. Foundation for **plug-and-play** readiness: when real sensor mesh comes online, these flows should carry it end to end without code changes.
 
-Last updated 2026-08-13, reflecting P92 hierarchical roles + P95 workspace Mission Console + P83 canonical DetectionSubject.
+Last updated 2026-09-06, reflecting the four escalation-extension flows (SLA overdue, structured progress status, post-incident handoff chain, observer revoke) added on top of the P92 / P95 / P83 baseline.
 
 ---
 
@@ -194,6 +194,178 @@ flowchart TD
 - army-isr-drone: 60 km/h flight, 300m orbit, 6s visual verify (does NOT neutralise)
 - sof-tactical: 200 km/h air insertion, 400m, 15s
 - wildlife-response: 20 km/h on-airport, 200m, 4s
+
+---
+
+## Flow 6: Escalation Extensions (SLA, Progress, Chain, Observer Revoke)
+
+Four gap-fill flows layered on top of the operator to receiver contract. All four are detection-only. No layer here triggers auto-cascade, kinetic response, or automatic re-routing. Every action is a human decision surfaced with clean data.
+
+### 6.1 SLA Timer to OVERDUE
+
+Per-tier acknowledgement windows. `rules.js` sweeps every 15 seconds. When an escalation has not reached `acknowledged` within the tier window, the record flips to `overdue = true` and both the operator and receiver see the flag. No auto-cascade fires.
+
+Windows: T1 = 5 min, T2 = 15 min, T3 = 30 min, T4 = 60 min, T5 = 120 min.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Op as Operator (site owner)
+    participant Ev as events.js
+    participant R as rules.js sweep (15s)
+    participant W as window (CustomEvent)
+    participant Rcv as Receiver (agency)
+
+    Op->>Ev: escalateEvent → rec.status = sent
+    Note over Ev: rec.overdue = false<br/>rec.initiatedAt = now
+    Ev-->>Rcv: dispatched (delivered → read timers)
+
+    loop every 15s
+        R->>Ev: sweepSLAOverdue()
+        R->>R: for each rec: status != acknowledged?
+        R->>R: age >= SLA_MINS_BY_TIER[tier] * 60s?
+    end
+
+    R->>Ev: setEscalationOverdue(eventId, escId)
+    Ev->>Ev: rec.overdue = true<br/>notes.push('sla-overdue')
+    Ev-->>W: CustomEvent('escalation-overdue')
+    W-->>Op: toast: "SLA overdue · <dest> · operator judgement needed"
+    W-->>Rcv: toast (same session-wide broadcast)
+    Note over Op,Rcv: NO auto-cascade. Human decides whether to re-route.
+```
+
+**Invariant:** `setEscalationOverdue` only writes state + emits a browser event. It never calls `escalateEvent`, never touches destinations, never triggers a rule.
+
+---
+
+### 6.2 Structured Progress Status
+
+Delivery axis (`status`) and progress axis (`progressStatus`) are orthogonal. `status` still tracks `sent → delivered → read → acknowledged`. `progressStatus` tracks what the receiver does with the case after ack: `in-progress → resolved` or `→ blocked(reason)`.
+
+Auto-advance: any physical-response CTA the receiver clicks flips the receiver's own escalation record to `in-progress`. Explicit "Update status" CTA covers resolve, blocked, and freeform re-set.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Rcv as Receiver actor
+    participant UI as main.js CTA handler
+    participant Adp as dispatch adapter
+    participant Ev as events.js
+    participant Op as Operator (log view)
+
+    Rcv->>UI: click "Deploy patrol"
+    UI->>UI: STUB_DISPATCH_ACTIONS.has(action)
+    UI->>Ev: updateEscalationProgress(evId, myRec.id, 'in-progress')
+    Note over Ev: rec.progressStatus = 'in-progress'<br/>rec.progressHistory.push(...)
+    UI->>Adp: adapter.dispatch({ action, event })
+    Adp-->>UI: result
+    UI-->>Rcv: toast "deploy patrol · logged"
+    Op->>Op: escalation log re-renders → IN PROGRESS badge
+
+    Rcv->>UI: click "Update status"
+    UI-->>Rcv: prompt: in-progress | resolved | blocked
+    alt blocked
+        UI-->>Rcv: prompt: reason (required)
+        UI->>Ev: updateEscalationProgress('blocked', reason)
+        Note over Ev: rec.blockedReason = reason
+    else resolved
+        UI->>Ev: updateEscalationProgress('resolved')
+    end
+    UI-->>Op: log renders BLOCKED / RESOLVED badge on rec
+    Note over Op,Rcv: Log never feeds back into agent prompts.<br/>Write-only from the platform's perspective.
+```
+
+**Invariant:** `progressStatus` is only ever set by explicit human action (physical-response click or "Update status"). No timer, rule, or agent writes it.
+
+---
+
+### 6.3 Post-Incident Handoff Chain
+
+Ground-response coordination after `dispatchOutcomes` is confirmed. `dispatchPostIncident` creates a root chain entry. Whoever holds any entry can hand off to another responder (creates a child linked via `chainParentId`) or mark their entry resolved. Close-event gate: every leaf (an entry with no child) must be resolved.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Op as Operator
+    participant UI as main.js Step 5
+    participant Ev as events.js chain funcs
+    participant PA as Politi (root)
+    participant BRS as Beredskabsstyrelsen (child)
+
+    Op->>UI: click Dispatch → Politi
+    UI->>Ev: dispatchPostIncident(evId, 'politi-kbh')
+    Ev->>Ev: addPostIncidentChainRoot(evId, 'politi-kbh', operator)
+    Note over Ev: chain = [{id:PIC-1, destId:politi-kbh,<br/>chainParentId:null, status:open}]
+    UI-->>PA: "Politi Kbh dispatched"
+
+    PA->>UI: click "Hand off" on PIC-1
+    UI-->>PA: prompt fresh responders (not yet in chain)
+    PA->>UI: select Beredskabsstyrelsen
+    UI->>Ev: handoffPostIncidentChain(evId, PIC-1, 'brs-kbh', politi-actor)
+    Ev->>Ev: chain.push({id:PIC-2, chainParentId:PIC-1, status:open})
+    Note over Ev: PIC-1 is no longer a leaf.<br/>Leaves now = [PIC-2].
+
+    BRS->>UI: click "Mark resolved" on PIC-2
+    UI->>Ev: resolvePostIncidentChainEntry(evId, PIC-2, brs-actor)
+    Note over Ev: PIC-2.status = 'resolved'<br/>PIC-2.resolvedBy = brs-actor
+
+    Op->>UI: view Step 6 close gate
+    UI->>Ev: postIncidentChainAllLeavesResolved(event)
+    alt every leaf resolved
+        Ev-->>UI: true
+        UI-->>Op: "Close event" button shown
+    else any leaf still open
+        Ev-->>UI: false
+        UI-->>Op: Step 6 hidden
+    end
+```
+
+**Invariant:** Any entry can spawn a child. Resolve only affects the entry, not its ancestors or descendants. Close gate reads `postIncidentChainLeaves(event)`, so intermediate handed-off entries are not part of the check.
+
+---
+
+### 6.4 Observer Add and Revoke
+
+Observers are looped in via `pushScopedNotification`. Revoke rules:
+- Original operator + admin can revoke anyone.
+- Any actor can revoke observers they themselves added.
+- Anyone can self-revoke (leave the case).
+
+`× ` visibility on chips is gated by `_canRevokeParticipant`. The handler applies the same check as defence-in-depth.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Actor as Actor role
+    participant UI as main.js CTA + strip
+    participant Ev as events.js participants
+    participant Notif as pushNotification
+    participant Obs as Observer role (target)
+
+    Actor->>UI: click "Loop in observer" → picker
+    UI->>UI: _openObserverPicker
+    Actor->>UI: select role from 242 pool
+    UI->>Ev: pushScopedNotification (adds to participants Map)
+    Ev-->>Obs: toast "Looped into event"
+
+    Note over UI: participants strip now renders new observer chip
+
+    Actor->>UI: click × on observer chip
+    UI->>UI: _canRevokeParticipant(event, activeRole, targetRole)?
+    alt authorized
+        UI->>Ev: revokeParticipant(evId, targetRole, revokedBy)
+        Ev->>Ev: participants.delete(targetRole)<br/>notes.push('participant-revoke')
+        UI->>Notif: pushNotification(targetRole, {kind:'observer-revoked'})
+        Notif-->>Obs: toast "You have been removed from event"
+        UI-->>Actor: toast "Removed <name> from event"
+    else not authorized
+        UI-->>Actor: toast "You cannot revoke this participant."
+    end
+
+    Note over Obs: Self-revoke path: Obs clicks × on their own chip → same handler,<br/>always authorized, toast "You left the case." No notification to self.
+```
+
+**Invariant:** Once removed, `event.participants.get(roleId)` returns `undefined`. The observer stops receiving `pushScopedNotification` triggers because those iterate participants at send time.
 
 ---
 

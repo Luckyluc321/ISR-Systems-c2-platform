@@ -1,0 +1,8 @@
+{
+  "fixtureId": "agent-a-energinet-amager",
+  "agent": "agent_a_digest",
+  "siteContextRef": "energinet_amager",
+  "event": { "siteId": "energinet_amager_koblingsstation" },
+  "assertions": ["writing_rules", "model_version"],
+  "notes": "Site brief for Amager Koblingsstation (grid TSO substation). Non-aviation, restricted airspace, escalate-only response doctrine. Verifies Agent A brief reflects operator-receiver flow — Energinet escalates, not fires."
+}

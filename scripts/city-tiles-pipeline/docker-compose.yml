@@ -1,0 +1,78 @@
+# ═════════════════════════════════════════════════════════════════════════
+# CityGML → Cesium 3D Tiles build stack
+# ═════════════════════════════════════════════════════════════════════════
+#
+# Runs a 3DCityDB Postgres instance + a 3DCityDB Importer/Exporter tool
+# container. Import CityGML into the DB, then export as Cesium 3D Tiles.
+#
+# Usage:
+#   1. Populate ./input/ with CityGML from Datafordeler order flow
+#   2. docker compose up -d citydb          # start Postgres
+#   3. docker compose run --rm importer      # import CityGML
+#   4. docker compose run --rm exporter      # export 3D Tiles
+#   5. bash deploy-scaleway.sh
+# ═════════════════════════════════════════════════════════════════════════
+
+# Image namespaces corrected 2026-09-02: canonical 3DCityDB org is
+# `3dcitydb/*` on Docker Hub, not `tumgeoinformatics/*`. Verify current
+# tags before running (`docker pull 3dcitydb/3dcitydb-pg`).
+#
+# CLI: verify subcommands against your specific Importer/Exporter version.
+# v5 exposes `import` and `export-citygml` / `export-cityjson`. A dedicated
+# `-tileset` subcommand is version-dependent — may need to export as
+# CityJSON and then run a separate tileset build (Nassar / cesium-3d-tiles
+# converter). Adjust the exporter command below to match your version.
+
+services:
+  citydb:
+    image: 3dcitydb/3dcitydb-pg:16-3.5-5.1   # pinned: Postgres 16, PostGIS 3.5, 3DCityDB 5.1
+    platform: linux/amd64   # amd64-only image; arm64 hosts run via emulation
+    environment:
+      POSTGRES_DB: citydb
+      POSTGRES_USER: citydb
+      POSTGRES_PASSWORD: citydb
+      SRID: 25832       # ETRS89 UTM32N (Danish SDFI native)
+    volumes:
+      - citydb-data:/var/lib/postgresql/data
+      - ./input:/data/input:ro
+    ports:
+      - "15432:5432"   # host 15432 → container 5432 (avoid clash with local Postgres)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U citydb -d citydb"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # citydb-tool is the v5 successor to impexp. Handles import/export
+  # against 3DCityDB v5 schema. Pinned to 1.4 (matches citydb schema 5.1).
+  importer:
+    image: 3dcitydb/citydb-tool:1.4
+    platform: linux/amd64
+    depends_on:
+      citydb:
+        condition: service_healthy
+    volumes:
+      - ./input:/data/input:ro
+    command:
+      - "import"
+      - "citygml"
+      - "-H"
+      - "citydb"
+      - "-P"
+      - "5432"
+      - "-d"
+      - "citydb"
+      - "-u"
+      - "citydb"
+      - "-p"
+      - "citydb"
+      - "/data/input"
+
+  # 3D Tiles export: py3dtilers's citygml-tiler queries the 3DCityDB
+  # directly and emits a Cesium 3D Tiles tileset. Runs from the host
+  # via the venv at scripts/city-tiles-pipeline/venv/ (NOT dockerised
+  # because py3dtilers needs local Python + system libs). See README.md
+  # for the exact command.
+
+volumes:
+  citydb-data:

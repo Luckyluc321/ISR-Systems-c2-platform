@@ -7,6 +7,94 @@ coordinated response.
 Current version reflects target state. Sections marked `[live]` are
 implemented today. Sections marked `[planned]` are next.
 
+**Companion documents:**
+- `agentic-preprocessing-architecture.md` `[live]` — the deterministic feature-extraction pipeline (approach vectors, z-scores, formation cohesion) that feeds Agent B a structured signal block instead of raw telemetry.
+- `agentic-signature-bridge-architecture.md` `[planned]` — the deterministic layer that translates raw NN numeric signatures (RF spectra, acoustic vectors, visual embeddings) into family-labelled narrative before preprocessing sees anything. Deferred until first real NN plugs in.
+- `agentic-cooperative-traffic-fusion-architecture.md` `[live — MVP with OpenSky + mock adapters landed 2026-09-05; Naviair partner adapter deferred]` — pluggable per-site cooperative-aircraft feed that reconciles sensor detections against known cooperative traffic. Classification precision, not visualization.
+- `agentic-precedent-retrieval-architecture.md` `[live — MVP in-memory index landed 2026-09-05; Azure AI Search adapter deferred]` — deterministic retrieval of similar past events, injected into Agent B prompt as a PRIOR SIMILAR EVENTS block. Detection-only stance: context for the operator, never basis for the agent to propose actions.
+- `agentic-eval-architecture.md` `[live]` — the golden-fixture harness that regression-tests every agent's prompt output. Load-bearing for the Azure sovereign-proxy migration.
+- `agentic-dispatch-adapter-architecture.md` `[live — MVP mock adapter landed 2026-09-06; real per-receiver adapters register file-by-file when customer APIs come online]` — pluggable per-receiver-role adapter seam for the 16 branch-scoped stub CTAs (deploy-patrol, brs-standby, issue-notam, etc.). Real customer dispatch APIs plug in without touching CTA code.
+- `nn-adapter-explainer.md` `[live]` — the `NnOutputSource` seam between real / mock NN hardware and the platform.
+- `interface-design-document.md` IF-9 `[live]` — the partner-facing contract for the Mistral agent surface.
+
+## System overview
+
+Live pieces are solid boxes. Planned pieces are dashed. Everything upstream of the LLM is deterministic — the model never gets raw floats and never decides what data to consume.
+
+```mermaid
+flowchart TD
+    subgraph EDGE["Sensor edge"]
+        NN[Sensor NN<br/>RF + Acoustic + Visual<br/>numeric signatures + confidence]
+    end
+
+    subgraph SRC["Source layer live"]
+        NNSRC["nn_source.js<br/>pluggable per-site adapter<br/>mock / websocket"]
+    end
+
+    subgraph BRIDGE["Signature bridge planned"]
+        SB["signature_bridge.js<br/>numeric to family classification<br/>per-modality narrative"]
+    end
+
+    subgraph COOP["Cooperative fusion live"]
+        CTR["cooperative_traffic_reconciler.js<br/>per-site adapter<br/>OpenSky / mock live, Naviair planned"]
+    end
+
+    subgraph PREP["Preprocessing live"]
+        PP["preprocessing.js<br/>approach vectors, z-scores<br/>dwell hotspots, formation cohesion<br/>notability tiering"]
+    end
+
+    subgraph PREC["Precedent retrieval live"]
+        PR["precedent_retrieval.js<br/>deterministic top-K similar past events<br/>in-memory today, Azure AI Search planned"]
+    end
+
+    subgraph SITEBRIEF["Persistent context live"]
+        AA["Agent A digest<br/>site brief cached per site"]
+    end
+
+    subgraph AGENTS["LLM narrative surface live"]
+        AB["Agent B debrief<br/>post-event, tier-gated"]
+        A3["Agent 3 case-file<br/>live event"]
+    end
+
+    subgraph UI["Operator + Receiver UI"]
+        OP["Operator workspace<br/>event ledger, dispatch"]
+        REC["Receiver mission console"]
+    end
+
+    subgraph EVAL["Regression net live"]
+        EV["eval harness<br/>golden fixtures + assertions<br/>runs against production endpoint"]
+    end
+
+    subgraph HOSTING["Inference hosting"]
+        MISTRAL["Mistral<br/>Scaleway primary<br/>Azure Foundry failover<br/>via Azure sovereign proxy"]
+    end
+
+    NN --> NNSRC
+    NNSRC -.-> SB
+    SB -.-> PP
+    NNSRC --> PP
+    NNSRC --> CTR
+    PP --> AB
+    PP --> A3
+    AA --> AB
+    AA --> A3
+    CTR --> AB
+    CTR --> A3
+    PR --> AB
+    AB --> MISTRAL
+    A3 --> MISTRAL
+    AA --> MISTRAL
+    MISTRAL --> OP
+    MISTRAL --> REC
+    EV --> MISTRAL
+
+    style SB stroke-dasharray: 5 5
+```
+
+**MVP wiring note (2026-09-05):** cooperative-traffic-reconciler (CTR) feeds Agent B and Agent 3 prompts directly today via a pre-formatted block. Long-term end state per `docs/agentic-cooperative-traffic-fusion-architecture.md` moves reconciliation upstream of preprocessing.js so classification collapse to `friendly` can bypass Agent B entirely on matched cooperative tracks. Signal-block path is the MVP; classification-collapse is v2.
+
+Detection-only stance (see `memory/feedback_detection_only_positioning`) applies to every arrow above. The platform observes and narrates. Operators decide and dispatch. No agent in this diagram proposes specific dispatch actions.
+
 ---
 
 ## 1. Design principles
@@ -37,9 +125,24 @@ NN's job, not a platform agent's job.
 
 **Sovereign by default.**
 
-All model inference runs on EU-hosted infrastructure. Mistral Large 2
-on Scaleway or OVH for narrative and reasoning work. NN inference runs
-on the sensor node itself. Zero calls to US-hosted models.
+All model inference runs on EU-hosted infrastructure. Target production
+architecture: Azure carries the platform spine (identity via Entra ID,
+secrets in Key Vault, event and evidence storage, telemetry, tenant
+isolation) and hosts a sovereign proxy service. That proxy forwards
+narrative and reasoning calls to Scaleway's Mistral endpoint (EU
+sovereign inference). Azure Foundry Mistral is the failover when
+Scaleway degrades. NN inference runs on the sensor node itself. Zero
+calls to US-hosted models. Full hosting mechanics are specified in
+`docs/interface-design-document.md` IF-9.7.
+
+**Known gap (parked 2026-09-06):** the Scaleway→Foundry failover is
+NOT implemented in the client today. `src/mistral_client.js` is
+single-endpoint. The proper fix belongs server-side at the Azure
+sovereign proxy (not in the browser), so this is parked pending
+Azure infra provisioning. If the configured endpoint degrades today,
+agent narratives stop rendering. Bump priority when Azure is
+provisioned or if a customer explicitly requires runtime provider
+resilience before then. See IDD IF-9.7.
 
 **Data provenance is a first-class artifact.**
 
@@ -205,44 +308,90 @@ never blocks escalation, only enriches the narrative.
 
 ---
 
-### Agent 3 · Narrative (Agent B) `[live: mock, planned: Mistral Large 2]`
+### Agent 3 · Narrative (Agent B) `[live]`
 
 **Role.** Produces a natural-language analyst-grade summary and
 recommendation per event. This is what the receiver reads first.
 
 **Inputs.** Event scaffold from Agent 1, `CorrelationResult`,
 `SiteContext`, live NN telemetry snapshot, recording samples if
-available.
+available. Debrief mode also injects the Agent A site digest and
+(when the preprocessing pipeline lands) the resolved highlights and
+ranked trajectory signals from `docs/agentic-preprocessing-architecture.md`.
 
 **Outputs.** `Narrative { body, recommendation, generated_at,
-model_version, confidence }`
+model_version, confidence, signalHash }`
 
-**Model.** Mistral Large 2 (`mistral-large-2411`), streaming,
-sovereign endpoint. Prompt template versioned. Temperature 0.2 for
-consistency across similar events.
+**Model.** Mistral (family sized per tier — Medium 3.5 for narrative,
+Large where reasoning breadth matters). Sovereign EU inference.
+Endpoint is OpenAI-compatible, streaming, `Authorization: Bearer <token>`.
+Temperature 0.2 for consistency across similar events.
 
-**Prompt structure.**
+**Hosting state (see IDD IF-9.4 + IF-9.7 for the full spec):**
+
+- **Current (transitional, dev/demo only).** Browser calls
+  `api.mistral.ai` directly with `VITE_MISTRAL_API_TOKEN` in the build.
+  Token is browser-exposed. Not shippable to production. Flagged in
+  `mistral_client.js:18-19`.
+- **Target production.** Browser calls an Azure-hosted sovereign proxy
+  (Azure Container Apps behind API Management, token in Azure Key
+  Vault). The proxy forwards to Scaleway's Mistral endpoint
+  (`https://api.scaleway.ai/v1/chat/completions`) for sovereign EU
+  inference. Azure carries everything else — identity (Entra ID),
+  event/evidence storage (Blob with WORM), correlation index (AI
+  Search), tenant isolation. Scaleway is treated as an external
+  sovereign inference provider plugged into the Azure spine.
+- **Failover.** Azure Foundry Mistral serverless (France Central /
+  Sweden Central) as the backup inference endpoint when Scaleway
+  degrades. Same IF-9.4 client contract, no browser change.
+
+**Endpoint swap seam.** `getInferenceConfig()` in `mistral_client.js`
+reads `VITE_MISTRAL_ENDPOINT`, `VITE_MISTRAL_MODEL`,
+`VITE_MISTRAL_API_TOKEN` from env. In production these point at the
+Azure proxy, not Mistral or Scaleway directly. Provider migration is
+one env-var change.
+
+**Module layout (post-Phase-2 split, 2026-08-30).** The Mistral
+integration is split across:
+- `src/mistral_client.js` — transport, config, streamCompletion,
+  makeDelimitedStreamHandler, WRITING_RULES, OUTPUT_FORMAT,
+  siteVersionStamp, sanitizePartnerString.
+- `src/agents/agent_a_digest.js` — Agent A site-context digest + cache.
+- `src/agents/agent_b_debrief.js` — Agent B debrief narrative + narrativeCache persistence.
+- `src/agents/agent_case_file.js` — Agent 3 live-event narrative.
+- `src/mistral.js` — re-export barrel so existing importers keep working.
+
+**Prompt structure (live post-Phase-4).**
 ```
-System: You are an intelligence analyst producing a concise briefing
-        for a Danish critical-infrastructure operator. Two short
-        paragraphs. Declarative voice. No hedge language, no AI filler.
-        Recommendation is one sentence with an action verb.
-
-Context: [site context digest]
-Event:   [NN classification + correlation + telemetry snapshot]
-
-Produce: body (max 400 chars), recommendation (max 200 chars).
+System 1: Analyst role + DEBRIEF_WRITING_RULES (looser: 2000-char body,
+          400-char reco, 4 paragraphs max) + delimited output format.
+System 2: PERSISTENT SITE INTELLIGENCE BRIEF (Agent A digest, optional).
+User:     Event metadata (id, site, duration, outcome, platform count) +
+          canonical detection subject digest +
+          PARTNER-DECLARED HIGHLIGHTS (JSON, sanitized rationale, treat-as-data prefix) +
+          STRUCTURED SIGNAL BLOCK (topOutliers + topTrends JSON from preprocessing) +
+          INTERPRETED SIGNAL PROSE (deterministic phrasings) +
+          TRAJECTORY ANALYSIS (dwell profile) +
+          CLASSIFICATION LOG.
 ```
 
 **Latency budget.** 3 seconds for stream start, 8 seconds for full
 completion. Streams into the UI as it arrives.
 
-**Fallback.** If Mistral is unreachable or slow, falls back to
-`_mockAiSynthesis` deterministic template. Fallback is invisible to
-the operator except for the model_version tag.
+**Persistence.** `event.narrativeCache` is written on `onDone` and
+mirrored to `localStorage[isr:narrativeCache:${eventId}]` so PDF
+export, closed-panel render, and reopen debrief flows survive a page
+reload without re-hitting Mistral.
 
-**Where it runs today.** Mock (`_mockAiSynthesis` in main.js). Real
-Mistral wiring is Advance A, blocked on API token.
+**Fallback.** If Mistral is unreachable or slow, falls back to
+`_generateAgentBNarrative` deterministic template in main.js.
+Fallback is invisible to the operator except for the model_version
+tag. Silent console warning `[mistral debrief] falling back to deterministic: <reason>`.
+
+**Regenerate.** Operator-triggered button in debrief modal invalidates
+the site's Agent A digest cache, the persisted narrative cache, and
+re-fires the full Agent A → Agent B chain. Guarded against rapid
+re-entry by an `event._regenInFlight` promise.
 
 ---
 
@@ -330,7 +479,7 @@ delivery fails downstream, chip reverts and a toast surfaces.
 
 ---
 
-### Agent 7 · Debrief Synthesizer `[live: partial mock, planned: Mistral Large 2]`
+### Agent 7 · Debrief Synthesizer `[live]`
 
 **Role.** Post-event synthesis. Combines trajectory recording, moment
 extraction, outlier detection, and asset touch analysis into a
@@ -353,18 +502,25 @@ outlier_flags, asset_touches, exports: {pdf, kml, gpx} }`
 
 **Outlier detection (deterministic today).** Per-drone mean confidence
 compared to pack average. Flags drones running 15+ percentage points
-below pack.
+below pack. Planned upgrade in `docs/agentic-preprocessing-architecture.md`
+adds ranked outlier + trend signals from the Trajectory Signal Extractor.
 
-**Narrative (planned: Mistral).** Currently `_debriefBuildNarrative`
-in main.js. Real Mistral integration in Advance A produces the
-analyst paragraph. Deterministic bullets + moments stay
-authoritative.
+**Narrative.** Streamed from Agent 3 (Agent B) via
+`streamDebriefNarrative` in `src/agents/agent_b_debrief.js`
+(re-exported through `src/mistral.js` for existing importers).
+Deterministic skeleton
+renders on debrief open, then Mistral tokens replace the body as they
+arrive. Model + prompt structure per Agent 3 above. When the
+preprocessing pipeline lands, Agent B also receives the resolved
+site highlights and ranked trajectory signals as prompt context.
 
 **Latency budget.** Debrief opens instantly with deterministic
-skeleton. Mistral narrative streams in over 5-8 seconds.
+skeleton. Mistral narrative streams in over 3-8 seconds.
 
 **Fallback.** Deterministic narrative always renders. Mistral
 narrative replaces it when it arrives.
+
+**Persistence + regenerate.** See Agent 3 above.
 
 ---
 
@@ -496,12 +652,16 @@ Three tiers.
 - All heavy lifting today (mock NN output source)
 
 ### Sovereign backend (planned)
-- Mistral Large 2 inference endpoint (EU-hosted)
+- Azure-hosted sovereign proxy (Container Apps + Key Vault) forwarding
+  narrative/reasoning calls to Scaleway Mistral (sovereign EU inference,
+  primary) with Azure Foundry Mistral as failover. See IDD IF-9.7.
 - Real sensor mesh ingestion (WebSocket + MQTT), consuming NN output
-  streams from field nodes
-- Persistent event storage with signed evidence hashes
-- Cross-site correlation index
-- Multi-tenant deployment per customer
+  streams from field nodes.
+- Persistent event storage with signed evidence hashes (Azure Blob with
+  WORM immutability).
+- Cross-site correlation index (Azure AI Search).
+- Multi-tenant deployment per customer (Entra ID + resource-group
+  boundaries).
 
 ---
 
@@ -752,10 +912,18 @@ Narrative failure never blocks dispatch. Deterministic path holds the
 
 ## 12. Design decisions we have already committed to
 
-**Cesium as the geospatial engine.** SDFI 2D default over Denmark,
-gated 3D toggle branching on the CPH bbox to Google Photoreal in the
-metro area and paid EU providers outside. Never Google/Vantar/Cesium
-ion for government tenants.
+**Cesium as the geospatial engine, two render profiles.** CesiumJS
+(Apache 2.0, engine-only, not the commercial Ion service) is the
+rendering engine. Data providers are pluggable via a single
+`render_profile` flag: `photoreal` (default — Cesium Ion + Google
+Photorealistic 3D Tiles + Cesium World Terrain, best fidelity for
+demos and non-sovereign customers) or `sovereign` (SDFI GeoDanmark
+primary imagery + self-hosted BBR/DHM-derived tiles when the
+pipeline lands, 100% DK data residency). Flip via `?profile=sovereign`
+URL param, `localStorage['isr:render_profile']`, or
+`window.__isr_setRenderProfile()`. See section 13 and
+[docs/geospatial-integrations.md](geospatial-integrations.md) for the
+full DK provider registry, tier plan, and integration procedure.
 
 **IBM Plex Mono for machine-readable text.** Every ID, timestamp,
 coordinate, and confidence value uses tabular-nums. Body copy uses
@@ -777,7 +945,198 @@ responds. Never framed as counter-drone, anti-drone, or kinetic.
 
 ---
 
-## 13. Open questions
+## 13. Geospatial rendering + sovereign profile
+
+The map is where every operator + receiver lives. The rendering data
+providers are separated from the entity layer (sensors, sites,
+tracks, coverage rings, debrief overlays, replay UI) so a customer
+with data-residency constraints gets the same product with different
+tiles underneath.
+
+### 13.1 Two profiles, one engine
+
+CesiumJS the engine (Apache 2.0, open-source) is not the same thing
+as Cesium Ion the tile-hosting service (commercial, US-cloud). We use
+the engine unconditionally. The data-provider selection is what
+switches.
+
+**`photoreal` (default).** Cesium Ion + Google Photorealistic 3D
+Tiles (asset 2275207, best over CPH/Aarhus/Aalborg/Odense, sparse
+elsewhere) + Cesium OSM Buildings fallback (asset 96188) + Cesium
+World Terrain. Best fidelity for demos, aviation customers, and any
+customer without a data-residency mandate.
+
+**`sovereign`.** SDFI GeoDanmark Ortofoto as primary imagery (100%
+DK data residency). Google Photorealistic 3D Tiles skipped
+entirely. Terrain and 3D buildings remain on Cesium World Terrain +
+OSM Buildings as an interim until the self-hosted DHM
+quantized-mesh pipeline and BBR+DHM 3D Tiles pipeline land (see
+Tier C in `geospatial-integrations.md`). All additional Danish
+vector jurisdictions, weather overlays, and no-fly zones are
+default-disabled but available via `window.__isr_layers.enable(id)`.
+
+The flag is picked in this order at boot:
+
+1. `?profile=sovereign|photoreal` URL param
+2. `localStorage['isr:render_profile']`
+3. Default: `photoreal`
+
+Code: [src/render_profile.js](../src/render_profile.js).
+
+### 13.2 Feature preservation contract
+
+The render profile only swaps what Cesium loads into the imagery,
+terrain, and 3D-tiles layers. It never touches:
+
+- Sensor entities and coverage rings
+- Site polygons (Billund, CPH, Amager, Energinet substations)
+- Drone trajectory lines, colours, animation
+- Debrief overlays, replay UI, replay playback
+- Event escalation logic, receiver inbox, cross-cued advisories
+- Simulator, threat templates
+- Day/night imagery mode logic (which is a separate concern from
+  render profile — day/night controls sun lighting + tile alpha
+  blending, render profile controls which tiles are loaded)
+- Cesium globals: `viewer.scene.globe.*`, `postProcessStages`,
+  `canvas.style.filter`, clock, atmosphere (see
+  `feedback_never_touch_cesium_globals`)
+
+Every entity renders in Cesium's entity layer, above whatever
+imagery/vector this system loads. Zero regression risk to any
+feature when the profile flips.
+
+### 13.3 Sovereign layer registry
+
+Every Danish geospatial data source is a plain-object entry in
+`SOVEREIGN_LAYERS` in [src/sovereign_layers.js](../src/sovereign_layers.js).
+Adding a new provider is one array entry. No case statements, no
+conditionals in `main.js`, no manager code changes.
+
+Three categories: `imagery` (WMTS/WMS raster tiles), `vector`
+(WFS/GeoJSON polygons + lines), `overlay` (WMS overlays like weather
+radar and no-fly zones).
+
+Three types the manager understands: `wmts`, `wms`, `geojson`. A
+fourth stub type `external-viewer` marks providers that need a
+companion iframe/panel rather than in-map rendering (e.g. SDFI
+Skråfoto oblique).
+
+Every entry declares: `id`, `category`, `provider`, `authority`,
+`name`, `description`, `type`, `tokenScope`, `url`, `credit`,
+`docsUrl`, `enabledByDefault`, plus optional `_needsVerification`
+and `_notes` for URL patterns that follow documented conventions but
+haven't been live-tested from our stack (prevents hallucinated URLs
+from silently 404-ing at customer sites).
+
+### 13.4 Layer manager
+
+`SovereignLayerManager` in the same module. Six public methods:
+
+- `enable(layerId)` — idempotent, adds the Cesium layer/data source
+- `disable(layerId)` — removes it
+- `list()` / `status()` — introspection for DevTools + future UI
+- `isEnabled(id)` — boolean check
+
+Init is gated on sovereign profile only. On photoreal, the manager
+is never constructed, `window.__isr_layers` never appears, and the
+entire codepath is a no-op.
+
+Runtime toggle via DevTools:
+
+```js
+window.__isr_layers.list()
+window.__isr_layers.enable('dagi_kommunegraenser')
+window.__isr_layers.disable('dagi_politikredse')
+```
+
+### 13.5 Token scopes
+
+Different providers use different tokens/API keys. The manager
+receives them at init keyed by scope and substitutes `${TOKEN}` in
+URL templates. Current scopes:
+
+- `sdfi` — dataforsyningen.dk (single token for Kortforsyningen +
+  Dataforsyningen APIs, includes DAGI and most ortho/topo)
+- `dmi` — dmigw.govcloud.dk (weather radar, observations, forecasts)
+- `datafordeler` — datafordeler.dk (BBR, DAR, CVR, Ejendom — some
+  require signed access agreements per dataset)
+
+### 13.6 Tier roadmap
+
+**Tier A — declarative layers (LANDED 2026-09-01).** 9 layers in the
+registry: SDFI ortho spring (live, managed elsewhere), ortho autumn
+(stub), topo skærmkort (stub), skråfoto (external-viewer stub), DAGI
+kommunegrænser + politikredse + regionsgrænser (all stub), BRS
+beredskabsområder (stub), droneluftrum no-fly (stub), DMI radar
+(stub). Unverified entries need endpoint QA before customer demo.
+
+**Tier B — REST integrations (SCAFFOLDING LANDED 2026-09-01, tokens
+pending).** BBR per-building info, DAR reverse-geocode, DMI weather
+stations, CVR company lookup. Not tile providers — click-driven
+services. Wired in [src/sovereign_services.js](../src/sovereign_services.js).
+Always-available (not profile-gated); gated only by token presence.
+Every response wraps its payload in a `{ provider, authority,
+retrieved_at, source_url, data }` envelope for provenance.
+DevTools access: `window.__isr_services.bbr(lat, lon)` etc.
+
+**Tier C — self-hosted tile pipelines.** DHM raster → quantized-mesh
+terrain (`cesium-terrain-builder`); 3D Bygningsmodel CityGML → 3D
+Tiles buildings (`py3dtiles` or FME). Both self-hosted on Azure DK
+East or Scaleway FR. 1-2 weeks each. Trigger: first sovereign
+customer signature.
+
+**Tier D — live feeds.** AIS ship tracking (Søfartsstyrelsen
+WebSocket), Naviair eAIP NOTAMs, Vejdirektoratet live traffic.
+
+Full DK provider registry, endpoint documentation, and add-a-layer
+procedure: [docs/geospatial-integrations.md](geospatial-integrations.md).
+
+### 13.7 Hosting for the sovereign stack
+
+- **Azure Denmark East (Copenhagen region)** — first-choice for
+  self-hosted tile pipelines. Microsoft cloud but data physically in
+  DK. Procurement-friendly for enterprise + government.
+- **Scaleway FR / OVH FR** — second-choice for customers who
+  explicitly refuse US-parented cloud.
+- **SecNumCloud (via OVH)** — only if a customer explicitly requires
+  it.
+- **Never:** Google Cloud, AWS US regions, Cesium Ion, any
+  US-parented service that would fail a data-residency audit.
+
+---
+
+## 14. Audit / Feedback log `[live]`
+
+Write-only audit trail of operator decisions on events. Records the **(agent_recommendation, operator_action, event_outcome)** triple every time an operator takes a load-bearing decision. Purpose: post-hoc "did operators agree with agent recommendations" review, regulatory audit ("prove the operator made the call, not the platform"), and eventual outcome-attribution input for the precedent-retrieval index.
+
+**Load-bearing actions logged today** (extendable):
+- `counter-dispatch` — operator dispatches a kinetic asset. Snapshot pulled from live Agent 3 case-file cache.
+- `confirm-outcome` — operator resolves the dispatch outcome (neutralised / escaped / etc). Retro-fills all earlier entries for this event with the resolved outcome.
+- `close-event` — final close. Also retro-fills outcome.
+
+**Schema** (per entry):
+```
+{
+  id, schemaVersion, timestamp, eventId, siteId, actorRole,
+  action, actionDetail,
+  recommendationSnapshot: { source, body, recommendation, model_version },
+  outcome: { status, label, resolvedAt }
+}
+```
+
+**Storage boundary:** pluggable adapter via `src/feedback_log_store.js` — contract is `hydrate() / append(entry) / appendOutcomeResolution(eventId, {status, label, resolvedAt}) / clear()`. `src/feedback_log.js` is a sync façade over an in-memory cache (mirror of `precedent_index.js`) — writes push to cache sync, then fire-and-forget to the adapter. WORM-safety enforced by the contract: `append` writes ONE entry (never rewrites the container); `appendOutcomeResolution` writes a NEW resolution entry rather than mutating prior entries in place. LocalStorage adapter can still mutate; Azure Blob adapter drops in append-only.
+- **Today:** localStorage adapter (`src/adapters/feedback_log_localstorage.js`) self-registers as default. Key `isr:feedback_log:v1`, 5000-entry FIFO cap, quota-exceeded halve+drop fallback.
+- **Production:** Azure Blob WORM adapter registers under `'azure-blob-worm'` + calls `setActiveFeedbackStore('azure-blob-worm')` at boot. Nothing in `feedback_log.js` or `main.js` changes.
+
+**Detection-only invariant (LOAD-BEARING).** The log is **write-only from the platform's perspective**. `src/agents/*` and `src/preprocessing.js` do NOT import `feedback_log`. Nothing feeds operator decisions back into agent behavior as "the operator picked Y last time, so recommend Y again". That's decision-collaborator territory, explicitly out of scope per `memory/feedback_detection_only_positioning.md`. The log is for humans and (later) for the precedent-retrieval index — even there, only as outcome-attribution CONTEXT for the operator's next call, never as basis for the agent to propose actions.
+
+**Console:** `window.__isr_feedbackLog(filter)` — `console.table` of entries. `window.__isr_feedbackLogClear()` — wipe.
+
+**When to extend:** any new operator action worth auditing gets a `logOperatorDecision(...)` call in the button-click handler in `main.js`. Wrap in try/catch — the log must be non-blocking on failure.
+
+---
+
+## 15. Open questions
 
 - **Prompt versioning for Mistral.** Do we version prompts per-agent
   in a git-tracked file and stamp `prompt_version` on every generated
@@ -798,4 +1157,4 @@ responds. Never framed as counter-drone, anti-drone, or kinetic.
 
 ---
 
-*Last updated 2026-08-11. Living document, updated as Advances land.*
+*Last updated 2026-09-01. Living document, updated as Advances land.*

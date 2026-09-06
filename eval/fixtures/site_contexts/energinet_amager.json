@@ -1,0 +1,49 @@
+{
+  "site_id": "energinet_amager_koblingsstation",
+  "name": "Amager Koblingsstation",
+  "site_type": "hv_switching_station",
+  "schema_version": "1.0",
+  "generated_at": "2026-08-05T00:00:00Z",
+  "generated_by": "Compact eval snapshot derived from src/site_context.js energinet_amager_koblingsstation record. Non-aviation grid site — cooperative_traffic.expected=false (no continuous overhead flights).",
+  "substation_reference_point": { "lat": 55.6410, "lon": 12.6088 },
+
+  "critical_areas": [
+    { "id": "sw_yard_400kv", "name": "400 kV switchyard", "center": { "lat": 55.6410, "lon": 12.6088 }, "criticality": "critical",
+      "reason": "Primary transmission node feeding CPH region. Fault at this bus cascades to city-scale outage." },
+    { "id": "sw_yard_132kv", "name": "132 kV switchyard", "center": { "lat": 55.6408, "lon": 12.6082 }, "criticality": "high",
+      "reason": "Regional distribution feed. Loss affects Amager + parts of central København." },
+    { "id": "control_building", "name": "Control + relay building", "center": { "lat": 55.6412, "lon": 12.6086 }, "criticality": "critical",
+      "reason": "SCADA + protection relays. Loss = manual control only, national-grid coordination degraded." }
+  ],
+
+  "high_value_assets": [
+    { "id": "auto_tx_1", "name": "Autotransformer 1 (400/132 kV)", "location": { "lat": 55.6409, "lon": 12.6087 }, "asset_type": "autotransformer", "criticality": "critical",
+      "reason": "Large oil-filled autotransformer. Replacement lead time 12-18 months." },
+    { "id": "auto_tx_2", "name": "Autotransformer 2 (400/132 kV)", "location": { "lat": 55.6411, "lon": 12.6087 }, "asset_type": "autotransformer", "criticality": "critical",
+      "reason": "Redundant unit. Loss of both = full regional interruption." }
+  ],
+
+  "response_doctrine": {
+    "authority": "Energinet operators escalate to Politi Kbh + Forsvar. Energinet has NO on-site kinetic capability. Grid isolation SCADA commands are the on-site response.",
+    "triggers": [
+      "Any airborne unknown over the switchyard fence triggers immediate escalation to Politi Kbh.",
+      "Dwell over autotransformer bays = immediate T3 escalation (national grid impact).",
+      "Simultaneous airborne activity at multiple Energinet sites = coordinated grid-attack pattern."
+    ]
+  },
+
+  "site_red_flags": [
+    "Any airborne contact within perimeter — this is restricted airspace with zero legitimate overflight.",
+    "Dwell over 400 kV switchyard or autotransformer bays reads as targeting the highest-consequence assets.",
+    "Sustained loiter over control building = SCADA compromise reconnaissance."
+  ],
+
+  "cooperative_traffic": {
+    "expected": false,
+    "source": "mock",
+    "match_radius_m": 800,
+    "match_time_window_s": 31536000,
+    "bbox_padding_deg": 0.15,
+    "_note": "expected=false because substation sites don't normally see cooperative aviation — no continuous overhead flights, so absence of a cooperative match tells us NOTHING at this site (per operator-receiver flow memory)."
+  }
+}

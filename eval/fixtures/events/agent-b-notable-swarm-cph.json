@@ -1,0 +1,47 @@
+{
+  "fixtureId": "agent-b-notable-swarm-cph",
+  "agent": "agent_b_debrief",
+  "expectedTier": "notable",
+  "siteContextRef": "cph",
+  "event": {
+    "id": "DET-20260904-NOTABLE-1",
+    "siteId": "cph",
+    "startTime": "2026-09-04T15:00:00Z",
+    "endTime":   "2026-09-04T15:12:00Z",
+    "classification": "hostile",
+    "threat": "elevated",
+    "platform": "quadcopter",
+    "droneType": "4x DJI Matrice formation (recon swarm)",
+    "droneCount": 4,
+    "confidence": 0.94,
+    "entry": { "lat": 55.6350, "lon": 12.6400 },
+    "lastPosition": { "lat": 55.6188, "lon": 12.6689 }
+  },
+  "samples": [],
+  "analysis": {
+    "dwellProfile": {
+      "hotspotIds": ["runway_04L_22R", "apron_east"],
+      "peakDwellSeconds": 240
+    },
+    "closestAssetApproach": {
+      "assetId": "ils_04L",
+      "assetName": "ILS Glideslope 04L",
+      "minDistanceM": 45
+    },
+    "classChangeLog": [
+      { "at": "2026-09-04T15:04:00Z", "from": "unknown", "to": "hostile", "reason": "formation cohesion above 0.9 sustained; dwell pattern over runway threshold" }
+    ]
+  },
+  "signalsJsonBlock": "{\"signals\":[{\"id\":\"dwell_hotspot\",\"assetId\":\"runway_04L_22R\",\"value\":240,\"threshold\":60,\"outlier\":true},{\"id\":\"formation_cohesion\",\"value\":0.92,\"threshold\":0.75,\"outlier\":true},{\"id\":\"approach_vector\",\"assetId\":\"ils_04L\",\"distanceM\":45,\"threshold\":100,\"outlier\":true}]}",
+  "signalsProseBlock": "Four Matrice-class airframes held tight formation (cohesion 0.92 vs 0.75 threshold) and executed a 4-minute dwell over the primary runway threshold, then transited east and passed within 45 metres of the ILS Glideslope 04L ground installation. Classification revised from unknown to hostile at T+4 minutes.",
+  "highlightsJson": "[{\"id\":\"ils_04L\",\"name\":\"ILS Glideslope 04L\",\"reason\":\"Instrument approach guidance for primary runway. Any interference triggers ILS re-certification.\"},{\"id\":\"runway_04L_22R\",\"name\":\"Runway 04L/22R (primary)\",\"reason\":\"Primary arrival axis.\"}]",
+  "grounding": {
+    "expectedAssetMentions": ["ILS", "Runway 04L"]
+  },
+  "subjectFidelity": {
+    "requiredPlatformFamily": "quadcopter",
+    "requiredMinimumCount": 4
+  },
+  "assertions": ["writing_rules", "delimiter", "tier_caps", "grounding", "subject_fidelity", "model_version"],
+  "notes": "4-drone Matrice swarm doing recon over CPH runway 04L and ILS. Agent B should produce a notable-tier narrative (up to 2000 chars), reference the ILS + runway by name, and describe the target as a swarm/formation of 4, not a single drone."
+}

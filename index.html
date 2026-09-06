@@ -43,8 +43,12 @@
         <div class="clock-col"><div class="clock-k">Local</div><div class="clock-v" id="clock-local">-</div></div>
       </div>
 
+      <!-- Render profile chip REMOVED from top-bar 2026-09-02 — it was
+           displacing the operator chip. Switch lives inside Map Controls
+           now (wired by main.js). -->
+
       <div class="tb-operator" id="tb-operator" title="Switch role">
-        <div class="op-avatar" id="op-avatar">LF</div>
+        <div class="op-avatar" id="op-avatar">LF<span class="op-sim-badge" id="op-sim-badge">SIM</span></div>
         <div class="op-meta">
           <div class="op-name" id="op-name">L. Flindt</div>
           <div class="op-role" id="op-role">Operator</div>
@@ -116,10 +120,16 @@
 
     <!-- ─────────── SENSOR POV CONTROLS (shown during POV mode) ─────────── -->
     <div id="sensor-pov-controls">
-      <span class="pov-badge">POV</span>
+      <span class="pov-badge" id="pov-badge">POV</span>
       <span class="pov-label" id="pov-label">-</span>
-      <button class="pov-exit-btn" id="pov-exit-btn">Exit POV</button>
+      <button class="pov-exit-btn" id="pov-exit-btn">Exit view</button>
     </div>
+
+    <!-- ─────────── DRONE POV STATIC OVERLAY (jam-crash moment) ─────────── -->
+    <div id="drone-pov-static"></div>
+
+    <!-- ─────────── DRONE POV HIT FLASH (tracer impact on the POV'd drone) ─────────── -->
+    <div id="drone-pov-hit"></div>
 
     <!-- ─────────── CONTROL PANEL (imagery + fly-to) ─────────── -->
     <div id="control-panel">
@@ -155,6 +165,7 @@
         <div class="cp-group cp-group-vert" id="fly-to-group">
           <button class="cp-btn wide" data-fly="cph">CPH Airport</button>
           <button class="cp-btn wide" data-fly="esbjerg">Esbjerg Harbour</button>
+          <button class="cp-btn wide" data-fly="billund">Billund Airport</button>
           <div class="fly-group" id="fly-group-energinet">
             <button class="cp-btn wide fly-group-hdr" data-fly-expand="energinet">
               <span>Energinet</span>
@@ -178,6 +189,7 @@
         <select class="sim-select" id="sim-site-select">
           <option value="cph">CPH Airport</option>
           <option value="esbjerg">Esbjerg Harbour</option>
+          <option value="billund">Billund Airport</option>
           <option value="energinet_hovegaard">Energinet · Hovegård</option>
           <option value="energinet_bjaeverskov">Energinet · Bjæverskov HVDC</option>
           <option value="energinet_landerupgaard">Energinet · Landerupgård</option>

@@ -8,14 +8,36 @@ import {
   filteredEvents, getEvent, getSelectedEventId, selectEvent,
   onSelectionChange, setFilter, onFilterChange,
   siteName, registerSiteName, relativeTime, formatDuration,
-  addNote, reclassifyEvent,
+  addNote, reclassifyEvent, registerSiteDomains, refreshSeedDomainScopes,
 } from './events.js';
 // Register every configured site's display name so siteName(siteId) resolves
 // to the pretty label everywhere (was falling back to the raw ID for all
 // non-CPH / non-Esbjerg sites, e.g. "energinet_kassoe" leaking into panels).
 for (const sid of Object.keys(SITES)) {
   registerSiteName(sid, SITES[sid].name || sid);
+  // Domain scope defaults per site type (Phase A). Feeds event.domainScope
+  // at detection time; destinations.js reads this to filter escalation
+  // targets so an inland substation event never routes to Kystvagten.
+  // Airport → aviation + ground. Harbour → maritime + ground. Substation
+  // + inland infra → ground only. Inference by id/name pattern; explicit
+  // customer overrides land here as mixed-profile sites come online.
+  const _sidLower = sid.toLowerCase();
+  const _snameLower = (SITES[sid].name || '').toLowerCase();
+  let _siteDomains;
+  if (_sidLower === 'cph' || _sidLower === 'billund' || /airport|lufthavn/.test(_snameLower)) {
+    _siteDomains = ['aviation', 'ground'];
+  } else if (_sidLower === 'esbjerg' || /harbour|harbor|havn|port/.test(_snameLower)) {
+    _siteDomains = ['maritime', 'ground'];
+  } else {
+    _siteDomains = ['ground'];
+  }
+  registerSiteDomains(sid, _siteDomains);
 }
+// Seed events in events.js compute their domainScope at module init,
+// which runs BEFORE the registerSiteDomains loop above. Recompute now
+// that the site registry is populated so historical CPH/Esbjerg events
+// carry their correct aviation/maritime scope instead of the fallback.
+refreshSeedDomainScopes();
 import {
   TEMPLATES, addLiveTrack, markTrackClosed, removeLiveTrack, anyTrackLive,
   onDroneUpdate, distanceToPerimeter, pointInPolygon, makeSubstationThreats,
@@ -29,26 +51,88 @@ Object.values(ENERGINET_SITES).forEach(site => {
 import {
   EVENTS, addEvent, closeEvent, nextEventId, escalateEvent, updateEscalationStatus,
   respondToEscalation, eventsForDestinations,
+  revokeParticipant, updateEscalationProgress,
+  addPostIncidentChainRoot, handoffPostIncidentChain,
+  resolvePostIncidentChainEntry, postIncidentChainAllLeavesResolved,
+  postIncidentChainLeaves, unionLinkedEventDomains,
 } from './events.js';
 import {
-  destinationsForSite, getDestination, destinationTypeLabel,
+  destinationsForSite, destinationsForEvent, getDestination, destinationTypeLabel,
   destinationParent, destinationShortLabel, groupByParent,
   addDestination, updateDestination, removeDestination,
   onDestinationsChange, resetDestinationsToDefault,
   CHANNEL_META, getDestinationGuidance, getAllDestinations,
 } from './destinations.js';
 import { renderDetectionBrief } from './summary.js';
+import { getSourceFor as _getNnSourceFor, SITE_SOURCE_CONFIG } from './nn_registry.js';
 import { contextForSite, nearestCriticalArea, dwellZonesAtPoint } from './site_context.js';
 import { responseBundle, responseBundleForSubject, RESPONSE_OPTION_DETAILS, outcomesForKind } from './response_assets.js';
 import { AIRCRAFT, aircraftAtBase, aircraftForResponseAsset } from './aircraft.js';
 import { playbookFor } from './response_playbook.js';
 import { ADMIN, OPERATORS, RECEIVERS, ACCOUNTS, getActiveRole, setActiveRole, onRoleChange, getRoleChildren, getRoleDestinationIdsRolledUp, impactedRoles as _impactedRoles, canInitiate as _canInitiate, agencyBranchOf, FLOW_TYPES } from './roles.js';
+import { getRenderProfile } from './render_profile.js';
+import { initSovereignLayers } from './sovereign_layers.js';
+import { initSovereignServices, DK_SERVICES, lookupBBR, reverseGeocodeDAR, findNearestWeatherStations } from './sovereign_services.js';
+import { initLiveFeeds } from './sovereign_live_feeds.js';
+import { activateManhattanDemo, deactivateManhattanDemo, setManhattanChase } from './manhattan_demo.js';
+// Cooperative-traffic adapters self-register on import. Order matters
+// only in that mock must be available for eval + sim scenarios;
+// opensky loads regardless so live sites can use it when configured.
+import './adapters/cooperative_mock.js';
+import './adapters/cooperative_opensky.js';
+import { checkCooperativeTraffic } from './cooperative_traffic_reconciler.js';
+import { loadFromEvents as loadPrecedentIndex, registerEvent as registerPrecedent, hydrateFromIdb as hydratePrecedentIndex, indexSize as precedentIndexSize, getRecord as getPrecedentRecord } from './precedent_index.js';
+import { buildPrecedentBlock } from './precedent_retrieval.js';
+import { logOperatorDecision, updateFeedbackOutcome, hydrateFeedbackLog, _installConsoleHelper as _installFeedbackConsole } from './feedback_log.js';
+// Feedback-log adapters self-register on import. localStorage is the
+// default today; Azure Blob WORM will register + setActive at prod boot.
+import './adapters/feedback_log_localstorage.js';
+// Dispatch adapter seam — mock adapter self-registers on import as
+// the DEFAULT for every receiver role. Real customer adapters
+// (Politi Kbh, BRS, Trafikstyrelsen, etc.) register per-role via
+// registerDispatchAdapter() when their APIs come online. See
+// docs/agentic-dispatch-adapter-architecture.md.
+import { getDispatchAdapter, DEFAULT_DISPATCH_ADAPTER_KEY } from './dispatch_source.js';
+import './adapters/dispatch_mock.js';
+
+// Phase 2 role-scoped CTA action names. Every entry here MUST route
+// through the dispatch adapter seam (currently the mock, tomorrow
+// real per-receiver adapters). Any new stub CTA action added to
+// availableCTAsForReceiver must also be added here or it won't reach
+// the adapter and will silently drop.
+const STUB_DISPATCH_ACTIONS = new Set([
+  'deploy-patrol', 'set-cordon', 'request-aks',
+  'brs-standby', 'brs-deploy',
+  'army-c-uas', 'army-ground',
+  'intel-log',
+  'issue-notam', 'restrict-airspace', 'issue-maritime-advisory',
+  'kom-crisis', 'kom-shelter',
+  'hjv-reinforce',
+  'region-ambulance-standby', 'region-triage-prep',
+]);
+import { AisShipRenderer, AirspaceRenderer, TrafficEventRenderer } from './sovereign_renderers.js';
+import { fetchDanishAirspaces } from './sovereign_services.js';
+import {
+  // BBR/GeoDanmark on-the-fly polygon rendering retired 2026-09-03
+  // (wrong shape for map rendering — too slow in urban areas). Real
+  // Danish 3D buildings come from scripts/city-tiles-pipeline/ once
+  // built. Interim: Google Photoreal 3D covers Danish cities.
+} from './sovereign_buildings.js';
+import {
+  GDK_FEATURE_LAYERS,
+  fetchGeoDanmarkFeatures,
+  GeoDanmarkFeatureRenderer,
+} from './sovereign_geodanmark_features.js';
+import { primeDagiCache, receiverIdsForPoint, dagiCacheStats } from './sovereign_geo_routing.js';
 import { runbookFor } from './runbooks.js';
 import { TARGETS as TARGETS_CORE } from './targets.js';
 import { HV_SUBSTATION_TARGETS } from './targets_hv.js';
 const TARGETS = [...TARGETS_CORE, ...HV_SUBSTATION_TARGETS];
 import { getRules, onRulesChange, toggleRule, removeRule, upsertRule, resetRulesToDefault, ruleSummaryText } from './rules.js';
-import { isMistralConfigured, streamCaseFileNarrative, streamDebriefNarrative } from './mistral.js';
+import { isMistralConfigured, streamCaseFileNarrative, streamDebriefNarrative, ensureSiteContextDigest, invalidateSiteContextDigest, writeNarrativeCache, readNarrativeCache, readNarrativeCacheIfSignalMatch, invalidateNarrativeCache } from './mistral.js';
+import { resolveHighlightsAsync, extractAndRankSignals, buildAgentBPromptBlock, writePreprocessed, rehydratePreprocessed, invalidatePreprocessed } from './preprocessing.js';
+import { invalidateFallbackHighlights } from './agents/agent_a2_highlights.js';
+import { saveRecording as _idbSaveRecording, loadRecording as _idbLoadRecording, deleteRecording as _idbDeleteRecording, listRecordingIds as _idbListRecordingIds, clearAll as _idbClearAll, migrateFromLocalStorage as _idbMigrateFromLocalStorage } from './recording_store.js';
 import { fetchDrivingRoute, computeSegmentLengths, advanceAlongPolyline } from './routing.js';
 import { buildCordon, assignPatrols, clearCordonCache } from './perimeter.js';
 import {
@@ -101,21 +185,129 @@ async function main() {
     bingLayer.nightAlpha = 0.5;   // partly transparent on dark side so city lights show through
   }
 
-  // ── Cesium World Terrain (asset 1) ──
+  // ── Terrain provider ──
+  // If VITE_DHM_TERRAIN_URL is set, use self-hosted SDFI DHM quantized-mesh
+  // tiles (built via scripts/dhm-pipeline/, hosted on Scaleway or localhost).
+  // Otherwise fall back to Cesium World Terrain (Cesium Ion, US-cloud).
+  const _dhmTerrainUrl = (() => { try { return import.meta.env?.VITE_DHM_TERRAIN_URL || ''; } catch (_) { return ''; } })();
   try {
-    viewer.terrainProvider = await Cesium.createWorldTerrainAsync({
-      requestVertexNormals: true,
-      requestWaterMask: true,
-    });
+    if (_dhmTerrainUrl) {
+      viewer.terrainProvider = await Cesium.CesiumTerrainProvider.fromUrl(_dhmTerrainUrl, {
+        requestVertexNormals: true,
+        requestWaterMask: false,   // DHM/Terræn is land-only
+        credit: new Cesium.Credit('Terrain © Klimadatastyrelsen · DHM (CC BY 4.0)', true),
+      });
+      console.log(`[terrain] using sovereign DHM tiles from ${_dhmTerrainUrl}`);
+    } else {
+      viewer.terrainProvider = await Cesium.createWorldTerrainAsync({
+        requestVertexNormals: true,
+        // Water mask OFF: sovereign mode has no Google 3D Tiles overlay,
+        // so the animated water shader paints scattered blue tiles across
+        // sea-level ground (Copenhagen airport is the worst case). Turning
+        // it off silences the flicker. Photoreal never noticed because
+        // Google 3D Tiles paint on top and hide the mask entirely.
+        requestWaterMask: false,
+      });
+    }
   } catch (err) { console.warn('Terrain failed:', err); }
+
+  // ── Render profile switch — see render_profile.js ──
+  const _renderProfile = getRenderProfile();
+  console.log(`[render_profile] active: ${_renderProfile}`);
+
+  // ── Render profile switcher ──
+  // Was previously a top-bar chip that displaced the operator chip and
+  // reshuffled core UI. Removed 2026-09-02. Switching now happens from
+  // inside Map Controls (rendered by _wireRenderProfileSection below, at
+  // the bottom of the panel body — doesn't touch the top-bar at all).
+  // ── Manhattan skyscraper demo (throwaway visual, console-only) ──
+  // Try: window.__isr_manhattan()  → flies to Midtown, drone orbits Empire State
+  //      window.__isr_manhattanChase(true)  → chase-cam follows the drone
+  //      window.__isr_manhattanExit()       → clean up
+  window.__isr_manhattan = () => activateManhattanDemo(viewer);
+  window.__isr_manhattanExit = () => deactivateManhattanDemo(viewer);
+  window.__isr_manhattanChase = (on) => setManhattanChase(viewer, !!on);
+  console.log('[manhattan_demo] window.__isr_manhattan() available — visual skyscraper drone demo.');
+
+  // ── Precedent index seed ──
+  // Cross-session persistence via IndexedDB (write-through cache
+  // pattern in precedent_index.js). Boot flow:
+  //   1. Await hydrateFromIdb() — pulls persisted PrecedentRecords
+  //      into the in-memory Map. Retrieval stays sync because this
+  //      resolves BEFORE any Agent B code path can fire.
+  //   2. Fill any gaps from EVENTS (first-run demo seeds, or events
+  //      registered before IDB backing landed). registerPrecedent is
+  //      idempotent — same id overwrites; still safe to loop.
+  // See docs/agentic-precedent-retrieval-architecture.md.
+  try {
+    await hydratePrecedentIndex();
+    console.log(`[precedent_index] hydrated ${precedentIndexSize()} record(s) from IndexedDB.`);
+    let seeded = 0;
+    for (const e of EVENTS) {
+      if (!getPrecedentRecord(e.id) && registerPrecedent(e)) seeded++;
+    }
+    if (seeded) console.log(`[precedent_index] seeded ${seeded} additional closed event(s) from EVENTS.`);
+  } catch (err) {
+    console.warn('[precedent_index] hydrate failed, falling back to EVENTS seed:', err.message);
+    try { loadPrecedentIndex(EVENTS); } catch (_) { /* nothing more we can do */ }
+  }
+
+  // ── Feedback log hydrate + console helper ──
+  // Operator-decision audit trail. Load-bearing operator actions
+  // (dispatch, confirm-outcome, close-event, escalate) fire
+  // logOperatorDecision() at the button-click handler in main.js.
+  // Inspection via window.__isr_feedbackLog(). Storage: pluggable
+  // adapter (localStorage today, Azure Blob WORM later). See
+  // src/feedback_log.js + src/feedback_log_store.js.
+  //
+  // Await hydrate BEFORE binding console helper so window.__isr_feedbackLog()
+  // returns real data on first call rather than an empty cache.
+  try {
+    const n = await hydrateFeedbackLog();
+    console.log(`[feedback_log] hydrated ${n} entries from adapter.`);
+  } catch (err) {
+    console.warn('[feedback_log] hydrate failed, cache starts empty:', err?.message || err);
+  }
+  _installFeedbackConsole();
+  console.log('[feedback_log] window.__isr_feedbackLog() available for inspection.');
+
+  window.__isr_switchRenderProfile = (target) => {
+    try {
+      localStorage.setItem('isr:render_profile', target);
+      const url = new URL(window.location.href);
+      url.searchParams.set('profile', target);
+      window.location.href = url.toString();
+    } catch (err) { console.warn('[render_profile] switch failed:', err); }
+  };
 
   // ── Google Photorealistic 3D Tiles (asset 2275207) ──
   // Covers major cities (CPH, Aarhus, Aalborg, Odense). Sparse in rural DK.
+  // Photoreal profile only — sovereign profile skips this (no US-cloud
+  // dependency). Sovereign 3D buildings come from self-hosted BBR+DHM
+  // pipeline (scripts/city-tiles-pipeline/) once VITE_CITY_TILES_URL is set.
   let googlePhotoreal = null;
-  try {
-    googlePhotoreal = await Cesium.Cesium3DTileset.fromIonAssetId(2275207);
-    viewer.scene.primitives.add(googlePhotoreal);
-  } catch (err) { console.warn('Google 3D Tiles failed:', err); }
+  const _cityTilesUrl = (() => { try { return import.meta.env?.VITE_CITY_TILES_URL || ''; } catch (_) { return ''; } })();
+  // Sovereign mode: prefer self-hosted Danish city tiles when available
+  // (VITE_CITY_TILES_URL). Otherwise fall through to Google Photoreal.
+  // Google 3D is US-cloud — the sovereign story is preserved via other
+  // Danish overlays. Real Danish state 3D buildings land when
+  // scripts/city-tiles-pipeline/ finishes (needs Datafordeler FTP order).
+  if (_renderProfile === 'sovereign' && _cityTilesUrl) {
+    try {
+      const sovBuildings = await Cesium.Cesium3DTileset.fromUrl(`${_cityTilesUrl}/tileset.json`);
+      viewer.scene.primitives.add(sovBuildings);
+      console.log(`[render_profile] sovereign: self-hosted 3D buildings from ${_cityTilesUrl}`);
+    } catch (err) { console.warn('Sovereign 3D Tiles failed — falling back to Google Photoreal:', err); }
+  }
+  if (!_cityTilesUrl || _renderProfile === 'photoreal') {
+    try {
+      googlePhotoreal = await Cesium.Cesium3DTileset.fromIonAssetId(2275207);
+      viewer.scene.primitives.add(googlePhotoreal);
+      if (_renderProfile === 'sovereign') {
+        console.log('[render_profile] sovereign: Google Photoreal 3D Tiles active (interim). Swap to self-hosted DK tiles when VITE_CITY_TILES_URL is set.');
+      }
+    } catch (err) { console.warn('Google 3D Tiles failed:', err); }
+  }
 
   // ── Cesium OSM Buildings (asset 96188) — global extruded fallback ──
   // Covers rural sites (Energinet substations, remote infra) where Google 3D
@@ -126,18 +318,24 @@ async function main() {
   let osmBuildings = null;
   try {
     osmBuildings = await Cesium.Cesium3DTileset.fromIonAssetId(96188);
+    console.log('[osm_buildings] loaded successfully — extruded blocks should render for OSM-mapped buildings globally');
+    // Warm off-white tint reads as building geometry against DK's green
+    // fields + grey asphalt. Previous dark navy #1a2733 was invisible
+    // against Bing at rural sites. Slight cyan bias keeps the tactical
+    // look. Non-transparent so buildings pop out of the aerial layer.
     osmBuildings.style = new Cesium.Cesium3DTileStyle({
-      color: 'color("#1a2733", 0.85)',                       // dark blue-slate fill
+      color: 'color("#d8e4ec", 0.95)',
     });
     viewer.scene.primitives.add(osmBuildings);
   } catch (err) { console.warn('OSM Buildings failed:', err); }
 
   // ── SDFI GeoDanmark Ortofoto (Denmark, sovereign, CC BY 4.0) ──
-  // Danish state imagery, activated when SDFI_TOKEN is set. Used only in
-  // the receiver workspace map mode, per project_map_architecture.md.
-  // Register a free token at https://dataforsyningen.dk (My page → Token)
-  // and paste it below. When null, the receiver map falls back to Bing.
-  const SDFI_TOKEN = 'fe7ed3229a1eb8c87028a3640dc6b2f6';
+  // Danish state imagery, activated when VITE_SDFI_TOKEN is set in
+  // .env.local. Used in the receiver workspace map mode (photoreal
+  // profile) and as primary imagery on sovereign profile.
+  // Register a free token at https://dataforsyningen.dk (Min side → Token)
+  // and paste it in .env.local. When null, the receiver map falls back to Bing.
+  const SDFI_TOKEN = (() => { try { return import.meta.env?.VITE_SDFI_TOKEN || ''; } catch (_) { return ''; } })();
   let sdfiLayer = null;
   if (SDFI_TOKEN) {
     try {
@@ -148,13 +346,513 @@ async function main() {
         format: 'image/jpeg',
         tileMatrixSetID: 'KortforsyningTilingDK',
         maximumLevel: 17,
+        // Constrain to Denmark's bounding box. Without this, SDFI is
+        // requested for the whole globe; JPEG (opaque) responses outside
+        // Denmark paint white over the Bing basemap. With the rectangle
+        // set, Cesium only requests tiles inside DK, and Bing shows
+        // through everywhere else.
+        rectangle: Cesium.Rectangle.fromDegrees(7.5, 54.4, 15.6, 58.0),
         credit: new Cesium.Credit('© GeoDanmark / Klimadatastyrelsen (CC BY 4.0)', true),
       });
       sdfiLayer = viewer.imageryLayers.addImageryProvider(sdfi);
-      sdfiLayer.show = false;   // hidden by default, shown in workspace map mode
+      // Hidden in both profiles right now. SDFI publishes tiles in
+      // EPSG:25832 (Danish UTM32N) via a custom TileMatrixSet
+      // `KortforsyningTilingDK`. Cesium's default WebMapTileServiceImageryProvider
+      // assumes Web Mercator globally, so tile-coord math is wrong and
+      // requests miss the actual grid — SDFI returns 200s with white
+      // JPEG content that paints a solid white rectangle over Bing.
+      // TODO: wire a proper EPSG:25832 TilingScheme (ProjectionType +
+      // resolution table + origin) so Cesium can consume SDFI natively.
+      // Until then, Bing is the base globally and sovereign identity
+      // comes from the GDK feature layers + BBR buildings + VD traffic
+      // overlays (all live).
+      sdfiLayer.show = false;
+      if (_renderProfile === 'sovereign') {
+        console.log('[render_profile] sovereign: SDFI ortho disabled pending EPSG:25832 TilingScheme wiring. Bing base + Danish overlays active.');
+      }
     } catch (err) { console.warn('SDFI GeoDanmark failed:', err); }
+  } else if (_renderProfile === 'sovereign') {
+    console.warn('[render_profile] sovereign profile active but SDFI_TOKEN missing — falling back to Bing imagery. Register at dataforsyningen.dk (My page → Token).');
   }
   window.__isr_sdfiLayer = sdfiLayer;   // exposed for workspace map mode toggle
+
+  // ── Sovereign layer registry — see sovereign_layers.js ──
+  // Additive: only initialised on sovereign profile. On photoreal, the
+  // manager is never constructed, __isr_layers never appears on window,
+  // and this codepath is a no-op. Every layer defaults to disabled unless
+  // marked enabledByDefault in the registry — so nothing renders until
+  // explicitly toggled via __isr_layers.enable(...).
+  // ── Read sovereign-profile tokens from Vite env (see .env.local) ────
+  // DMI is fully public since Dec 2025 (no auth needed). Only SDFI +
+  // Datafordeler still need credentials.
+  const _datafordelerCreds = (() => { try { return import.meta.env?.VITE_DATAFORDELER_CREDS || ''; } catch (_) { return ''; } })();
+
+  if (_renderProfile === 'sovereign') {
+    try {
+      const _mgr = await initSovereignLayers(viewer, {
+        sdfi: SDFI_TOKEN,
+        datafordeler: _datafordelerCreds,
+      });
+      _renderSovereignLayersPanel(_mgr);
+    } catch (err) { console.warn('[sovereign_layers] init failed:', err); }
+  }
+
+  // ── Sovereign REST services — see sovereign_services.js ──
+  // Always-available (not profile-gated). Each service throws a clear
+  // "not configured" error if its token is missing (and no service that
+  // needs auth silently fails). DMI needs no auth. Token-set-at-boot
+  // happens here; runtime override via
+  // window.__isr_services.setToken(scope, value).
+  const _openaipKey = (() => { try { return import.meta.env?.VITE_OPENAIP_KEY || ''; } catch (_) { return ''; } })();
+  const _vejdirKey  = (() => { try { return import.meta.env?.VITE_VEJDIREKTORATET_KEY || ''; } catch (_) { return ''; } })();
+  try {
+    initSovereignServices({
+      sdfi: SDFI_TOKEN,
+      datafordeler: _datafordelerCreds,
+      openaip: _openaipKey,
+      vejdirektoratet: _vejdirKey,
+    });
+    if (_renderProfile === 'sovereign') _renderSovereignServicesPanel(viewer);
+  } catch (err) { console.warn('[sovereign_services] init failed:', err); }
+
+  // ── Sovereign live feeds — see sovereign_live_feeds.js ────────────────
+  // Always initialised (profile-agnostic). Feeds do NOT auto-start; each
+  // must be triggered via window.__isr_live_feeds.start('<id>'). WebSocket
+  // provider is only picked if the corresponding VITE_*_WS_URL env var
+  // is set; otherwise falls back to the entry's default provider (mock
+  // for AIS today).
+  const _aisWsUrl = (() => { try { return import.meta.env?.VITE_AIS_WS_URL || ''; } catch (_) { return ''; } })();
+  const _vdTrafficWsUrl = (() => { try { return import.meta.env?.VITE_VD_TRAFFIC_WS_URL || ''; } catch (_) { return ''; } })();
+  let _liveFeedsMgr = null;
+  try {
+    _liveFeedsMgr = initLiveFeeds({}, {
+      VITE_AIS_WS_URL: _aisWsUrl,
+      VITE_VD_TRAFFIC_WS_URL: _vdTrafficWsUrl,
+    });
+  } catch (err) { console.warn('[live_feeds] init failed:', err); }
+
+  // ── Sovereign renderers (Cesium entity managers) ──────────────────────
+  // Each renderer is inert until explicitly turned on via the UI panel.
+  // Photoreal profile can also toggle these — they're additive layers, no
+  // profile lock.
+  const _aisRenderer      = new AisShipRenderer();
+  const _airspaceRenderer = new AirspaceRenderer();
+  const _trafficRenderer  = new TrafficEventRenderer();
+  // One renderer instance per GDK feature layer (roads, water, forest, ...).
+  // Keeps on/off toggles independent and dataSources isolated per layer.
+  const _gdkRenderers = Object.fromEntries(
+    GDK_FEATURE_LAYERS.map(l => [l.id, new GeoDanmarkFeatureRenderer(l)])
+  );
+  window.__isr_renderers = { ais: _aisRenderer, airspace: _airspaceRenderer, traffic: _trafficRenderer, gdk: _gdkRenderers };
+
+  // ── Sovereign Live Feeds control-panel section (sovereign profile only)
+  function _renderSovereignLiveFeedsPanel() {
+    const cpBody = document.getElementById('cp-body');
+    if (!cpBody || !_liveFeedsMgr) return;
+    const section = document.createElement('div');
+    section.className = 'cp-section';
+    section.id = 'cp-sov-feeds-section';
+    section.innerHTML = `
+      <div class="cp-hdr">
+        <span class="cp-label">Sovereign Live Feeds · DK</span>
+        <button class="cp-collapse" data-cp-collapse="cp-sov-feeds-section" title="Collapse">−</button>
+      </div>
+      <div class="cp-collapsible cp-sovereign-body">
+        <div class="cp-sovereign-cat">
+          <div class="cp-sovereign-cat-label">Maritime</div>
+          <label class="cp-sovereign-row" title="Realtids skibsposition fra DMA. Fallback: mock ships hvis ingen Scaleway-proxy.">
+            <input type="checkbox" data-feed="ais_ships" />
+            <span class="cp-sovereign-name">AIS skibspositioner</span>
+            ${_aisWsUrl ? '<span class="cp-sovereign-tag ok" title="Scaleway proxy configured">live</span>' : '<span class="cp-sovereign-tag base" title="No VITE_AIS_WS_URL — using mock provider (8 synthetic ships)">mock</span>'}
+          </label>
+        </div>
+        <div class="cp-sovereign-cat">
+          <div class="cp-sovereign-cat-label">Aviation</div>
+          <label class="cp-sovereign-row" title="Danske luftrumsklassifikationer fra openAIP. Kræver VITE_OPENAIP_KEY.">
+            <input type="checkbox" data-render="airspaces" />
+            <span class="cp-sovereign-name">Luftrum (openAIP)</span>
+            <span class="cp-sovereign-tag base" title="One-shot fetch on toggle. Cached 28d (per AIRAC cycle).">cache</span>
+          </label>
+        </div>
+        <div class="cp-sovereign-cat">
+          <div class="cp-sovereign-cat-label">Road</div>
+          <label class="cp-sovereign-row" title="Live traffic Situations pushed from Vejdirektoratet Dataudveksleren over Azure Service Bus (AMQP). Requires scripts/vd-amqp-proxy/ deployed and VITE_VD_TRAFFIC_WS_URL set.">
+            <input type="checkbox" data-feed="vd_traffic" />
+            <span class="cp-sovereign-name">Trafikhændelser (Vejdirektoratet)</span>
+            ${_vdTrafficWsUrl ? '<span class="cp-sovereign-tag ok" title="vd-amqp-proxy configured">live</span>' : '<span class="cp-sovereign-tag warn" title="No VITE_VD_TRAFFIC_WS_URL — feed is disabled until scripts/vd-amqp-proxy/ is running">no proxy</span>'}
+          </label>
+        </div>
+        <!-- BBR bygninger checkbox removed 2026-09-03. On-the-fly polygon
+             fetch from BBR + GeoDanmark WFS is the wrong shape for map
+             rendering (up to 2min per toggle in urban areas). Real Danish
+             3D buildings will come from scripts/city-tiles-pipeline/ as
+             pre-built 3D Tiles. Interim: Google Photoreal 3D covers all
+             Danish cities. BBR remains a click-to-lookup service in the
+             Sovereign Lookups panel. -->
+        ${(() => {
+          // Group GDK layers by category so 22+ toggles stay scannable.
+          // Order of appearance = first-seen-per-category = catalog order.
+          const catLabels = {
+            basemap: 'GeoDanmark · Basemap',
+            water: 'GeoDanmark · Water',
+            infrastructure: 'GeoDanmark · Infrastructure',
+            urban: 'GeoDanmark · Urban context',
+            perimeter: 'GeoDanmark · Perimeter',
+          };
+          const groups = new Map();
+          for (const l of GDK_FEATURE_LAYERS) {
+            const k = l.category || 'other';
+            if (!groups.has(k)) groups.set(k, []);
+            groups.get(k).push(l);
+          }
+          return [...groups.entries()].map(([cat, layers]) => `
+        <div class="cp-sovereign-cat">
+          <div class="cp-sovereign-cat-label">${catLabels[cat] || 'GeoDanmark · ' + cat}</div>
+          ${layers.map(l => `
+          <label class="cp-sovereign-row" title="${l.description}">
+            <input type="checkbox" data-gdk-layer="${l.id}" />
+            <span class="cp-sovereign-name">${l.label}</span>
+            <span class="cp-sovereign-tag ok" title="Live from wfs.datafordeler.dk (gdk60:${l.typeName})">live</span>
+          </label>`).join('')}
+        </div>`).join('');
+        })()}
+      </div>`;
+    cpBody.appendChild(section);
+
+    // AIS ships (live feed → renderer)
+    const aisCb = section.querySelector('[data-feed="ais_ships"]');
+    if (aisCb) aisCb.addEventListener('change', (e) => {
+      const rec = _liveFeedsMgr.get('ais_ships');
+      if (!rec) return;
+      if (e.target.checked) {
+        _aisRenderer.start(viewer, rec.provider);
+        _liveFeedsMgr.start('ais_ships');
+      } else {
+        _liveFeedsMgr.stop('ais_ships');
+        _aisRenderer.stop();
+      }
+    });
+
+    // Epoch counter per feed — prevents rapid on/off toggles from
+    // rendering a stale in-flight fetch response after the user unchecked.
+    // Every toggle bumps the epoch; a resolved fetch aborts if its
+    // captured epoch !== current.
+    let _airspaceEpoch = 0;
+
+    // Airspaces (one-shot fetch + render)
+    const asCb = section.querySelector('[data-render="airspaces"]');
+    if (asCb) asCb.addEventListener('change', async (e) => {
+      _airspaceEpoch++;
+      const myEpoch = _airspaceEpoch;
+      if (e.target.checked) {
+        try {
+          const pack = await fetchDanishAirspaces();
+          if (myEpoch !== _airspaceEpoch) return;   // toggled off mid-fetch
+          const n = _airspaceRenderer.render(viewer, pack);
+          console.log(`[airspaces] rendered ${n} airspaces`);
+        } catch (err) {
+          console.warn('[airspaces] fetch failed:', err.message);
+          if (myEpoch === _airspaceEpoch) e.target.checked = false;
+        }
+      } else {
+        _airspaceRenderer.clear();
+      }
+    });
+
+    // Vejdirektoratet traffic (live push via vd-amqp-proxy WebSocket).
+    // Provider streams { type:'traffic-batch', events } on connect and
+    // { type:'traffic-event', event } for each Situation update. Renderer
+    // dedups by situation id, so both shapes are safe to feed directly.
+    let _vdTrafficUnsub = null;
+    const tCb = section.querySelector('[data-feed="vd_traffic"]');
+    if (tCb) tCb.addEventListener('change', (e) => {
+      const rec = _liveFeedsMgr?.get('vd_traffic');
+      if (!rec) return;
+      if (e.target.checked) {
+        _vdTrafficUnsub = rec.provider.onUpdate((payload) => {
+          if (!payload) return;
+          const events = payload.type === 'traffic-batch' ? (payload.events || [])
+                       : payload.type === 'traffic-event' ? (payload.event ? [payload.event] : [])
+                       : [];
+          for (const ev of events) {
+            if (!ev?.situationXml) continue;
+            const r = _trafficRenderer.upsertFromXml(viewer, ev.situationXml);
+            if (r.plotted) console.log(`[traffic] upserted ${r.plotted}/${r.situations} situations from id=${ev.id}`);
+          }
+        });
+        _liveFeedsMgr.start('vd_traffic');
+      } else {
+        _liveFeedsMgr?.stop('vd_traffic');
+        if (_vdTrafficUnsub) { _vdTrafficUnsub(); _vdTrafficUnsub = null; }
+        _trafficRenderer.clear();
+      }
+    });
+
+    // BBR bygninger toggle removed 2026-09-03 — see comment in the panel
+    // HTML above. BBR remains a lookup service in Sovereign Lookups.
+
+    // GeoDanmark feature layers — one toggle each, all share the same
+    // site-around-here fetch pattern as BBR. Per-layer epoch counter
+    // guards against rapid-toggle races. Fetch is per-layer (independent),
+    // not batched, so hitting one checkbox doesn't wait on others.
+    const _gdkEpochs = Object.fromEntries(GDK_FEATURE_LAYERS.map(l => [l.id, 0]));
+    for (const layer of GDK_FEATURE_LAYERS) {
+      const cb = section.querySelector(`[data-gdk-layer="${layer.id}"]`);
+      if (!cb) continue;
+      cb.addEventListener('change', async (e) => {
+        _gdkEpochs[layer.id]++;
+        const myEpoch = _gdkEpochs[layer.id];
+        const renderer = _gdkRenderers[layer.id];
+        if (e.target.checked) {
+          try {
+            const activeOp = (typeof getActiveRole === 'function') ? getActiveRole() : null;
+            const opSiteId = activeOp?.siteIds?.[0];
+            let ref;
+            if (opSiteId && SITES_CORE[opSiteId]?.coordinates) ref = SITES_CORE[opSiteId].coordinates;
+            else if (typeof _cameraCenterLatLon === 'function') ref = _cameraCenterLatLon(viewer);
+            if (!ref || ref.lat == null) throw new Error('No site or camera center for GDK fetch');
+            const features = await fetchGeoDanmarkFeatures(layer, ref, { bboxKm: 3, credsToken: _datafordelerCreds });
+            if (myEpoch !== _gdkEpochs[layer.id]) return;
+            renderer.render(viewer, features, ref);
+          } catch (err) {
+            console.warn(`[gdk:${layer.id}] fetch/render failed:`, err.message);
+            if (myEpoch === _gdkEpochs[layer.id]) e.target.checked = false;
+          }
+        } else {
+          renderer.clear();
+        }
+      });
+    }
+
+    // Firefox/Safari persist checkbox state across reload without firing
+    // change events on hydration. Force all checkboxes in this section to
+    // unchecked so visual state agrees with underlying data-layer state
+    // (no layer is actually enabled yet at page load).
+    section.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+      if (cb.checked) cb.checked = false;
+    });
+
+    // Collapse handled by the global .cp-collapse[data-cp-collapse]
+    // handler wired later at boot (~line 10522). Don't wire locally —
+    // two toggles would cancel each other out.
+  }
+  if (_renderProfile === 'sovereign') _renderSovereignLiveFeedsPanel();
+
+  // ── Render profile switcher — inside Map Controls (photoreal + sovereign)
+  // Renders a small "Render profile" section at the BOTTOM of the panel
+  // body so both profiles can switch to the other. Deliberately last so
+  // it never displaces the primary controls.
+  (function _renderRenderProfileSection() {
+    const cpBody = document.getElementById('cp-body');
+    if (!cpBody || cpBody.querySelector('#cp-render-profile-section')) return;
+    const section = document.createElement('div');
+    section.className = 'cp-section';
+    section.id = 'cp-render-profile-section';
+    const other = _renderProfile === 'photoreal' ? 'sovereign' : 'photoreal';
+    const otherLabel = other === 'sovereign' ? 'Sovereign · DK' : 'Photoreal';
+    const otherDesc  = other === 'sovereign' ? 'SDFI + Datafordeler · 100% Danish data' : 'Google 3D + Cesium Ion';
+    const activeLabel = _renderProfile === 'sovereign' ? 'Sovereign · DK' : 'Photoreal';
+    section.innerHTML = `
+      <div class="cp-hdr">
+        <span class="cp-label">Render profile</span>
+      </div>
+      <div class="cp-group cp-group-vert">
+        <div style="font-size:11px; color:#7a8998; padding:2px 4px 6px;">Active: <b style="color:#e8ecef;">${activeLabel}</b></div>
+        <button class="cp-btn wide" id="cp-rp-switch" title="${otherDesc}. Switching reloads the page.">
+          Switch to ${otherLabel}
+        </button>
+      </div>`;
+    cpBody.appendChild(section);
+    const btn = section.querySelector('#cp-rp-switch');
+    if (btn) btn.addEventListener('click', () => window.__isr_switchRenderProfile(other));
+  })();
+
+  // ── Geospatial escalation routing (opt-in DAGI prime) ───────────────
+  // Not auto-primed — DAGI polygon pull is ~30MB. Trigger via DevTools:
+  //   await window.__isr_geo_routing.prime()
+  //   window.__isr_geo_routing.forPoint(55.7405, 9.1580)  // Billund
+  // Once primed, receiverIdsForPoint() returns {ids, admins} that can be
+  // merged with the hand-configured destinationsForSite() baseline in the
+  // escalation router. Router-integration TODO: wire into rules.js so
+  // fireRule() ALSO consults geo lookup for any site with lat/lon meta.
+  window.__isr_geo_routing = {
+    prime: () => primeDagiCache(_datafordelerCreds),
+    forPoint: (lat, lon) => receiverIdsForPoint(lat, lon),
+    stats: () => dagiCacheStats(),
+  };
+  console.log('[geo_routing] window.__isr_geo_routing ready. To enable: await __isr_geo_routing.prime()');
+
+  // ── Sovereign Layers control-panel section (sovereign profile only) ──
+  // Renders a "Sovereign Layers" cp-section under existing Map Controls
+  // with a checkbox per layer, grouped by category. Wired directly to the
+  // manager: check → enable(), uncheck → disable(). Photoreal profile
+  // never renders this section — control panel stays byte-identical.
+  function _renderSovereignLayersPanel(mgr) {
+    const cpBody = document.getElementById('cp-body');
+    if (!cpBody || !mgr) return;
+    // Filter out layers that aren't renderable in Cesium yet (SDFI WMTS
+    // in EPSG:25832, Skråfoto external-viewer). They stay in the registry
+    // for later — just not toggled from the UI.
+    const layers = mgr.list().filter(l => !l.hidden);
+    const byCategory = layers.reduce((acc, l) => {
+      (acc[l.category] = acc[l.category] || []).push(l);
+      return acc;
+    }, {});
+    const CATEGORY_LABELS = { imagery: 'Imagery', vector: 'Jurisdictions', overlay: 'Overlays' };
+
+    const section = document.createElement('div');
+    section.className = 'cp-section';
+    section.id = 'cp-sovereign-section';
+    section.innerHTML = `
+      <div class="cp-hdr">
+        <span class="cp-label">Sovereign Layers · DK</span>
+        <button class="cp-collapse" data-cp-collapse="cp-sovereign-section" title="Collapse">−</button>
+      </div>
+      <div class="cp-collapsible cp-sovereign-body">
+        ${Object.keys(byCategory).map(cat => `
+          <div class="cp-sovereign-cat">
+            <div class="cp-sovereign-cat-label">${CATEGORY_LABELS[cat] || cat}</div>
+            ${byCategory[cat].map(l => `
+              <label class="cp-sovereign-row" title="${(l.description || '').replace(/"/g, '&quot;')}">
+                <input type="checkbox" data-sovereign-layer="${l.id}"
+                       ${l.enabled ? 'checked' : ''}
+                       ${l.managedElsewhere ? 'disabled' : ''} />
+                <span class="cp-sovereign-name">${l.name}</span>
+                ${l.managedElsewhere ? '<span class="cp-sovereign-tag base">base</span>' : ''}
+                ${l.needsVerification ? '<span class="cp-sovereign-tag warn" title="Endpoint not live-tested from this stack. Verify before customer demo.">unverified</span>' : ''}
+              </label>
+            `).join('')}
+          </div>
+        `).join('')}
+      </div>
+    `;
+    cpBody.appendChild(section);
+
+    // Wire checkbox toggles → manager.enable/disable
+    section.querySelectorAll('[data-sovereign-layer]').forEach(cb => {
+      cb.addEventListener('change', async (e) => {
+        const id = e.target.getAttribute('data-sovereign-layer');
+        if (e.target.checked) {
+          const ref = await mgr.enable(id);
+          if (!ref) { e.target.checked = false; }   // load failed — revert UI
+        } else {
+          mgr.disable(id);
+        }
+      });
+    });
+
+    // Collapse handled by global .cp-collapse[data-cp-collapse] handler
+    // wired at boot. Don't wire locally — double-toggle cancels itself.
+  }
+
+  // ── Sovereign Services control-panel section (sovereign profile only) ──
+  // Mirrors _renderSovereignLayersPanel's architecture but for click-driven
+  // REST lookups (BBR, DAWA, DMI weather, CVR). Each service gets a small
+  // "Query" button that reads the current view center from Cesium's camera,
+  // fires the lookup, and renders the response in a floating popup.
+  // Photoreal never calls this — sovereign only.
+  function _renderSovereignServicesPanel(cesiumViewer) {
+    const cpBody = document.getElementById('cp-body');
+    if (!cpBody) return;
+    const services = Object.values(DK_SERVICES);
+    const _svcFns = {
+      bbr: (lat, lon) => lookupBBR({ lat, lon }),
+      dar: (lat, lon) => reverseGeocodeDAR({ lat, lon }),
+      dmi_weather: (lat, lon) => findNearestWeatherStations({ lat, lon, radiusKm: 20, limit: 5 }),
+      cvr: () => { throw new Error('CVR lookup requires a CVR-number, not a coordinate. Use window.__isr_services.cvr("<cvrNumber>").'); },
+    };
+
+    const section = document.createElement('div');
+    section.className = 'cp-section';
+    section.id = 'cp-sov-services-section';
+    section.innerHTML = `
+      <div class="cp-hdr">
+        <span class="cp-label">Sovereign Lookups · DK</span>
+        <button class="cp-collapse" data-cp-collapse="cp-sov-services-section" title="Collapse">−</button>
+      </div>
+      <div class="cp-collapsible cp-sovereign-body">
+        ${services.map(s => `
+          <div class="cp-sovereign-row cp-sovereign-svc-row" data-svc="${s.id}">
+            <div class="cp-sovereign-svc-line">
+              <span class="cp-sovereign-name">${s.name}</span>
+              ${s.tokenScope ? `<span class="cp-sovereign-tag ${window.__isr_services?.hasToken?.(s.tokenScope) ? 'ok' : 'warn'}" title="${s.tokenScope} token ${window.__isr_services?.hasToken?.(s.tokenScope) ? 'configured' : 'MISSING — set via __isr_services.setToken(scope, value)'}">${s.tokenScope}</span>` : '<span class="cp-sovereign-tag ok" title="Public endpoint, no token required">public</span>'}
+              ${s.id !== 'cvr' ? `<button class="cp-btn cp-svc-query" data-svc-query="${s.id}" title="Query at current view center">Query</button>` : '<span class="cp-sovereign-tag base" title="Requires a CVR-number, not a coordinate. Use DevTools: __isr_services.cvr(\'12345678\')">devtools</span>'}
+            </div>
+            <div class="cp-sovereign-svc-desc" title="${(s.description || '').replace(/"/g, '&quot;')}">${s.description || ''}</div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+    cpBody.appendChild(section);
+
+    // Wire Query buttons — read camera center, fire lookup, popup response.
+    section.querySelectorAll('[data-svc-query]').forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        const svcId = e.target.getAttribute('data-svc-query');
+        const fn = _svcFns[svcId];
+        if (!fn) return;
+        const { lat, lon } = _cameraCenterLatLon(cesiumViewer);
+        if (lat == null || lon == null) {
+          _showSvcPopup(svcId, { error: 'Could not read camera center. Pan the map first.' });
+          return;
+        }
+        btn.disabled = true;
+        btn.textContent = '…';
+        try {
+          const res = await fn(lat, lon);
+          _showSvcPopup(svcId, { ok: true, at: { lat, lon }, response: res });
+        } catch (err) {
+          _showSvcPopup(svcId, { error: err.message || String(err) });
+        } finally {
+          btn.disabled = false;
+          btn.textContent = 'Query';
+        }
+      });
+    });
+
+    // Collapse handled by global .cp-collapse[data-cp-collapse] handler
+    // wired at boot. No local wiring.
+  }
+
+  // Helper: read the ground point at the centre of the current camera view.
+  // Returns {lat, lon} in WGS84 degrees, or {lat: null, lon: null} if the
+  // ray misses the globe (e.g. tilted too far away).
+  function _cameraCenterLatLon(v) {
+    try {
+      const canvas = v.scene.canvas;
+      const center = new Cesium.Cartesian2(canvas.clientWidth / 2, canvas.clientHeight / 2);
+      const ray = v.camera.getPickRay(center);
+      const worldPos = v.scene.globe.pick(ray, v.scene);
+      if (!worldPos) return { lat: null, lon: null };
+      const carto = Cesium.Cartographic.fromCartesian(worldPos);
+      return {
+        lat: Cesium.Math.toDegrees(carto.latitude),
+        lon: Cesium.Math.toDegrees(carto.longitude),
+      };
+    } catch (_) { return { lat: null, lon: null }; }
+  }
+
+  // Popup: minimal floating panel with the response payload. Reuses the
+  // existing acct-card visual language so it feels native.
+  function _showSvcPopup(svcId, payload) {
+    // Remove any previous popup
+    document.querySelectorAll('.sov-svc-popup').forEach(n => n.remove());
+    const svc = DK_SERVICES[svcId];
+    const div = document.createElement('div');
+    div.className = 'sov-svc-popup';
+    const body = payload.error
+      ? `<div class="sov-svc-err">${payload.error}</div>`
+      : `<div class="sov-svc-meta">at ${payload.at.lat.toFixed(5)}°N, ${payload.at.lon.toFixed(5)}°E · via ${payload.response.provider}</div>
+         <pre class="sov-svc-json">${JSON.stringify(payload.response.data, null, 2).slice(0, 2400)}</pre>`;
+    div.innerHTML = `
+      <div class="sov-svc-popup-hdr">
+        <span class="sov-svc-popup-title">${svc?.name || svcId}</span>
+        <button class="sov-svc-popup-close" title="Close">×</button>
+      </div>
+      <div class="sov-svc-popup-body">${body}</div>`;
+    document.body.appendChild(div);
+    div.querySelector('.sov-svc-popup-close').addEventListener('click', () => div.remove());
+  }
 
   // ── Imagery mode ──
   let imageryMode = 'day';   // default landing view — day mode
@@ -2334,6 +3032,14 @@ async function main() {
       supportsMultiDispatch: true,   // more than one patrol from same base is doctrine
       maxUnitsPerDispatch: 5,        // units picker range 1-5
       billboardScale: 0.55,          // smaller so patrol pack reads clearly
+      // Spawn spread — 40m radial so each car is clearly separated at any
+      // zoom, including street-level POV. 15m default read as stacked
+      // when the camera pulled into a couple of car-lengths above.
+      swarmSpacingM: 40,
+      // Terminal spread — additional per-car tangential offset applied on
+      // top of the cordon ingress point when >4 cars share one slot.
+      // Prevents all cars stopping at exact same (lat, lon) after arrival.
+      cordonSlotSpreadM: 18,
       label: 'Police Counter-Drone Patrol',
     },
     'army-isr-drone': {
@@ -2478,6 +3184,10 @@ async function main() {
         if (d.radiationEntity) {
           viewer.entities.remove(d.radiationEntity);
           d.radiationEntity = null;
+        }
+        if (d.jammingPipEntity) {
+          viewer.entities.remove(d.jammingPipEntity);
+          d.jammingPipEntity = null;
         }
       }
       // Fetch fresh OSRM route from current position to the ingress point
@@ -2741,6 +3451,18 @@ async function main() {
     });
   }
 
+  // Absolute ellipsoid altitude for an airborne dispatch position.
+  // Adds terrain height at (lon,lat) so a "relAlt of 60m AGL" reads
+  // as 60m above the actual ground surface, not 60m above sea level.
+  // Falls back to relAlt alone when terrain tiles at that spot haven't
+  // finished streaming (getHeight returns undefined). Used by both the
+  // interceptor billboard and the tracer origin so the two agree.
+  function _airborneAbsAlt(lon, lat, relAlt) {
+    const cart = Cesium.Cartographic.fromDegrees(lon, lat);
+    const t = viewer.scene.globe.getHeight(cart);
+    return (typeof t === 'number' ? t : 0) + relAlt;
+  }
+
   function _createCounterDispatchEntities(d) {
     const iconCanvas = _counterDispatchIcon(d.profile.icon);
     if (!iconCanvas) return;
@@ -2749,16 +3471,25 @@ async function main() {
       position: new Cesium.CallbackProperty(() => (
         // Airborne interceptors render at their tracked altitude
         // (d.curAlt) so climbing/descending to match an enemy drone
-        // reads properly in 3D. Ground vehicles stay at 0 and use
-        // CLAMP_TO_GROUND on the billboard below.
-        Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? (d.curAlt || 60) : 0)
+        // reads properly in 3D. Absolute ellipsoid height = terrain +
+        // curAlt so the drone position matches tracer origins (which
+        // also sample terrain). Previously used RELATIVE_TO_GROUND on
+        // the billboard which put the drone at terrain+curAlt visually
+        // while tracers fired from ellipsoid=curAlt, i.e. terrain metres
+        // below the drone (50m gap over CPH terminal roofs).
+        // Ground vehicles stay at 0 and use CLAMP_TO_GROUND below.
+        Cesium.Cartesian3.fromDegrees(
+          d.curLon, d.curLat,
+          d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0
+        )
       ), false),
       billboard: {
         image: iconUrl,
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
-        // Airborne → render at position.height. Ground → clamp.
+        // Airborne → absolute ellipsoid altitude (matches tracer math).
+        // Ground → clamp.
         heightReference: d.profile.airborne
-          ? Cesium.HeightReference.RELATIVE_TO_GROUND
+          ? Cesium.HeightReference.NONE
           : Cesium.HeightReference.CLAMP_TO_GROUND,
         scale: d.profile.billboardScale ?? 0.85,
         scaleByDistance: new Cesium.NearFarScalar(1000, 1.4, 500000, 0.7),
@@ -2818,6 +3549,132 @@ async function main() {
     });
   }
 
+  // ── Jamming pip ── small yellow lightning-bolt style badge that
+  // sits just above the patrol icon during engaging state. Distinct
+  // from the 800m coverage ellipse — that ellipse says "here is the
+  // jamming footprint", the pip says "this specific unit is actively
+  // jamming right now". Pulses 2Hz so the operator can see at a
+  // glance which patrols are transmitting.
+  function _createJammingPip(d) {
+    if (d.jammingPipEntity) return;
+    // Yellow bolt on translucent black square. 26x26 canvas so it
+    // matches the 26x26 police billboard hierarchy already in use.
+    const cvs = document.createElement('canvas');
+    cvs.width = 32; cvs.height = 32;
+    const ctx = cvs.getContext('2d');
+    ctx.fillStyle = 'rgba(20, 24, 28, 0.85)';
+    ctx.beginPath();
+    ctx.arc(16, 16, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffd54d';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    // Bolt path
+    ctx.fillStyle = '#ffd54d';
+    ctx.beginPath();
+    ctx.moveTo(18, 6);
+    ctx.lineTo(10, 18);
+    ctx.lineTo(15, 18);
+    ctx.lineTo(13, 26);
+    ctx.lineTo(22, 13);
+    ctx.lineTo(17, 13);
+    ctx.lineTo(20, 6);
+    ctx.closePath();
+    ctx.fill();
+    const iconUrl = cvs.toDataURL();
+    d.jammingPipEntity = viewer.entities.add({
+      position: new Cesium.CallbackProperty(() => (
+        Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, 0)
+      ), false),
+      billboard: {
+        image: iconUrl,
+        verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        scale: new Cesium.CallbackProperty(() => {
+          const t = ((Date.now() - (d.engageStartTs || Date.now())) / 500) % 1;
+          return 0.9 + 0.20 * Math.sin(t * Math.PI * 2);
+        }, false),
+        pixelOffset: new Cesium.Cartesian2(0, -32),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+  }
+
+  // ── Jam-fall initiation ── on engage, scan hostile drones inside
+  // the 800m jamming ellipse and seed a fall trajectory on each. Fall
+  // duration + drift depend on drone model class (light quad = quick
+  // descent, heavy = slower, fixed-wing = arcing glide). Uses the
+  // model field stored per swarm slot at spawn time (main.js:8783).
+  //
+  // The actual descent is applied in the drone tick loop, which
+  // checks sw._jamFall on each frame and overrides waypoint pos with
+  // an interpolated fall trajectory. Landing detection also lives in
+  // the tick loop so the drone can react to terrain-height changes.
+  function _fallDurMsForModel(model) {
+    const m = String(model || '').toLowerCase();
+    if (m.includes('mavic') || m.includes('skydio') || m.includes('mini')) return 3500;
+    if (m.includes('matrice') || m.includes('m300') || m.includes('m350')) return 5500;
+    if (m.includes('wing') || m.includes('fixed') || m.includes('parrot')) return 7000;
+    if (!m.startsWith('dji')) return 6000;   // rogue / unknown
+    return 4500;
+  }
+
+  function _initiateJamFall(d) {
+    const RAD_RADIUS_M = 800;
+    const event = getEvent(d.eventId);
+    if (!event) return;
+    const state = droneState.get(d.eventId);
+    if (!state) return;
+    const candidates = [];
+    if (state.leadSwarmMember) candidates.push(state.leadSwarmMember);
+    if (Array.isArray(state.swarmBillboards)) candidates.push(...state.swarmBillboards);
+    let jammedCount = 0;
+    for (const sw of candidates) {
+      if (!sw || sw.neutralised || sw._jamFall) continue;
+      // Must have a live billboard position (i.e. drone actually rendered).
+      // Overwatch drones outside coverage are hidden — skip them.
+      const bbCart = sw.billboard?.position?.getValue?.(Cesium.JulianDate.now());
+      if (!bbCart) continue;
+      const bc = Cesium.Cartographic.fromCartesian(bbCart);
+      const swLat = Cesium.Math.toDegrees(bc.latitude);
+      const swLon = Cesium.Math.toDegrees(bc.longitude);
+      const swAlt = bc.height || 60;
+      const distM = haversineM(d.curLat, d.curLon, swLat, swLon);
+      if (distM > RAD_RADIUS_M) continue;
+      // Terrain height at drone position — target landing altitude.
+      const gh = viewer.scene.globe.getHeight(Cesium.Cartographic.fromDegrees(swLon, swLat));
+      const groundAlt = (typeof gh === 'number') ? gh : 0;
+      sw._jamFall = {
+        startTs: Date.now(),
+        durMs: _fallDurMsForModel(sw.model),
+        startLat: swLat, startLon: swLon, startAlt: swAlt,
+        // Small horizontal drift on descent — not a straight vertical
+        // drop. Direction sampled once and held so drift is stable.
+        driftBearingRad: Math.random() * Math.PI * 2,
+        driftMetres: 8 + Math.random() * 14,
+        groundAlt,
+        jammedBy: d.id,
+      };
+      jammedCount++;
+    }
+    if (jammedCount > 0) {
+      toast(`${d.assetName} jamming ${jammedCount} hostile drone${jammedCount === 1 ? '' : 's'}.`, 'info');
+    }
+  }
+
+  // Notify hook fired when a jam-fall lands. Currently drives the
+  // drone-POV TV-static overlay when the operator is inside the
+  // jammed drone at the moment of landing. Sensor POV is intentionally
+  // NOT notified — semantically a sensor doesn't "lose signal" just
+  // because one of the drones it saw stopped emitting.
+  function _notifyJamLanded(event, sw) {
+    if (typeof _dronePov !== 'undefined' && _dronePov.active
+        && _dronePov.eventId === event.id
+        && _dronePov.swRef === sw) {
+      _triggerDroneStatic();
+    }
+  }
+
   function _startCounterDispatchLoop() {
     if (_cdRafId) return;
     const tick = () => {
@@ -2853,6 +3710,7 @@ async function main() {
         d.rtbTargetLon = d.originLon;
         d.lastFrameTs = now;
         if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+        if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
         toast(`${d.assetName} low battery (${Math.round(d.batteryPct)}%). Returning to base.`, 'warn');
       }
     }
@@ -2932,6 +3790,7 @@ async function main() {
         d.rtbTargetLon = d.originLon;
         d.lastFrameTs = now;
         if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+        if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
         return;
       }
       if (!groupComplete) {
@@ -3018,7 +3877,13 @@ async function main() {
         && d.assignedSwarmMember
         && !d.assignedSwarmMember.neutralised
         && d.assignedSwarmMember.billboard
-        && d.assignedSwarmMember.billboard.show === false) {
+        && d.assignedSwarmMember.billboard.show === false
+        // ...UNLESS the target is only visually-hidden because the operator
+        // is in first-person POV inside it. Coverage is still real; only
+        // the icon has been suppressed to keep it from rendering on top
+        // of the camera. Interceptor should keep engaging normally, and
+        // the operator should get to watch themselves get shot down.
+        && !d.assignedSwarmMember._povActive) {
       d.state = 'rtb_via_last_known';
       // Extend the last-known target 1 km along the target's last
       // heading before signal loss. Interceptor keeps flying past
@@ -3043,6 +3908,7 @@ async function main() {
       d.rtbOrbitStartTs = null;
       d.lastFrameTs = now;
       if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+        if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
       toast(`${d.assetName} lost signal on target. Following last known trajectory to edge of coverage.`, 'warn');
       return;
     }
@@ -3074,6 +3940,7 @@ async function main() {
         d.rtbOrbitStartTs = null;
         d.lastFrameTs = now;
         if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+        if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
         toast(`${d.assetName} at fuel limit ${maxPursuitKm} km from base. Returning to base.`, 'warn');
         return;
       }
@@ -3085,6 +3952,7 @@ async function main() {
         d.rtbOrbitStartTs = null;
         d.lastFrameTs = now;
         if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+        if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
         toast(`${d.assetName} at edge of coverage, no active target. Returning to base.`, 'warn');
         return;
       }
@@ -3096,6 +3964,7 @@ async function main() {
         d.rtbOrbitStartTs = null;
         d.lastFrameTs = now;
         if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+        if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
         toast(`${d.assetName} past coastline with no active target. Returning to base.`, 'warn');
         return;
       }
@@ -3123,7 +3992,11 @@ async function main() {
           d.state = 'engaging';
           d.arrivedTs = now;
           d.engageStartTs = now;
-          if (d.profile.radiationCone) _createRadiationEntity(d);
+          if (d.profile.radiationCone) {
+            _createRadiationEntity(d);
+            _createJammingPip(d);
+            _initiateJamFall(d);
+          }
           if (getActiveRole().kind === 'receiver') renderReceiverView();
           toast(`${d.assetName} on station. Engaging.`, 'info');
         }
@@ -3136,7 +4009,7 @@ async function main() {
         d.curLat += stepDegLat;
         d.curLon += stepDegLon;
         if (d.profile.trail) {
-          d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? (d.curAlt || 60) : 0));
+          d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
           if (d.trailPositions.length > 500) d.trailPositions.shift();
         }
         const distM = haversineM(d.curLat, d.curLon, d.targetLat, d.targetLon);
@@ -3152,7 +4025,11 @@ async function main() {
           if (d.kind === 'counter-drone-swarm') {
             _assignInterceptorTarget(d);
           }
-          if (d.profile.radiationCone) _createRadiationEntity(d);
+          if (d.profile.radiationCone) {
+            _createRadiationEntity(d);
+            _createJammingPip(d);
+            _initiateJamFall(d);
+          }
           if (d.profile.firesTracer) _fireMachineGunBurst(d);
           if (getActiveRole().kind === 'receiver') renderReceiverView();
           toast(`${d.assetName} on station. Engaging.`, 'info');
@@ -3201,7 +4078,7 @@ async function main() {
           }
           d.heading = _bearingRad(d.curLat, d.curLon, enemyLat, enemyLon);
           if (d.profile.trail) {
-            d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? (d.curAlt || 60) : 0));
+            d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
             if (d.trailPositions.length > 500) d.trailPositions.shift();
           }
         }
@@ -3241,7 +4118,7 @@ async function main() {
       d.curLat += (stepM * Math.cos(brng)) / 111000;
       d.curLon += (stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
       if (d.profile.trail) {
-        d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? (d.curAlt || 60) : 0));
+        d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
         if (d.trailPositions.length > 500) d.trailPositions.shift();
       }
       const distM = haversineM(d.curLat, d.curLon, d.rtbTargetLat, d.rtbTargetLon);
@@ -3272,7 +4149,7 @@ async function main() {
       d.curLat += (stepM * Math.cos(brng)) / 111000;
       d.curLon += (stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
       if (d.profile.trail) {
-        d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? (d.curAlt || 60) : 0));
+        d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
         if (d.trailPositions.length > 500) d.trailPositions.shift();
       }
       const distM = haversineM(d.curLat, d.curLon, d.originLat, d.originLon);
@@ -3385,7 +4262,14 @@ async function main() {
     for (let r = 0; r < roundCount; r++) {
       setTimeout(() => _fireSingleTracerRound(d, target), r * roundGap);
     }
-    _spawnFlashEntity(d.curLon, d.curLat, 180, '#ffdb4d', 3, 8);
+    // Muzzle flash — bigger and longer so the shooter is unmistakably
+    // firing when the camera is pulled in on the interceptor. Pin the
+    // flash to the interceptor's absolute-ellipsoid altitude so airborne
+    // shooters get a flash at the drone, not on the ground 50m beneath.
+    const flashAlt = d.profile.airborne
+      ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60)
+      : 8;
+    _spawnFlashEntity(d.curLon, d.curLat, 300, '#ffdb4d', 7, 18, flashAlt);
   }
 
   // Single tracer round — small-arms fire visual.
@@ -3403,7 +4287,10 @@ async function main() {
   // "big ball" flash Lucas hated.
   function _fireSingleTracerRound(d, target) {
     const startTs = Date.now();
-    const travelMs = 110;
+    // Travel time was 110ms — only 6 frames at 60Hz, the eye barely
+    // registers the streak at close POV zoom. 220ms is still a fast
+    // bullet in perceptual terms and gives the streak time to render.
+    const travelMs = 220;
 
     // Live-target lookup reads the assigned enemy drone's billboard
     // position DIRECTLY each frame — same source Cesium uses to draw
@@ -3441,7 +4328,12 @@ async function main() {
     // (d.curAlt) so bullets fire from where the drone actually is.
     // Airborne interceptors climb to match the enemy, so tracers rise
     // with them. Ground vehicles stay at 8 m.
-    const _originAlt = () => d.profile.airborne ? (d.curAlt || 60) : 8;
+    // Origin altitude — absolute ellipsoid so it matches the
+    // interceptor billboard (which now also uses absolute altitude).
+    // Ground vehicles fire from an 8m mast.
+    const _originAlt = () => d.profile.airborne
+      ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60)
+      : 8;
 
     // Bullet-in-flight position: interpolated between LIVE origin
     // (interceptor at its cruise altitude) and LIVE target (enemy
@@ -3460,16 +4352,17 @@ async function main() {
         );
       }, false),
       point: {
-        pixelSize: 3,
+        pixelSize: 7,
         color: Cesium.Color.fromCssColorString('#fff1a8'),
         outlineColor: Cesium.Color.fromCssColorString('#ffb800'),
-        outlineWidth: 1,
+        outlineWidth: 2,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     });
 
-    // Short 20% streak trailing the head — full 3D endpoints so it
-    // ends at the enemy icon, not underneath it.
+    // Extended 40% streak trailing the head — full 3D endpoints so it
+    // ends at the enemy icon, not underneath it. Widened to 4.5px so
+    // the tracer reads at close POV zoom (was 1.6, invisible).
     const streak = viewer.entities.add({
       polyline: {
         positions: new Cesium.CallbackProperty(() => {
@@ -3479,7 +4372,7 @@ async function main() {
           const headLat = d.curLat + (tgt.lat - d.curLat) * t;
           const headLon = d.curLon + (tgt.lon - d.curLon) * t;
           const headAlt = oa + (tgt.alt - oa) * t;
-          const back = Math.max(0, t - 0.20);
+          const back = Math.max(0, t - 0.40);
           const tailLat = d.curLat + (tgt.lat - d.curLat) * back;
           const tailLon = d.curLon + (tgt.lon - d.curLon) * back;
           const tailAlt = oa + (tgt.alt - oa) * back;
@@ -3488,9 +4381,9 @@ async function main() {
             Cesium.Cartesian3.fromDegrees(headLon, headLat, headAlt),
           ];
         }, false),
-        width: 1.6,
+        width: 4.5,
         material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
-          return Cesium.Color.fromCssColorString('#ffe066').withAlpha(0.80 * (1 - _t() * 0.35));
+          return Cesium.Color.fromCssColorString('#ffe066').withAlpha(0.90 * (1 - _t() * 0.25));
         }, false)),
         arcType: Cesium.ArcType.NONE,
       },
@@ -3500,16 +4393,30 @@ async function main() {
       if (bullet) viewer.entities.remove(bullet);
       if (streak) viewer.entities.remove(streak);
       // Impact spark at the drone's LIVE position, not the snapshot.
+      // Bigger + longer than before (was 2->5 over 120ms) so the hit is
+      // visible from POV distance instead of a single-frame flicker.
+      // Anchored at the enemy drone's live altitude, otherwise the spark
+      // renders at 8m below an airborne target and looks like a miss.
       const impact = _liveTarget();
-      _spawnFlashEntity(impact.lon, impact.lat, 120, '#ffdb4d', 2, 5);
-    }, travelMs + 15);
+      _spawnFlashEntity(impact.lon, impact.lat, 260, '#ffdb4d', 5, 14, impact.alt || 8);
+      // If the operator is POV'd inside THIS drone, fire the screen-space
+      // hit flash — the 3D spark renders at their eye position and gets
+      // visually swallowed, so a DOM vignette is what actually reads as
+      // "you took a hit".
+      if (typeof _dronePov !== 'undefined' && _dronePov.active && _dronePov.swRef === d.assignedSwarmMember) {
+        _triggerDronePovHit();
+      }
+    }, travelMs + 30);
   }
 
-  // Small point flash — reused for muzzle + impact
-  function _spawnFlashEntity(lon, lat, durMs, colorHex, startSize, endSize) {
+  // Small point flash — reused for muzzle + impact. altM optional; when
+  // omitted defaults to ground level so a legacy caller keeps working.
+  // Airborne muzzle bursts pass the interceptor altitude so the flash
+  // renders at the shooter, not on the ground below.
+  function _spawnFlashEntity(lon, lat, durMs, colorHex, startSize, endSize, altM) {
     const startTs = Date.now();
     const flashEntity = viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(lon, lat, 8),
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, typeof altM === 'number' ? altM : 8),
       point: {
         pixelSize: new Cesium.CallbackProperty(() => {
           const t = (Date.now() - startTs) / durMs;
@@ -3753,6 +4660,7 @@ async function main() {
         d.rtbTargetLon = d.originLon;
         d.lastFrameTs = Date.now();
         if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+        if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
         return;
       }
       // Group not done yet — hold in state='complete'. The stale-
@@ -3760,6 +4668,7 @@ async function main() {
       // on the next tick; re-target block will pick a live hostile
       // and transition back to en_route.
       if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+        if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
       return;
     }
     if (d.profile.useRoadRouting && !d.profile.airborne && d.assignedWreckageId) {
@@ -3769,6 +4678,7 @@ async function main() {
       // engage timer no longer trips (rtbCompleted-style guard).
       d.state = 'holding-cordon';
       if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+        if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
       return;
     }
     // Fallback: graceful fade-out then full remove at 5s.
@@ -3784,6 +4694,7 @@ async function main() {
       if (d.entity) { viewer.entities.remove(d.entity); d.entity = null; }
       if (d.trail) { viewer.entities.remove(d.trail); d.trail = null; }
       if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+        if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
       if (d.routeEntity) { viewer.entities.remove(d.routeEntity); d.routeEntity = null; }
       _counterDispatches.delete(d.id);
     }, 5000);
@@ -3850,6 +4761,9 @@ async function main() {
     if (!Array.isArray(event.postIncidentDispatched)) event.postIncidentDispatched = [];
     if (event.postIncidentDispatched.includes(destId)) return;
     event.postIncidentDispatched.push(destId);
+    // Add a root entry to the post-incident chain so downstream handoffs
+    // + resolve state hang off it. Root parent is null.
+    addPostIncidentChainRoot(eventId, destId, getActiveRole()?.id || 'operator');
     toast(postIncidentToast(dest), 'ok');
   }
 
@@ -3907,8 +4821,14 @@ async function main() {
     const exitTime = e.exit ? e.exit.timestamp.slice(11,19) + 'Z' : '—';
     const entryCoord = e.entry ? `${e.entry.lat.toFixed(4)}°N ${e.entry.lon.toFixed(4)}°E` : '—';
     const exitCoord = e.exit ? `${e.exit.lat.toFixed(4)}°N ${e.exit.lon.toFixed(4)}°E` : '—';
-    const sensorRows = (e.contributingSensors || []).map(s => `
-      <tr><td>${s.id}</td><td>${s.offline ? 'OFFLINE' : 'ONLINE'}</td><td>${s.offline ? '—' : s.confidence.toFixed(2)}</td></tr>`).join('');
+    const sensorRows = (e.contributingSensors || []).map(s => {
+      // Closed-event context — prefer peakConfidence over current tick
+      // value so a drone that exited coverage before close still shows
+      // realistic detection quality.
+      const peakOrCur = (typeof s.peakConfidence === 'number' ? s.peakConfidence : s.confidence);
+      const confStr = s.offline ? '—' : (typeof peakOrCur === 'number' ? peakOrCur.toFixed(2) : '—');
+      return `<tr><td>${s.id}</td><td>${s.offline ? 'OFFLINE' : 'ONLINE'}</td><td>${confStr}</td></tr>`;
+    }).join('');
     const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -4000,9 +4920,26 @@ async function main() {
   // Print-ready incident report. Opens a new window with formatted HTML
   // and triggers the browser print dialog — operator saves as PDF from
   // there. Zero external dependencies.
+  // Rehydrate event.narrativeCache from localStorage if the in-memory
+  // field is empty. Called before any read path (PDF export, closed
+  // panel, debrief modal open) so a reloaded browser still surfaces
+  // the cached Mistral narrative instead of falling back to the
+  // deterministic template. Silent on miss. FIX-1 per architecture
+  // review 2026-08-30.
+  function _rehydrateNarrativeCache(event) {
+    if (!event) return;
+    if (event.narrativeCache) return;
+    // Pass the full event so the cache key matches the write path
+    // (includes startTime — prevents cross-session eventId collisions
+    // from surfacing yesterday's narrative in a fresh event).
+    const persisted = readNarrativeCache(event);
+    if (persisted) event.narrativeCache = persisted;
+  }
+
   function generatePirReport(eventId) {
     const e = getEvent(eventId);
     if (!e) return;
+    _rehydrateNarrativeCache(e);
     // Fold in the shadow chain so a swarm that crossed CPH → AMK
     // reports both sites, not just the primary siteId. Also picks up
     // any explicit _reacquiredSites.
@@ -4063,25 +5000,75 @@ async function main() {
         <td>${esc.status || '—'}</td>
         <td>${(esc.message || '').replace(/</g, '&lt;').slice(0, 140)}</td>
       </tr>`).join('') || '<tr><td colspan="4" style="text-align:center;color:#666;">No escalations recorded</td></tr>';
-    const sensorRows = (e.contributingSensors || []).map(s => `
-      <tr><td>${s.id}</td><td>${s.offline ? 'OFFLINE' : 'ONLINE'}</td><td>${s.offline ? '—' : s.confidence.toFixed(2)}</td></tr>`).join('');
-    // Available Danish + regional NATO air defense assets, computed relative
-    // to the impact zone. Deliberately factual: Denmark does not operate
-    // Patriot, so those are cross border via NATINAMDS. NASAMS is Danish
-    // and currently fielding (Kongsberg contract, 2024).
-    const impactLat = lk?.lat ?? SKRYDSTRUP.lat;
-    const impactLon = lk?.lon ?? SKRYDSTRUP.lon;
-    const airDefenseAssets = [
-      { name: 'Flyvestation Skrydstrup',           operator: 'Flyvevåbnet',            role: 'F-35 QRA',                   lat: 55.221, lon: 9.264,  status: (e.awaitingNeutralization || e.outcome === 'neutralized') ? 'DISPATCHED' : 'AVAILABLE' },
-      { name: 'NASAMS battery (CPH sector)',       operator: 'Flyvevåbnet',            role: 'Medium range SAM',           lat: 55.618, lon: 12.647, status: 'FIELDING · 2025 to 2028' },
-      { name: 'NASAMS battery (Aalborg sector)',   operator: 'Flyvevåbnet',            role: 'Medium range SAM',           lat: 57.092, lon: 9.849,  status: 'FIELDING · 2025 to 2028' },
-      { name: 'German Patriot (northern Germany)', operator: 'Bundeswehr · NATINAMDS', role: 'Long range SAM',             lat: 54.310, lon: 9.550,  status: 'CUEABLE' },
-      { name: 'IRIS T SLM (northern Germany)',     operator: 'Bundeswehr · NATINAMDS', role: 'Medium range SAM',           lat: 54.500, lon: 9.500,  status: 'CUEABLE' },
-      { name: 'Nordic Air Policing (Ronneby)',     operator: 'Rotational · NATINAMDS', role: 'Fighter surge (Baltic QRA)', lat: 56.267, lon: 15.267, status: 'AVAILABLE' },
+    // Contributing sensor rows — join against SITES to enrich the ID-only
+    // event record with hardware, modalities, and site of origin. All read
+    // from real sensor definitions; nothing hardcoded per row. When the
+    // sensor registry moves to an API, only the lookup below has to swap.
+    const _sensorLookup = (sid) => {
+      for (const site of Object.values(SITES)) {
+        const hit = site.sensors?.find(x => x.id === sid);
+        if (hit) return { site, sensor: hit };
+      }
+      return null;
+    };
+    const sensorRows = (e.contributingSensors || []).map(s => {
+      const rec = _sensorLookup(s.id);
+      const site = rec?.site?.name || '—';
+      const label = rec?.sensor?.label || s.id;
+      const modalities = rec?.sensor?.modalities?.join(' · ') || '—';
+      const coverage = rec?.sensor?.coverageRadius ? `${rec.sensor.coverageRadius} m` : '—';
+      const status = s.offline ? 'OFFLINE' : (rec?.sensor?.status || 'ONLINE').toUpperCase();
+      // Closed-event summary reads peakConfidence (best-ever value
+      // during the event's life) not confidence (current tick value).
+      // Otherwise a drone that exited coverage before close shows 0%
+      // for every sensor, misrepresenting the actual detection quality.
+      const peakOrCur = (typeof s.peakConfidence === 'number' ? s.peakConfidence : s.confidence);
+      const conf = s.offline
+        ? '—'
+        : (typeof peakOrCur === 'number' ? peakOrCur.toFixed(2) : '—');
+      return `<tr>
+        <td>${s.id}</td>
+        <td>${site}</td>
+        <td>${label}</td>
+        <td>${modalities}</td>
+        <td style="text-align:right;">${coverage}</td>
+        <td>${status}</td>
+        <td style="text-align:right;">${conf}</td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="7" style="text-align:center;color:#666;">No contributing sensors recorded</td></tr>`;
+
+    // ─────────────────────────────────────────────────────────────────
+    // Air defence registry — swap-target for a live NATINAMDS / DALO
+    // asset feed. Structure is stable so the render loop below stays
+    // untouched when the source becomes live. Status strings are the
+    // only fields not derived from the event; the "FIELDING" markers
+    // reflect real Danish NASAMS delivery schedule (Kongsberg 2024).
+    // ─────────────────────────────────────────────────────────────────
+    const _AIR_DEFENSE_REGISTRY = [
+      { name: 'Flyvestation Skrydstrup',           operator: 'Flyvevåbnet',            role: 'F-35 QRA',                   lat: 55.221, lon: 9.264 },
+      { name: 'NASAMS battery (CPH sector)',       operator: 'Flyvevåbnet',            role: 'Medium range SAM',           lat: 55.618, lon: 12.647, statusOverride: 'FIELDING · 2025 to 2028' },
+      { name: 'NASAMS battery (Aalborg sector)',   operator: 'Flyvevåbnet',            role: 'Medium range SAM',           lat: 57.092, lon: 9.849,  statusOverride: 'FIELDING · 2025 to 2028' },
+      { name: 'German Patriot (northern Germany)', operator: 'Bundeswehr · NATINAMDS', role: 'Long range SAM',             lat: 54.310, lon: 9.550,  statusOverride: 'CUEABLE' },
+      { name: 'IRIS T SLM (northern Germany)',     operator: 'Bundeswehr · NATINAMDS', role: 'Medium range SAM',           lat: 54.500, lon: 9.500,  statusOverride: 'CUEABLE' },
+      { name: 'Nordic Air Policing (Ronneby)',     operator: 'Rotational · NATINAMDS', role: 'Fighter surge (Baltic QRA)', lat: 56.267, lon: 15.267 },
     ];
-    const airDefenseRows = airDefenseAssets.map(a => {
-      const distKm = Math.round(haversineM(impactLat, impactLon, a.lat, a.lon) / 1000);
-      return `<tr><td>${a.name}</td><td>${a.operator}</td><td>${a.role}</td><td style="text-align:right;">${distKm} km</td><td>${a.status}</td></tr>`;
+    // Impact reference — use event's last known position; when unknown,
+    // fall back to the primary site centre rather than the old hardcoded
+    // Skrydstrup constant (which was misleading when the event was nowhere
+    // near Skrydstrup).
+    const _primarySiteCentre = SITES[e.siteId]?.coordinates;
+    const impactLat = lk?.lat ?? _primarySiteCentre?.lat;
+    const impactLon = lk?.lon ?? _primarySiteCentre?.lon;
+    const airDefenseRows = _AIR_DEFENSE_REGISTRY.map(a => {
+      const distKm = (impactLat != null && impactLon != null)
+        ? `${Math.round(haversineM(impactLat, impactLon, a.lat, a.lon) / 1000)} km`
+        : '—';
+      // Skrydstrup's status is event-driven; other assets use registry
+      // override (representing static fielding state).
+      const status = a.statusOverride
+        ? a.statusOverride
+        : (e.awaitingNeutralization || e.outcome === 'neutralized' ? 'DISPATCHED' : 'AVAILABLE');
+      return `<tr><td>${a.name}</td><td>${a.operator}</td><td>${a.role}</td><td style="text-align:right;">${distKm}</td><td>${status}</td></tr>`;
     }).join('');
 
     // Platform-aware Response Action fields. Air defence assets table
@@ -4150,7 +5137,7 @@ async function main() {
     <div class="kv"><span class="k">Type</span><span>${e.droneType}</span></div>
     <div class="kv"><span class="k">Classification</span><span>${(e.classification || '').toUpperCase()}</span></div>
     <div class="kv"><span class="k">Threat level</span><span>${(e.threat || '').toUpperCase()}</span></div>
-    <div class="kv"><span class="k">Confidence</span><span>${e.confidence.toFixed(2)} · ${e.confidenceTrend || ''}</span></div>
+    <div class="kv"><span class="k">Confidence</span><span>${(typeof e.confidence === 'number' ? e.confidence.toFixed(2) : '—')} · ${e.confidenceTrend || ''}</span></div>
     <div class="kv"><span class="k">First detect</span><span>${e.startTime.slice(11,19)}Z · ${siteName(e.siteId)}</span></div>
     <div class="kv"><span class="k">Duration</span><span>${formatDuration(e.duration)}</span></div>
   </div>
@@ -4161,14 +5148,15 @@ async function main() {
     <div class="kv"><span class="k">Chain</span><span>${siteChain.join(' → ')}</span></div>
     <div class="kv"><span class="k">Initial site</span><span>${siteName(e.siteId)}</span></div>
     <div class="kv"><span class="k">Last confirmed</span><span>${impactSite}</span></div>
-    <div class="kv"><span class="k">Evasion recorded</span><span>${evasion > 8 ? evasion + '° course change post Kassø exit' : 'None'}</span></div>
+    <div class="kv"><span class="k">Evasion recorded</span><span>${evasion > 8 ? `${evasion}° course change` : 'None'}</span></div>
   </div>
 
   <h2>Contributing Sensors</h2>
   <table>
-    <thead><tr><th>Sensor ID</th><th>Status</th><th>Confidence</th></tr></thead>
+    <thead><tr><th>Sensor ID</th><th>Site</th><th>Node</th><th>Modalities</th><th style="text-align:right;">Coverage</th><th>Status</th><th style="text-align:right;">Confidence</th></tr></thead>
     <tbody>${sensorRows}</tbody>
   </table>
+  <div style="font-size:9px;color:#888;margin-top:4px;font-family:'Courier New',monospace;letter-spacing:0.10em;">Modality mix per node · RF band data pending live sensor telemetry feed</div>
 
   <h2>Escalation Log</h2>
   <table>
@@ -4330,7 +5318,10 @@ async function main() {
     const site = SITES[siteId];
     // Auto-escalate to the re-acquiring site's national tier destinations so
     // their receivers' advisory strip upgrades to a full escalation card.
-    const autoDests = destinationsForSite(siteId)
+    // Domain-scoped via destinationsForEvent so a track re-acquired at a
+    // harbour site still fans out to maritime + ground; re-acquired at an
+    // airport stays aviation + ground; substation stays ground-only.
+    const autoDests = destinationsForEvent(event)
       .filter(d => d.type === 'agency' && d.tier >= 2 && d.tier <= 4)
       .map(d => d.id);
     if (autoDests.length) {
@@ -4670,6 +5661,7 @@ async function main() {
         backgroundColor: Cesium.Color.BLACK.withAlpha(0.75),
         backgroundPadding: new Cesium.Cartesian2(5, 2),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        show: true,   // explicit — some Cesium builds treat undefined as "not-yet-visible" until scene requests a render
       },
       properties: { markerEventId: eventId || 'orphan', markerKind: _markerKindFromLabel(labelText) },
     });
@@ -4677,6 +5669,10 @@ async function main() {
       if (!_perEventMarkers.has(eventId)) _perEventMarkers.set(eventId, []);
       _perEventMarkers.get(eventId).push(ent);
     }
+    // Force a render tick so the label paints immediately, not on the
+    // next unrelated scene event (which was the reason CPH labels only
+    // appeared once the AMK shadow spawn triggered a downstream render).
+    viewer.scene.requestRender();
     return ent;
   }
 
@@ -5107,8 +6103,30 @@ async function main() {
   // showing zero data because its template.contributingSensors were
   // pinned to CPH sensor IDs and never got updated).
   // ═══════════════════════════════════════════════════════════════════
+  // Monotonic tick counter — bumped once per onDroneTick call, then read
+  // by _updateContributingSensorsForPosition to decide "first drone this
+  // tick" vs "another drone within the same tick". Using a counter (not
+  // wall-clock) means the swarm-processing loop can spread across tens of
+  // milliseconds without any drone being mistakenly treated as a new tick.
+  let _contribTickSeq = 0;
+
+  // Route a drone's live position through the site's NnOutputSource
+  // (mock or websocket, decided by nn_registry.js), then fold the
+  // emitted detection batch into the event's contributingSensors.
+  //
+  // Mock source: ingestPositions computes per-sensor coverage math
+  // synchronously and fires the onDetection callback in-line. That
+  // preserves the exact per-tick semantics the inline math had.
+  //
+  // WebSocket source: ingestPositions is a no-op — real sensor batches
+  // arrive on the socket's own message loop. Those batches update the
+  // same targetEvent.contributingSensors via a persistent subscriber
+  // that will be registered when the first WS site is wired.
+  //
+  // See docs/interface-design-document.md IF-1 for the source contract.
   function _updateContributingSensorsForPosition(event, lat, lon) {
     try {
+      const tickSeq = _contribTickSeq;
       const hitSites = _sitesSeeingPoint(lat, lon);
       for (const sid of hitSites) {
         let targetEvent = event;
@@ -5122,24 +6140,121 @@ async function main() {
           if (!matched) continue;
           targetEvent = matched;
         }
-        const siteObj = SITES[sid];
-        if (!siteObj?.sensors) continue;
         if (!targetEvent.contributingSensors) targetEvent.contributingSensors = [];
-        for (const sensor of siteObj.sensors) {
-          if (sensor.status === 'offline') continue;
-          const dist = haversineM(lat, lon, sensor.lat, sensor.lon);
-          if (dist > sensor.coverageRadius) continue;
-          const newConf = Math.min(0.98, Math.max(0.55, 1 - dist / sensor.coverageRadius));
-          const existing = targetEvent.contributingSensors.find(s => s.id === sensor.id);
-          if (!existing) {
-            targetEvent.contributingSensors.push({ id: sensor.id, confidence: +newConf.toFixed(2) });
-          } else if (!existing.offline && newConf > (existing.confidence || 0)) {
-            existing.confidence = +newConf.toFixed(2);
+        // First call for this event in the current tick? Reset every
+        // sensor's confidence to 0 so all drones this tick start from a
+        // clean slate. Subsequent calls in the same tick (later drones
+        // in the swarm) skip the reset and just apply MAX. Between-tick
+        // residue never survives, so confidence tracks live geometry.
+        if (targetEvent._contribTickSeq !== tickSeq) {
+          for (const existing of targetEvent.contributingSensors) {
+            if (existing.offline) continue;
+            existing.confidence = 0;
           }
+          targetEvent._contribTickSeq = tickSeq;
         }
+        // One-shot capture of the source's emitted batch. Registering
+        // + unregistering per call keeps the mock path free of any
+        // subscriber-lifecycle bookkeeping. WebSocket sources will be
+        // driven by a persistent subscriber when they land — that path
+        // does not touch this function.
+        const src = _getNnSourceFor(sid);
+        if (!src) continue;
+        let batch = null;
+        const unsub = src.onDetection(b => { batch = b; });
+        src.ingestPositions([{ lat, lon }]);
+        unsub();
+        if (!batch?.sensors) continue;
+        _applyDetectionBatchToEvent(batch, targetEvent);
       }
     } catch (_) { /* silent — never break the tick */ }
   }
+
+  // Fold an NnDetectionBatch (IF-1.4) into an event's contributingSensors.
+  // MAX-merges each sensor's confidence across all detections in the
+  // batch, and MAX-merges into any existing per-tick entry (letting a
+  // later drone in the same tick raise a sensor's confidence).
+  //
+  // Also maintains a `peakConfidence` — the best-ever confidence any
+  // detection produced for this sensor over the event's entire life.
+  // Live views read `confidence` (current tick geometry). Closed-event
+  // summary + PDF read `peakConfidence` so the audit trail reflects
+  // "sensor N01 saw this target at 0.87 at its closest approach" not
+  // "sensor N01 saw 0% because the drone exited coverage before the
+  // event closed." Peak is monotonic — never decays.
+  function _applyDetectionBatchToEvent(batch, targetEvent) {
+    for (const sEntry of batch.sensors) {
+      if (sEntry.status === 'offline') continue;
+      let maxConf = 0;
+      for (const d of (sEntry.detections || [])) {
+        if (d.confidence > maxConf) maxConf = d.confidence;
+      }
+      if (maxConf <= 0) continue;
+      const rounded = +maxConf.toFixed(2);
+      const existing = targetEvent.contributingSensors.find(s => s.id === sEntry.sensorId);
+      if (!existing) {
+        targetEvent.contributingSensors.push({ id: sEntry.sensorId, confidence: rounded, peakConfidence: rounded });
+      } else if (!existing.offline) {
+        if (rounded > (existing.confidence || 0)) existing.confidence = rounded;
+        if (rounded > (existing.peakConfidence || 0)) existing.peakConfidence = rounded;
+      }
+    }
+  }
+
+  // ── Persistent WebSocket NN subscriber (IF-1 real-hardware path) ──
+  // The mock path uses per-tick subscribe/emit/unsub (block above at
+  // _updateContributingSensorsForPosition) because MockNnOutputSource
+  // fires detections synchronously in response to ingestPositions.
+  // WebSocketNnOutputSource cannot: real batches arrive on the
+  // socket's own message loop, unrelated to the tick's call stack.
+  // Comment at _updateContributingSensorsForPosition acknowledges the
+  // WS path lives here.
+  //
+  // At boot: iterate SITE_SOURCE_CONFIG, and for every entry declared
+  // 'websocket', register a lifetime subscriber that folds arriving
+  // batches into every active event at that site via the same
+  // _applyDetectionBatchToEvent path the mock uses. Guarantees identical
+  // downstream shape whether the source is mock or real hardware.
+  //
+  // Called once at boot near initLiveFeeds — see wiring below.
+  const _wsNnSubscriptions = new Map();   // siteId → unsub fn (for hot-reload / test cleanup)
+  function _installPersistentWebSocketNnSubscribers() {
+    for (const [siteId, cfg] of Object.entries(SITE_SOURCE_CONFIG)) {
+      if (cfg?.source !== 'websocket') continue;
+      if (_wsNnSubscriptions.has(siteId)) continue;   // idempotent
+      // getSourceFor lazy-constructs + start()s the WebSocketNnOutputSource
+      // and caches it. Same instance every call → subscription persists.
+      const src = _getNnSourceFor(siteId);
+      if (!src) continue;
+      const unsub = src.onDetection((batch) => {
+        // Batch arrived from real hardware. Route it to every active
+        // event whose siteId matches (typically the primary event for
+        // the site plus any cross-cued shadow events at other sites
+        // via linkedEventIds — but those get their own subscriber via
+        // their own site's config, so we only match on batch.siteId
+        // here to avoid double-counting).
+        if (!batch?.siteId || !Array.isArray(batch.sensors)) return;
+        for (const ev of EVENTS) {
+          if (ev.status !== 'active') continue;
+          if (ev.siteId !== batch.siteId) continue;
+          if (!Array.isArray(ev.contributingSensors)) ev.contributingSensors = [];
+          try { _applyDetectionBatchToEvent(batch, ev); }
+          catch (_) { /* never break the WS message loop */ }
+        }
+      });
+      _wsNnSubscriptions.set(siteId, unsub);
+      console.log(`[nn_ws] persistent subscriber installed for ${siteId} (${cfg.url || 'no-url'})`);
+    }
+  }
+
+  // Install once at boot. Idempotent — safe to call again from
+  // hot-reload / test hooks. Kept in-line here (not deferred to
+  // requestIdleCallback or similar) so the subscriber is attached
+  // before any real WS message can arrive. Sites currently all mock;
+  // this loop is a no-op today. First flip in nn_registry.js to
+  // { source: 'websocket', url, auth } starts routing that site's
+  // real batches into events without any other code change.
+  _installPersistentWebSocketNnSubscribers();
 
   // ═══════════════════════════════════════════════════════════════════
   // P21 · Universal per-site event lifecycle
@@ -5222,9 +6337,21 @@ async function main() {
       const ev = _findGroupEventForSite(primaryEvent, sid);
       if (ev && ev.status === 'active') {
         // Last drone of the group exited this site → close its event.
-        ev.status = 'closed';
-        ev.endTime = new Date().toISOString();
+        // Use closeEvent() from events.js so duration is computed and
+        // listeners fire. Direct field mutation used to leave duration=0
+        // and skip the persistence hook — an event that closed on site
+        // exit stayed missing its own trajectory recording forever.
+        closeEvent(ev.id, ev.exit || null);
         addNote(ev.id, `All tracked drones exited ${SITES[sid]?.name || sid} sensor coverage. Event closed.`, 'AUTO-CORRELATOR');
+        // Cross-cued events (e.g. AMK when the CPH primary is still
+        // running) have no own tick loop, so their recording is a
+        // slice of the primary's stream. Extract + persist that slice
+        // under this event's own key at THIS close moment — otherwise
+        // AMK's Replay/Debrief have no data source until CPH also
+        // closes (which may never happen if drones stay in CPH cov).
+        if (ev.id !== primaryEvent.id) {
+          _persistCrossCuedRecordings(primaryEvent);
+        }
         renderAlertStrip();
         if (getSelectedEventId() === ev.id) renderDetailPanel();
         console.log(`[P21] site exit: closed ${ev.id} at ${sid}`);
@@ -5263,12 +6390,29 @@ async function main() {
       multiSiteTrack: true,
       detected: true,
       spawnTs: Date.now(),
+      // Both events are FIRST-CLASS. linkedEventId (singular) is a
+      // "source-of-recording-data" pointer used by the tick loop to
+      // extract this event's sample slice from the primary's stream at
+      // close (see _persistRecording). shadowOfEventId is kept for
+      // backwards compat with tick-loop code paths that still read it,
+      // but the term is misleading — both events own their own data
+      // after close. linkedEventIds (plural, below) is what receiver
+      // panels read for cross-navigation.
       linkedEventId: primary.id,
       shadowOfEventId: primary.id,
+      linkedEventIds: [primary.id],
     };
     addEvent(spawned);
     if (!primary.linkedEventIds) primary.linkedEventIds = [];
     primary.linkedEventIds.push(spawnedId);
+    // Union domain scope across the freshly-linked pair so a drone that
+    // starts inland (ground) and cross-cues to a maritime site pulls
+    // maritime into scope for the parent event too, and vice versa.
+    // Idempotent inside events.js — no-op if scopes already match.
+    try {
+      unionLinkedEventDomains(primary.id);
+      unionLinkedEventDomains(spawnedId);
+    } catch (err) { console.warn('[domain] union on cross-cue failed:', err.message); }
     // Correlator validates the link with signature match audit note
     _autoCorrelate(spawned);
 
@@ -5457,8 +6601,11 @@ async function main() {
     return 500;
   }
   const _SAMPLE_INTERVAL_MS = 500;   // legacy fallback
+  // Prefix retained solely for the one-shot boot-time migration that
+  // scans localStorage for legacy trajectory entries and copies them
+  // into IndexedDB. Post-migration, trajectories live in IDB and this
+  // prefix is not used for reads/writes.
   const _P5A_STORAGE_PREFIX = 'isr_trajectory_';
-  const _P5A_MAX_STORED_RECORDINGS = 5;   // FIFO eviction cap
 
   function _computeSensorsDetecting(lat, lon) {
     const result = [];
@@ -5677,6 +6824,13 @@ async function main() {
     if (!best.prior.linkedEventIds) best.prior.linkedEventIds = [];
     if (!best.prior.linkedEventIds.includes(event.id)) best.prior.linkedEventIds.push(event.id);
     event.correlationScore = +best.score.toFixed(3);
+    // Union domain scope across the auto-linked pair. Ensures cross-site
+    // continuations (drone crossing land/sea/inland boundary) surface the
+    // right destinations at both ends. Idempotent per events.js.
+    try {
+      unionLinkedEventDomains(event.id);
+      unionLinkedEventDomains(best.prior.id);
+    } catch (err) { console.warn('[domain] union on auto-link failed:', err.message); }
     addNote(event.id,
       `Auto-linked to ${best.prior.id} by signature match (composite ${pctStr(best.score)}: RF ${pctStr(best.rf)}, kinematic ${pctStr(best.kin)}, temporal ${pctStr(best.tmp)}). Same threat continuing across events.`,
       'AUTO-CORRELATOR');
@@ -5693,14 +6847,27 @@ async function main() {
   // to produce a plain-English insight: nearest critical asset, dwell
   // heatmap over pre-registered critical zones, triggered pattern flags,
   // and behavioural classification (reconnaissance / continuation /
-  // targeting / non-identifiable). This is the mock; post-demo replaces
-  // this function with a Mistral call carrying the same inputs on EU
-  // sovereign inference (Scaleway / OVH).
+  // targeting / non-identifiable). This is the mock; production
+  // replaces this function with a Mistral call routed through the
+  // Azure sovereign proxy (Scaleway primary, Foundry failover) per
+  // IDD IF-9.7.
   // ═══════════════════════════════════════════════════════════════════
   function _generateAgentBNarrative(event) {
     const siteContext = contextForSite(event.siteId);
     if (!siteContext) return null;
-    const recording = window.__isr_getRecording?.(event.id);
+    // For shadow events (AMK cross-cued from CPH primary), the standard
+    // getRecording call filters the primary's samples to the shadow's
+    // active window. If the filter yields nothing (spawn happened AFTER
+    // primary's last sample, or clock drift), fall through to the raw
+    // primary recording so we still get behavioural context instead of
+    // dropping to "Insufficient data."
+    let recording = window.__isr_getRecording?.(event.id);
+    if (!recording?.timeseries?.length) {
+      const primaryId = event.linkedEventId || event.shadowOfEventId;
+      if (primaryId && primaryId !== event.id) {
+        recording = window.__isr_getRecording?.(primaryId);
+      }
+    }
     const hasTimeseries = !!(recording?.timeseries?.length);
     // Reference position for nearest-critical-asset query
     const refPos = event.lastPosition || event.lastKnownPosition;
@@ -5708,9 +6875,15 @@ async function main() {
     if (refPos?.lat != null) {
       nearest = nearestCriticalArea(event.siteId, refPos.lat, refPos.lon, 3);
     }
-    // Dwell analysis — count DETECTED samples inside each dwell zone
+    // Dwell analysis — count DETECTED samples inside each dwell zone.
+    // Percentage is share of ZONE dwell time (not full flight), so users
+    // see "70% of dwell was over Terminal A" rather than "16% of the flight
+    // was over Terminal A" — the latter dilutes across free-flight samples
+    // that aren't in any zone and buries the concentration signal.
+    // pctOfFlight is kept alongside for the PDF's flight-share column.
     const dwellCounts = {};
     let detectedSamples = 0;
+    let totalZoneHits = 0;
     if (hasTimeseries) {
       for (const s of recording.timeseries) {
         if (s.detection_state !== 'detected') continue;
@@ -5718,11 +6891,17 @@ async function main() {
         const hits = dwellZonesAtPoint(event.siteId, s.lat, s.lon);
         for (const h of hits) {
           dwellCounts[h.zone.name] = (dwellCounts[h.zone.name] || 0) + 1;
+          totalZoneHits++;
         }
       }
     }
     const dwellRanked = Object.entries(dwellCounts)
-      .map(([name, count]) => ({ name, pct: detectedSamples ? Math.round(count / detectedSamples * 100) : 0 }))
+      .map(([name, count]) => ({
+        name,
+        pct: totalZoneHits ? Math.round(count / totalZoneHits * 100) : 0,
+        pctOfFlight: detectedSamples ? Math.round(count / detectedSamples * 100) : 0,
+        sampleCount: count,
+      }))
       .filter(d => d.pct > 0)
       .sort((a, b) => b.pct - a.pct);
     // Pattern flags (heuristic — Mistral would produce narrative flags)
@@ -5880,97 +7059,183 @@ async function main() {
     };
   }
 
-  function _persistRecording(eventId) {
+  // ─────────────────────────────────────────────────────────────
+  // Persistence layer — IndexedDB via src/recording_store.js.
+  //
+  // Historical context: trajectory recordings originally lived in
+  // localStorage (`isr_trajectory_*` keys). That hit the ~5MB browser
+  // cap fast — a single swarm recording is ~600KB, and it competes
+  // with narrative caches / Agent A digest / preprocessed signals for
+  // the same quota pool. Migrated to IndexedDB on 2026-08-31.
+  //
+  // IndexedDB is async by construction, but many read paths in this
+  // module were written when the store was sync (localStorage). We
+  // keep `window.__isr_getRecording()` sync by caching loaded
+  // recordings in `_loadedRecordings`. `window.__isr_ensureRecording()`
+  // is the async helper that populates the cache from IDB; async
+  // callers (Replay button click, Debrief modal open, PDF export)
+  // await it before opening the UI that consumes the recording.
+  //
+  // Boot-time migration copies any legacy localStorage entries into
+  // IDB then removes them from localStorage — happens once per browser.
+  // ─────────────────────────────────────────────────────────────
+
+  // In-memory cache of loaded recordings. Populated by ensureRecording
+  // on first access; sync getRecording returns from here. Cleared by
+  // __isr_clearAllSimData.
+  const _loadedRecordings = new Map();
+
+  async function _persistRecording(eventId) {
     const st = droneState.get(eventId);
     if (!st?.recording) return;
+    // Also cache in-memory so a sync getRecording immediately after
+    // persist doesn't need to re-load from IDB.
+    _loadedRecordings.set(eventId, st.recording);
     try {
-      localStorage.setItem(_P5A_STORAGE_PREFIX + eventId, JSON.stringify(st.recording));
-      _evictOldestRecordings();
+      await _idbSaveRecording(eventId, st.recording);
     } catch (err) {
-      // localStorage may throw QuotaExceededError — try eviction and retry once
-      console.warn('[P5A] localStorage write failed, evicting + retry', err);
-      _evictOldestRecordings(true);
-      try {
-        localStorage.setItem(_P5A_STORAGE_PREFIX + eventId, JSON.stringify(st.recording));
-      } catch (err2) { console.warn('[P5A] retry also failed', err2); }
+      console.error(`[P5A] IndexedDB save failed for ${eventId}. Recording lives in droneState + in-memory cache for this session. Prior recordings remain intact.`, err);
     }
   }
 
-  // FIFO retention: keep only the most-recent N recordings. Event IDs are
-  // timestamp-prefixed so sorting alphabetically gives chronological order.
-  function _evictOldestRecordings(aggressive = false) {
-    const keys = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (k?.startsWith(_P5A_STORAGE_PREFIX)) keys.push(k);
-    }
-    keys.sort();   // oldest first (timestamp-prefixed IDs)
-    const cap = aggressive ? Math.max(1, _P5A_MAX_STORED_RECORDINGS - 2) : _P5A_MAX_STORED_RECORDINGS;
-    while (keys.length > cap) {
-      const oldest = keys.shift();
-      localStorage.removeItem(oldest);
-      console.log(`[P5A] evicted oldest recording: ${oldest}`);
-    }
-  }
-
-  window.__isr_getRecording = (eventId) => {
-    // 1) Event's own live recording
-    const st = droneState.get(eventId);
-    if (st?.recording) return st.recording;
-    // 2) Event's own persisted recording
-    try {
-      const raw = localStorage.getItem(_P5A_STORAGE_PREFIX + eventId);
-      if (raw) return JSON.parse(raw);
-    } catch (e) { /* fall through */ }
-    // 3) SHADOW FALLBACK. Linked/shadow events (AMK cross-cued from
-    //    CPH primary) have no droneState of their own — they piggyback
-    //    on the primary's tick loop. Fetch the primary's recording and
-    //    filter timeseries to this shadow event's active window so
-    //    replay / debrief / PDF / summary / intelligence all render
-    //    the AMK-window slice instead of coming up empty.
-    try {
-      const ev = EVENTS.find(e => e.id === eventId);
-      const primaryId = ev?.shadowOfEventId || ev?.linkedEventId;
-      if (!primaryId) return null;
-      const primarySt = droneState.get(primaryId);
-      let rec = primarySt?.recording || null;
-      if (!rec) {
-        const raw = localStorage.getItem(_P5A_STORAGE_PREFIX + primaryId);
-        if (raw) rec = JSON.parse(raw);
+  // Cross-cued events (e.g. AMK spawn from a CPH swarm) don't run their
+  // own tick loop — while live, their sample data is piggybacked on the
+  // primary's stream. That's a live-only optimisation. At close, we
+  // extract each cross-cued event's TIME-WINDOW slice from the primary
+  // recording and persist it under the cross-cued event's own eventId
+  // in IDB. From that moment on, `window.__isr_getRecording(amkId)`
+  // returns AMK's OWN recording. Both events are first-class after
+  // close, per the "replay always available" product principle.
+  async function _persistCrossCuedRecordings(primaryEvent) {
+    console.log(`[P5A cross-cued] called for primary=${primaryEvent.id} linkedIds=[${(primaryEvent.linkedEventIds || []).join(',')}]`);
+    const primarySt = droneState.get(primaryEvent.id);
+    let primaryRec = primarySt?.recording;
+    let primarySource = 'live';
+    if (!primaryRec?.timeseries?.length) {
+      // Fall back to already-loaded in-memory cache (populated on
+      // previous access), then IDB, so cross-cued persistence still
+      // works if the primary's droneState was cleaned up first.
+      primaryRec = _loadedRecordings.get(primaryEvent.id) || null;
+      if (primaryRec?.timeseries?.length) {
+        primarySource = 'in-memory-cache';
+      } else {
+        try {
+          primaryRec = await _idbLoadRecording(primaryEvent.id);
+          if (primaryRec?.timeseries?.length) primarySource = 'idb';
+        } catch (_) { /* swallow */ }
       }
-      if (!rec?.timeseries?.length) return null;
-      const startMs = new Date(ev.startTime).getTime();
-      const endMs = ev.endTime ? new Date(ev.endTime).getTime() : Date.now();
-      const filtered = rec.timeseries.filter(s => {
+    }
+    if (!primaryRec?.timeseries?.length) {
+      console.warn(`[P5A cross-cued] no primary recording available for ${primaryEvent.id}. Aborting.`);
+      return;
+    }
+    console.log(`[P5A cross-cued] primary recording found via ${primarySource}, ${primaryRec.timeseries.length} samples`);
+    const linkedIds = primaryEvent.linkedEventIds || [];
+    for (const linkedId of linkedIds) {
+      const linked = getEvent(linkedId);
+      if (!linked) { console.warn(`[P5A cross-cued] linked event ${linkedId} not found`); continue; }
+      // Only persist if the linked event doesn't already have its own
+      // recording (e.g. if it was spawned from its own template with
+      // an own tick loop, don't overwrite).
+      if (droneState.get(linkedId)?.recording) { console.log(`[P5A cross-cued] ${linkedId} already has own recording, skipping`); continue; }
+      const startMs = new Date(linked.startTime).getTime();
+      const endMs = linked.endTime ? new Date(linked.endTime).getTime() : Date.now();
+      const slice = primaryRec.timeseries.filter(s => {
         const t = new Date(s.timestamp_utc).getTime();
         return t >= startMs && t <= endMs;
       });
-      if (!filtered.length) {
-        console.warn('[shadow-fallback] Zero samples in shadow window', {
-          eventId, primaryId,
-          shadowStart: ev.startTime, shadowEnd: ev.endTime,
-          primarySampleCount: rec.timeseries.length,
-          primaryFirstSample: rec.timeseries[0]?.timestamp_utc,
-          primaryLastSample: rec.timeseries[rec.timeseries.length - 1]?.timestamp_utc,
-        });
-        return null;
+      if (!slice.length) {
+        const primaryFirst = primaryRec.timeseries[0]?.timestamp_utc;
+        const primaryLast = primaryRec.timeseries[primaryRec.timeseries.length - 1]?.timestamp_utc;
+        console.warn(`[P5A cross-cued] ${linkedId}: filter yielded 0 samples. linked window=[${linked.startTime}..${linked.endTime}], primary samples=[${primaryFirst}..${primaryLast}]`);
+        continue;
       }
-      // Return a shadow-scoped clone so callers get event-scoped meta
-      // (event_id, event_type) instead of the primary's fields.
-      return {
+      const ownRecording = {
         meta: {
-          ...(rec.meta || {}),
-          event_id: eventId,
-          event_type: rec.meta?.event_type || 'quadcopter',
-          shadow_of: primaryId,
-          shadow_scoped: true,
-          started_at_utc: ev.startTime,
-          ended_at_utc: ev.endTime || null,
-          duration_sec: ev.duration || null,
+          ...(primaryRec.meta || {}),
+          event_id: linkedId,
+          site_id: linked.siteId,
+          derived_from: primaryEvent.id,
+          derived_note: `Slice of ${primaryEvent.id} filtered to ${linked.id}'s active window. Cross-cued event, sensors at ${linked.siteId} observed the same physical threat.`,
+          ended_at_utc: linked.endTime || new Date().toISOString(),
+          duration_sec: linked.duration || null,
         },
-        timeseries: filtered,
+        timeseries: slice,
       };
-    } catch (e) { return null; }
+      // Cache in-memory + persist to IDB. No eviction — event
+      // evidence is preserved until operator explicitly clears.
+      _loadedRecordings.set(linkedId, ownRecording);
+      try {
+        await _idbSaveRecording(linkedId, ownRecording);
+        console.log(`[P5A cross-cued] persisted ${linkedId} to IDB (${slice.length} samples derived from ${primaryEvent.id})`);
+      } catch (err) {
+        console.error(`[P5A cross-cued] IDB save failed for ${linkedId}. Slice lives in memory only.`, err);
+      }
+    }
+  }
+
+  // Async loader — ensures the recording for `eventId` is in the
+  // in-memory cache, loading from IDB if necessary. Async callers
+  // (Replay click, Debrief open, PDF export) await this before
+  // reading through the sync `window.__isr_getRecording()`. Returns
+  // the recording or null.
+  window.__isr_ensureRecording = async (eventId) => {
+    if (!eventId) return null;
+    // Live droneState wins first.
+    const st = droneState.get(eventId);
+    if (st?.recording) return st.recording;
+    // In-memory cache hit.
+    if (_loadedRecordings.has(eventId)) return _loadedRecordings.get(eventId);
+    // Load from IDB into cache.
+    try {
+      const rec = await _idbLoadRecording(eventId);
+      if (rec?.timeseries?.length) {
+        _loadedRecordings.set(eventId, rec);
+        return rec;
+      }
+    } catch (_) { /* swallow */ }
+    // Shadow-scoped fallback: if this event is cross-cued and we
+    // never persisted a slice for it (e.g. legacy events or events
+    // that closed abnormally), derive on-the-fly from the primary's
+    // recording. Rare; retained as safety net.
+    const ev = EVENTS.find(e => e.id === eventId);
+    const primaryId = ev?.shadowOfEventId || ev?.linkedEventId;
+    if (!primaryId || primaryId === eventId) return null;
+    const primaryRec = await window.__isr_ensureRecording(primaryId);
+    if (!primaryRec?.timeseries?.length) return null;
+    const startMs = new Date(ev.startTime).getTime();
+    const endMs = ev.endTime ? new Date(ev.endTime).getTime() : Date.now();
+    const filtered = primaryRec.timeseries.filter(s => {
+      const t = new Date(s.timestamp_utc).getTime();
+      return t >= startMs && t <= endMs;
+    });
+    if (!filtered.length) return null;
+    const derived = {
+      meta: {
+        ...(primaryRec.meta || {}),
+        event_id: eventId,
+        event_type: primaryRec.meta?.event_type || 'quadcopter',
+        shadow_of: primaryId,
+        shadow_scoped: true,
+        started_at_utc: ev.startTime,
+        ended_at_utc: ev.endTime || null,
+        duration_sec: ev.duration || null,
+      },
+      timeseries: filtered,
+    };
+    _loadedRecordings.set(eventId, derived);
+    return derived;
+  };
+
+  // Sync accessor. Live droneState + in-memory cache. Returns null if
+  // not loaded — caller should await __isr_ensureRecording(id) first
+  // for post-close read paths. Live callers (tick loop) never need
+  // the async path because droneState is populated live.
+  window.__isr_getRecording = (eventId) => {
+    if (!eventId) return null;
+    const st = droneState.get(eventId);
+    if (st?.recording) return st.recording;
+    return _loadedRecordings.get(eventId) || null;
   };
   // Phase 3 · scope-filter for exports. Given a recording and the
   // active role, returns a copy of the recording with timeseries
@@ -6006,7 +7271,9 @@ async function main() {
     };
   }
 
-  window.__isr_downloadRecording = (eventId) => {
+  window.__isr_downloadRecording = async (eventId) => {
+    // Ensure recording is loaded from IDB before consuming.
+    await window.__isr_ensureRecording(eventId);
     const rawRec = window.__isr_getRecording(eventId);
     if (!rawRec) { console.warn('[P5A] no recording for', eventId); return; }
     const rec = _scopeRecordingForActiveRole(rawRec, eventId);
@@ -6024,7 +7291,8 @@ async function main() {
   // per-drone timeseries into rows. sensors_detecting is pipe-encoded per
   // sensor as "SENSOR_ID:CONFIDENCE:RANGE_M" so external tools can split
   // the field. Meta rows omitted (they'd break the tabular contract).
-  window.__isr_downloadRecordingCSV = (eventId) => {
+  window.__isr_downloadRecordingCSV = async (eventId) => {
+    await window.__isr_ensureRecording(eventId);
     const rawRec = window.__isr_getRecording(eventId);
     if (!rawRec || !rawRec.timeseries?.length) { console.warn('[P5C] no recording for', eventId); return; }
     const rec = _scopeRecordingForActiveRole(rawRec, eventId);
@@ -6999,9 +8267,45 @@ async function main() {
       <div class="dbn-body" data-debrief-body="${event.id}" data-debrief-reco="${event.id}">${narrativeHtml}</div>
       ${momentsList}
       <div class="dbn-footer" data-debrief-foot="${event.id}">${modelSubtitle}</div>
+      <div class="dbn-regen-row" style="display:flex;gap:8px;padding:0 var(--space-3) var(--space-3);align-items:center;">
+        <button class="dbn-regen-btn" data-debrief-regen="${event.id}" style="padding:6px 12px;background:transparent;border:1px solid var(--border);color:var(--text-dim);font-family:var(--font-mono);font-size:var(--fs-2xs);letter-spacing:0.10em;text-transform:uppercase;cursor:pointer;border-radius:2px;">Regenerate narrative</button>
+        <span class="dbn-regen-hint" style="font-family:var(--font-mono);font-size:9px;color:var(--text-dim);letter-spacing:0.08em;">Re-runs Agent B against the same event data. Use if the current read is off.</span>
+      </div>
     `;
     document.body.appendChild(wrap);
     document.getElementById('debrief-close-btn').addEventListener('click', stopDebrief);
+    // Regenerate: clear ALL downstream caches and re-fire the full
+    // pipeline (highlights → digest → preprocessing → Agent B).
+    //
+    // FIX-6 (regenerate re-entry race): track an in-flight promise on
+    // event._regenInFlight. Rapid clicks land only the first — the rest
+    // short-circuit before spawning a Mistral call. Cleared in .finally
+    // so a stuck error state still re-enables the button.
+    //
+    // Phase 5 extension: also clears preprocessed signals + Agent A2
+    // fallback ranker cache so a poor read is fully re-derived, not
+    // just re-narrated over stale intermediate data. Declared
+    // highlights (site_context.js) are NEVER touched by regenerate —
+    // they change only via config edit.
+    wrap.querySelector(`[data-debrief-regen="${event.id}"]`)?.addEventListener('click', () => {
+      if (event._regenInFlight) return;
+      const btn = wrap.querySelector(`[data-debrief-regen="${event.id}"]`);
+      if (btn) { btn.disabled = true; btn.textContent = 'Regenerating...'; }
+      invalidateSiteContextDigest(event.siteId);
+      invalidateFallbackHighlights(event.siteId);
+      // Pass full event so cache key matches the write path (per FIX-9
+      // cross-session collision fix — key includes startTime).
+      invalidateNarrativeCache(event);
+      invalidatePreprocessed(event);
+      event.narrativeCache = null;
+      event._preprocessed = null;
+      const samples = window.__isr_getRecording?.(event.id)?.timeseries || [];
+      const analysis = _debriefAnalyzeAssets(event, samples);
+      event._regenInFlight = _fireMistralDebrief(event, samples, analysis).finally(() => {
+        event._regenInFlight = null;
+        if (btn) { btn.disabled = false; btn.textContent = 'Regenerate narrative'; }
+      });
+    });
     // Chip clicks in the debrief header — same handler as detail panel.
     wrap.querySelectorAll('[data-mflt]').forEach(chip => {
       chip.addEventListener('click', () => {
@@ -7011,9 +8315,21 @@ async function main() {
     return wrap;
   }
 
-  function startDebrief(eventId) {
+  async function startDebrief(eventId) {
     const event = getEvent(eventId);
     if (!event) return;
+    // Load recording from IDB into memory before _debriefResolveSamples
+    // runs. For cross-cued events, also ensure the primary is loaded
+    // (the resolver's fallback path needs it).
+    await window.__isr_ensureRecording(eventId);
+    const _primaryId = event.linkedEventId || event.shadowOfEventId;
+    if (_primaryId && _primaryId !== eventId) {
+      await window.__isr_ensureRecording(_primaryId);
+    }
+    // Rehydrate any persisted narrative from localStorage before we
+    // render the debrief panel — a reload otherwise re-triggers Agent B
+    // even though the cached narrative is still valid (FIX-1).
+    _rehydrateNarrativeCache(event);
     if (_debriefState) stopDebrief();
     // Dim base map + entities so the debrief callouts + trajectory pop.
     // CSS class on <body> is picked up by style.css rules that reduce
@@ -7148,13 +8464,87 @@ async function main() {
   // Fires the Mistral streaming call for the currently-mounted debrief.
   // The deterministic narrative is already in the DOM. Tokens replace it
   // as they arrive. On error the deterministic narrative stays.
+  //
+  // Pipeline (per docs/agentic-preprocessing-architecture.md):
+  //   1. Resolve highlights[] (declared or Agent A2 fallback ranked).
+  //   2. Fetch-or-cache Agent A site digest.
+  //   3. Run deterministic Trajectory Signal Extractor (haversine +
+  //      regressions), rank top outliers + trends, format JSON + prose blocks.
+  //   4. Cache preprocessed signals on event._preprocessed + localStorage.
+  //   5. FIX-9 short-circuit: if narrativeCache.signalHash matches the
+  //      current signalHash, reuse the cached narrative — no Mistral call.
+  //   6. Otherwise call Agent B with siteDigest + highlightsJson +
+  //      signalsJsonBlock + signalsProseBlock as opts.
   let _mistralDebriefGen = 0;
-  function _fireMistralDebrief(event, samples, analysis) {
+  async function _fireMistralDebrief(event, samples, analysis) {
     if (!isMistralConfigured() || !event) return;
     const gen = ++_mistralDebriefGen;
     const bodyEl = document.querySelector(`[data-debrief-body="${event.id}"]`);
     const footEl = document.querySelector(`[data-debrief-foot="${event.id}"]`);
     if (!bodyEl) return;
+
+    const siteCtx = contextForSite(event.siteId);
+
+    // ── Step 1-3: preprocessing pipeline (parallel await where safe)
+    // Agent A digest + highlights resolution can share the digest, so
+    // we resolve highlights first (which internally awaits digest for
+    // fallback path). Then extract signals. Both are cheap on cache-hit.
+    const highlightsRes = await resolveHighlightsAsync(event.siteId, siteCtx);
+    if (gen !== _mistralDebriefGen) return;
+    const siteDigest = await ensureSiteContextDigest(event.siteId, siteCtx);
+    if (gen !== _mistralDebriefGen) return;
+
+    // ── Step 3: extract + rank signals (deterministic, ~30ms).
+    // Rehydrate previous run from localStorage if the sample fingerprint
+    // still matches. Post-close replay or edit that adds/removes ticks
+    // invalidates the persisted copy and forces a fresh extract.
+    let ranked = rehydratePreprocessed(event, samples);
+    if (!ranked) {
+      ranked = extractAndRankSignals(event, samples, { ctx: siteCtx, highlights: highlightsRes });
+      event._preprocessed = ranked;
+      writePreprocessed(event, ranked);
+    }
+    const promptBlock = buildAgentBPromptBlock(ranked, highlightsRes);
+    const currentSignalHash = promptBlock.signalHash;
+
+    // ── identify-only short-circuit: skip Mistral entirely for events
+    // that don't warrant analysis. Small site, short duration, no
+    // highlight approach. Deterministic one-sentence identification
+    // gets rendered + cached in the same shape as a Mistral narrative
+    // so PDF export, closed panel, and reopen flows are uniform.
+    if (ranked?.notability?.tier === 'identify-only' && ranked.notability.deterministicBody) {
+      const detCache = {
+        body: ranked.notability.deterministicBody,
+        recommendation: ranked.notability.deterministicReco || '',
+        model_version: 'deterministic-identify-only',
+        at: new Date().toISOString(),
+        signalHash: currentSignalHash,
+      };
+      event.narrativeCache = detCache;
+      writeNarrativeCache(event, detCache);
+      if (bodyEl) {
+        const bodyHtml = `<p>${detCache.body}</p>`;
+        const recoHtml = detCache.recommendation ? `<p class="dbn-analyst-take" style="margin-top:12px;padding-left:10px;border-left:2px solid var(--accent);color:var(--text-primary);font-weight:500;">${detCache.recommendation}</p>` : '';
+        bodyEl.innerHTML = bodyHtml + recoHtml;
+      }
+      if (footEl) footEl.textContent = `Identify-only · deterministic classification · ${ranked.notability.reason}`;
+      return;
+    }
+
+    // ── Step 5: FIX-9 cache short-circuit. If we have a persisted
+    // narrative for this event whose signalHash matches the current
+    // one, reuse it — free.
+    const cached = readNarrativeCacheIfSignalMatch(event, currentSignalHash);
+    if (cached) {
+      event.narrativeCache = cached;
+      if (bodyEl) {
+        const bodyHtml = `<p>${(cached.body || '').trim()}</p>`;
+        const recoHtml = cached.recommendation ? `<p class="dbn-analyst-take" style="margin-top:12px;padding-left:10px;border-left:2px solid var(--accent);color:var(--text-primary);font-weight:500;">${cached.recommendation.trim()}</p>` : '';
+        bodyEl.innerHTML = bodyHtml + recoHtml;
+      }
+      if (footEl) footEl.textContent = `Cached · Sovereign EU inference · Model: ${cached.model_version} · ${cached.at?.slice(0,19) || ''}Z`;
+      return;
+    }
 
     let hasReplacedBody = false;
     let latestBody = '';
@@ -7164,6 +8554,32 @@ async function main() {
       const recoHtml = latestReco ? `<p class="dbn-analyst-take" style="margin-top:12px;padding-left:10px;border-left:2px solid var(--accent);color:var(--text-primary);font-weight:500;">${latestReco}</p>` : '';
       bodyEl.innerHTML = bodyHtml + recoHtml;
     };
+
+    // Cooperative traffic cross-check. Same non-blocking pattern as
+    // Agent 3 case-file. Runs BEFORE the stream so the check block is
+    // available in the prompt from the first token. Skipped when site
+    // has no cooperative_traffic config or when the check errors.
+    // See docs/agentic-cooperative-traffic-fusion-architecture.md.
+    let cooperativeCheckBlock = null;
+    try {
+      const check = await checkCooperativeTraffic(event, siteCtx);
+      if (check?.formatted_block) cooperativeCheckBlock = check.formatted_block;
+    } catch (_) { /* non-blocking */ }
+    if (gen !== _mistralDebriefGen) return;
+
+    // Precedent retrieval. Deterministic + synchronous — no HTTP, no
+    // LLM, cheap. Query BEFORE register so the current event doesn't
+    // match itself. Register AFTER so it becomes available for future
+    // debriefs at this site.
+    let precedentBlock = null;
+    try {
+      const result = buildPrecedentBlock(event);
+      if (result?.formatted_block) precedentBlock = result.formatted_block;
+    } catch (err) { console.warn('[precedent_retrieval] query failed:', err.message); }
+    try {
+      registerPrecedent(event);
+    } catch (err) { console.warn('[precedent_index] register failed:', err.message); }
+
     streamDebriefNarrative(event, samples, analysis, {
       onBodyDelta: (text) => {
         if (gen !== _mistralDebriefGen) return;
@@ -7181,18 +8597,45 @@ async function main() {
         if (footEl) footEl.textContent = `Generated just now · Sovereign EU inference · Model: ${result.model_version}`;
         // Cache the narrative on the event so PDF export + other
         // downstream renders can reuse it without re-hitting Mistral.
+        // signalHash captures the preprocessing signal set that fed
+        // this run — Phase 4 FIX-9 uses it to short-circuit Agent B
+        // when the operator re-opens a debrief and signals are unchanged.
         event.narrativeCache = {
           body: result.body || latestBody,
           recommendation: result.recommendation || latestReco,
           model_version: result.model_version,
           at: new Date().toISOString(),
+          signalHash: currentSignalHash,
         };
+        // Persist to localStorage so a page reload keeps the narrative
+        // available to PDF export, closed-panel render, and reopen
+        // debrief flows (FIX-1 per architecture review).
+        // Pass full event so startTime is captured in the cache key —
+        // prevents cross-session eventId collisions (per architecture
+        // review 2026-08-30).
+        writeNarrativeCache(event, event.narrativeCache);
       },
       onError: (err) => {
         if (gen !== _mistralDebriefGen) return;
         console.warn('[mistral debrief] falling back to deterministic:', err.message);
         if (footEl) footEl.textContent = `Mistral unreachable · showing deterministic synthesis · ${err.message.slice(0, 80)}`;
       },
+    }, {
+      siteDigest,
+      // Serialize highlights for prompt injection. Rationale strings
+      // are pre-sanitized inside resolveHighlights so they are safe
+      // to concat into the prompt verbatim.
+      highlightsJson: JSON.stringify((highlightsRes?.highlights || []).map(h => ({
+        asset_id: h.asset_id, name: h.name, priority: h.priority,
+        rationale: h.rationale, source: h.source,
+      })), null, 2),
+      signalsJsonBlock: promptBlock.jsonBlock,
+      signalsProseBlock: promptBlock.proseBlock,
+      cooperativeCheckBlock,
+      precedentBlock,
+      // Tier constrains how deep Agent B is allowed to go. transit
+      // gets a single short paragraph, marginal 1-2, notable full.
+      notabilityTier: ranked?.notability?.tier || 'marginal',
     });
   }
 
@@ -7467,7 +8910,9 @@ async function main() {
     return wrap;
   }
 
-  function startReplay(eventId) {
+  async function startReplay(eventId) {
+    // Ensure recording is loaded from IDB into memory before consuming.
+    await window.__isr_ensureRecording(eventId);
     const rec = window.__isr_getRecording(eventId);
     if (!rec || !rec.timeseries?.length) {
       toast('No trajectory recording available for this event.', 'info');
@@ -7851,6 +9296,11 @@ async function main() {
   const GHOST_MS = 15000; // markers + trail linger 15s after close
 
   function onDroneTick(positions) {
+    // Bump the contributing-sensors tick sequence once per tick. Every
+    // _updateContributingSensorsForPosition call inside this forEach (lead
+    // + wingmen for each event) reads the same value, so the first call
+    // per event resets stale confidence and subsequent calls MAX into it.
+    _contribTickSeq++;
     positions.forEach(p => {
       const state = droneState.get(p.eventId);
       if (!state) return;
@@ -8417,11 +9867,75 @@ async function main() {
               sw._panicPos.alt = Math.min(130, (sw._panicPos.alt || 100) + 0.5 * dtSec);
             }
             pos = sw._panicPos;
+          } else if (sw._jamFall) {
+            // Jam-fall trajectory — takes over from waypoint drive when
+            // police jamming has been applied. Interpolates altitude
+            // from startAlt down to groundAlt over durMs, with a small
+            // horizontal drift so the descent isn't a perfectly vertical
+            // drop. Once altitude reaches ground, marks the drone
+            // neutralised and hides its billboard.
+            const jf = sw._jamFall;
+            // startTs is Date.now() wall clock (see _initiateJamFall);
+            // tick's nowMs is performance.now(), different scale.
+            const t = Math.min(1, (Date.now() - jf.startTs) / jf.durMs);
+            // Ease-in altitude — drone stabiliser fails, tips, then plummets
+            const altT = t < 0.35 ? (t / 0.35) * 0.15 : 0.15 + ((t - 0.35) / 0.65) * 0.85;
+            const alt = jf.startAlt - (jf.startAlt - jf.groundAlt) * altT;
+            const driftT = Math.pow(t, 1.3);
+            const driftM = jf.driftMetres * driftT;
+            const dEast = driftM * Math.sin(jf.driftBearingRad);
+            const dNorth = driftM * Math.cos(jf.driftBearingRad);
+            const jfLat = jf.startLat + dNorth / 111320;
+            const jfLon = jf.startLon + dEast / (111320 * Math.cos(jf.startLat * Math.PI / 180));
+            pos = { lat: jfLat, lon: jfLon, alt };
+            if (t >= 1 && !sw._jamFallLanded) {
+              sw._jamFallLanded = true;
+              sw.neutralised = true;
+              sw._neutralisedAt = new Date().toISOString();
+              // Drop a small downed-drone marker at the landing spot so
+              // it's visible in top-down after the billboard hides.
+              viewer.entities.add({
+                position: Cesium.Cartesian3.fromDegrees(jfLon, jfLat, jf.groundAlt + 0.5),
+                properties: { markerEventId: event.id, markerKind: 'jam-down' },
+                point: {
+                  pixelSize: 6,
+                  color: Cesium.Color.fromCssColorString('#ffd54d'),
+                  outlineColor: Cesium.Color.fromCssColorString('#8a6a00'),
+                  outlineWidth: 1,
+                  heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+                  disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                },
+                label: {
+                  text: '× JAMMED',
+                  font: '9px system-ui',
+                  fillColor: Cesium.Color.fromCssColorString('#ffd54d'),
+                  outlineColor: Cesium.Color.BLACK,
+                  outlineWidth: 2,
+                  style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                  verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                  pixelOffset: new Cesium.Cartesian2(0, -14),
+                  heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+                  disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                },
+              });
+              // Notify POV chrome so it can flip to SIGNAL LOST if the
+              // operator was watching from a sensor that saw this drone.
+              _notifyJamLanded(event, sw);
+            }
           } else {
             pos = _interpolateWaypoints(sw.waypoints, tSec);
           }
           if (!pos) {
             sw.billboard.show = false;
+            if (sw.projLine) sw.projLine.show = false;
+            continue;
+          }
+          // Once landed, hide the drone billboard + trail so it doesn't
+          // keep rendering as a live airborne asset. The downed marker
+          // above is the persistent ground indicator.
+          if (sw._jamFallLanded) {
+            sw.billboard.show = false;
+            if (sw.trailLine) sw.trailLine.show = false;
             if (sw.projLine) sw.projLine.show = false;
             continue;
           }
@@ -8453,7 +9967,12 @@ async function main() {
           // at ANY site. Uniform. Every event type. Every drone.
           const swShouldShow = inCov;
           sw.billboard.position = Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, pos.alt);
-          sw.billboard.show = swShouldShow;
+          // Suppress this drone's own icon while the operator is INSIDE
+          // it in first-person POV — otherwise the billboard renders
+          // right in front of the camera (disableDepthTestDistance =
+          // INFINITY, always on top). Coverage-driven visibility still
+          // applies to all other drones normally.
+          sw.billboard.show = swShouldShow && !sw._povActive;
           // Trail visibility mirrors the drone billboard — as soon as
           // the drone drops out of coverage (billboard hides), its
           // trendline also hides. Prevents the "overwatch trail
@@ -8611,6 +10130,12 @@ async function main() {
           state.recording.meta.duration_sec = event.duration || null;
           _persistRecording(p.eventId);
           console.log(`[P5A] recording persisted: isr_trajectory_${p.eventId} (${state.recording.timeseries.length} samples)`);
+          // Also persist own-key recordings for every cross-cued linked
+          // event (e.g. AMK cross-cued from CPH swarm) so they become
+          // first-class after close — their Replay + Debrief + PDF read
+          // their own data directly, no shadow fallback needed. All
+          // events are peers.
+          _persistCrossCuedRecordings(event);
         }
       }
 
@@ -8860,6 +10385,36 @@ async function main() {
     setActiveSite(null);
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
+  // ── Double-click drone handler ──
+  //
+  // Real mode (default, operator-grade): let Cesium track the entity so
+  // the camera orbits with the drone as it moves through sensor coverage.
+  // This mirrors what the real platform gives an operator — a
+  // coordinate-follow view derived from actual sensor data. Cesium's
+  // built-in trackedEntity does exactly this; we just have to set it
+  // ourselves since Cesium's default LEFT_DOUBLE_CLICK handler is
+  // replaced when we register this one.
+  //
+  // Simulation mode: open the first-person drone POV instead. This is a
+  // demo/scenario-only cinematic view that doesn't reflect real
+  // operator capability (we can't tap enemy drone cameras). Gated by
+  // the Mode toggle in the role-menu so real ops can't accidentally
+  // see it.
+  handler.setInputAction((movement) => {
+    const picked = viewer.scene.pick(movement.position);
+    if (!picked || !picked.id) return;
+    const type = picked.id.properties?.type?.getValue?.();
+    if (type === 'drone' && _isSimMode()) {
+      const eventId = picked.id.properties.eventId.getValue();
+      const swIdx = picked.id.properties.swarmIndex?.getValue?.() ?? 0;
+      viewer.trackedEntity = undefined;
+      _enterDronePOV(eventId, swIdx);
+      return;
+    }
+    // Real mode + any other entity → Cesium default tracking behaviour.
+    viewer.trackedEntity = picked.id;
+  }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);
+
   // ── Sensor popup ──
   const popup = document.getElementById('sensor-popup');
   let activePopupSensor = null;
@@ -9091,6 +10646,7 @@ async function main() {
   let _povPriorCameraState = null;
   const povControls = document.getElementById('sensor-pov-controls');
   const povLabel = document.getElementById('pov-label');
+  const povBadge = document.getElementById('pov-badge');
   const povExitBtn = document.getElementById('pov-exit-btn');
 
   function _enterSensorPOV(siteId, sensorId) {
@@ -9139,6 +10695,7 @@ async function main() {
     });
     _povActive = true;
     if (povControls) povControls.classList.add('active');
+    if (povBadge) povBadge.textContent = 'SENSOR POV';
     if (povLabel) povLabel.textContent = `${sensor.id} · ${sensor.label}`;
     _povIsolateRing(siteId, sensorId);
     hideSensorPopup();
@@ -9223,9 +10780,282 @@ async function main() {
     _povHiddenRingIds = [];
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // Drone POV — first-person view from inside an enemy drone
+  // ───────────────────────────────────────────────────────────────────
+  // SIM MODE ONLY. Real platform doesn't get camera access on enemy
+  // drones (we only see them via our own sensors). This is a demo
+  // cinematic view — position the camera at the drone's live position,
+  // heading forward, and let the user look around like they were the
+  // drone's operator. If the drone leaves all sensor coverage, we
+  // auto-exit (the real platform would have gone dark, so we do too).
+  // If the drone gets jammed and crashes, the TV static overlay fires
+  // at landing and the "Exit view" button restores the prior camera.
+  // ═══════════════════════════════════════════════════════════════════
+  const _dronePov = {
+    active: false,
+    eventId: null,
+    swIdx: 0,
+    swRef: null,
+    priorCameraState: null,
+    postRenderRemove: null,
+    staticShown: false,
+    userYawRad: 0,     // camera yaw offset accumulated by user's look
+    userPitchRad: 0,   // camera pitch offset (bounded)
+    baseHeadingRad: 0, // drone heading captured at entry
+  };
+  const droneStaticEl = document.getElementById('drone-pov-static');
+
+  function _getSwarmRef(eventId, swIdx) {
+    const state = droneState.get(eventId);
+    if (!state) return null;
+    if (swIdx === 0) return state.leadSwarmMember || null;
+    return state.swarmBillboards?.[swIdx - 1] || null;
+  }
+
+  function _enterDronePOV(eventId, swIdx) {
+    if (_povActive) _exitSensorPOV();   // never both at once
+    if (_dronePov.active) _exitDronePOV();
+    const swRef = _getSwarmRef(eventId, swIdx);
+    if (!swRef || !swRef.billboard) {
+      toast('Drone not available for POV.', 'warn');
+      return;
+    }
+    // Bail if the drone is already dead or out of coverage — a POV that
+    // opens on a hidden target is a bad UX.
+    if (swRef.neutralised) {
+      toast('Drone already neutralised. POV unavailable.', 'warn');
+      return;
+    }
+    if (swRef.billboard.show === false) {
+      toast('Drone outside sensor coverage. POV unavailable.', 'warn');
+      return;
+    }
+    // Snapshot the camera we're leaving so exit can restore it cleanly.
+    const camera = viewer.scene.camera;
+    _dronePov.priorCameraState = {
+      destination: camera.position.clone(),
+      heading: camera.heading,
+      pitch: camera.pitch,
+      roll: camera.roll,
+    };
+    _dronePov.eventId = eventId;
+    _dronePov.swIdx = swIdx;
+    _dronePov.swRef = swRef;
+    _dronePov.userYawRad = 0;
+    _dronePov.userPitchRad = 0;
+    _dronePov.staticShown = false;
+    // Suppress this drone's own billboard while camera is inside it
+    // (drone tick reads swRef._povActive and drops show accordingly).
+    swRef._povActive = true;
+    swRef.billboard.show = false;
+    // Drone's current heading at entry — camera looks along drone travel.
+    const bbCart = swRef.billboard.position?.getValue?.(Cesium.JulianDate.now());
+    const bc = Cesium.Cartographic.fromCartesian(bbCart);
+    const startLon = Cesium.Math.toDegrees(bc.longitude);
+    const startLat = Cesium.Math.toDegrees(bc.latitude);
+    _dronePov.baseHeadingRad = Cesium.Math.toRadians(swRef._lastHeadingDeg || 0);
+    // Same control swap as sensor POV — LEFT_DRAG = LOOK (turn head).
+    const ctrl = viewer.scene.screenSpaceCameraController;
+    ctrl.enableCollisionDetection = false;
+    ctrl.minimumZoomDistance = 0.5;
+    ctrl.rotateEventTypes = [];
+    ctrl.translateEventTypes = [];
+    ctrl.lookEventTypes = [Cesium.CameraEventType.LEFT_DRAG];
+    ctrl.tiltEventTypes = [
+      { eventType: Cesium.CameraEventType.LEFT_DRAG, modifier: Cesium.KeyboardEventModifier.SHIFT },
+      Cesium.CameraEventType.MIDDLE_DRAG,
+    ];
+    viewer.scene.camera.frustum.near = 0.1;
+
+    // Fly to the drone's position with heading matching its travel.
+    const dest = Cesium.Cartesian3.fromDegrees(startLon, startLat, bc.height || 60);
+    viewer.camera.flyTo({
+      destination: dest,
+      orientation: {
+        heading: _dronePov.baseHeadingRad,
+        pitch: Cesium.Math.toRadians(-5),
+        roll: 0,
+      },
+      duration: 1.2,
+      easingFunction: Cesium.EasingFunction.CUBIC_IN_OUT,
+    });
+
+    _dronePov.active = true;
+    if (povControls) {
+      povControls.classList.add('active');
+      povControls.classList.add('sim');
+    }
+    if (povBadge) povBadge.textContent = 'SIM POV';
+    if (povLabel) {
+      const modelLabel = swRef.model || (swIdx === 0 ? 'Lead drone' : `Wingman ${swIdx}`);
+      povLabel.textContent = modelLabel;
+    }
+    hideSensorPopup();
+
+    // Per-frame camera position update — reads the drone billboard's
+    // live position and translates the camera to it. Orientation is
+    // NOT overwritten so the user's look controls stay in charge.
+    // Uses postRender (not preRender) so the drone's per-frame position
+    // update has already happened by the time we sample it.
+    _dronePov.postRenderRemove = viewer.scene.postRender.addEventListener(() => {
+      if (!_dronePov.active) return;
+      const sw = _dronePov.swRef;
+      if (!sw || !sw.billboard) { _exitDronePOV(); return; }
+      // Non-jam kill (tracer take-down) while in POV — killshot sequence:
+      // big red vignette flash, then TV static overlay with "Target
+      // destroyed" plate. No auto-exit; operator presses Exit view when
+      // they're done. Jam kills fire the static via _jamFallLanded below.
+      if (sw.neutralised && !sw._jamFall && !_dronePov.staticShown) {
+        _triggerDronePovKillshot();
+        return;
+      }
+      // Coverage-exit auto-close: real platform loses the drone here
+      // (billboard.show would flip false when out of every sensor's
+      // coverage). We suppress the drone's own billboard during POV,
+      // so instead check the raw coverage state by re-sampling.
+      // A jam-fall in progress overrides this — we WANT to watch it
+      // crash regardless of coverage.
+      if (!sw._jamFall) {
+        const cart0 = sw.billboard.position?.getValue?.(Cesium.JulianDate.now());
+        if (cart0) {
+          const c0 = Cesium.Cartographic.fromCartesian(cart0);
+          const lat0 = Cesium.Math.toDegrees(c0.latitude);
+          const lon0 = Cesium.Math.toDegrees(c0.longitude);
+          if (!_shouldAutoDetect(lat0, lon0)) {
+            toast('Drone left sensor coverage. Exiting POV.', 'info');
+            _exitDronePOV();
+            return;
+          }
+        }
+      }
+      const cart = sw.billboard.position?.getValue?.(Cesium.JulianDate.now());
+      if (!cart) return;
+      // Translate the camera to the drone position while preserving the
+      // user's current orientation (heading/pitch/roll from look drags).
+      viewer.scene.camera.position = cart;
+      // Jam-crash landing → TV static overlay. Fires once.
+      if (sw._jamFallLanded && !_dronePov.staticShown) {
+        _triggerDroneStatic();
+      }
+    });
+  }
+
+  function _exitDronePOV() {
+    const ctrl = viewer.scene.screenSpaceCameraController;
+    const saved = _dronePov.priorCameraState;
+    // Stop per-frame updates first so nothing overrides the exit fly.
+    if (_dronePov.postRenderRemove) {
+      _dronePov.postRenderRemove();
+      _dronePov.postRenderRemove = null;
+    }
+    // Restore this drone's billboard visibility to whatever the coverage
+    // logic dictates on the next tick.
+    if (_dronePov.swRef) {
+      _dronePov.swRef._povActive = false;
+    }
+    _dronePov.active = false;
+    _dronePov.eventId = null;
+    _dronePov.swIdx = 0;
+    _dronePov.swRef = null;
+    _dronePov.staticShown = false;
+    _dronePov.priorCameraState = null;
+    if (povControls) {
+      povControls.classList.remove('active');
+      povControls.classList.remove('sim');
+    }
+    if (povBadge) povBadge.textContent = 'POV';
+    if (droneStaticEl) droneStaticEl.classList.remove('active');
+    if (dronePovHitEl) {
+      dronePovHitEl.classList.remove('hit');
+      dronePovHitEl.classList.remove('fade');
+    }
+    viewer.camera.cancelFlight();
+    ctrl.enableInputs = false;
+    _resetCameraControllerToDefaults(ctrl);
+    ctrl.enableInputs = true;
+    viewer.scene.camera.frustum.near = 1.0;
+    if (saved && saved.destination) {
+      viewer.camera.flyTo({
+        destination: saved.destination,
+        orientation: {
+          heading: saved.heading,
+          pitch: saved.pitch,
+          roll: saved.roll,
+        },
+        duration: 1.2,
+      });
+    }
+  }
+
+  function _triggerDroneStatic() {
+    if (_dronePov.staticShown) return;
+    _dronePov.staticShown = true;
+    if (droneStaticEl) droneStaticEl.classList.add('active');
+    // Camera stops chasing the wreckage — freeze at the moment of loss.
+    if (_dronePov.postRenderRemove) {
+      _dronePov.postRenderRemove();
+      _dronePov.postRenderRemove = null;
+    }
+    // Auto-exit after ~1.5s of static. Long enough to register "drone
+    // is gone" as a beat, short enough that the operator doesn't sit
+    // staring at noise wondering how to escape.
+    setTimeout(() => {
+      if (_dronePov.active) _exitDronePOV();
+    }, 1500);
+  }
+
+  // Killshot-flash + delayed static, used for tracer take-downs. The
+  // big red vignette snaps in first (~400ms), then the TV static drops
+  // over it. Feels catastrophic and violent — matches the moment.
+  function _triggerDronePovKillshot() {
+    if (!dronePovHitEl) return _triggerDroneStatic();
+    if (_dronePovHitFadeTimer) { clearTimeout(_dronePovHitFadeTimer); _dronePovHitFadeTimer = null; }
+    dronePovHitEl.classList.remove('hit');
+    dronePovHitEl.classList.remove('fade');
+    dronePovHitEl.classList.add('killshot');
+    // Freeze camera immediately so it doesn't lurch during the flash.
+    if (_dronePov.postRenderRemove) {
+      _dronePov.postRenderRemove();
+      _dronePov.postRenderRemove = null;
+    }
+    // TV static kicks in after the flash peaks; static then auto-exits
+    // after 1.5s (handled inside _triggerDroneStatic).
+    setTimeout(_triggerDroneStatic, 400);
+    // Fade the red overlay out shortly after the static covers it so
+    // it doesn't sit on top of the static forever.
+    setTimeout(() => {
+      if (dronePovHitEl) {
+        dronePovHitEl.classList.remove('killshot');
+        dronePovHitEl.classList.remove('hit');
+        dronePovHitEl.classList.remove('fade');
+      }
+    }, 1200);
+  }
+
+  // Screen-space red vignette pulse for tracer impact on the POV'd drone.
+  // Called from _fireSingleTracerRound's impact tail. Uses a two-class
+  // sequence: `.hit` snaps opacity to 1 (fast 60ms), then `.fade` on the
+  // next tick trails it out over 220ms — total ~280ms per round. Bursts
+  // fire 4 rounds ~70ms apart so the flashes stack into a sustained
+  // "you're being shot up" feel rather than four discrete blips.
+  const dronePovHitEl = document.getElementById('drone-pov-hit');
+  let _dronePovHitFadeTimer = null;
+  function _triggerDronePovHit() {
+    if (!dronePovHitEl) return;
+    dronePovHitEl.classList.remove('fade');
+    dronePovHitEl.classList.add('hit');
+    if (_dronePovHitFadeTimer) clearTimeout(_dronePovHitFadeTimer);
+    _dronePovHitFadeTimer = setTimeout(() => {
+      dronePovHitEl.classList.remove('hit');
+      dronePovHitEl.classList.add('fade');
+    }, 60);
+  }
+
   if (povExitBtn) povExitBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    _exitSensorPOV();
+    if (_dronePov.active) _exitDronePOV();
+    else _exitSensorPOV();
   });
 
   function updatePopupPosition() {
@@ -9384,6 +11214,16 @@ async function main() {
       pitch: -45,
       duration: 3.0,
     },
+    billund: {
+      type: 'site',
+      siteId: 'billund',
+      centerLon: 9.1581,
+      centerLat: 55.7405,
+      range: 6500,
+      heading: 0,
+      pitch: -45,
+      duration: 3.0,
+    },
     // Energinet substations — tight zoom, small footprint (~300m)
     energinet_hovegaard: { type: 'site', siteId: 'energinet_hovegaard', centerLon: 12.23379, centerLat: 55.73231, range: 1400, heading: 0, pitch: -55, duration: 2.5 },
     energinet_bjaeverskov: { type: 'site', siteId: 'energinet_bjaeverskov', centerLon: 12.00729, centerLat: 55.45151, range: 1600, heading: 0, pitch: -55, duration: 2.5 },
@@ -9509,6 +11349,13 @@ async function main() {
       { key: 'esbjerg_fixedwing_hostile', label: 'Fixed wing reconnaissance, hostile' },
       { key: 'esbjerg_missile_hostile', label: 'Cruise missile from sea, critical', cls: 'critical' },
     ],
+    billund: [
+      { key: 'billund_quad_hostile', label: 'Quadcopter, hostile (low pass over terminal + cargo)' },
+      { key: 'billund_fixedwing_hostile', label: 'Fixed wing recon (E-W runway axis)' },
+      { key: 'billund_swarm_recon', label: 'SWARM · 4-drone recon over CHBA cargo apron', cls: 'critical' },
+      { key: 'billund_missile_hostile', label: 'Cruise missile from S, critical', cls: 'critical' },
+      { key: 'billund_lego_recon', label: 'LEGO adjacency recon (transits BLL → LEGO HQ)', cls: 'recon' },
+    ],
   };
   // Auto-generate for Energinet sites (3 threats each)
   Object.keys(ENERGINET_SITES).forEach(sid => {
@@ -9528,6 +11375,13 @@ async function main() {
     if (!simSelect || !simPanel) return;
     const site = simSelect.value;
     const menu = THREAT_MENU[site] || [];
+    if (!menu.length) {
+      // Site is configured but no threat templates have been authored
+      // yet (e.g. Billund pre-scenario). Show a placeholder so the
+      // dropdown selection isn't left mysteriously empty.
+      simPanel.innerHTML = `<div class="cp-empty" style="padding:12px;font-family:var(--font-mono);font-size:var(--fs-2xs);color:var(--text-dim);letter-spacing:0.08em;">No threat scenarios authored for this site yet. Site config, sensor grid, and receiver routing are live — drone-path templates land next.</div>`;
+      return;
+    }
     simPanel.innerHTML = menu.map(t =>
       `<button class="cp-btn wide sim-btn ${t.cls || ''}" data-threat="${t.key}" data-site="${site}">${t.label}</button>`
     ).join('');
@@ -9567,6 +11421,22 @@ async function main() {
     el.style.display = 'block';
     clearTimeout(el._t);
     el._t = setTimeout(() => { el.style.display = 'none'; }, 2600);
+  }
+
+  // SLA overdue toast — fired by rules.js sweep via events.js CustomEvent.
+  // Detection-only: this is a NOTIFICATION, never triggers auto-cascade.
+  // Toast is shown to every session; the operator + receiver both need to
+  // know the SLA window elapsed. Re-renders any surface currently mounted
+  // so the OVERDUE badge appears without waiting for the next input.
+  if (typeof window !== 'undefined') {
+    window.addEventListener('escalation-overdue', (ev) => {
+      const { eventId, destinationId } = ev.detail || {};
+      const evt = getEvent(eventId);
+      const destName = getDestination?.(destinationId)?.name || destinationId || 'destination';
+      const site = evt ? (SITES[evt.siteId]?.name || evt.siteId) : '';
+      toast(`SLA overdue · ${destName}${site ? ' · ' + site : ''} · operator judgement needed`, 'warn');
+      try { renderReceiverView?.({ immediate: true }); } catch (_) {}
+    });
   }
 
   // ═══════════════════════════════════════════════════════════════════
@@ -10416,6 +12286,11 @@ async function main() {
   }
 
   function renderPalantirClosedPanel(e) {
+    // Rehydrate narrative from localStorage if a page reload emptied the
+    // in-memory field (FIX-1 per architecture review). Runs before the
+    // signature check so a re-hydrated cache flows through the same
+    // render path as a fresh one.
+    _rehydrateNarrativeCache(e);
     const sig = _closedPanelSig(e);
     if (sig === _lastClosedPanelSig && _lastClosedPanelEventId === e.id) return;
     _lastClosedPanelSig = sig;
@@ -10427,8 +12302,25 @@ async function main() {
 
     // Section content builders
     const insight = _generateAgentBNarrative(e);
+    // Product principle: Replay MUST be available whenever sensors
+    // captured any data for this event (own OR via a linked primary
+    // whose recording covers the shadow's time window). Never gate
+    // Replay on AI insights or heuristics — evidence stays independent
+    // of analysis. See memory: replay-always-available.
+    //
+    // For shadow events (AMK cross-cued from CPH), window.__isr_getRecording
+    // itself resolves to the shadow-scoped slice via the shadow-fallback
+    // at line ~6086, so startReplay(shadowId) works correctly. But the
+    // fallback timing can race with `_lastClosedPanelSig` — if the panel
+    // renders before the primary is persisted, hasRecording is false and
+    // the button vanishes. Explicit linked-primary check below defeats
+    // the race: if a primary recording exists, we show Replay
+    // unconditionally, and startReplay resolves via its own shadow-scoped
+    // fallback on click.
+    const _linkedPrimaryIdForRec = e.linkedEventId || e.shadowOfEventId;
     const recording = window.__isr_getRecording?.(e.id);
-    const hasRecording = !!(recording?.timeseries?.length);
+    const hasRecording = !!(recording?.timeseries?.length)
+      || !!(_linkedPrimaryIdForRec && window.__isr_getRecording?.(_linkedPrimaryIdForRec)?.timeseries?.length);
     const isNeutralised = e.outcome === 'neutralized';
 
     // Timeline: notes + startTime + endTime, chronological
@@ -10439,9 +12331,23 @@ async function main() {
     timelineItems.sort((a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime());
 
     // Intelligence content
-    const sensors = (e.contributingSensors || []).filter(s => !s.offline).sort((a, b) => (b.confidence || 0) - (a.confidence || 0));
+    // Sort by peakConfidence — closed-panel context — so a sensor
+    // that peaked high but was out of coverage at close still ranks
+    // near the top instead of tying with all the other 0's.
+    const sensors = (e.contributingSensors || []).filter(s => !s.offline).sort((a, b) => {
+      const bp = (typeof b.peakConfidence === 'number' ? b.peakConfidence : (b.confidence || 0));
+      const ap = (typeof a.peakConfidence === 'number' ? a.peakConfidence : (a.confidence || 0));
+      return bp - ap;
+    });
     const topSensors = sensors.slice(0, 6);
-    const linkedIds = e.linkedEventIds || [];
+    // Anti-circular navigation: if the operator arrived at this event
+    // by clicking a linked-event chip on another event's panel, hide
+    // that source event from THIS panel's linked-events section so we
+    // don't invite an infinite ping-pong. Nav history is a stack —
+    // top-of-stack is the immediate referrer. Other linked events (a
+    // 3+ site chain) still show.
+    const _linkedFromEventId = _eventNavHistory[_eventNavHistory.length - 1] || null;
+    const linkedIds = (e.linkedEventIds || []).filter(id => id !== _linkedFromEventId);
 
     const sec = (key, label, body, defaultOpen = false) => {
       const openSelf = _isPlOpen(e.id, key, defaultOpen);
@@ -10519,7 +12425,13 @@ async function main() {
       ${topSensors.length ? `<div class="pl-kv">
         <div class="pl-k">Contributing sensors</div>
         <div class="pl-v">
-          ${topSensors.map(s => `<div class="pl-inline-row"><span class="pl-mono">${s.id}</span><span class="pl-mono">${Math.round((s.confidence || 0) * 100)}%</span></div>`).join('')}
+          ${topSensors.map(s => {
+            // Closed panel — read peakConfidence over current tick value
+            // so we show the best detection each sensor achieved during
+            // the event, not whatever it happened to be at close.
+            const conf = (typeof s.peakConfidence === 'number' ? s.peakConfidence : (s.confidence || 0));
+            return `<div class="pl-inline-row"><span class="pl-mono">${s.id}</span><span class="pl-mono">${Math.round(conf * 100)}%</span></div>`;
+          }).join('')}
           ${sensors.length > topSensors.length ? `<div class="pl-inline-row pl-dim"><span>+ ${sensors.length - topSensors.length} more</span></div>` : ''}
         </div>
       </div>` : ''}
@@ -10541,7 +12453,11 @@ async function main() {
     `;
 
     // Debrief-eligible if we have EITHER a recording (own or linked) OR a
-    // template with waypoints — matches _debriefResolveSamples() fallback.
+    // template with waypoints — matches _debriefResolveSamples() fallback
+    // chain. The linked-primary check uses the primary's RAW recording
+    // (not the shadow-filtered view) so a shadow event whose time-window
+    // filter yields nothing still surfaces the button — the debrief
+    // resolver itself can consume the primary's samples on click.
     const linkedPrimaryId = e.linkedEventId || e.shadowOfEventId;
     const hasDebriefData = hasRecording
       || !!(linkedPrimaryId && window.__isr_getRecording?.(linkedPrimaryId))
@@ -10566,7 +12482,7 @@ async function main() {
       <div class="pl-cta-grid">
         <button class="pl-cta" data-action="download-evidence" data-id="${e.id}">Evidence JSON</button>
         <button class="pl-cta" data-action="download-evidence-csv" data-id="${e.id}">Evidence CSV</button>
-        ${isNeutralised ? `<button class="pl-cta" data-pir="pdf-report">Full PDF report</button>` : ''}
+        <button class="pl-cta" data-pir="pdf-report">Full PDF report</button>
       </div>
     `;
 
@@ -10635,16 +12551,24 @@ async function main() {
         else if (a === 'replay') startReplay(btn.dataset.id || e.id);
         else if (a === 'debrief') startDebrief(btn.dataset.id || e.id);
         else if (a === 'download-evidence') {
-          const rec = window.__isr_getRecording(btn.dataset.id || e.id);
-          if (!rec) return toast('No trajectory recording available.', 'info');
-          window.__isr_downloadRecording(btn.dataset.id || e.id);
-          toast(`JSON evidence downloaded (${rec.timeseries.length} samples)`, 'ok');
+          (async () => {
+            const _id = btn.dataset.id || e.id;
+            await window.__isr_ensureRecording(_id);
+            const rec = window.__isr_getRecording(_id);
+            if (!rec) return toast('No trajectory recording available.', 'info');
+            await window.__isr_downloadRecording(_id);
+            toast(`JSON evidence downloaded (${rec.timeseries.length} samples)`, 'ok');
+          })();
         }
         else if (a === 'download-evidence-csv') {
-          const rec = window.__isr_getRecording(btn.dataset.id || e.id);
-          if (!rec) return toast('No trajectory recording available.', 'info');
-          window.__isr_downloadRecordingCSV(btn.dataset.id || e.id);
-          toast(`CSV evidence downloaded (${rec.timeseries.length} rows)`, 'ok');
+          (async () => {
+            const _id = btn.dataset.id || e.id;
+            await window.__isr_ensureRecording(_id);
+            const rec = window.__isr_getRecording(_id);
+            if (!rec) return toast('No trajectory recording available.', 'info');
+            await window.__isr_downloadRecordingCSV(_id);
+            toast(`CSV evidence downloaded (${rec.timeseries.length} rows)`, 'ok');
+          })();
         }
         else if (a === 'pl-open-pdf') generatePirReport(e.id);
       });
@@ -11285,7 +13209,7 @@ async function main() {
               <div class="mc-conf mc-conf-${confCls}">Confidence · ${confidence}</div>
             </div>
           </div>
-          <div class="mc-footer">Agent B mock output. Live Mistral inference post-demo (Scaleway / OVH sovereign EU).</div>
+          <div class="mc-footer">Agent B mock output. Live Mistral inference in production via Azure sovereign proxy (Scaleway primary, Foundry failover).</div>
         </div>`;
     })();
 
@@ -11448,17 +13372,23 @@ async function main() {
           const destName = dest ? dest.name : esc.destinationId;
           const destType = dest ? destinationTypeLabel(dest.type) : '';
           const statusChain = esc.statusHistory.map(h => `${escStatusLabel(h.status)} ${h.timestamp.slice(11,19)}Z`).join(' → ');
+          const overdueBadge = esc.overdue
+            ? `<span class="esc-overdue-badge" style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:rgba(255,120,120,0.12);border:1px solid rgba(255,120,120,0.5);border-radius:12px;font-size:var(--fs-2xs);letter-spacing:0.14em;color:#ff7878;font-family:var(--font-mono);margin-left:6px;">OVERDUE</span>`
+            : '';
+          const progressBadge = _renderProgressBadge(esc);
           const response = esc.response ? `
             <div class="esc-response">
               <div class="esc-response-hdr">Response · ${esc.response.respondedBy} · ${esc.response.receivedAt.slice(11,19)}Z</div>
               <div class="esc-response-text">${esc.response.text}</div>
             </div>` : '';
           return `
-            <div class="esc-row esc-status-${esc.status}">
+            <div class="esc-row esc-status-${esc.status}${esc.overdue ? ' esc-overdue' : ''}">
               <div class="esc-hdr">
                 <span class="esc-dest">${destName}</span>
                 <span class="esc-type">${destType}</span>
                 <span class="esc-status">${escStatusLabel(esc.status)}</span>
+                ${overdueBadge}
+                ${progressBadge}
               </div>
               <div class="esc-meta">${esc.payload.toUpperCase()} · by ${esc.initiatedBy}</div>
               ${esc.message ? `<div class="esc-msg">"${esc.message}"</div>` : ''}
@@ -11604,31 +13534,38 @@ async function main() {
           // Includes per-drone position, kinematics, RF, acoustic, visual,
           // per-sensor detection state at every sample. Feeds Agent B, KML
           // export, replay, and any external analyst tooling.
-          const rec = window.__isr_getRecording(btn.dataset.id || e.id);
-          if (!rec) {
-            toast('No recorded trajectory for this event (recording only spawned for swarm events).', 'info');
-          } else {
-            window.__isr_downloadRecording(btn.dataset.id || e.id);
-            toast(`JSON evidence downloaded (${rec.timeseries.length} samples across ${rec.meta.drones_count} drones)`, 'ok');
-          }
+          (async () => {
+            const _id = btn.dataset.id || e.id;
+            await window.__isr_ensureRecording(_id);
+            const rec = window.__isr_getRecording(_id);
+            if (!rec) {
+              toast('No recorded trajectory for this event (recording only spawned for swarm events).', 'info');
+            } else {
+              await window.__isr_downloadRecording(_id);
+              toast(`JSON evidence downloaded (${rec.timeseries.length} samples across ${rec.meta.drones_count} drones)`, 'ok');
+            }
+          })();
         }
         if (btn.dataset.action === 'replay') {
           // P5B: opens the trajectory replay overlay with ghost billboards
           // + confidence-coloured trail. Available on any event with a
-          // recording (currently swarm events only; post-demo retrofit
-          // widens to missile + drone).
+          // recording (swarm + single-drone events).
           startReplay(btn.dataset.id || e.id);
         }
         if (btn.dataset.action === 'download-evidence-csv') {
           // P5C: flattened per-sample CSV for analyst tooling (Excel,
           // Python, R). Same underlying data as JSON export, tabular shape.
-          const rec = window.__isr_getRecording(btn.dataset.id || e.id);
-          if (!rec) {
-            toast('No recorded trajectory for this event.', 'info');
-          } else {
-            window.__isr_downloadRecordingCSV(btn.dataset.id || e.id);
-            toast(`CSV evidence downloaded (${rec.timeseries.length} rows)`, 'ok');
-          }
+          (async () => {
+            const _id = btn.dataset.id || e.id;
+            await window.__isr_ensureRecording(_id);
+            const rec = window.__isr_getRecording(_id);
+            if (!rec) {
+              toast('No recorded trajectory for this event.', 'info');
+            } else {
+              await window.__isr_downloadRecordingCSV(_id);
+              toast(`CSV evidence downloaded (${rec.timeseries.length} rows)`, 'ok');
+            }
+          })();
         }
       });
     });
@@ -11884,7 +13821,11 @@ async function main() {
     const e = getEvent(eventId);
     if (!e) return;
     const rec = recommendationFor(e);
-    const dests = destinationsForSite(e.siteId);
+    // Domain-filtered pool. Inland Energinet event will hide Kystvagten;
+    // maritime harbour drone shows the full set; cross-linked event
+    // pulls in every domain any linked event carries. Config UI stays
+    // on destinationsForSite so admin sees the full unfiltered catalog.
+    const dests = destinationsForEvent(e);
     const destsByTier = dests.reduce((acc, d) => { (acc[d.tier] = acc[d.tier] || []).push(d); return acc; }, {});
     // Preselect destinations matching recommendation tiers
     const preselected = new Set(dests.filter(d => rec.tiers.includes(d.tier)).map(d => d.id));
@@ -12327,13 +14268,16 @@ async function main() {
           <button class="btn primary" data-form="save-reclass">Save</button>
         </div>
       </div>`;
-    area.querySelector('[data-form="cancel"]').addEventListener('click', renderDetailPanel);
+    area.querySelector('[data-form="cancel"]').addEventListener('click', () => {
+      area.innerHTML = '';
+    });
     area.querySelector('[data-form="save-reclass"]').addEventListener('click', () => {
       const val = document.getElementById('reclass-select').value;
       const reason = document.getElementById('reclass-reason').value;
       let classification = val, threat = null;
       if (val.startsWith('hostile-')) { classification = 'hostile'; threat = val.split('-')[1]; }
       reclassifyEvent(eventId, { classification, threat, reason });
+      area.innerHTML = '';
     });
   }
 
@@ -12349,11 +14293,14 @@ async function main() {
           <button class="btn primary" data-form="save-note">Save</button>
         </div>
       </div>`;
-    area.querySelector('[data-form="cancel"]').addEventListener('click', renderDetailPanel);
+    area.querySelector('[data-form="cancel"]').addEventListener('click', () => {
+      area.innerHTML = '';
+    });
     area.querySelector('[data-form="save-note"]').addEventListener('click', () => {
       const txt = document.getElementById('note-text').value;
       if (!txt.trim()) return;
       addNote(eventId, txt);
+      area.innerHTML = '';
     });
     setTimeout(() => document.getElementById('note-text')?.focus(), 20);
   }
@@ -12743,9 +14690,11 @@ async function main() {
         <div class="hst-esc-section">
           <div class="hst-section-hdr">Escalation Log · ${selectedEv.escalations.length}</div>
           ${selectedEv.escalations.map(esc => `
-            <div class="hst-esc-row">
+            <div class="hst-esc-row${esc.overdue ? ' hst-esc-overdue' : ''}">
               <b>${getDestination(esc.destinationId)?.name || esc.destinationId}</b>
               <span class="hst-esc-status">${(esc.status || '').toUpperCase()}</span>
+              ${esc.overdue ? '<span class="hst-esc-status" style="color:#ff7878;border:1px solid rgba(255,120,120,0.5);padding:1px 6px;border-radius:10px;margin-left:6px;">OVERDUE</span>' : ''}
+              ${_renderProgressBadge(esc)}
               <span class="hst-esc-time">${esc.initiatedAt.slice(11,19)}Z</span>
               ${esc.response ? `<div class="hst-esc-response">Response by ${esc.response.respondedBy}: "${esc.response.text}"</div>` : ''}
             </div>`).join('')}
@@ -12865,6 +14814,16 @@ async function main() {
         <div class="cfg-hdr-sub">Destinations, escalation rules, and per-site setup. Not a live-ops surface. Changes take effect immediately.</div>
       </div>
       <div class="cfg-grid">
+        <section class="cfg-mode-card">
+          <div class="cfg-mode-l">
+            <div class="cfg-mode-t">Platform Mode</div>
+            <div class="cfg-mode-desc">Real = operator-grade behaviour. Data-driven, only what sensors observe. Sim = adds demo cinematics (first-person drone POV, jam-crash overlay). Sim never affects real dispatch or telemetry pipelines.</div>
+          </div>
+          <div class="cfg-mode-seg">
+            <button class="cfg-mode-btn ${_isSimMode() ? '' : 'on'}" data-cfgmode="real">Real</button>
+            <button class="cfg-mode-btn ${_isSimMode() ? 'on' : ''}" data-cfgmode="sim">Sim</button>
+          </div>
+        </section>
         <section class="cfg-card">
           <div class="cfg-card-hdr">
             <div class="cfg-card-t">Destinations</div>
@@ -12893,6 +14852,14 @@ async function main() {
     const openRules = configView.querySelector('#cfg-open-rules');
     if (openDest) openDest.addEventListener('click', () => window.__openConfigModal && window.__openConfigModal());
     if (openRules) openRules.addEventListener('click', () => window.__openRulesModal && window.__openRulesModal());
+    // Mode toggle (Real / Sim) — flips _simulationMode and re-renders
+    // the Config view so the .on state repaints.
+    configView.querySelectorAll('[data-cfgmode]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        _setSimMode(btn.dataset.cfgmode === 'sim');
+        renderConfigView();
+      });
+    });
   }
   onDestinationsChange(() => { if (_activeView === 'config') renderConfigView(); });
   onRulesChange(() => { if (_activeView === 'config') renderConfigView(); });
@@ -12934,17 +14901,45 @@ async function main() {
           </span>
         </span>
       </button>`;
-    const rxCard = (r) => `
-      <button class="acct-card rx ${r.id === active.id ? 'on' : ''}" data-role="${r.id}">
-        <span class="acct-mark rx-tone">${r.initials}</span>
-        <span class="acct-body">
-          <span class="acct-top">
-            <span class="acct-name">${r.org}</span>
-            <span class="acct-badge scope">${r.scope}</span>
-          </span>
-          <span class="acct-desc">${r.description}</span>
-        </span>
-      </button>`;
+    // Build the "children-of" index once so we can (a) find every leaf that
+    // is buried under a parent and hide it from the flat top level, and
+    // (b) resolve a parent's children list without scanning RECEIVERS per
+    // card.
+    const _childrenOfIndex = new Map();
+    const _hasParentIndex = new Set();
+    RECEIVERS.forEach(r => {
+      if (Array.isArray(r.childrenIds) && r.childrenIds.length) {
+        _childrenOfIndex.set(r.id, r.childrenIds);
+        r.childrenIds.forEach(cid => _hasParentIndex.add(cid));
+      }
+    });
+
+    const rxCard = (r, opts = {}) => {
+      const isChild = opts.isChild === true;
+      const kids = _childrenOfIndex.get(r.id) || [];
+      const hasKids = kids.length > 0;
+      const chevron = hasKids ? `
+        <button class="acct-expand" data-expand="${r.id}" aria-expanded="false" title="Show ${kids.length} sub-unit${kids.length === 1 ? '' : 's'}">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+          <span class="acct-expand-count">${kids.length}</span>
+        </button>` : '';
+      const cardCls = `acct-card rx ${r.id === active.id ? 'on' : ''} ${isChild ? 'is-child' : ''}`.trim();
+      return `
+        <div class="acct-card-wrap ${isChild ? 'is-child' : ''}" data-card-wrap="${r.id}">
+          <button class="${cardCls}" data-role="${r.id}">
+            <span class="acct-mark rx-tone">${r.initials}</span>
+            <span class="acct-body">
+              <span class="acct-top">
+                <span class="acct-name">${r.org}</span>
+                <span class="acct-badge scope">${r.scope}</span>
+              </span>
+              <span class="acct-desc">${r.description || ''}</span>
+            </span>
+            ${chevron}
+          </button>
+          ${hasKids ? `<div class="acct-children" data-children-of="${r.id}" hidden></div>` : ''}
+        </div>`;
+    };
     const adminCard = (a) => `
       <button class="acct-card admin ${a.id === active.id ? 'on' : ''}" data-role="${a.id}">
         <span class="acct-logo">${a.logo ? `<img src="${a.logo}" alt="${a.org}" />` : `<span class="acct-mark admin-tone">${a.initials}</span>`}</span>
@@ -12970,10 +14965,13 @@ async function main() {
 
       <div class="acct-group">
         <div class="acct-group-lbl">Receiver accounts</div>
-        <input id="role-menu-search" type="search" placeholder="Search 242 receiver profiles..." autocomplete="off" spellcheck="false"
+        <input id="role-menu-search" type="search" placeholder="Search ${RECEIVERS.length} receiver profiles..." autocomplete="off" spellcheck="false"
           style="width: 100%; padding: 8px 12px; margin-bottom: var(--space-2); background: rgba(0,0,0,0.35); border: 1px solid #1e2530; border-radius: 2px; color: var(--text); font-family: var(--font-body); font-size: var(--fs-sm); box-sizing: border-box;" />
         <div id="role-menu-receivers">
-          ${[...RECEIVERS].sort((a,b) => (a.org||a.label||a.id).localeCompare(b.org||b.label||b.id, 'da')).map(rxCard).join('')}
+          ${[...RECEIVERS]
+            .filter(r => !_hasParentIndex.has(r.id))
+            .sort((a,b) => (a.org||a.label||a.id).localeCompare(b.org||b.label||b.id, 'da'))
+            .map(r => rxCard(r)).join('')}
         </div>
       </div>
 
@@ -12982,23 +14980,184 @@ async function main() {
         ${adminCard(ADMIN)}
       </div>`;
 
+    // Role-picker click activates the role (but NOT if the click landed on
+    // the expand chevron — that toggles the children reveal instead).
     roleMenu.querySelectorAll('[data-role]').forEach(btn => {
-      btn.addEventListener('click', () => { setActiveRole(btn.dataset.role); roleMenu.style.display = 'none'; });
+      btn.addEventListener('click', (ev) => {
+        if (ev.target.closest('[data-expand]')) return;
+        setActiveRole(btn.dataset.role);
+        roleMenu.style.display = 'none';
+      });
     });
 
-    // Client-side substring filter over the receiver list. Keeps 242
-    // profiles navigable without scrolling forever.
+    // Expand chevron: lazily render children into the .acct-children slot
+    // and toggle its visibility. Children are recursive — a parent's
+    // grandchildren stay behind a nested chevron.
+    roleMenu.querySelectorAll('[data-expand]').forEach(btn => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+        const parentId = btn.dataset.expand;
+        const slot = roleMenu.querySelector(`[data-children-of="${parentId}"]`);
+        if (!slot) return;
+        const isOpen = !slot.hasAttribute('hidden');
+        if (isOpen) {
+          slot.setAttribute('hidden', '');
+          btn.setAttribute('aria-expanded', 'false');
+          btn.classList.remove('open');
+          return;
+        }
+        if (!slot.dataset.rendered) {
+          const kidIds = _childrenOfIndex.get(parentId) || [];
+          const kids = kidIds
+            .map(cid => RECEIVERS.find(r => r.id === cid))
+            .filter(Boolean)
+            .sort((a,b) => (a.org||a.label||a.id).localeCompare(b.org||b.label||b.id, 'da'));
+          slot.innerHTML = kids.map(k => rxCard(k, { isChild: true })).join('');
+          slot.dataset.rendered = '1';
+          slot.querySelectorAll('[data-role]').forEach(cbtn => {
+            cbtn.addEventListener('click', (cev) => {
+              if (cev.target.closest('[data-expand]')) return;
+              setActiveRole(cbtn.dataset.role);
+              roleMenu.style.display = 'none';
+            });
+          });
+          slot.querySelectorAll('[data-expand]').forEach(cbtn => {
+            cbtn.addEventListener('click', function nestedExpand(cev) {
+              cev.stopPropagation();
+              cev.preventDefault();
+              const nid = cbtn.dataset.expand;
+              const nslot = roleMenu.querySelector(`[data-children-of="${nid}"]`);
+              if (!nslot) return;
+              const nOpen = !nslot.hasAttribute('hidden');
+              if (nOpen) {
+                nslot.setAttribute('hidden', '');
+                cbtn.setAttribute('aria-expanded', 'false');
+                cbtn.classList.remove('open');
+              } else {
+                if (!nslot.dataset.rendered) {
+                  const gkidIds = _childrenOfIndex.get(nid) || [];
+                  const gkids = gkidIds
+                    .map(gcid => RECEIVERS.find(r => r.id === gcid))
+                    .filter(Boolean)
+                    .sort((a,b) => (a.org||a.label||a.id).localeCompare(b.org||b.label||b.id, 'da'));
+                  nslot.innerHTML = gkids.map(g => rxCard(g, { isChild: true })).join('');
+                  nslot.dataset.rendered = '1';
+                  nslot.querySelectorAll('[data-role]').forEach(gbtn => {
+                    gbtn.addEventListener('click', (gev) => {
+                      if (gev.target.closest('[data-expand]')) return;
+                      setActiveRole(gbtn.dataset.role);
+                      roleMenu.style.display = 'none';
+                    });
+                  });
+                }
+                nslot.removeAttribute('hidden');
+                cbtn.setAttribute('aria-expanded', 'true');
+                cbtn.classList.add('open');
+              }
+            });
+          });
+        }
+        slot.removeAttribute('hidden');
+        btn.setAttribute('aria-expanded', 'true');
+        btn.classList.add('open');
+      });
+    });
+
+    // Search: substring match across ALL RECEIVERS (including buried
+    // children). When a match is found under a collapsed parent, the
+    // parent is force-expanded so the match is visible.
     const _searchInput = roleMenu.querySelector('#role-menu-search');
     const _receiverListEl = roleMenu.querySelector('#role-menu-receivers');
     if (_searchInput && _receiverListEl) {
       _searchInput.addEventListener('input', (e) => {
         const q = (e.target.value || '').toLowerCase().trim();
-        _receiverListEl.querySelectorAll('.acct-card').forEach(card => {
-          if (!q) { card.style.display = ''; return; }
-          const hay = (card.textContent || '').toLowerCase();
-          card.style.display = hay.includes(q) ? '' : 'none';
+
+        // Reset to collapsed baseline when the query is cleared.
+        if (!q) {
+          _receiverListEl.querySelectorAll('.acct-card-wrap').forEach(w => { w.style.display = ''; });
+          _receiverListEl.querySelectorAll('.acct-children').forEach(s => {
+            s.setAttribute('hidden', '');
+            const cbtn = _receiverListEl.querySelector(`[data-expand="${s.dataset.childrenOf}"]`);
+            if (cbtn) { cbtn.setAttribute('aria-expanded', 'false'); cbtn.classList.remove('open'); }
+          });
+          return;
+        }
+
+        // For each top-level wrap: check the card itself + any children in
+        // its subtree. If the query hits anywhere in the subtree, show the
+        // wrap and force-expand parents down to the match.
+        _receiverListEl.querySelectorAll(':scope > .acct-card-wrap').forEach(wrap => {
+          const rootId = wrap.dataset.cardWrap;
+          const rootRole = RECEIVERS.find(r => r.id === rootId);
+          const subtreeIds = collectSubtreeIds(rootId);
+          const anyMatch = subtreeIds.some(id => {
+            const role = RECEIVERS.find(r => r.id === id);
+            if (!role) return false;
+            const hay = `${role.org || ''} ${role.label || ''} ${role.description || ''} ${role.initials || ''}`.toLowerCase();
+            return hay.includes(q);
+          });
+          wrap.style.display = anyMatch ? '' : 'none';
+          if (anyMatch) forceExpandForSearch(wrap, q);
         });
       });
+    }
+
+    function collectSubtreeIds(rootId) {
+      const out = [rootId];
+      const kids = _childrenOfIndex.get(rootId) || [];
+      kids.forEach(k => { out.push(...collectSubtreeIds(k)); });
+      return out;
+    }
+    function forceExpandForSearch(wrap, q) {
+      const kidIds = _childrenOfIndex.get(wrap.dataset.cardWrap) || [];
+      if (!kidIds.length) return;
+      const slot = wrap.querySelector(`[data-children-of="${wrap.dataset.cardWrap}"]`);
+      const btn = wrap.querySelector(`[data-expand="${wrap.dataset.cardWrap}"]`);
+      if (!slot || !btn) return;
+      if (!slot.dataset.rendered) {
+        // Trigger the render path by simulating a click, then re-hide if
+        // no match at this level (children below might still match).
+        btn.click();
+      }
+      slot.removeAttribute('hidden');
+      btn.setAttribute('aria-expanded', 'true');
+      btn.classList.add('open');
+      // Recursively filter children the same way.
+      slot.querySelectorAll(':scope > .acct-card-wrap').forEach(child => {
+        const cid = child.dataset.cardWrap;
+        const subIds = collectSubtreeIds(cid);
+        const hit = subIds.some(id => {
+          const role = RECEIVERS.find(r => r.id === id);
+          if (!role) return false;
+          const hay = `${role.org || ''} ${role.label || ''} ${role.description || ''} ${role.initials || ''}`.toLowerCase();
+          return hay.includes(q);
+        });
+        child.style.display = hit ? '' : 'none';
+        if (hit) forceExpandForSearch(child, q);
+      });
+    }
+  }
+
+  // ══════════════════════════════════════════════════════════════════
+  // Simulation / Real mode
+  // ──────────────────────────────────────────────────────────────────
+  // Global toggle sitting inside the role-menu (accounts area). Default
+  // is 'real' so the platform behaves exactly like the operator-grade
+  // production build (double-click drone = Cesium coordinate-tracking,
+  // no cinematic effects). Flipping to 'sim' enables the first-person
+  // drone POV entry point + jam-crash TV static overlay, both of which
+  // are demo/scenario-only visualisations that don't reflect real
+  // operator capability (we don't tap enemy drone cameras). SIM badge
+  // renders on the operator chip so the mode is visible at a glance.
+  let _simulationMode = false;
+  function _isSimMode() { return _simulationMode === true; }
+  function _setSimMode(on) {
+    _simulationMode = !!on;
+    document.body.classList.toggle('mode-simulation', _simulationMode);
+    // If a drone POV was open and we flip back to real, exit cleanly.
+    if (!_simulationMode && typeof _dronePov !== 'undefined' && _dronePov.active) {
+      _exitDronePOV();
     }
   }
 
@@ -13075,6 +15234,14 @@ async function main() {
       'politi-sydvest': new Set(['police-c-uas']),
       'op-cph-airports':new Set(['wildlife-response']),
       'op-esbjerg-port':new Set(['wildlife-response']),
+      // Energinet is a grid TSO. They have NO kinetic-response capability
+      // (no wildlife team, no C-UAS, no counter-drone). Their role in a
+      // drone incident is escalate + coordinate: notify Politi / Forsvar,
+      // trigger internal SCADA + security-team alerts, request physical
+      // substation inspection. Empty set is CORRECT — the fix for the
+      // empty Mission Console pane is to render an escalate-focused
+      // action set for roles with no dispatch scope, NOT to invent a
+      // kinetic capability they don't have. See TODO in Mission Console.
       'op-energinet':   new Set([]),
       'flv-qra':        new Set(['helicopter-intercept']),   // legacy alias
     };
@@ -13373,8 +15540,11 @@ async function main() {
     if (!responders.length) return '';
     const dispatched = new Set(event.postIncidentDispatched || []);
     const pending = responders.filter(r => !dispatched.has(r.id));
-    if (!pending.length) return '';
-    const rows = pending.map(r => `
+
+    // Not-yet-dispatched pending rows (original Step 5 behaviour). Kept
+    // intact so the initial ground-handoff surface is unchanged. The
+    // chain block below is additive.
+    const pendingRows = pending.map(r => `
       <div style="display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; border-top: 1px solid var(--border);">
         <div style="flex: 1 1 auto; min-width: 0;">
           <div style="font-size: var(--fs-sm); color: var(--text); font-weight: 500;">${r.name}</div>
@@ -13383,12 +15553,59 @@ async function main() {
         <button class="pl-dispatch-btn" style="padding: 6px 12px; font-size: var(--fs-2xs); background: rgba(77, 210, 255, 0.06); color: var(--accent); border: 1px solid rgba(77, 210, 255, 0.4); border-left: 2px solid var(--accent); border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="dispatch-postinc" data-id="${event.id}" data-dest="${r.id}">Dispatch</button>
       </div>
     `).join('');
+
+    // Chain block — one row per postIncidentChain entry. Whoever holds
+    // the record can hand it off to another responder (creates child
+    // entry) or mark it resolved. Close-event gate reads chain leaves.
+    const chain = Array.isArray(event.postIncidentChain) ? event.postIncidentChain : [];
+    const leafIds = new Set(postIncidentChainLeaves(event).map(l => l.id));
+    const chainRows = chain.map(entry => {
+      const dest = getDestination(entry.destId);
+      const destName = dest?.name || entry.destId;
+      const parentName = entry.chainParentId
+        ? (chain.find(c => c.id === entry.chainParentId)?.destId
+            ? (getDestination(chain.find(c => c.id === entry.chainParentId).destId)?.name || chain.find(c => c.id === entry.chainParentId).destId)
+            : entry.chainParentId)
+        : null;
+      const parentLine = parentName
+        ? `<div class="c-label" style="margin-top: 2px; color: var(--text-dim);">Handed off from ${parentName}</div>`
+        : `<div class="c-label" style="margin-top: 2px; color: var(--text-dim);">Root dispatch</div>`;
+      const statusChip = entry.status === 'resolved'
+        ? `<span style="display:inline-flex;align-items:center;padding:2px 8px;background:rgba(77,255,156,0.10);border:1px solid rgba(77,255,156,0.4);border-radius:12px;font-size:var(--fs-2xs);letter-spacing:0.14em;color:#4dff9c;font-family:var(--font-mono);">RESOLVED</span>`
+        : `<span style="display:inline-flex;align-items:center;padding:2px 8px;background:rgba(77,210,255,0.10);border:1px solid rgba(77,210,255,0.4);border-radius:12px;font-size:var(--fs-2xs);letter-spacing:0.14em;color:#4dd2ff;font-family:var(--font-mono);">OPEN</span>`;
+      const controls = entry.status === 'open'
+        ? `
+          <button class="pl-dispatch-btn" style="padding:5px 10px;font-size:var(--fs-2xs);background:rgba(255,184,77,0.08);color:#ffb84d;border:1px solid rgba(255,184,77,0.4);border-radius:2px;cursor:pointer;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;font-family:var(--font-mono);" data-rcv="chain-handoff" data-id="${event.id}" data-chain="${entry.id}">Hand off</button>
+          <button class="pl-dispatch-btn" style="padding:5px 10px;font-size:var(--fs-2xs);background:rgba(77,255,156,0.08);color:#4dff9c;border:1px solid rgba(77,255,156,0.4);border-radius:2px;cursor:pointer;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;font-family:var(--font-mono);" data-rcv="chain-resolve" data-id="${event.id}" data-chain="${entry.id}">Mark resolved</button>
+        `
+        : `<span class="c-label" style="color: var(--text-dim);">${(entry.resolvedAt || '').slice(11,19)}Z${entry.resolvedBy ? ' · by ' + entry.resolvedBy : ''}</span>`;
+      const leafMarker = leafIds.has(entry.id) && chain.length > 1
+        ? `<span class="c-label" style="color: var(--text-dim); margin-left: 6px;">· leaf</span>` : '';
+      return `
+        <div style="display:flex;align-items:center;gap:var(--space-2);padding:var(--space-2) 0;border-top:1px solid var(--border);">
+          <div style="flex:1 1 auto;min-width:0;">
+            <div style="font-size:var(--fs-sm);color:var(--text);font-weight:500;display:flex;align-items:center;gap:8px;">${destName} ${statusChip}${leafMarker}</div>
+            ${parentLine}
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0;">${controls}</div>
+        </div>
+      `;
+    }).join('');
+
+    if (!pending.length && !chain.length) return '';
+
     return `
       <div class="c-panel c-panel-collapsible" style="border-top: 3px solid #4dd2ff;">
         <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #4dd2ff;">Step 5 · Post-incident handoff</div>
         <div class="c-panel-body">
-          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-1);">${pending.length} ground-response destination${pending.length === 1 ? '' : 's'} available for cordon, evidence recovery, and civil handoff.</div>
-          ${rows}
+          ${pending.length ? `
+            <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-1);">${pending.length} ground-response destination${pending.length === 1 ? '' : 's'} available for cordon, evidence recovery, and civil handoff.</div>
+            ${pendingRows}
+          ` : ''}
+          ${chain.length ? `
+            <div style="margin-top: var(--space-3);"><div class="c-section-eyebrow">Handoff chain · ${chain.length}</div></div>
+            ${chainRows}
+          ` : ''}
         </div>
       </div>`;
   }
@@ -13413,6 +15630,11 @@ async function main() {
     const dispatched = new Set(event.postIncidentDispatched || []);
     const handoffPending = responders.filter(r => !dispatched.has(r.id));
     if (handoffPending.length) return '';   // Step 5 still active
+    // Chain gate — every leaf entry must be resolved. When no chain was
+    // ever established (older-flow events), fall through to the legacy
+    // dispatched-set gate above so we don't block closure.
+    const chain = Array.isArray(event.postIncidentChain) ? event.postIncidentChain : [];
+    if (chain.length && !postIncidentChainAllLeavesResolved(event)) return '';
     return `
       <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--ok);">
         <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--ok);">Step 6 · Close event</div>
@@ -13444,546 +15666,22 @@ async function main() {
     'politi-sydvest': new Set(['police-c-uas']),
     'op-cph-airports':new Set(['wildlife-response']),
     'op-esbjerg-port':new Set(['wildlife-response']),
+    // Energinet has NO kinetic-response scope by design (grid TSO).
+    // Kept in sync with ROLE_SCOPE_MC above. See that entry for why.
     'op-energinet':   new Set([]),
     'flv-qra':        new Set(['helicopter-intercept']),
   };
 
-  // ── Response Overlay (right-side slide-in panel on receiver dashboard) ──
-  // Categorized asset table: tactical intercept (real response), ground coordination
-  // (police, cordon, evidence), civil consequence (emergency + reinforcement).
-  // Tactical map with real trajectory, threat forecast, reach rings, target site.
-  function renderResponseOverlay(event) {
-    const threatLat = event.lastPosition?.lat || event.entry?.lat;
-    const threatLon = event.lastPosition?.lon || event.entry?.lon;
-    if (threatLat == null || threatLon == null) return '';
-    // Subject-aware bundle. Falls back to legacy proximity-based bundle
-    // for events without a subject (defensive; every event via addEvent
-    // has event.subject attached by events.js).
-    const bundle = event.subject
-      ? responseBundleForSubject(event.subject, threatLat, threatLon)
-      : responseBundle(threatLat, threatLon);
-    const pb = playbookFor(event);
-    const severity = pb?.severity || 'medium';
-    const site = SITES[event.siteId];
-    const heading = event.lastPosition?.heading;
-    const speedKmh = (event.lastPosition?.speed || 40) * 3.6;
-    const kindIcon = (k) => ({
-      // Legacy kinds
-      'police': '⚑', 'police-national': '⚑',
-      'air-force-qra': '✈', 'air-force': '✈',
-      'navy': '⚓', 'coast-guard': '⚓',
-      'home-guard': '◼', 'emergency': '✚',
-      'defence-command': '◉',
-      // New counter-response kinds (P85)
-      'army-isr-drone': '◈',
-      'army-c-uas': '≋',
-      'army-ground': '⚒',
-      'police-c-uas': '⇉',
-      'helicopter-intercept': '⌂',
-      'sof-tactical': '★',
-      'wildlife-response': '◇',
-      'counter-drone-swarm': '⚔',
-    }[k] || '●');
-    const kindColor = (k) => ({
-      // Legacy: air = blue, police/emergency mixed
-      'air-force-qra': '#4dd2ff', 'air-force': '#4dd2ff',
-      'navy': '#4dd2ff', 'coast-guard': '#4dd2ff',
-      'police': '#4dff9c', 'police-national': '#4dff9c',
-      'emergency': '#ffb84d', 'home-guard': '#ffb84d',
-      // Counter-response (friendly-dispatched) = green
-      'army-isr-drone': '#4dff9c',
-      'army-c-uas': '#4dff9c',
-      'army-ground': '#4dff9c',
-      'police-c-uas': '#4dff9c',
-      'helicopter-intercept': '#4dff9c',
-      'sof-tactical': '#4dff9c',
-      'wildlife-response': '#e6ecf0',
-      'counter-drone-swarm': '#4dff9c',
-    }[k] || '#e6ecf0');
-
-    // ── Scramble decision cockpit ─────────────────────────────────
-    // One screen, one question: "If I scramble the F-35 right now,
-    // will it get there in time?" — everything else is stripped.
-    //
-    // Renders: threat (live pulsing) with heading vector + projected
-    // path to target · Skrydstrup origin · projected intercept point
-    // (F-35 + threat convergence given both speeds) · numeric readout
-    // block. No ground assets, no unrelated bases, no legend chrome.
-
-    const SKRYDSTRUP_POS = { lat: 55.221, lon: 9.264, name: 'Skrydstrup' };
-    const F35_CRUISE_KMH = 1100;   // Mach 0.9 realistic subsonic cruise
-    const targetPos = site ? { lat: site.coordinates.lat, lon: site.coordinates.lon, name: site.name } : null;
-
-    // Layout: fit threat, skrydstrup, target into a padded square
-    const layoutPts = [
-      { lat: threatLat, lon: threatLon },
-      { lat: SKRYDSTRUP_POS.lat, lon: SKRYDSTRUP_POS.lon },
-      ...(targetPos ? [{ lat: targetPos.lat, lon: targetPos.lon }] : []),
-    ];
-    let latMin = Math.min(...layoutPts.map(p => p.lat));
-    let latMax = Math.max(...layoutPts.map(p => p.lat));
-    let lonMin = Math.min(...layoutPts.map(p => p.lon));
-    let lonMax = Math.max(...layoutPts.map(p => p.lon));
-    const pad = 0.30;
-    const dLat = Math.max(0.05, latMax - latMin) * (1 + pad * 2);
-    const dLon = Math.max(0.08, lonMax - lonMin) * (1 + pad * 2);
-    const cLat = (latMin + latMax) / 2, cLon = (lonMin + lonMax) / 2;
-    const W = 360, H = 300;
-    const px = (lon) => W * ((lon - (cLon - dLon/2)) / dLon);
-    const py = (lat) => H - H * ((lat - (cLat - dLat/2)) / dLat);
-    const kmPerLat = 111;
-    const kmPerLon = 111 * Math.cos(cLat * Math.PI / 180);
-    const kmToPx = ((H / dLat) / kmPerLat + (W / dLon) / kmPerLon) / 2;
-    const tx = px(threatLon), ty = py(threatLat);
-    const sx = px(SKRYDSTRUP_POS.lon), sy = py(SKRYDSTRUP_POS.lat);
-
-    // Tighter grid — 6x6 subtle lines, faded
-    const gridSvg = [];
-    for (let i = 1; i < 6; i++) {
-      const x = (W / 6) * i;
-      const y = (H / 6) * i;
-      gridSvg.push(`<line x1="${x}" y1="0" x2="${x}" y2="${H}" stroke="rgba(255,255,255,0.035)" stroke-width="1"/>`);
-      gridSvg.push(`<line x1="0" y1="${y}" x2="${W}" y2="${y}" stroke="rgba(255,255,255,0.035)" stroke-width="1"/>`);
-    }
-
-    // ── Compute threat time to target + F-35 time to intercept + margin ──
-    const distToTargetKm = targetPos
-      ? haversineM(threatLat, threatLon, targetPos.lat, targetPos.lon) / 1000
-      : null;
-    const timeToTargetMin = distToTargetKm != null && speedKmh > 0
-      ? distToTargetKm / speedKmh * 60
-      : null;
-
-    // Lead pursuit: find point P on threat trajectory where F-35 from
-    // Skrydstrup arrives at the same time as the threat. Numeric solve.
-    let interceptPos = null;
-    let interceptTimeMin = null;
-    if (heading != null && speedKmh > 0) {
-      const headingRad = heading * Math.PI / 180;
-      let best = null;
-      for (let tMin = 1; tMin <= 30; tMin += 0.5) {
-        const distThreatKm = speedKmh * (tMin / 60);
-        // Advance threat along heading (bearing from north, clockwise)
-        const dLatKm = distThreatKm * Math.cos(headingRad);
-        const dLonKm = distThreatKm * Math.sin(headingRad);
-        const projLat = threatLat + dLatKm / kmPerLat;
-        const projLon = threatLon + dLonKm / kmPerLon;
-        const distFromSkrKm = haversineM(SKRYDSTRUP_POS.lat, SKRYDSTRUP_POS.lon, projLat, projLon) / 1000;
-        const f35TimeMin = distFromSkrKm / F35_CRUISE_KMH * 60;
-        const diff = Math.abs(f35TimeMin - tMin);
-        if (!best || diff < best.diff) {
-          best = { tMin, lat: projLat, lon: projLon, f35TimeMin, diff };
-        }
-      }
-      if (best && best.diff < 2) {
-        interceptPos = { lat: best.lat, lon: best.lon };
-        interceptTimeMin = best.tMin;
-      }
-    }
-
-    // Threat trajectory line — from threat forward to intercept (or target)
-    let trajSvg = '';
-    if (heading != null && speedKmh > 0) {
-      const headingRad = heading * Math.PI / 180;
-      // Extend forward to the target if we have one, else 15 min out
-      const forwardKm = distToTargetKm != null ? distToTargetKm * 1.05 : speedKmh * 0.25;
-      const dLatKm = forwardKm * Math.cos(headingRad);
-      const dLonKm = forwardKm * Math.sin(headingRad);
-      const fLat = threatLat + dLatKm / kmPerLat;
-      const fLon = threatLon + dLonKm / kmPerLon;
-      const fx = px(fLon), fy = py(fLat);
-      trajSvg += `<line x1="${tx}" y1="${ty}" x2="${fx}" y2="${fy}" stroke="rgba(255,90,90,0.55)" stroke-width="1.2" stroke-dasharray="5,4"/>`;
-      // Heading arrow tick at threat (short bold)
-      const tickKm = 2;
-      const tLatKm = tickKm * Math.cos(headingRad);
-      const tLonKm = tickKm * Math.sin(headingRad);
-      const ttx = px(threatLon + tLonKm / kmPerLon);
-      const tty = py(threatLat + tLatKm / kmPerLat);
-      trajSvg += `<line x1="${tx}" y1="${ty}" x2="${ttx}" y2="${tty}" stroke="#ff5a5a" stroke-width="2.2"/>`;
-    }
-
-    // Target marker
-    let targetSvg = '';
-    if (targetPos) {
-      const gx = px(targetPos.lon), gy = py(targetPos.lat);
-      targetSvg = `
-        <circle cx="${gx}" cy="${gy}" r="14" fill="none" stroke="rgba(255,184,77,0.4)" stroke-width="1">
-          <animate attributeName="r" values="10;20;10" dur="2.4s" repeatCount="indefinite"/>
-          <animate attributeName="opacity" values="0.7;0;0.7" dur="2.4s" repeatCount="indefinite"/>
-        </circle>
-        <rect x="${gx-5}" y="${gy-5}" width="10" height="10" fill="none" stroke="#ffb84d" stroke-width="1.5"/>
-        <circle cx="${gx}" cy="${gy}" r="2" fill="#ffb84d"/>
-        <text x="${gx + 8}" y="${gy + 3}" font-family="'SF Mono', Menlo, monospace" font-size="8" fill="#ffb84d" letter-spacing="0.08em">TARGET · ${targetPos.name.toUpperCase()}</text>
-      `;
-    }
-
-    // Skrydstrup origin marker
-    const skrydstrupSvg = `
-      <polygon points="${sx},${sy-6} ${sx+6},${sy} ${sx},${sy+6} ${sx-6},${sy}" fill="#4dd2ff" stroke="#06080b" stroke-width="1.5"/>
-      <text x="${sx + 9}" y="${sy + 3}" font-family="'SF Mono', Menlo, monospace" font-size="8" fill="#4dd2ff" letter-spacing="0.08em">SKRYDSTRUP · F-35 QRA</text>
-    `;
-
-    // Intercept point (if F-35 dispatched now)
-    let interceptSvg = '';
-    if (interceptPos && interceptTimeMin != null) {
-      const ix = px(interceptPos.lon), iy = py(interceptPos.lat);
-      // Line from Skrydstrup to intercept
-      interceptSvg += `<line x1="${sx}" y1="${sy}" x2="${ix}" y2="${iy}" stroke="rgba(77,210,255,0.45)" stroke-width="1" stroke-dasharray="4,3"/>`;
-      // Intercept diamond
-      interceptSvg += `
-        <polygon points="${ix},${iy-5} ${ix+5},${iy} ${ix},${iy+5} ${ix-5},${iy}" fill="none" stroke="#4dd2ff" stroke-width="1.5"/>
-        <circle cx="${ix}" cy="${iy}" r="1.5" fill="#4dd2ff"/>
-        <text x="${ix + 7}" y="${iy - 5}" font-family="'SF Mono', Menlo, monospace" font-size="8" fill="#4dd2ff" letter-spacing="0.08em">INTERCEPT · T+${interceptTimeMin.toFixed(1)} MIN</text>
-      `;
-    }
-
-    // Threat marker (pulsing, dominant)
-    const threatSvg = `
-      <circle cx="${tx}" cy="${ty}" r="12" fill="none" stroke="rgba(255,90,90,0.55)" stroke-width="1.5">
-        <animate attributeName="r" values="8;22;8" dur="1.8s" repeatCount="indefinite"/>
-        <animate attributeName="opacity" values="0.9;0;0.9" dur="1.8s" repeatCount="indefinite"/>
-      </circle>
-      <circle cx="${tx}" cy="${ty}" r="6" fill="#ff5a5a" stroke="#06080b" stroke-width="1.5"/>
-    `;
-
-    // Scale bar
-    const scaleKm = kmToPx > 5 ? 5 : kmToPx > 1 ? 10 : 25;
-    const scalePx = scaleKm * kmToPx;
-    const scaleSvg = `
-      <g transform="translate(${W - scalePx - 14}, ${H - 16})">
-        <line x1="0" y1="0" x2="${scalePx}" y2="0" stroke="rgba(255,255,255,0.5)" stroke-width="1"/>
-        <line x1="0" y1="-3" x2="0" y2="3" stroke="rgba(255,255,255,0.5)" stroke-width="1"/>
-        <line x1="${scalePx}" y1="-3" x2="${scalePx}" y2="3" stroke="rgba(255,255,255,0.5)" stroke-width="1"/>
-        <text x="${scalePx/2}" y="-4" font-family="'SF Mono', Menlo, monospace" font-size="8" fill="rgba(255,255,255,0.6)" text-anchor="middle" letter-spacing="0.08em">${scaleKm} KM</text>
-      </g>`;
-
-    // Decision numbers computed as plain values — rendered as HTML stat
-    // cards ABOVE the SVG, not baked into the map. Typography lives in CSS
-    // where it belongs, not stuffed inside SVG text elements.
-    const marginMin = timeToTargetMin != null && interceptTimeMin != null
-      ? timeToTargetMin - interceptTimeMin
-      : null;
-    const marginOk = marginMin != null && marginMin > 0;
-    // Inside-SVG readout is now minimal: just threat coord/vector so operators
-    // reading the map itself have the raw numbers in eye view.
-    const readoutSvg = `
-      <g transform="translate(12, 16)">
-        <text font-family="'SF Mono', Menlo, monospace" font-size="8" fill="rgba(255,255,255,0.35)" letter-spacing="0.16em">THREAT</text>
-        <text y="12" font-family="'SF Mono', Menlo, monospace" font-size="9" fill="rgba(230,236,240,0.85)" letter-spacing="0.04em">${threatLat.toFixed(3)}°N ${threatLon.toFixed(3)}°E · ${Math.round(speedKmh)} km/h</text>
-      </g>
-    `;
-
-    // ── Decision feasibility (for the readout block below the map) ──
-    let feasibility = null;
-    if (interceptTimeMin != null && timeToTargetMin != null) {
-      feasibility = {
-        assetName: 'F-35A · Skrydstrup',
-        assetEta: interceptTimeMin.toFixed(1),
-        threatEta: timeToTargetMin.toFixed(1),
-        marginMin: marginMin.toFixed(1),
-        canIntercept: marginOk,
-      };
-    }
-
-    const severityColor = { info: '#4dff9c', low: '#4dff9c', medium: '#ffb84d', high: '#ff8c3d', critical: '#ff5a5a' }[severity] || '#ffb84d';
-
-    // ── Asset row renderer ──
-    // Air bases carry an info icon per airframe assigned to them (F-35 at
-    // Skrydstrup, helos at Karup, transports at Aalborg). Click opens the
-    // universal aircraft info popup. Ground / consequence assets get no
-    // airframe icons since they aren't air platforms.
-    // Kinds that can be dispatched via the counter-response Level 3
-    // visualisation. F-35 QRA uses its own dedicated dispatch flow
-    // (session-wide singleton), so excluded here.
-    const DISPATCHABLE_KINDS = new Set([
-      'helicopter-intercept', 'army-c-uas', 'police-c-uas',
-      'army-isr-drone', 'sof-tactical', 'wildlife-response', 'counter-drone-swarm',
-    ]);
-
-    // Role-scoping (P90 + P92): which receiver roles have jurisdiction
-    // to dispatch which asset kinds. Now covers the P92 per-base leaves.
-    // Only these roles see a live Dispatch button; others see the asset
-    // row for situational awareness only. Admin sees all.
-    const ROLE_DISPATCH_SCOPE = {
-      // Air Force bases
-      'flv-skrydstrup': new Set(['helicopter-intercept']),
-      'flv-karup':      new Set(['helicopter-intercept']),
-      // Army bases
-      'haer-slagelse':  new Set(['army-c-uas', 'army-isr-drone']),
-      'haer-hovelte':   new Set(['army-ground']),
-      'haer-varde':     new Set(['army-isr-drone', 'army-c-uas', 'counter-drone-swarm']),
-      'haer-bornholm':  new Set(['army-c-uas']),
-      'haer-oksbol':    new Set(['army-c-uas']),
-      // SOF
-      'sok-aalborg':    new Set(['sof-tactical']),
-      // Command HQ (sees all military dispatch)
-      'forsvarskmd':    new Set(['helicopter-intercept', 'army-c-uas', 'army-isr-drone', 'army-ground', 'sof-tactical', 'counter-drone-swarm']),
-      // Intelligence
-      'fe':             new Set(['army-isr-drone']),
-      // Police
-      'rigspoliti':     new Set(['police-c-uas', 'counter-drone-swarm']),
-      'politi-kbh':     new Set(['police-c-uas']),
-      'politi-sydvest': new Set(['police-c-uas']),
-      // Operators (wildlife on site)
-      'op-cph-airports':new Set(['wildlife-response']),
-      'op-esbjerg-port':new Set(['wildlife-response']),
-      'op-energinet':   new Set([]),
-      // Legacy alias (still respected while call sites migrate)
-      'flv-qra':        new Set(['helicopter-intercept']),
-    };
-    const roleScope = ROLE_DISPATCH_SCOPE[activeRole?.id] || null;
-    const canDispatch = (kind) => (activeRole?.kind === 'admin')
-      || (roleScope ? roleScope.has(kind) : false);
-
-    const assetRow = (a, isTactical) => {
-      const airframes = aircraftForResponseAsset(a.id);
-      const airframeChips = airframes.map(af => {
-        const id = Object.keys(AIRCRAFT).find(k => AIRCRAFT[k].designation === af.designation);
-        return `<button class="c-chip accent" style="cursor: pointer; padding: 3px 6px 3px 8px; gap: 5px;" data-aircraft-info="${id}" aria-label="${af.designation} info">${af.designation.split(' ')[0]}<span style="font-style: italic; opacity: 0.7;">i</span></button>`;
-      }).join('');
-
-      // Dispatch button — only for tactical counter-response assets
-      // AND only when the current role has jurisdictional scope.
-      // Other roles still see the asset row (situational awareness),
-      // but no dispatch action. State-aware button: Dispatch → En route
-      // → Engaging → Complete.
-      let dispatchBtn = '';
-      if (isTactical && DISPATCHABLE_KINDS.has(a.kind) && canDispatch(a.kind)) {
-        const cdState = counterDispatchStateFor(event.id, a.id);
-        const stateLabel = { en_route: 'En route', engaging: 'Engaging', complete: 'Complete' }[cdState];
-        if (cdState) {
-          const stateColor = cdState === 'complete' ? '#6b7280' : cdState === 'engaging' ? '#ffb84d' : '#4dd2ff';
-          dispatchBtn = `<div style="margin-top: 4px; font-size: var(--fs-xs); color: ${stateColor}; font-family: var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase;">${stateLabel}</div>`;
-        } else {
-          dispatchBtn = `<button class="pl-dispatch-btn" style="margin-top: 4px; padding: 5px 12px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.06); color: #4dff9c; border: 1px solid rgba(77, 255, 156, 0.35); border-left: 2px solid #4dff9c; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">Dispatch</button>`;
-        }
-      } else if (isTactical && DISPATCHABLE_KINDS.has(a.kind)) {
-        // Asset is dispatchable but this role doesn't have jurisdiction —
-        // show the state as an unclickable label so operator sees another
-        // agency is handling / can handle it.
-        const cdState = counterDispatchStateFor(event.id, a.id);
-        if (cdState) {
-          const stateLabel = { en_route: 'En route', engaging: 'Engaging', complete: 'Complete' }[cdState];
-          const stateColor = cdState === 'complete' ? '#6b7280' : cdState === 'engaging' ? '#ffb84d' : '#4dd2ff';
-          dispatchBtn = `<div style="margin-top: 4px; font-size: var(--fs-xs); color: ${stateColor}; font-family: var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase;">${stateLabel}</div>`;
-        } else {
-          dispatchBtn = `<div style="margin-top: 4px; font-size: var(--fs-2xs); color: var(--text-dim); font-family: var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase;">Other agency</div>`;
-        }
-      }
-
-      return `
-      <div class="c-row">
-        <div style="color: ${kindColor(a.kind)}; font-size: 14px; line-height: 1; width: 20px; text-align: center; flex: 0 0 20px;">${kindIcon(a.kind)}</div>
-        <div style="flex: 1 1 auto; min-width: 0;">
-          <div style="font-size: var(--fs-base); color: var(--text); font-weight: 500; letter-spacing: var(--ls-body);">${a.name}</div>
-          <div class="c-label" style="margin-top: 2px;">${a.response}</div>
-          ${airframeChips ? `<div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: var(--space-2);">${airframeChips}</div>` : ''}
-        </div>
-        <div style="text-align: right; white-space: nowrap; flex: 0 0 auto;">
-          <div style="color: ${kindColor(a.kind)}; font-family: var(--font-mono); font-size: var(--fs-sm); font-weight: 600; letter-spacing: var(--ls-body); font-variant-numeric: tabular-nums;">${a.etaLabel}</div>
-          <div class="c-label" style="margin-top: 2px;">${a.distanceKm} km</div>
-          ${dispatchBtn}
-        </div>
-      </div>`;
-    };
-
-    // Dispatch block — Air Force sees the Dispatch button (or airborne status).
-    // Other receivers see a read only Fighter Status card when fighter is airborne.
-    const activeRole = getActiveRole();
-    const isFlyvevaabnet = activeRole.id === 'flv-qra';
-    const isMissile = event.platform === 'missile' && event.classification === 'hostile';
-    // Airframe row generator — shared across all dispatch states. Every
-    // asset row carries a compact info icon that opens the full spec
-    // popup (aircraft.js). Info popup is intentionally unchanged.
-    const airframeIdOf = (a) => Object.keys(AIRCRAFT).find(k => AIRCRAFT[k].designation === a.designation);
-    const airframeRow = (a) => `
-      <div class="c-row">
-        <div style="flex:1 1 auto; min-width:0;">
-          <div style="font-size: var(--fs-base); font-weight: 600; color: var(--text); letter-spacing: var(--ls-body);">${a.designation}</div>
-          <div class="c-label" style="margin-top: 2px;">${a.role}</div>
-        </div>
-        <button class="c-btn-icon info" data-aircraft-info="${airframeIdOf(a)}" aria-label="${a.designation} info">i</button>
-      </div>`;
-    const airframeList = (heading, aircraftIds) => `
-      <div style="margin: var(--space-3) 0;">
-        <div class="c-label-lg" style="margin-bottom: var(--space-1);">${heading}</div>
-        <div style="border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
-          ${aircraftIds.map(airframeRow).join('')}
-        </div>
-      </div>`;
-
-    let dispatchBlock = '';
-    if (event.outcome === 'neutralized') {
-      const impactSite = event._prevCoverageSite || event.siteId;
-      const responders = postIncidentResponders(impactSite);
-      const dispatched = event.postIncidentDispatched || [];
-      const allDone = responders.length > 0 && responders.every(r => dispatched.includes(r.id));
-      const responderButtons = responders.length === 0
-        ? `<div class="c-label" style="padding: var(--space-2) 0;">No post incident responders configured for this site.</div>`
-        : responders.map(r => {
-            const done = dispatched.includes(r.id);
-            return `
-              <button class="c-btn wide ${done ? 'done' : ''}" style="justify-content: space-between; margin-bottom: var(--space-1);" data-rcv="dispatch-postinc" data-id="${event.id}" data-dest="${r.id}" ${done ? 'disabled' : ''}>
-                <span>${done ? r.name + ' Dispatched' : 'Dispatch ' + r.name}</span>
-                <span class="c-chip">Tier ${r.tier}</span>
-              </button>`;
-          }).join('');
-      dispatchBlock = `
-        <section class="c-panel">
-          <div style="display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2);">
-            <span class="c-chip ok">Target Neutralised</span>
-            <span class="c-label">${event.neutralizedAt ? event.neutralizedAt.slice(11,19) + 'Z' : ''}</span>
-          </div>
-          <div style="font-size: var(--fs-sm); color: var(--text-dim); line-height: 1.55;">${event.neutralizedBy || 'Flyvevåbnet Fighter Response'}</div>
-        </section>
-        <section class="c-panel">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Post Incident Response</div>
-          <div style="font-size: var(--fs-sm); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">Impact site: ${SITES[impactSite]?.name || impactSite || 'Unknown'}. Ground response required for cordon, evidence recovery, and civilian safety.</div>
-          ${responderButtons}
-          ${allDone ? `
-            <button class="c-btn solid ok wide" style="justify-content: center; margin-top: var(--space-2);" data-rcv="close-event" data-id="${event.id}">
-              Close Event
-            </button>` : ''}
-        </section>`;
-    } else if (isFlyvevaabnet && isMissile) {
-      const skrydstrupList = aircraftAtBase('skrydstrup');
-      if (!_f35.airborne) {
-        // P91 fix: wrap the chip in a flex column with align-items:
-        // flex-start so it can never stretch to fill the parent's width
-        // (previous yellow-pillar bug in Flyvevåbnet view).
-        dispatchBlock = `
-          <section class="c-panel">
-            <div style="display: flex; flex-direction: column; align-items: flex-start;">
-              <span class="c-chip warn" style="align-self: flex-start; max-width: max-content;">Awaiting Dispatch</span>
-            </div>
-            <div style="font-size: var(--fs-base); color: var(--text); line-height: 1.55; margin-top: var(--space-3);">Confirmed cruise missile signature. Airborne intercept authorised on scramble.</div>
-            ${airframeList('Available airframes · Skrydstrup', skrydstrupList)}
-            <button class="c-btn solid ok wide" style="justify-content: center;" data-rcv="qra-dispatch" data-id="${event.id}">
-              Scramble F-35
-            </button>
-          </section>`;
-      } else {
-        dispatchBlock = `
-          <section class="c-panel">
-            <span class="c-chip accent">F-35 Airborne · Tracking</span>
-            <div style="font-size: var(--fs-base); color: var(--text); line-height: 1.55; margin-top: var(--space-3);">Single airframe in the air from earlier scramble. Same aircraft covers this event. Neutralisation triggers on intercept.</div>
-            ${airframeList('Airborne asset', skrydstrupList)}
-          </section>`;
-      }
-    } else if (isMissile && _f35.airborne) {
-      const skrydstrupList = aircraftAtBase('skrydstrup');
-      dispatchBlock = `
-        <section class="c-panel">
-          <span class="c-chip accent">Flyvevåbnet Airborne</span>
-          <div style="font-size: var(--fs-base); color: var(--text); line-height: 1.55; margin-top: var(--space-3);">F-35 scrambled from Skrydstrup. Intercept station near Copenhagen approach. Fighter response covers this event.</div>
-          ${airframeList('Airborne asset', skrydstrupList)}
-        </section>`;
-    }
-
-    // Severity → chip variant. Info/low = ok, medium = warn, high/critical = danger.
-    const severityChipClass = { info: 'ok', low: 'ok', medium: 'warn', high: 'danger', critical: 'danger' }[severity] || 'warn';
-
-    return `
-      <aside class="rcv-response-overlay">
-        <section class="c-panel">
-          <div class="c-section-eyebrow">Response Overlay</div>
-          <div class="c-section-title" style="margin-bottom: var(--space-3);">${pb?.title || 'Response'}</div>
-          <span class="c-chip ${severityChipClass}">Severity · ${severity.toUpperCase()}</span>
-        </section>
-
-        ${dispatchBlock}
-
-        <section class="c-panel">
-          <div class="c-panel-hdr" style="border-bottom: none; padding-bottom: 0; margin-bottom: var(--space-3);">
-            <span class="c-panel-title">Scramble Decision</span>
-            ${marginMin != null ? `<span class="c-chip ${marginOk ? 'ok' : 'danger'}">${marginOk ? 'Intercept Feasible' : 'Margin Lost'}</span>` : ''}
-          </div>
-          <div class="c-stat-grid" style="margin-bottom: var(--space-3);">
-            <div class="c-stat danger">
-              <div class="c-stat-lbl">Threat to target</div>
-              <div class="c-stat-val">${timeToTargetMin != null ? timeToTargetMin.toFixed(1) : '—'}<span class="c-stat-unit">min</span></div>
-            </div>
-            <div class="c-stat accent">
-              <div class="c-stat-lbl">F-35 to intercept</div>
-              <div class="c-stat-val">${interceptTimeMin != null ? interceptTimeMin.toFixed(1) : '—'}<span class="c-stat-unit">min</span></div>
-            </div>
-            <div class="c-stat ${marginOk ? 'ok' : 'danger'}">
-              <div class="c-stat-lbl">Margin</div>
-              <div class="c-stat-val">${marginMin != null ? (marginOk ? '+' : '') + marginMin.toFixed(1) : '—'}<span class="c-stat-unit">min</span></div>
-            </div>
-          </div>
-          <svg viewBox="0 0 ${W} ${H}" class="rro-map" preserveAspectRatio="xMidYMid meet" style="width: 100%; height: auto; display: block; border: 1px solid var(--border);">
-            <rect x="0" y="0" width="${W}" height="${H}" fill="var(--surface-bg)"/>
-            ${gridSvg.join('')}
-            ${targetSvg}
-            ${trajSvg}
-            ${interceptSvg}
-            ${skrydstrupSvg}
-            ${threatSvg}
-            ${scaleSvg}
-            ${readoutSvg}
-          </svg>
-          <div style="display: flex; gap: var(--space-4); margin-top: var(--space-2);">
-            <span class="c-label">ALT ${event.lastPosition?.alt || '?'}m</span>
-            <span class="c-label">HDG ${heading != null ? Math.round(heading) + '°' : '?'}</span>
-            <span class="c-label" style="margin-left: auto; color: var(--accent);">Live · Bjæverskov cross cue</span>
-          </div>
-        </section>
-
-        ${bundle.tactical.length ? `
-        <section class="c-panel">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Tactical Assets</div>
-          <div>${bundle.tactical.map(a => assetRow(a, true)).join('')}</div>
-          <div class="c-label" style="margin-top: var(--space-2); line-height: 1.5; text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs);">${bundle.tacticalRationale || 'Airborne + maritime. Only these can act on the threat in flight.'}</div>
-        </section>` : (bundle.tacticalRationale ? `
-        <section class="c-panel">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Tactical Assets</div>
-          <div class="c-label" style="line-height: 1.5; text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs);">${bundle.tacticalRationale}</div>
-        </section>` : '')}
-
-        ${bundle.ground.length ? `
-        <section class="c-panel">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Ground Coordination</div>
-          <div>${bundle.ground.map(a => assetRow(a, false)).join('')}</div>
-          <div class="c-label" style="margin-top: var(--space-2); line-height: 1.5; text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs);">Perimeter cordon, evidence, operator arrest.</div>
-        </section>` : ''}
-
-        ${bundle.consequence.length ? `
-        <section class="c-panel">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Consequence + Reinforcement</div>
-          <div>${bundle.consequence.map(a => assetRow(a, false)).join('')}</div>
-          <div class="c-label" style="margin-top: var(--space-2); line-height: 1.5; text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs);">Civil emergency, mass alert, reinforcement.</div>
-        </section>` : ''}
-
-        <section class="c-panel">
-          <div class="c-panel-title" style="margin-bottom: var(--space-3);">Playbook · Full Response Chain</div>
-          <ol style="padding-left: 0; margin: 0; list-style: none; counter-reset: rro-step;">
-            ${(pb?.immediateActions || []).map(a => `
-              <li style="display: grid; grid-template-columns: 24px 1fr; gap: var(--space-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--border); counter-increment: rro-step; font-size: var(--fs-sm); line-height: 1.55; color: var(--text);">
-                <span class="c-label" style="text-align: right;">${'0' + (pb.immediateActions.indexOf(a) + 1)}</span>
-                <span>${a}</span>
-              </li>`).join('')}
-          </ol>
-        </section>
-
-        ${pb?.coordination?.length ? `
-        <section class="c-panel">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Coordination</div>
-          <ul style="padding-left: var(--space-4); margin: 0; font-size: var(--fs-sm); color: var(--text); line-height: 1.6;">
-            ${pb.coordination.map(a => `<li style="margin-bottom: var(--space-1);">${a}</li>`).join('')}
-          </ul>
-        </section>` : ''}
-
-        ${pb?.handoffTo?.length ? `
-        <section class="c-panel">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Handoff</div>
-          <div style="display: flex; flex-wrap: wrap; gap: var(--space-1);">
-            ${pb.handoffTo.map(h => `<span class="c-chip">${h}</span>`).join('')}
-          </div>
-        </section>` : ''}
-      </aside>
-    `;
-  }
+  // ── renderResponseOverlay — RETIRED 2026-09-05 ──
+  // Legacy slide-in response panel from the pre-workspace receiver
+  // dashboard. Never rendered in the current flow (only mounted when
+  // the inbox split-view had a selected event, which was gated on the
+  // retired `pick` action). ~530 lines of dead code removed. All
+  // real dispatch surfaces now live in the workspace Mission Console
+  // (`renderWorkspaceMissionConsole`). If a wide-format response panel
+  // is ever wanted again, build fresh — this one hardcoded specific
+  // Skrydstrup + F-35 assets and would need a rewrite for real data.
+  function renderResponseOverlay(_event) { return ''; }
 
   // ── Event Workspace ─────────────────────────────────────────────
   // Full-screen surface opened when receiver clicks Open Report or
@@ -14298,13 +15996,26 @@ async function main() {
       ? event.participants.get(role.id)
       : null;
     const _isObserverOnThis = _participant?.mode === 'observer';
-    const observerChip = _isObserverOnThis
-      ? `<span class="rer-observer-chip" style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; background: rgba(255, 184, 77, 0.08); border: 1px solid rgba(255, 184, 77, 0.35); border-radius: 12px; font-size: var(--fs-2xs); letter-spacing: 0.12em; text-transform: uppercase; color: #ffb84d; font-family: var(--font-mono); margin-left: var(--space-2);"><span style="width: 6px; height: 6px; border-radius: 50%; background: #ffb84d;"></span>Observer</span>`
+    // Self-revoke × visible to the active role when they are an observer.
+    // Uses same revoke handler as the participants strip below.
+    const _selfRevokeX = _isObserverOnThis
+      ? `<button class="rer-observer-x" data-rcv="observer-revoke" data-id="${event.id}" data-role="${role.id}" title="Leave this case" style="background: transparent; border: none; color: #ffb84d; cursor: pointer; padding: 0 2px; margin-left: 4px; font-size: 12px; line-height: 1;">×</button>`
       : '';
+    const observerChip = _isObserverOnThis
+      ? `<span class="rer-observer-chip" style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; background: rgba(255, 184, 77, 0.08); border: 1px solid rgba(255, 184, 77, 0.35); border-radius: 12px; font-size: var(--fs-2xs); letter-spacing: 0.12em; text-transform: uppercase; color: #ffb84d; font-family: var(--font-mono); margin-left: var(--space-2);"><span style="width: 6px; height: 6px; border-radius: 50%; background: #ffb84d;"></span>Observer${_selfRevokeX}</span>`
+      : '';
+
+    // Participants strip — everyone on this event other than the active
+    // role, so an actor can see who else is looped in and revoke them if
+    // authorized. Auth rule: original operator (rec.initiatedBy match) +
+    // admin can revoke anyone; anyone else can only revoke observers
+    // they themselves added.
+    const _participantsStrip = _renderParticipantsStrip(event, role.id, rec);
 
     const actions = `
       <section class="rer-section rer-actions">
         <div class="c-section-eyebrow" style="display: flex; align-items: center;">Your Response · ${role.name || 'Receiver'}${observerChip}</div>
+        ${_participantsStrip}
         <div class="rer-cta-rail">
           ${ctas.map(c => `
             <button class="rer-cta ${c.tone}" data-rcv="${c.action}" data-id="${event.id}" ${c.esc ? `data-esc="${c.esc}"` : ''} title="${c.tooltip}" ${c.disabled ? 'disabled' : ''}>
@@ -14429,7 +16140,7 @@ async function main() {
   const _mistralResultCache = new Map();   // event.id -> {body, recommendation, model_version, generated_at}
   const MISTRAL_COOLDOWN_MS = 45 * 1000;   // 45s cooldown on 429
 
-  function _fireMistralCaseFile(event, opts = {}) {
+  async function _fireMistralCaseFile(event, opts = {}) {
     if (!isMistralConfigured() || !event) return;
     const { force = false } = opts;
 
@@ -14469,6 +16180,33 @@ async function main() {
     if (footEl) footEl.textContent = 'Streaming from Mistral Large 2 · sovereign EU inference...';
 
     const site = SITES[event.siteId];
+
+    // Resolve Agent A digest before streaming Agent 3. Same pattern
+    // as _fireMistralDebrief (main.js:8305). Cache hit is ~0ms after
+    // the first fire per site; first miss pays one Agent A token spend
+    // and then persists. Live case-file gets the same doctrine +
+    // asset grounding as post-event debrief. Agent A failure is
+    // NON-BLOCKING — case-file proceeds without the digest and matches
+    // pre-2026-09-04 behaviour on that path.
+    let siteDigest = null;
+    let siteCtxForCoop = null;
+    try {
+      siteCtxForCoop = contextForSite(event.siteId);
+      siteDigest = await ensureSiteContextDigest(event.siteId, siteCtxForCoop);
+    } catch (_) { /* non-blocking */ }
+    if (gen !== _mistralCaseFileGen) return;   // staleness check after await
+
+    // Cooperative traffic cross-check. NON-BLOCKING — if the site has
+    // no cooperative_traffic config, adapter is unreachable, or feed
+    // errors, we just skip the block. Agent 3 proceeds without it.
+    // See docs/agentic-cooperative-traffic-fusion-architecture.md.
+    let cooperativeCheckBlock = null;
+    try {
+      const check = await checkCooperativeTraffic(event, siteCtxForCoop);
+      if (check?.formatted_block) cooperativeCheckBlock = check.formatted_block;
+    } catch (_) { /* non-blocking */ }
+    if (gen !== _mistralCaseFileGen) return;
+
     let hasReplacedBody = false;
     streamCaseFileNarrative(event, site, {
       onBodyDelta: (text) => {
@@ -14504,7 +16242,7 @@ async function main() {
           if (footEl) footEl.textContent = `Mistral unreachable · showing mock synthesis · ${err.message.slice(0, 80)}`;
         }
       },
-    });
+    }, siteDigest, cooperativeCheckBlock);
   }
 
   // Compact "N sec ago" / "N min ago" formatter for cached Mistral timestamps
@@ -14585,6 +16323,95 @@ async function main() {
   //
   // Observers see: Promote to actor, Add note.
   // ═══════════════════════════════════════════════════════════════════
+  // Site-capability filter for branch-specific CTAs.
+  //
+  // Reads `response_capabilities: [...]` off the site's context (from
+  // site_context.js). If the array is DECLARED, only actions listed
+  // are allowed at that site. If the array is UNDECLARED (missing),
+  // fallback is PERMISSIVE — every action passes. Matches Q1(a) from
+  // the founder's greenlight: non-breaking for existing sites.
+  //
+  // Combines ADDITIVELY with existing role + threat-type gates (Q2a):
+  // an action must pass role gate AND threat gate AND site gate to
+  // render. Removing the site declaration reverts to today's behavior.
+  //
+  // Universals (ack, respond, add-note, observer-*, cascade-politi,
+  // cascade-fe-pet, intel-log, qra-dispatch) are NEVER filtered by
+  // site — they're either operational primitives or national-level
+  // capabilities that ignore site.
+  function _siteAllowsAction(event, action) {
+    if (!event?.siteId) return true;
+    const siteCtx = contextForSite(event.siteId);
+    const caps = siteCtx?.response_capabilities;
+    if (!Array.isArray(caps)) return true;   // permissive fallback (Q1a)
+    return caps.includes(action);
+  }
+
+  // Compact badge for esc.progressStatus (post-ack progress axis).
+  // Empty when no progress state set yet. Used by both operator log
+  // renderers and the receiver inbox card so the state surfaces on
+  // every axis the state is visible.
+  function _renderProgressBadge(esc) {
+    if (!esc || !esc.progressStatus) return '';
+    const cfg = ({
+      'in-progress': { bg: 'rgba(77,210,255,0.10)', border: 'rgba(77,210,255,0.4)', fg: '#4dd2ff', label: 'IN PROGRESS' },
+      'resolved':    { bg: 'rgba(77,255,156,0.10)', border: 'rgba(77,255,156,0.4)', fg: '#4dff9c', label: 'RESOLVED' },
+      'blocked':     { bg: 'rgba(255,184,77,0.12)', border: 'rgba(255,184,77,0.5)', fg: '#ffb84d', label: 'BLOCKED' },
+    })[esc.progressStatus];
+    if (!cfg) return '';
+    const reason = esc.progressStatus === 'blocked' && esc.blockedReason
+      ? ` · ${esc.blockedReason.length > 60 ? esc.blockedReason.slice(0,60) + '…' : esc.blockedReason}`
+      : '';
+    return `<span class="esc-progress-badge" title="${(esc.blockedReason || '').replace(/"/g,'&quot;')}" style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:${cfg.bg};border:1px solid ${cfg.border};border-radius:12px;font-size:var(--fs-2xs);letter-spacing:0.14em;color:${cfg.fg};font-family:var(--font-mono);margin-left:6px;">${cfg.label}${reason}</span>`;
+  }
+
+  // Revoke authorization for observers on an event.
+  // Rule: original operator (rec.initiatedBy match) + admin can revoke
+  // anyone; anyone else can only revoke observers they themselves added.
+  // Called from render-time to decide × visibility AND from the click
+  // handler as a defense-in-depth check.
+  function _canRevokeParticipant(event, activeRoleId, targetRoleId) {
+    if (!event || !activeRoleId || !targetRoleId) return false;
+    if (activeRoleId === targetRoleId) return true;   // self-revoke always
+    const entry = event.participants instanceof Map
+      ? event.participants.get(targetRoleId) : null;
+    if (!entry) return false;
+    // Admin tenant — always allowed.
+    if (activeRoleId === ADMIN?.id) return true;
+    // Any operator role — treated as the "original operator" side.
+    const isOperator = Array.isArray(OPERATORS) && OPERATORS.some(o => o.id === activeRoleId);
+    if (isOperator) return true;
+    // Otherwise only if the active role added this participant.
+    return entry.addedBy === activeRoleId;
+  }
+
+  // Compact strip listing all OTHER participants on this event with
+  // per-row × when the active role can revoke. Rendered above the CTA
+  // rail on the receiver side so an actor sees who else is looped in.
+  function _renderParticipantsStrip(event, activeRoleId, rec) {
+    if (!event || !(event.participants instanceof Map) || event.participants.size === 0) return '';
+    const others = [];
+    for (const [rid, entry] of event.participants) {
+      if (rid === activeRoleId) continue;
+      others.push({ roleId: rid, ...entry });
+    }
+    if (!others.length) return '';
+    const rows = others.map(p => {
+      const r = RECEIVERS.find(x => x.id === p.roleId)
+        || OPERATORS.find(x => x.id === p.roleId)
+        || (p.roleId === ADMIN?.id ? ADMIN : null);
+      const label = r?.org || r?.label || r?.name || p.roleId;
+      const modeColor = p.mode === 'actor' ? '#4dff9c' : '#ffb84d';
+      const modeLabel = p.mode === 'actor' ? 'Actor' : 'Observer';
+      const canX = _canRevokeParticipant(event, activeRoleId, p.roleId);
+      const xBtn = canX
+        ? `<button class="rer-participant-x" data-rcv="observer-revoke" data-id="${event.id}" data-role="${p.roleId}" title="Revoke ${label}" style="background: transparent; border: none; color: var(--text-dim); cursor: pointer; padding: 0 4px; margin-left: 6px; font-size: 14px; line-height: 1;">×</button>`
+        : '';
+      return `<span class="rer-participant-chip" style="display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; font-size: var(--fs-2xs); color: var(--text-dim); font-family: var(--font-mono);"><span style="width: 6px; height: 6px; border-radius: 50%; background: ${modeColor};"></span>${label} · ${modeLabel}${xBtn}</span>`;
+    }).join('');
+    return `<div class="rer-participants-strip" style="display: flex; flex-wrap: wrap; gap: 6px; margin: var(--space-2) 0;">${rows}</div>`;
+  }
+
   function availableCTAsForReceiver(roleId, event, ctx = {}) {
     const { rec, isAcked, isActive } = ctx;
     const ctas = [];
@@ -14639,18 +16466,18 @@ async function main() {
 
     // Politi actors
     if (isActive && isPolitiBranch) {
-      ctas.push({
+      if (_siteAllowsAction(event, 'deploy-patrol')) ctas.push({
         label: 'Deploy patrol', sub: 'Local district cars', icon: '🚔', tone: 'accent',
         action: 'deploy-patrol',
         tooltip: 'Dispatches district patrol cars to the incident site. Confirms via radio when on scene.',
       });
-      ctas.push({
+      if (_siteAllowsAction(event, 'set-cordon')) ctas.push({
         label: 'Set up perimeter cordon', sub: 'Afspær området', icon: '⚑', tone: 'accent',
         action: 'set-cordon',
         tooltip: 'Establishes a physical perimeter cordon around the affected area. Coordinates with local fire and medical.',
       });
-      // Only regional Politi (not HQ, not specialty) requests AKS backup
-      if (role.parentId === 'politi' && !roleId.startsWith('politi-special')) {
+      // Only regional Politi (not HQ, not specialty) requests AKS backup — AND site must declare aks capability
+      if (role.parentId === 'politi' && !roleId.startsWith('politi-special') && _siteAllowsAction(event, 'request-aks')) {
         ctas.push({
           label: 'Request AKS backup', sub: 'Aktionsstyrken', icon: '⚡', tone: 'neutral',
           action: 'request-aks',
@@ -14661,12 +16488,12 @@ async function main() {
 
     // BRS actors
     if (isActive && isBrsBranch) {
-      ctas.push({
+      if (_siteAllowsAction(event, 'brs-standby')) ctas.push({
         label: 'Standby response', sub: 'Teams on alert', icon: '⏳', tone: 'accent',
         action: 'brs-standby',
         tooltip: 'Places BRS response teams on active standby without deploying yet.',
       });
-      ctas.push({
+      if (_siteAllowsAction(event, 'brs-deploy')) ctas.push({
         label: 'Full deployment', sub: 'CBRN + rescue + medical', icon: '🚨', tone: 'accent',
         action: 'brs-deploy',
         tooltip: 'Full BRS deployment. Hazmat, rescue, and medical teams en route.',
@@ -14686,12 +16513,12 @@ async function main() {
     // Forsvaret army (Hæren) actors
     const isHaer = roleId.startsWith('haer-') || role.parentId === 'haeren';
     if (isActive && isForsvaretBranch && isHaer) {
-      ctas.push({
+      if (_siteAllowsAction(event, 'army-c-uas')) ctas.push({
         label: 'Deploy army C-UAS', sub: 'RF + electronic warfare', icon: '⚡', tone: 'neutral',
         action: 'army-c-uas',
         tooltip: 'Requests army counter-drone unit deployment. Radio frequency and electronic warfare capability.',
       });
-      ctas.push({
+      if (_siteAllowsAction(event, 'army-ground')) ctas.push({
         label: 'Deploy ground force', sub: 'Rapid reinforcement', icon: '🪖', tone: 'neutral',
         action: 'army-ground',
         tooltip: 'Requests army ground reinforcement to hold cordon or protect infrastructure.',
@@ -14710,12 +16537,12 @@ async function main() {
 
     // Agency (Trafikstyrelsen — aviation regulator)
     if (isActive && isAgencyBranch && roleId === 'agency-traf' && ['quadcopter', 'fixed-wing', 'jet', 'missile'].includes(event.platform)) {
-      ctas.push({
+      if (_siteAllowsAction(event, 'issue-notam')) ctas.push({
         label: 'Issue airspace advisory', sub: 'NOTAM push', icon: '📡', tone: 'accent',
         action: 'issue-notam',
         tooltip: 'Issues NOTAM airspace advisory for the affected zone. Distributed to Eurocontrol.',
       });
-      ctas.push({
+      if (_siteAllowsAction(event, 'restrict-airspace')) ctas.push({
         label: 'Restrict airspace', sub: 'Full closure order', icon: '⛔', tone: 'danger',
         action: 'restrict-airspace',
         tooltip: 'Full airspace closure order for the affected zone. Requires ministerial sign-off in production.',
@@ -14724,7 +16551,7 @@ async function main() {
 
     // Agency (Søfartsstyrelsen — maritime regulator)
     if (isActive && isAgencyBranch && roleId === 'agency-sof' && (roleScope === 'maritime' || event.siteId === 'esbjerg')) {
-      ctas.push({
+      if (_siteAllowsAction(event, 'issue-maritime-advisory')) ctas.push({
         label: 'Issue maritime advisory', sub: 'Coast guard notice', icon: '📡', tone: 'accent',
         action: 'issue-maritime-advisory',
         tooltip: 'Issues advisory to coast guard and maritime traffic in affected zone.',
@@ -14733,12 +16560,12 @@ async function main() {
 
     // Kommune (municipal crisis staff)
     if (isActive && isKommune) {
-      ctas.push({
+      if (_siteAllowsAction(event, 'kom-crisis')) ctas.push({
         label: 'Alert kommune crisis staff', sub: 'Municipal war-room', icon: '🏛', tone: 'accent',
         action: 'kom-crisis',
         tooltip: 'Alerts the municipal crisis staff. Activates local emergency plan.',
       });
-      if (event.classification === 'hostile' && event.threat === 'high') {
+      if (event.classification === 'hostile' && event.threat === 'high' && _siteAllowsAction(event, 'kom-shelter')) {
         ctas.push({
           label: 'Shelter-in-place notification', sub: 'Public alert', icon: '🏘', tone: 'danger',
           action: 'kom-shelter',
@@ -14749,7 +16576,7 @@ async function main() {
 
     // Hjemmeværnet actors
     if (isActive && isHjvBranch) {
-      ctas.push({
+      if (_siteAllowsAction(event, 'hjv-reinforce')) ctas.push({
         label: 'Reinforce guard', sub: 'Volunteer callout', icon: '🛡', tone: 'neutral',
         action: 'hjv-reinforce',
         tooltip: 'Calls out Hjemmeværn volunteer patrols to reinforce perimeter or hold cordon.',
@@ -14758,12 +16585,12 @@ async function main() {
 
     // Region (ambulance + hospital coordination)
     if (isActive && isRegionBranch) {
-      ctas.push({
+      if (_siteAllowsAction(event, 'region-ambulance-standby')) ctas.push({
         label: 'Ambulance standby', sub: 'Regional 112 alerted', icon: '🚑', tone: 'accent',
         action: 'region-ambulance-standby',
         tooltip: 'Puts regional ambulance service on active standby for casualty response.',
       });
-      if (event.classification === 'hostile' && event.threat === 'high') {
+      if (event.classification === 'hostile' && event.threat === 'high' && _siteAllowsAction(event, 'region-triage-prep')) {
         ctas.push({
           label: 'Casualty triage prep', sub: 'Regional hospitals', icon: '🏥', tone: 'danger',
           action: 'region-triage-prep',
@@ -14797,6 +16624,15 @@ async function main() {
         label: 'Respond to operator', sub: 'Send back to source', icon: '↩', tone: 'neutral',
         action: 'respond-open', esc: rec.id,
         tooltip: 'Opens the response composer. Reply is delivered to the operator inbox.',
+      });
+      // Explicit status update — freeform advancement of progressStatus
+      // + optional blocked-reason. Auto-advance from physical-response
+      // CTAs covers the common "in-progress" path; this CTA covers the
+      // resolve, blocked, and any freeform re-set path the receiver needs.
+      ctas.push({
+        label: 'Update status', sub: 'In progress · Resolved · Blocked', icon: '⇄', tone: 'neutral',
+        action: 'update-status', esc: rec.id,
+        tooltip: 'Sets the progress state on this case. Blocked requires a reason. Visible in the operator log.',
       });
     }
     ctas.push({
@@ -14918,17 +16754,23 @@ async function main() {
     }).join('');
 
     return `
-      <div class="rcv-parent-landing" style="padding: var(--space-6); max-width: 1200px; margin: 0 auto;">
+      <div class="rcv-parent-landing" style="padding: var(--space-6) var(--space-6) var(--space-8); max-width: 1200px; margin: 0 auto; height: 100%; overflow-y: auto; box-sizing: border-box;">
         <div style="margin-bottom: var(--space-5);">
           <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.14em; color: var(--text-dim); font-size: var(--fs-2xs);">Logged in as</div>
           <h1 style="font-size: var(--fs-2xl); color: var(--text); margin: var(--space-1) 0 var(--space-2); font-weight: 600;">${role.label}</h1>
           <p style="color: var(--text-dim); font-size: var(--fs-sm); line-height: 1.55; max-width: 720px;">${role.description || 'Select a sub-unit to drill in.'}</p>
+          <div class="c-label" style="margin-top: var(--space-2); color: var(--text-dim); font-size: var(--fs-2xs); letter-spacing: 0.1em;">${children.length} SUB-UNIT${children.length === 1 ? '' : 'S'}</div>
         </div>
         <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--space-3);">
           ${tiles}
         </div>
       </div>
       <style>
+        .rcv-parent-landing { scrollbar-width: thin; scrollbar-color: rgba(180,200,220,0.2) transparent; }
+        .rcv-parent-landing::-webkit-scrollbar { width: 8px; }
+        .rcv-parent-landing::-webkit-scrollbar-track { background: transparent; }
+        .rcv-parent-landing::-webkit-scrollbar-thumb { background: rgba(180,200,220,0.2); border-radius: 4px; }
+        .rcv-parent-landing::-webkit-scrollbar-thumb:hover { background: rgba(180,200,220,0.35); }
         .rcv-parent-tile:hover { border-color: var(--accent) !important; background: rgba(77, 210, 255, 0.04) !important; }
       </style>
     `;
@@ -15152,7 +16994,13 @@ async function main() {
       _workspaceEventId = null;   // event vanished, fall through to inbox
     }
 
-    const selectedEv = _selectedReceiverEventId ? receivedEvents.find(e => e.id === _selectedReceiverEventId) : null;
+    // Legacy inbox split-view (event card → detail pane on the right)
+    // was retired 2026-09-05. Card clicks now emit `open-report` and
+    // jump straight to the Mission Console workspace via the receiver-
+    // action dispatcher. `_selectedReceiverEventId` is kept as null to
+    // preserve back-compat for any handlers that use it as a fallback,
+    // but nothing sets it anymore. `selectedEv` therefore always null.
+    const selectedEv = null;
     // Filter to escalations addressed to THIS role
     const roleDestSet = new Set(role.destinationIds);
 
@@ -15192,6 +17040,40 @@ async function main() {
         </div>
       </div>`).join('') : '';
 
+    // Standing-by hero — full-viewport empty state when no events are
+    // dispatched to this desk. Promotes any projected-threat advisories
+    // into large cards so a receiver duty officer has a proper
+    // situational picture instead of a lonely "no events" line floating
+    // in black space. Replaces the compact advisoryStrip in the body
+    // when receivedEvents.length === 0.
+    const advisoryHeroCards = advisories.length ? advisories.map(({ ev, impact, originName }) => `
+      <div class="rcv-adv-hero-card" data-rcv="advisory-view" data-id="${ev.id}">
+        <div class="rcv-adv-hero-tag">Projected Threat · Advisory</div>
+        <div class="rcv-adv-hero-headline">${originName} → ${impact.name}</div>
+        <div class="rcv-adv-hero-grid">
+          <div><div class="rcv-adv-hero-k">Track</div><div class="rcv-adv-hero-v mono">${ev.id}</div></div>
+          <div><div class="rcv-adv-hero-k">ETA</div><div class="rcv-adv-hero-v strong">${impact.etaMin} min</div></div>
+          <div><div class="rcv-adv-hero-k">Distance</div><div class="rcv-adv-hero-v">${impact.distanceKm} km</div></div>
+          <div><div class="rcv-adv-hero-k">Class</div><div class="rcv-adv-hero-v">${(ev.classification || 'unknown').toUpperCase()}</div></div>
+        </div>
+        <div class="rcv-adv-hero-cta">Click to open cross-cued advisory →</div>
+      </div>`).join('') : '';
+
+    const standbyHero = `
+      <div class="rcv-standby-hero">
+        <div class="rcv-standby-status">
+          <div class="rcv-standby-dot"></div>
+          <div class="rcv-standby-label">Standing by</div>
+        </div>
+        <div class="rcv-standby-subtitle">No incidents currently dispatched to ${role.label}. Your desk is monitoring ${role.scope === 'all-sites' ? 'all sites nationally' : role.scope === 'cph-only' ? 'CPH Airport' : role.scope === 'esbjerg-only' ? 'Esbjerg Harbour' : role.scope}.</div>
+        ${advisories.length ? `
+          <div class="rcv-standby-adv-hdr">Cross-cued advisories · ${advisories.length}</div>
+          <div class="rcv-standby-adv-list">${advisoryHeroCards}</div>
+        ` : `
+          <div class="rcv-standby-empty-adv">No projected-threat advisories at monitored sites.</div>
+        `}
+      </div>`;
+
     const list = receivedEvents.length ? receivedEvents.map(e => {
       const rec = e.escalations.find(r => roleDestSet.has(r.destinationId));
       const isActive = e.status === 'active';
@@ -15205,40 +17087,18 @@ async function main() {
           </div>
           <div class="rcv-card-drone">${e.droneType}</div>
           <div class="rcv-card-meta">${e.id}  ·  ${SITES[e.siteId]?.name || e.siteId}</div>
-          <div class="rcv-card-status">Dispatched: <b>${rec.statusHistory[0].timestamp.slice(11,19)}Z</b>  ·  Status: <b>${(rec.status || '').toUpperCase()}</b></div>
+          <div class="rcv-card-status">Dispatched: <b>${rec.statusHistory[0].timestamp.slice(11,19)}Z</b>  ·  Status: <b>${(rec.status || '').toUpperCase()}</b>${rec.overdue ? '<span class="rcv-card-overdue" style="display:inline-flex;align-items:center;padding:1px 6px;margin-left:8px;background:rgba(255,120,120,0.14);border:1px solid rgba(255,120,120,0.55);border-radius:10px;font-size:var(--fs-2xs);letter-spacing:0.14em;color:#ff7878;font-family:var(--font-mono);">OVERDUE</span>' : ''}${_renderProgressBadge(rec)}</div>
           <div class="rcv-card-actions">
             <button class="c-btn compact" data-rcv="open-map" data-id="${e.id}" title="Skip to Live Map">Open on map →</button>
           </div>
         </div>`;
     }).join('') : `<div class="rcv-empty">No events currently dispatched to ${role.label}.</div>`;
 
-    const selectedRec = selectedEv ? selectedEv.escalations.find(r => roleDestSet.has(r.destinationId)) : null;
-    const isResponding = _respondingEscId === (selectedRec && selectedRec.id);
-    const detail = selectedEv ? `
-      <div class="rcv-detail-hdr">
-        <div class="rcv-detail-title">Incoming intelligence</div>
-        <div class="rcv-detail-actions">
-          ${selectedRec.status !== 'acknowledged' ? `<button class="btn primary" data-rcv="ack" data-esc="${selectedRec.id}">Acknowledge</button>` : `<span class="rcv-acked">Acknowledged at ${selectedRec.statusHistory.filter(h => h.status === 'acknowledged')[0]?.timestamp.slice(11,19) || ''}Z</span>`}
-          <button class="btn" data-rcv="respond-open" data-esc="${selectedRec.id}">Send response</button>
-        </div>
-      </div>
-      ${isResponding ? `
-        <div class="rcv-respond">
-          <textarea id="rcv-response-text" rows="3" placeholder="Response to operator..."></textarea>
-          <div class="rcv-respond-actions">
-            <button class="btn" data-rcv="respond-cancel">Cancel</button>
-            <button class="btn primary" data-rcv="respond-send" data-esc="${selectedRec.id}">Send response</button>
-          </div>
-        </div>` : ''}
-      ${selectedRec.response ? `
-        <div class="rcv-response-sent">
-          <div class="rcv-response-hdr">Your response sent ${selectedRec.response.receivedAt.slice(11,19)}Z</div>
-          <div class="rcv-response-text">${selectedRec.response.text}</div>
-        </div>` : ''}
-      <div class="rcv-brief-wrap">${renderDetectionBrief(selectedEv)}</div>
-    ` : `<div class="rcv-empty rcv-empty-detail">Select an incoming event on the left to view the detection brief.</div>`;
-
-    const overlay = selectedEv ? renderResponseOverlay(selectedEv) : '';
+    // Detail-pane + response-overlay construction removed 2026-09-05.
+    // Both were gated on `selectedEv` (i.e. `_selectedReceiverEventId`)
+    // which was only ever set by the retired `pick` action. Inbox is
+    // now a single-column list; card click emits `open-report` and
+    // jumps straight to the workspace. See receiver-UI audit note.
 
     // P94 memoization guard for inbox mode
     const sig = _receiverViewSignature(role, null, _selectedReceiverEventId, receivedEvents);
@@ -15253,19 +17113,25 @@ async function main() {
       ? `<button class="rcv-list-back" data-rcv="role-back-parent" title="Back to ${parentRole.org || parentRole.label}">← ${parentRole.org || parentRole.label}</button>`
       : '';
 
+    // When events ARE dispatched: keep the compact advisory strip
+    // at the top of the inbox so the operator can scan cards below.
+    // When NOT dispatched: swap the whole body for the full-viewport
+    // standby hero (fills the black void the compact layout used to
+    // leave behind).
+    const bodyContent = receivedEvents.length
+      ? `${advisoryStrip}<div class="rcv-list-body">${list}</div>`
+      : standbyHero;
+
     receiverView.innerHTML = `
-      <aside class="rcv-list ${selectedEv ? '' : 'rcv-list--full'}">
+      <aside class="rcv-list rcv-list--full">
         <div class="rcv-list-hdr">
           ${parentBackBtn}
           <span class="rcv-list-title">Inbox</span>
           <span class="rcv-list-count">${receivedEvents.length}</span>
         </div>
         <div class="rcv-list-scope">${role.label} · Scope: ${role.scope === 'all-sites' ? 'All sites, Denmark' : role.scope === 'cph-only' ? 'CPH Airport only' : role.scope === 'esbjerg-only' ? 'Esbjerg Harbour only' : role.scope}</div>
-        ${advisoryStrip}
-        <div class="rcv-list-body">${list}</div>
+        ${bodyContent}
       </aside>
-      ${selectedEv ? `<main class="rcv-detail">${detail}</main>` : ''}
-      ${overlay}
     `;
 
     receiverView.style.display = 'flex';
@@ -15313,8 +17179,9 @@ async function main() {
       // Invalidate ONLY the console sig — full workspace mount stays
       // stable so center pane Mistral output is preserved.
       _lastConsoleSig = null;
-      if (action === 'pick') { _selectedReceiverEventId = id; _respondingEscId = null; renderReceiverView(); }
-      else if (action === 'ack') {
+      // `pick` action retired 2026-09-05 — inbox split-view is gone.
+      // Card click now emits `open-report` and routes to workspace.
+      if (action === 'ack') {
         // Event id resolution priority: button dataset (workspace case-
         // file), then workspace event, then legacy inbox selection.
         // Previously only used _selectedReceiverEventId, so acks fired
@@ -15355,6 +17222,18 @@ async function main() {
         toast(`Outcome confirmed: ${outcomeDef?.label || outcomeId}`, 'ok');
         _lastConsoleSig = null;   // console-only re-render so Step 5 unlocks
         renderReceiverView({ immediate: true });
+        // Feedback log: log the outcome-confirm decision + retro-fill
+        // any earlier-logged entries for this event with the resolved
+        // outcome status/label. Non-blocking.
+        try {
+          logOperatorDecision({
+            event: ev,
+            action: 'confirm-outcome',
+            actionDetail: { dispatchId, outcomeId, outcomeLabel: outcomeDef?.label || outcomeId, notes: notesEl?.value || '' },
+            actorRole: getActiveRole()?.id || 'unknown',
+          });
+          updateFeedbackOutcome(ev.id, outcomeId, outcomeDef?.label || outcomeId);
+        } catch (err) { console.warn('[feedback_log] confirm-outcome log failed:', err.message); }
       }
       else if (action === 'counter-dispatch') {
         // Level 3 counter-response dispatch. Uses the current event's
@@ -15378,6 +17257,21 @@ async function main() {
         const unitsSelect = document.querySelector(`[data-units-for="${assetId}"]`);
         const units = unitsSelect ? Math.max(1, parseInt(unitsSelect.value, 10) || 1) : 1;
         dispatchCounterResponse(id, asset, units > 1 ? { swarmSize: units } : {});
+        // Feedback log: record the operator decision + snapshot the
+        // agent recommendation live at the moment of action. Non-blocking.
+        try {
+          logOperatorDecision({
+            event: ev,
+            action: 'counter-dispatch',
+            actionDetail: { assetId, assetName: asset.name, assetKind: asset.kind, units },
+            recommendationSnapshot: (() => {
+              const live = _mistralResultCache.get(ev.id);
+              return live ? { source: 'agent_case_file', body: live.body, recommendation: live.recommendation, model_version: live.model_version }
+                          : null;
+            })(),
+            actorRole: getActiveRole()?.id || 'unknown',
+          });
+        } catch (err) { console.warn('[feedback_log] counter-dispatch log failed:', err.message); }
       }
       else if (action === 'cascade-fe-pet') {
         // Receiver-initiated cascade to FE + PET tier-3 destinations.
@@ -15388,7 +17282,7 @@ async function main() {
         const eventId = _selectedReceiverEventId || _workspaceEventId;
         const ev = getEvent(eventId);
         if (!ev) { toast('Event not found', 'err'); return; }
-        const dests = destinationsForSite(ev.siteId);
+        const dests = destinationsForEvent(ev);
         const targetIds = dests.filter(d => d.tier === 3 && (destinationParent(d) === 'FE' || destinationParent(d) === 'PET')).map(d => d.id);
         if (!targetIds.length) { toast('No FE/PET destinations configured for this site', 'err'); return; }
         const role = getActiveRole();
@@ -15408,7 +17302,7 @@ async function main() {
         const eventId = _selectedReceiverEventId || _workspaceEventId;
         const ev = getEvent(eventId);
         if (!ev) { toast('Event not found', 'err'); return; }
-        const dests = destinationsForSite(ev.siteId);
+        const dests = destinationsForEvent(ev);
         const politiIds = dests.filter(d => d.tier === 2 && destinationParent(d) === 'Politi').map(d => d.id);
         if (!politiIds.length) { toast('No local Politi destination configured', 'err'); return; }
         const role = getActiveRole();
@@ -15422,42 +17316,63 @@ async function main() {
         else toast(`Cascaded to local Politikreds (${dests.find(d => d.id === politiIds[0])?.name || 'Politi'})`, 'ok');
         renderReceiverView();
       }
-      // Phase 2 role-scoped CTA stubs. These fire the appropriate
-      // notification/audit record but the actual dispatch pipeline
-      // (real patrol dispatch, real NOTAM push, real Ambulance service
-      // integration) is wired in Phase 3+. For now they toast + log an
-      // interaction record so the operator sees the action land.
-      else if (
-        action === 'deploy-patrol' || action === 'set-cordon' || action === 'request-aks'
-        || action === 'brs-standby' || action === 'brs-deploy'
-        || action === 'army-c-uas' || action === 'army-ground'
-        || action === 'intel-log'
-        || action === 'issue-notam' || action === 'restrict-airspace' || action === 'issue-maritime-advisory'
-        || action === 'kom-crisis' || action === 'kom-shelter'
-        || action === 'hjv-reinforce'
-        || action === 'region-ambulance-standby' || action === 'region-triage-prep'
-      ) {
+      // Phase 2 role-scoped CTA stubs. Routing changed 2026-09-06:
+      // the audit-log push moved into the dispatch adapter layer
+      // (`src/dispatch_source.js` + `src/adapters/dispatch_mock.js`).
+      // The mock adapter preserves the pre-adapter push shape
+      // byte-for-byte, so behavior is unchanged today. Real customer
+      // adapters (Politi Kbh, BRS, Trafikstyrelsen, etc.) register
+      // per-receiver-role via `registerDispatchAdapter(roleId, adapter)`
+      // and route to their real internal dispatch APIs when they
+      // land. Contract at dispatch_source.js.
+      //
+      // Toast + view re-render stay inline (UI concerns, not adapter
+      // concerns). Adapter is transport-only.
+      else if (STUB_DISPATCH_ACTIONS.has(action)) {
         const eventId = id || _selectedReceiverEventId || _workspaceEventId;
         const ev = getEvent(eventId);
         if (!ev) { toast('Event not found', 'err'); return; }
         const role = getActiveRole();
-        const roleId = role?.id || 'unknown';
-        // Record the action to the event's interaction audit trail so
-        // it shows up in the audit journal + PDF export.
-        if (!Array.isArray(ev.interactions)) ev.interactions = [];
-        ev.interactions.push({
-          id: `ACT-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-          timestamp: new Date().toISOString(),
-          flow: 'action-dispatched',
-          from_role_id: roleId,
-          to_role_id: 'response-pipeline',
-          payload: { action, event_id: eventId },
-          ackStatus: 'pending',
-          ackedAt: null,
-          ackedBy: null,
-        });
-        toast(`${action.replace(/-/g, ' ')} · logged. Live dispatch pipeline wires in Phase 3.`, 'info');
-        renderReceiverView();
+        const adapter = getDispatchAdapter(role?.id) || getDispatchAdapter(DEFAULT_DISPATCH_ADAPTER_KEY);
+        if (!adapter) {
+          console.warn('[dispatch] no adapter registered (mock should be default) — action dropped:', action);
+          toast('Dispatch adapter unavailable', 'err');
+          return;
+        }
+        // Auto-advance progressStatus on the receiver's own escalation
+        // record. The click IS the decision — flip the state immediately
+        // rather than waiting on the adapter round-trip. Idempotent for
+        // subsequent physical-response CTAs on the same case (stays at
+        // in-progress until receiver explicitly resolves/blocks).
+        try {
+          const roleDestSet = new Set(role?.destinationIds || []);
+          const myRec = (ev.escalations || []).find(r => roleDestSet.has(r.destinationId));
+          if (myRec && myRec.progressStatus !== 'resolved') {
+            updateEscalationProgress(eventId, myRec.id, 'in-progress', {
+              reason: null,
+              by: role?.id || 'receiver',
+            });
+          }
+        } catch (err) { console.warn('[progress] auto-advance failed:', err.message); }
+        // Fire and forget — the adapter pushes to event.interactions
+        // itself. The .then chain surfaces adapter errors to the
+        // operator via toast without blocking the click. Real adapters
+        // that make network calls resolve after their HTTP round-trip;
+        // the mock resolves synchronously in a microtask.
+        adapter.dispatch({ action, event: ev, actorRole: role, actionDetail: {} })
+          .then((result) => {
+            if (result?.status === 'rejected' || result?.status === 'error') {
+              toast(`${action.replace(/-/g, ' ')} · ${result.status} · ${result.notes || 'no details'}`, 'warn');
+            } else {
+              toast(`${action.replace(/-/g, ' ')} · logged. Live dispatch pipeline wires in Phase 3.`, 'info');
+            }
+            renderReceiverView();
+          })
+          .catch((err) => {
+            console.warn('[dispatch] adapter threw:', err);
+            toast(`${action.replace(/-/g, ' ')} · dispatch failed · ${err.message || 'unknown error'}`, 'err');
+            renderReceiverView();
+          });
       }
       else if (action === 'add-note') {
         const eventId = id || _selectedReceiverEventId || _workspaceEventId;
@@ -15488,8 +17403,120 @@ async function main() {
         _lastConsoleSig = null;
         renderReceiverView({ immediate: true });
       }
+      else if (action === 'observer-revoke') {
+        const eventId = id || _selectedReceiverEventId || _workspaceEventId;
+        const targetRoleId = el.dataset.role;
+        const ev = getEvent(eventId);
+        const activeRoleId = getActiveRole()?.id;
+        if (!ev || !targetRoleId || !activeRoleId) return;
+        // Defense-in-depth: same authorization check the × visibility used.
+        if (!_canRevokeParticipant(ev, activeRoleId, targetRoleId)) {
+          toast('You cannot revoke this participant.', 'err');
+          return;
+        }
+        const removed = revokeParticipant(eventId, targetRoleId, {
+          revokedBy: activeRoleId,
+          reason: activeRoleId === targetRoleId ? 'self-leave' : 'manual-revoke',
+        });
+        if (!removed) return;
+        // Notify the removed party unless they revoked themselves.
+        if (activeRoleId !== targetRoleId) {
+          const targetLabel = RECEIVERS.find(r => r.id === targetRoleId)?.org || targetRoleId;
+          pushNotification(targetRoleId, {
+            kind: 'observer-revoked',
+            event_id: eventId,
+            priority: 'info',
+            payload: {
+              revokedBy: activeRoleId,
+              toast: `You have been removed from ${ev.droneType || 'event'} at ${SITES[ev.siteId]?.name || ev.siteId}.`,
+            },
+          });
+          toast(`Removed ${targetLabel} from event.`, 'ok');
+        } else {
+          toast('You left the case.', 'ok');
+        }
+        _lastConsoleSig = null;
+        _lastReceiverViewSig = null;
+        renderReceiverView({ immediate: true });
+      }
       else if (action === 'dispatch-postinc') { dispatchPostIncident(id, el.dataset.dest); renderReceiverView(); }
-      else if (action === 'close-event') { closePostIncidentEvent(id); renderReceiverView(); }
+      else if (action === 'chain-handoff') {
+        const eventId = id;
+        const chainId = el.dataset.chain;
+        const ev = getEvent(eventId);
+        if (!ev || !chainId) return;
+        // Build the picker list: post-incident responders not yet used
+        // ANYWHERE in the chain (open or resolved) so the operator can't
+        // hand off to a destination already engaged. Handoff to a fresh
+        // responder is the intended flow.
+        const responders = postIncidentResponders(ev.siteId);
+        const inChain = new Set((ev.postIncidentChain || []).map(c => c.destId));
+        const eligible = responders.filter(r => !inChain.has(r.id));
+        if (!eligible.length) { toast('No fresh handoff targets remaining.', 'warn'); return; }
+        const listStr = eligible.map((r, i) => `${i + 1}. ${r.name}`).join('\n');
+        const raw = window.prompt(`Hand off to (enter number):\n${listStr}`);
+        if (!raw) return;
+        const idx = parseInt(raw.trim(), 10) - 1;
+        const target = eligible[idx];
+        if (!target) { toast('Invalid selection.', 'err'); return; }
+        const entry = handoffPostIncidentChain(eventId, chainId, target.id, getActiveRole()?.id || 'operator');
+        if (!entry) { toast('Handoff failed.', 'err'); return; }
+        toast(`Handed off to ${target.name}.`, 'ok');
+        renderReceiverView({ immediate: true });
+      }
+      else if (action === 'chain-resolve') {
+        const eventId = id;
+        const chainId = el.dataset.chain;
+        if (!eventId || !chainId) return;
+        const entry = resolvePostIncidentChainEntry(eventId, chainId, getActiveRole()?.id || 'operator');
+        if (!entry) { toast('Resolve failed.', 'err'); return; }
+        toast('Chain entry marked resolved.', 'ok');
+        renderReceiverView({ immediate: true });
+      }
+      else if (action === 'close-event') {
+        const ev = getEvent(id);
+        closePostIncidentEvent(id);
+        renderReceiverView();
+        // Feedback log: closing an event is a load-bearing operator
+        // decision. Snapshot the recommendation state at close and
+        // retro-fill any prior entries with the final outcome.
+        try {
+          if (ev) {
+            const finalOutcome = ev.outcome || 'closed';
+            const finalLabel = ev.dispatchOutcomes ? Object.values(ev.dispatchOutcomes)[0]?.outcomeLabel || null : null;
+            logOperatorDecision({
+              event: ev,
+              action: 'close-event',
+              actionDetail: { finalOutcome, finalLabel },
+              actorRole: getActiveRole()?.id || 'unknown',
+            });
+            updateFeedbackOutcome(ev.id, finalOutcome, finalLabel);
+          }
+        } catch (err) { console.warn('[feedback_log] close-event log failed:', err.message); }
+      }
+      else if (action === 'update-status') {
+        const eventId = _workspaceEventId || _selectedReceiverEventId || id;
+        if (!eventId || !escId) { toast('No escalation context for status update', 'err'); return; }
+        const choice = (window.prompt('Set progress status — enter one: in-progress | resolved | blocked') || '').trim().toLowerCase();
+        if (!['in-progress', 'resolved', 'blocked'].includes(choice)) {
+          if (choice) toast('Invalid status. Use in-progress, resolved, or blocked.', 'err');
+          return;
+        }
+        let reason = null;
+        if (choice === 'blocked') {
+          reason = (window.prompt('Blocked reason (required):') || '').trim();
+          if (!reason) { toast('Blocked reason is required.', 'err'); return; }
+        }
+        const rec = updateEscalationProgress(eventId, escId, choice, {
+          reason,
+          by: getActiveRole()?.id || 'receiver',
+        });
+        if (!rec) { toast('Update failed.', 'err'); return; }
+        toast(`Status set to ${choice.toUpperCase()}${reason ? ' · ' + reason : ''}`, 'ok');
+        _lastConsoleSig = null;
+        _lastReceiverViewSig = null;
+        renderReceiverView({ immediate: true });
+      }
       else if (action === 'respond-open') {
         // Composer lives in the center pane → needs full mount, not
         // just console re-render.
@@ -15506,7 +17533,14 @@ async function main() {
       else if (action === 'respond-send') {
         const txt = document.getElementById('rcv-response-text').value;
         if (!txt.trim()) { toast('Response cannot be empty', 'err'); return; }
-        respondToEscalation(_selectedReceiverEventId, escId, txt, `${getActiveRole().person} (${getActiveRole().org})`);
+        // Event-id resolution: workspace context first (the reachable
+        // flow via CTA-rail respond-open), legacy inbox selection
+        // second. Before the inbox flow was retired the legacy path
+        // was primary; kept as a defensive fallback in case any code
+        // path re-introduces _selectedReceiverEventId.
+        const evtId = _workspaceEventId || _selectedReceiverEventId;
+        if (!evtId) { toast('No event context for response', 'err'); return; }
+        respondToEscalation(evtId, escId, txt, `${getActiveRole().person} (${getActiveRole().org})`);
         _respondingEscId = null;
         toast('Response sent to operator', 'ok');
         _lastReceiverViewSig = null;
@@ -15592,7 +17626,60 @@ async function main() {
   onSelectionChange(() => { if (getActiveRole().kind === 'receiver') renderReceiverView(); });
   updateOperatorChip();
 
-  console.log('ISR C2 Platform initialized.');
+  // Manual data-clear helper. Nothing gets auto-deleted from ISR
+  // storage per Lucas's rule — event evidence is preserved forever
+  // unless explicitly wiped. Call this from DevTools when you actually
+  // want to free space:
+  //
+  //   await window.__isr_clearAllSimData()          → clear everything
+  //   await window.__isr_clearAllSimData('recordings') → only IDB trajectory recordings
+  //   await window.__isr_clearAllSimData('caches')     → only agentic localStorage caches
+  //
+  // Async now that trajectory recordings live in IndexedDB.
+  window.__isr_clearAllSimData = async (scope = 'all') => {
+    let idbCleared = 0;
+    if (scope === 'all' || scope === 'recordings') {
+      try {
+        const ids = await _idbListRecordingIds();
+        idbCleared = ids.length;
+        await _idbClearAll();
+        _loadedRecordings.clear();
+      } catch (_) { /* swallow */ }
+    }
+    const prefixes = [];
+    if (scope === 'all' || scope === 'recordings') prefixes.push('isr_trajectory_');   // legacy localStorage
+    if (scope === 'all' || scope === 'caches') prefixes.push('isr:');
+    const toRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && prefixes.some(p => k.startsWith(p))) toRemove.push(k);
+    }
+    toRemove.forEach(k => localStorage.removeItem(k));
+    console.log(`[__isr_clearAllSimData] cleared ${idbCleared} IDB recording(s) + ${toRemove.length} localStorage entries (scope=${scope}). Reload the page to reset in-memory state.`);
+    return { idbCleared, localStorageCleared: toRemove.length };
+  };
+
+  // Boot-time: migrate any legacy localStorage trajectory entries into
+  // IndexedDB, then pre-load every IDB recording into the in-memory
+  // cache so sync __isr_getRecording() calls resolve immediately for
+  // events surfaced in the initial UI render (closed panel, PDF, etc).
+  // Non-blocking failure: if IDB is unavailable, sync callers just get
+  // null and the async ensureRecording path becomes a no-op.
+  try {
+    await _idbMigrateFromLocalStorage(_P5A_STORAGE_PREFIX);
+    const ids = await _idbListRecordingIds();
+    await Promise.all(ids.map(async (id) => {
+      try {
+        const rec = await _idbLoadRecording(id);
+        if (rec) _loadedRecordings.set(id, rec);
+      } catch (_) { /* swallow per-recording */ }
+    }));
+    if (ids.length) console.log(`[recording_store] pre-loaded ${ids.length} recording(s) into in-memory cache`);
+  } catch (err) {
+    console.warn('[recording_store] boot-time migration/preload failed — sync recording reads may miss until first async ensureRecording call.', err);
+  }
+
+  console.log('ISR C2 Platform initialized. To wipe stored sim data: await window.__isr_clearAllSimData()');
 }
 
 main().catch((err) => console.error('Fatal error:', err));

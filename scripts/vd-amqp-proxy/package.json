@@ -1,0 +1,20 @@
+{
+  "name": "isr-vd-amqp-proxy",
+  "version": "0.1.0",
+  "description": "Vejdirektoratet Dataudveksleren AMQP subscriber -> WebSocket proxy. Consumes DATEX II Situation records over Azure Service Bus and rebroadcasts to browser C2 clients.",
+  "private": true,
+  "main": "server.js",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "ws": "^8.18.0",
+    "@azure/service-bus": "^7.9.5",
+    "@azure/identity": "^4.5.0"
+  }
+}

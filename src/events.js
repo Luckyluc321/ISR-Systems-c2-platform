@@ -10,6 +10,7 @@
 // surfaces populated in parallel — swap consumers to event.subject at your
 // own pace. New agents MUST read event.subject.
 import { syncEventSubject, applyNnTickToSubject } from './detection_subject.js';
+import { SITES } from './sites.js';
 
 export const EVENTS = [
   // ── Recently closed hostile (was live, exited 10 min ago) ──
@@ -201,6 +202,48 @@ export function addEvent(event) {
   if (!(event.participants instanceof Map)) event.participants = new Map();
   event.interactions = event.interactions || [];
   event.routingHistory = event.routingHistory || [];
+  // Agentic preprocessing fields (FIX-2 per architecture review 2026-08-30).
+  // narrativeCache: Agent B output (body + recommendation + model_version
+  //   + at + signalHash). Written by mistral.js onDone. Persisted to
+  //   localStorage per FIX-1. Reads through main.js rehydrate helper.
+  // _preprocessed: Trajectory Signal Extractor output (signals +
+  //   signalHash + computedAt). Written by preprocessing.js on debrief
+  //   open. Persisted to localStorage per FIX-3.
+  // Explicit null (not undefined) so downstream readers can differentiate
+  // "no narrative yet" from "field missing entirely."
+  event.narrativeCache = event.narrativeCache || null;
+  event._preprocessed = event._preprocessed || null;
+  // Geo-context enrichment (opt-in). Only populated if the sovereign geo
+  // routing module has been primed. Coord resolution priority:
+  //   1. event.entry.{lat,lon}         (from threat template spawn)
+  //   2. event.lastPosition.{lat,lon}  (updated by tick loop)
+  //   3. SITES[event.siteId].coordinates.{lat,lon} (site centroid fallback)
+  // Never blocks event creation. Additive metadata that debrief/narrative
+  // /UI can display: "This incident is in Billund Kommune, Sydøstjyllands
+  // Politikreds, Region Syddanmark". Non-authoritative — hand-configured
+  // destinationsForSite() remains the source of truth for actual routing.
+  if (event.geoContext === undefined) event.geoContext = null;
+  // Domain scope (Phase A of the event-transmission-relevance work).
+  // Every event carries the set of operational domains it's relevant to.
+  // Destinations declare which domains they care about; destinationsForEvent
+  // (destinations.js) applies the intersection so inland events don't
+  // route to Kystvagten but a drone that crosses the coastline does.
+  if (!Array.isArray(event.domainScope) || !event.domainScope.length) {
+    event.domainScope = _computeInitialDomainScope(event);
+  }
+  try {
+    const resolver = (typeof window !== 'undefined' && window.__isr_geo_routing) ? window.__isr_geo_routing : null;
+    const stats = resolver?.stats?.();
+    if (resolver && stats?.primed) {
+      const siteCoords = SITES[event.siteId]?.coordinates;
+      const lat = event.entry?.lat ?? event.lastPosition?.lat ?? siteCoords?.lat;
+      const lon = event.entry?.lon ?? event.lastPosition?.lon ?? siteCoords?.lon;
+      if (lat != null && lon != null) {
+        const geo = resolver.forPoint(lat, lon);
+        if (geo?.admins) event.geoContext = { ...geo.admins, receiverIds: geo.ids || [], resolvedAt: new Date().toISOString(), resolvedFrom: event.entry?.lat != null ? 'entry' : event.lastPosition?.lat != null ? 'lastPosition' : 'site-centroid' };
+      }
+    }
+  } catch (err) { console.warn('[events] geoContext enrichment failed:', err.message); }
   syncEventSubject(event);   // canonical DetectionSubject attached here
   EVENTS.push(event);
   _listeners.forEach(fn => fn(event.id));
@@ -246,6 +289,12 @@ export function closeEvent(id, exitPoint) {
 EVENTS.forEach(e => {
   e.escalations = e.escalations || [];
   syncEventSubject(e);
+  // domainScope backfill for seed events. addEvent handles this for
+  // dynamically-spawned events; the seed EVENTS constant array is
+  // declared inline above and misses the addEvent path.
+  if (!Array.isArray(e.domainScope) || !e.domainScope.length) {
+    e.domainScope = _computeInitialDomainScope(e);
+  }
 });
 
 // ── Escalation (mock UX, real dispatchers replace later) ──
@@ -277,6 +326,18 @@ export function escalateEvent(id, { destinationIds, payload, message, operator =
       status: 'sent',
       statusHistory: [{ timestamp: now.toISOString(), status: 'sent' }],
       response: null,
+      // Delivery-axis vs. progress-axis are orthogonal. `status` above tracks
+      // sent → delivered → read → acknowledged (arrival). `progressStatus`
+      // tracks what the receiver is DOING with the case after acknowledgement:
+      // in-progress | resolved | blocked. Both persist independently.
+      progressStatus: null,
+      blockedReason: null,
+      progressHistory: [],
+      // SLA overdue flag. Flipped by rules.js sla sweep when the record has
+      // not reached 'acknowledged' within the tier's SLA window. Detection-only:
+      // never triggers an auto-cascade — surfaces a visual badge + operator toast.
+      overdue: false,
+      overdueAt: null,
     };
     return rec;
   });
@@ -301,6 +362,153 @@ export function updateEscalationStatus(eventId, escalationId, status) {
   rec.status = status;
   rec.statusHistory.push({ timestamp: new Date().toISOString(), status });
   _listeners.forEach(fn => fn(eventId));
+}
+
+// Structured status extension (post-ack progress axis).
+// Values: 'in-progress' | 'resolved' | 'blocked'. blockedReason required when
+// progressStatus is 'blocked' (freeform string). Auto-advanced when a receiver
+// dispatches a physical response CTA; also settable via explicit "Update status"
+// action for freeform state changes. Detection-only: nothing here feeds back
+// into agent prompts or triggers auto-cascade.
+export function updateEscalationProgress(eventId, escalationId, progressStatus, { reason = null, by = 'unknown' } = {}) {
+  const e = EVENTS.find(x => x.id === eventId);
+  if (!e || !e.escalations) return null;
+  const rec = e.escalations.find(r => r.id === escalationId);
+  if (!rec) return null;
+  const allowed = ['in-progress', 'resolved', 'blocked'];
+  if (!allowed.includes(progressStatus)) return null;
+  rec.progressStatus = progressStatus;
+  rec.blockedReason = progressStatus === 'blocked' ? (reason || '').trim() || 'no reason given' : null;
+  if (!Array.isArray(rec.progressHistory)) rec.progressHistory = [];
+  rec.progressHistory.push({
+    timestamp: new Date().toISOString(),
+    progressStatus,
+    reason: rec.blockedReason,
+    by,
+  });
+  _listeners.forEach(fn => fn(eventId));
+  return rec;
+}
+
+// SLA overdue flag. Idempotent. Called by rules.js sweep when a non-ack'd
+// escalation crosses its tier SLA window. Emits a browser CustomEvent so
+// main.js can surface a one-shot operator toast without importing rules.
+export function setEscalationOverdue(eventId, escalationId) {
+  const e = EVENTS.find(x => x.id === eventId);
+  if (!e || !e.escalations) return null;
+  const rec = e.escalations.find(r => r.id === escalationId);
+  if (!rec || rec.overdue) return null;
+  rec.overdue = true;
+  rec.overdueAt = new Date().toISOString();
+  e.notes = e.notes || [];
+  e.notes.push({
+    timestamp: rec.overdueAt,
+    author: 'SLA sweep',
+    text: `Escalation ${rec.id} to ${rec.destinationId} passed its SLA window without acknowledgement. No auto-cascade fired — operator judgement required.`,
+    type: 'sla-overdue',
+  });
+  _listeners.forEach(fn => fn(eventId));
+  try {
+    if (typeof window !== 'undefined' && typeof CustomEvent === 'function') {
+      window.dispatchEvent(new CustomEvent('escalation-overdue', {
+        detail: { eventId, escalationId, destinationId: rec.destinationId },
+      }));
+    }
+  } catch (_) { /* non-browser or CSP blocks event dispatch */ }
+  return rec;
+}
+
+// Observer revoke. Removes a role from event.participants. Caller enforces
+// authorization: original operator + admin can revoke anyone; a role can
+// revoke observers they added themselves. Returns the removed entry (with
+// roleId attached) or null when the participant was not present.
+export function revokeParticipant(eventId, roleId, { revokedBy = 'unknown', reason = 'manual-revoke' } = {}) {
+  const e = EVENTS.find(x => x.id === eventId);
+  if (!e || !(e.participants instanceof Map)) return null;
+  const entry = e.participants.get(roleId);
+  if (!entry) return null;
+  e.participants.delete(roleId);
+  e.notes = e.notes || [];
+  e.notes.push({
+    timestamp: new Date().toISOString(),
+    author: revokedBy,
+    text: `Removed ${roleId} from event participants (${reason}).`,
+    type: 'participant-revoke',
+  });
+  _listeners.forEach(fn => fn(eventId));
+  return { roleId, ...entry };
+}
+
+// Post-incident handoff chain. Each entry represents one ground-handoff
+// destination. Root entries (chainParentId === null) come from Step 5
+// dispatchPostIncident. Child entries come from a subsequent handoff by
+// whoever holds the parent record. Close-event gate: every leaf (an entry
+// with no child referencing it as parent) must be status 'resolved'.
+let _chainCounter = 0;
+function _nextChainId() {
+  _chainCounter++;
+  const now = new Date();
+  return `PIC-${now.getUTCFullYear()}${String(now.getUTCMonth()+1).padStart(2,'0')}${String(now.getUTCDate()).padStart(2,'0')}-${String(_chainCounter).padStart(4,'0')}`;
+}
+export function addPostIncidentChainRoot(eventId, destId, dispatchedBy) {
+  const e = EVENTS.find(x => x.id === eventId);
+  if (!e || !destId) return null;
+  if (!Array.isArray(e.postIncidentChain)) e.postIncidentChain = [];
+  const now = new Date().toISOString();
+  const entry = {
+    id: _nextChainId(),
+    destId,
+    chainParentId: null,
+    dispatchedBy,
+    dispatchedAt: now,
+    status: 'open',
+    resolvedAt: null,
+    resolvedBy: null,
+  };
+  e.postIncidentChain.push(entry);
+  _listeners.forEach(fn => fn(eventId));
+  return entry;
+}
+export function handoffPostIncidentChain(eventId, parentChainId, newDestId, dispatchedBy) {
+  const e = EVENTS.find(x => x.id === eventId);
+  if (!e || !Array.isArray(e.postIncidentChain) || !newDestId || !parentChainId) return null;
+  const parent = e.postIncidentChain.find(c => c.id === parentChainId);
+  if (!parent) return null;
+  const now = new Date().toISOString();
+  const entry = {
+    id: _nextChainId(),
+    destId: newDestId,
+    chainParentId: parentChainId,
+    dispatchedBy,
+    dispatchedAt: now,
+    status: 'open',
+    resolvedAt: null,
+    resolvedBy: null,
+  };
+  e.postIncidentChain.push(entry);
+  _listeners.forEach(fn => fn(eventId));
+  return entry;
+}
+export function resolvePostIncidentChainEntry(eventId, chainId, resolvedBy) {
+  const e = EVENTS.find(x => x.id === eventId);
+  if (!e || !Array.isArray(e.postIncidentChain)) return null;
+  const entry = e.postIncidentChain.find(c => c.id === chainId);
+  if (!entry || entry.status === 'resolved') return entry || null;
+  entry.status = 'resolved';
+  entry.resolvedAt = new Date().toISOString();
+  entry.resolvedBy = resolvedBy;
+  _listeners.forEach(fn => fn(eventId));
+  return entry;
+}
+export function postIncidentChainLeaves(event) {
+  if (!event || !Array.isArray(event.postIncidentChain)) return [];
+  const parentIds = new Set(event.postIncidentChain.map(c => c.chainParentId).filter(Boolean));
+  return event.postIncidentChain.filter(c => !parentIds.has(c.id));
+}
+export function postIncidentChainAllLeavesResolved(event) {
+  const leaves = postIncidentChainLeaves(event);
+  if (!leaves.length) return false;
+  return leaves.every(l => l.status === 'resolved');
 }
 
 export function respondToEscalation(eventId, escalationId, text, respondedBy) {
@@ -455,6 +663,79 @@ const _SITE_NAMES = { cph: 'CPH Airport', esbjerg: 'Esbjerg Harbour' };
 export function registerSiteName(siteId, name) { if (siteId && name) _SITE_NAMES[siteId] = name; }
 export function siteName(siteId) {
   return _SITE_NAMES[siteId] || siteId;
+}
+
+// ── Domain scope (per event) ──
+// Every event carries a domainScope array declaring which operational
+// domains are relevant to it. Starts from site type + platform when the
+// event is created; grows as the trajectory crosses domain boundaries
+// or as shadow events are linked at other sites. destinations.js reads
+// this to filter who receives escalations for the event.
+//
+// Site type is registered by main.js at boot via registerSiteDomains()
+// so we avoid a SITES import cycle here. Same pattern as _SITE_NAMES.
+const _SITE_DEFAULT_DOMAINS = {};
+export function registerSiteDomains(siteId, domains) {
+  if (!siteId || !Array.isArray(domains) || !domains.length) return;
+  _SITE_DEFAULT_DOMAINS[siteId] = [...new Set(domains)];
+}
+export function defaultDomainsForSite(siteId) {
+  return _SITE_DEFAULT_DOMAINS[siteId] ? [..._SITE_DEFAULT_DOMAINS[siteId]] : ['ground'];
+}
+function _computeInitialDomainScope(event) {
+  const scope = new Set(defaultDomainsForSite(event.siteId));
+  // Airborne platforms always add aviation regardless of site type.
+  if (event.platform === 'missile' || event.platform === 'jet' || event.platform === 'fixed-wing') {
+    scope.add('aviation');
+  }
+  // Quadcopters + rotary craft over harbour sites already carry both
+  // scopes from the site default. Nothing extra to add here.
+  return [...scope];
+}
+// Public expander used when trajectory crosses a domain boundary or a
+// shadow event is linked. Idempotent: adding a domain already in scope
+// no-ops. Emits listener notification so consumers re-render.
+export function expandEventDomainScope(eventId, ...domains) {
+  const e = EVENTS.find(x => x.id === eventId);
+  if (!e || !domains.length) return null;
+  if (!Array.isArray(e.domainScope)) e.domainScope = _computeInitialDomainScope(e);
+  const before = e.domainScope.length;
+  const merged = new Set([...e.domainScope, ...domains.filter(Boolean)]);
+  e.domainScope = [...merged];
+  if (e.domainScope.length !== before) _listeners.forEach(fn => fn(eventId));
+  return e.domainScope;
+}
+// Recompute domainScope for every seed event. Necessary because seed
+// EVENTS backfill runs at events.js module init (before main.js has
+// registered site domains via registerSiteDomains), so seed events
+// otherwise carry the fallback `['ground']` scope even when their
+// site is an airport or harbour. main.js calls this once immediately
+// after the register-site-domains loop to close the gap. Idempotent
+// for dynamically-spawned events (their addEvent computed the correct
+// scope from the already-populated registry).
+export function refreshSeedDomainScopes() {
+  EVENTS.forEach(e => {
+    e.domainScope = _computeInitialDomainScope(e);
+  });
+  _listeners.forEach(fn => fn(null));
+}
+
+// Union linked events' scopes into this event's scope (shadow-chain
+// merge). Called from main.js when linkedEventIds is populated.
+export function unionLinkedEventDomains(eventId) {
+  const e = EVENTS.find(x => x.id === eventId);
+  if (!e || !Array.isArray(e.linkedEventIds) || !e.linkedEventIds.length) return null;
+  const scope = new Set(Array.isArray(e.domainScope) ? e.domainScope : _computeInitialDomainScope(e));
+  e.linkedEventIds.forEach(linkedId => {
+    const linked = EVENTS.find(x => x.id === linkedId);
+    if (linked && Array.isArray(linked.domainScope)) {
+      linked.domainScope.forEach(d => scope.add(d));
+    }
+  });
+  const changed = scope.size !== (Array.isArray(e.domainScope) ? e.domainScope.length : 0);
+  e.domainScope = [...scope];
+  if (changed) _listeners.forEach(fn => fn(eventId));
+  return e.domainScope;
 }
 
 export function relativeTime(iso) {

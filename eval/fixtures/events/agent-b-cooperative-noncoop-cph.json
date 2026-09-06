@@ -1,0 +1,42 @@
+{
+  "fixtureId": "agent-b-cooperative-noncoop-cph",
+  "agent": "agent_b_debrief",
+  "expectedTier": "notable",
+  "siteContextRef": "cph",
+  "event": {
+    "id": "DET-20260904-NONCOOP-1",
+    "siteId": "cph",
+    "startTime": "2026-09-04T16:00:00Z",
+    "endTime":   "2026-09-04T16:08:00Z",
+    "classification": "unknown",
+    "threat": "elevated",
+    "platform": "quadcopter",
+    "droneType": "1x DJI Matrice 300",
+    "droneCount": 1,
+    "confidence": 0.91,
+    "entry": { "lat": 55.6320, "lon": 12.6450 },
+    "lastPosition": { "lat": 55.6188, "lon": 12.6689 }
+  },
+  "samples": [],
+  "analysis": {
+    "dwellProfile": { "hotspotIds": ["ils_04L"], "peakDwellSeconds": 180 },
+    "closestAssetApproach": {
+      "assetId": "ils_04L",
+      "assetName": "ILS Glideslope 04L",
+      "minDistanceM": 75
+    },
+    "classChangeLog": []
+  },
+  "signalsJsonBlock": "{\"signals\":[{\"id\":\"dwell_hotspot\",\"assetId\":\"ils_04L\",\"value\":180,\"threshold\":60,\"outlier\":true}]}",
+  "signalsProseBlock": "Quadcopter track dwelled 3 minutes over ILS Glideslope 04L, well beyond doctrine threshold. Sensor mesh classifies as quadcopter with 0.91 confidence.",
+  "cooperativeCheckBlock": "COOPERATIVE TRAFFIC CROSS-CHECK\n─────────────────────────────────\nSite expectation: cooperative traffic normally present.\nFeed status: live (14 cooperative tracks in site bubble at detection time).\nMatch result: 0 cooperative tracks compatible with observed class + trajectory.\nConfidence uplift on NON-cooperative hypothesis: HIGH (site normally sees cooperative traffic).",
+  "grounding": {
+    "expectedAssetMentions": ["ILS"],
+    "expectedCoopSignals": ["non-cooperative"]
+  },
+  "subjectFidelity": {
+    "requiredPlatformFamily": "quadcopter"
+  },
+  "assertions": ["writing_rules", "delimiter", "tier_caps", "grounding", "cooperative_grounding", "subject_fidelity", "model_version"],
+  "notes": "Non-cooperative quadcopter dwelling over ILS at a site that normally sees cooperative traffic. Agent B should ground its narrative in the cooperative cross-check absence — describe the target as non-cooperative, not just 'unknown'."
+}

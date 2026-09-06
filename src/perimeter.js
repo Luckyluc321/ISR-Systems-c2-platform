@@ -217,8 +217,26 @@ export function assignPatrols(patrolIds, wreckages) {
     const wreck = wreckages.find(w => w.id === wid);
     if (!wreck) continue;
     const ingressRing = ingressForWreckage(wreck);
+    // Slot occupancy — how many cars have already been placed on this
+    // ingress index. Extra cars get a tangential offset (perpendicular
+    // to the radial heading) so multiple patrols on the same ring point
+    // don't stack pixel-perfectly.
+    const slotFill = new Array(ingressRing.length).fill(0);
     pids.forEach((pid, idx) => {
-      const ingress = ingressRing[idx % ingressRing.length];
+      const slotIdx = idx % ingressRing.length;
+      const base = ingressRing[slotIdx];
+      const occupancy = slotFill[slotIdx]++;
+      let ingress = base;
+      if (occupancy > 0) {
+        // Tangential direction = radial heading + 90deg. Alternate sides
+        // (occupancy 1 → left, 2 → right, 3 → farther left, ...) so the
+        // spread is symmetric around the base slot.
+        const step = Math.ceil(occupancy / 2);
+        const side = (occupancy % 2 === 1) ? 1 : -1;
+        const tangential = (base.heading + 90 * side + 360) % 360;
+        const p = _offsetLatLon(base.lat, base.lon, 18 * step, tangential);
+        ingress = { lat: p.lat, lon: p.lon, heading: base.heading };
+      }
       assignments.set(pid, { wreckageId: wid, ingress });
     });
   }

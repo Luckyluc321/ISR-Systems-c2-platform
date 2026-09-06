@@ -1,0 +1,49 @@
+{
+  "site_id": "esbjerg",
+  "name": "Port of Esbjerg",
+  "site_type": "port_offshore_wind_hub",
+  "schema_version": "1.0",
+  "generated_at": "2026-08-05T00:00:00Z",
+  "generated_by": "Compact eval snapshot derived from src/site_context.js esbjerg record. Do not treat as authoritative.",
+  "port_reference_point": { "lat": 55.4680, "lon": 8.4500 },
+
+  "critical_areas": [
+    { "id": "quay_deep", "name": "Deepwater quays (4 + 5)", "center": { "lat": 55.467, "lon": 8.450 }, "criticality": "high",
+      "reason": "Heavy-lift quays for offshore wind installation vessels and diplomatic cargo." },
+    { "id": "ow_o_and_m", "name": "Offshore wind O&M base", "center": { "lat": 55.469, "lon": 8.446 }, "criticality": "high",
+      "reason": "Servicing Horns Rev and North Sea assets. Base for Danish offshore wind fleet." },
+    { "id": "lng_terminal_planned", "name": "LNG terminal area (planned)", "center": { "lat": 55.465, "lon": 8.454 }, "criticality": "medium",
+      "reason": "Future LNG import terminal footprint." }
+  ],
+
+  "high_value_assets": [
+    { "id": "installation_vessel_berth", "name": "Installation vessel berth", "location": { "lat": 55.468, "lon": 8.449 }, "asset_type": "specialized_berth", "criticality": "critical",
+      "reason": "Turbine installation vessels dock here. Loss of berth halts North Sea wind construction cycles." },
+    { "id": "harbor_control", "name": "Havnekontor (VTS)", "location": { "lat": 55.466, "lon": 8.451 }, "asset_type": "vessel_traffic_service", "criticality": "high",
+      "reason": "Regulates maritime traffic in the fairway. Loss forces manual coordination." }
+  ],
+
+  "response_doctrine": {
+    "authority": "Police (Sydvestjyllands Politi) hold primary response. Port operations coordinate with Søfartsstyrelsen for maritime advisories.",
+    "triggers": [
+      "Any airborne unknown over installation vessel berth triggers immediate police notification.",
+      "Sea-approach vector with descending altitude reads as payload delivery — immediate escalation.",
+      "RF signature matching mil-COTS platforms → state-actor threat escalation."
+    ]
+  },
+
+  "site_red_flags": [
+    "Sea-approach vector (from W) with descending altitude profile = payload delivery pattern.",
+    "RF signature matching mil-COTS platforms indicates state actor.",
+    "Loitering over offshore wind O&M base during vessel turnaround = reconnaissance of high-value maritime asset."
+  ],
+
+  "cooperative_traffic": {
+    "expected": true,
+    "source": "mock",
+    "match_radius_m": 800,
+    "match_time_window_s": 31536000,
+    "bbox_padding_deg": 0.15,
+    "_note": "Eval-only huge time window (see cph.json). Esbjerg has continuous helicopter O&M traffic to offshore wind — expected=true."
+  }
+}

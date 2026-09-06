@@ -45,6 +45,24 @@ export const OPERATORS = [
     brandTint: '#4dd2ff',
   },
   {
+    id: 'op-billund-airport',
+    kind: 'operator',
+    org: 'Billund Airport',
+    label: 'Billund Airport',
+    person: 'Duty Officer',
+    initials: 'BA',
+    // logo: '/logos/billund.svg' — file not yet in /public/logos/. Falls
+    // back to initials mark (orange square) until Lucas drops the SVG.
+    scope: 'assigned-sites',
+    destinationIds: [],
+    siteIds: ['billund'],
+    sensorCount: 19,
+    isMultiSite: false,
+    sector: 'Aviation',
+    description: 'Billund Lufthavn (EKBI). Danmarks næststørste lufthavn, primær fragtknudepunkt og Legoland-adjacent.',
+    brandTint: '#ff6b4d',
+  },
+  {
     id: 'op-esbjerg-port',
     kind: 'operator',
     org: 'Port of Esbjerg',
@@ -98,11 +116,12 @@ export const OPERATORS = [
 export const RECEIVERS = [
   // ── Intelligence (standalone leaves) ────────────────────────────
   {
-    id: 'pet', kind: 'receiver', type: 'leaf',
+    id: 'pet', kind: 'receiver', type: 'parent',
     org: 'PET', label: 'PET — Politiets Efterretningstjeneste',
     person: 'K. Larsen', initials: 'KL',
     scope: 'all-sites', destinationIds: ['cph-t2-pet', 'esb-t2-pet', 'hvg-t2-pet', 'bjk-t2-pet', 'ldg-t2-pet', 'kas-t2-pet', 'frv-t2-pet'],
-    description: 'National security service. Tier 2 escalation, national scope.',
+    childrenIds: ['pet-cta', 'pet-livvagt'],
+    description: 'National security service. Tier 2 escalation, national scope. Sub-units: CTA (fusion centre) + Livvagtsstyrken (PPU).',
   },
   {
     id: 'fe', kind: 'receiver', type: 'leaf',
@@ -146,23 +165,25 @@ export const RECEIVERS = [
     parentId: 'forsvaret',
     org: 'Flyvevåbnet', label: 'Flyvevåbnet — Danish Air Force',
     initials: 'FV', scope: 'aviation',
-    childrenIds: ['flv-skrydstrup', 'flv-karup'],
+    childrenIds: ['flv-skrydstrup', 'flv-karup', 'flv-aalborg', 'flv-karup-control', 'flv-karup-ops', 'flv-skalstrup', 'flv-flyverkommandoen', 'flv-naoc'],
     description: 'Danish Air Force branch. Select a base to drill in.',
   },
   {
-    id: 'flv-skrydstrup', kind: 'receiver', type: 'leaf',
+    id: 'flv-skrydstrup', kind: 'receiver', type: 'parent',
     parentId: 'flyvevaabnet',
     org: 'Flyvevåbnet · Skrydstrup', label: 'Fighter Wing Skrydstrup (F-35 QRA)',
     person: 'T. Andersen', initials: 'TA',
     scope: 'aviation', destinationIds: ['cph-t4-qra', 'esb-t4-qra', 'hvg-t4-qra', 'bjk-t4-qra', 'ldg-t4-qra', 'kas-t4-qra', 'frv-t4-qra'],
+    childrenIds: ['flv-esk-727'],
     description: 'Fighter Wing Skrydstrup. F-35 QRA. National airborne intercept.',
   },
   {
-    id: 'flv-karup', kind: 'receiver', type: 'leaf',
+    id: 'flv-karup', kind: 'receiver', type: 'parent',
     parentId: 'flyvevaabnet',
     org: 'Flyvevåbnet · Karup', label: 'Helicopter Wing Karup',
     person: 'B. Rasmussen', initials: 'BR',
     scope: 'all-sites', destinationIds: ['cph-t4-qra', 'esb-t4-qra', 'hvg-t4-qra', 'bjk-t4-qra', 'ldg-t4-qra', 'kas-t4-qra', 'frv-t4-qra'],
+    childrenIds: ['flv-esk-722', 'flv-esk-723', 'flv-esk-724'],
     description: 'Helicopter Wing Karup. EH-101 Merlin + AS550 Fennec tactical intercept.',
   },
 
@@ -172,7 +193,7 @@ export const RECEIVERS = [
     parentId: 'forsvaret',
     org: 'Hæren', label: 'Hæren — Danish Army',
     initials: 'HA', scope: 'all-sites',
-    childrenIds: ['haer-slagelse', 'haer-hovelte', 'haer-varde', 'haer-bornholm', 'haer-oksbol'],
+    childrenIds: ['haer-slagelse', 'haer-hovelte', 'haer-varde', 'haer-bornholm', 'haer-oksbol', 'haer-holstebro', 'haer-haderslev', 'haer-oksbol-artillery', 'haer-skive', 'haer-fredericia', 'haer-aalborg', 'haer-bornholm-regiment'],
     description: 'Danish Army branch. Select a garrison to drill in.',
   },
   {
@@ -222,7 +243,7 @@ export const RECEIVERS = [
     parentId: 'forsvaret',
     org: 'Søværnet', label: 'Søværnet — Danish Navy',
     initials: 'SO', scope: 'maritime',
-    childrenIds: ['sov-frederikshavn', 'sov-korsor'],
+    childrenIds: ['sov-frederikshavn', 'sov-korsor', 'sov-frederikshavn-3esk', 'sov-korsor-2esk', 'sov-fromands', 'sov-svk', 'sov-1-eskadre', 'sov-2-eskadre', 'sov-3-eskadre', 'sov-4-eskadre', 'sov-vbc', 'sov-nmoc', 'sov-vts-storebalt', 'sov-vts-oeresund', 'sov-dykker', 'sov-arktisk-kmd'],
     description: 'Danish Navy branch. Select a base to drill in.',
   },
   {
@@ -267,8 +288,35 @@ export const RECEIVERS = [
     id: 'politi', kind: 'receiver', type: 'parent',
     org: 'Politi', label: 'Politi — Danish Police',
     initials: 'PO', scope: 'all-sites',
-    childrenIds: ['rigspoliti', 'politi-kbh', 'politi-sydvest'],
-    description: 'Danish Police umbrella. Select national HQ or a district.',
+    // All 12 Danish police districts + Rigspolitiet + specialist units
+    // (NSK, AKS) exposed in the parent picker so a police-role login
+    // sees the full national coverage, not just the 3 districts adjacent
+    // to current live events.
+    childrenIds: [
+      'rigspoliti',
+      'politi-kbh',
+      'politi-vestegn',
+      'politi-nordsj',
+      'politi-midtvestsjaelland',
+      'politi-sydsjaelland',
+      'politi-bornholm',
+      'politi-fyn',
+      'politi-sydvest',
+      'politi-sydsonderjyl',
+      'politi-sydostjyl',
+      'politi-midtvestjyl',
+      'politi-ostjyl',
+      'politi-nordjyl',
+      'politi-nsk',
+      'politi-aks',
+      'rigspoliti-nkc',
+      'rigspoliti-nc3',
+      'rigspoliti-sirene',
+      'rigspoliti-dvi',
+      'rigspoliti-hundetjeneste',
+      'rigspoliti-politiskolen',
+    ],
+    description: 'Danish Police umbrella. Select national HQ, one of the 12 districts, or a specialist unit (NSK / AKS / NKC / NC3 / SIRENE / DVI / hundetjeneste / Politiskolen).',
   },
   {
     id: 'rigspoliti', kind: 'receiver', type: 'leaf',
@@ -279,12 +327,13 @@ export const RECEIVERS = [
     description: 'National police coordination + C-UAS response team.',
   },
   {
-    id: 'politi-kbh', kind: 'receiver', type: 'leaf',
+    id: 'politi-kbh', kind: 'receiver', type: 'parent',
     parentId: 'politi',
     org: 'Politi København', label: 'Politi København',
     person: 'S. Hansen', initials: 'SH',
     scope: 'cph-only', destinationIds: ['cph-t2-politi'],
-    description: 'Copenhagen district. Local C-UAS patrol.',
+    childrenIds: ['kbh-politi-rytteri'],
+    description: 'Copenhagen district. Local C-UAS patrol. Rytteriafdelingen sits here (national mounted section).',
   },
   {
     id: 'politi-sydvest', kind: 'receiver', type: 'leaf',
@@ -367,10 +416,11 @@ export const RECEIVERS = [
 
   // ── Politi specialty units ──────────────────────────────────────
   {
-    id: 'politi-nsk', kind: 'receiver', type: 'leaf', parentId: 'politi',
+    id: 'politi-nsk', kind: 'receiver', type: 'parent', parentId: 'politi',
     org: 'NSK', label: 'NSK — Nationalt Særligt Kriminalpoliti', initials: 'NS',
     scope: 'all-sites', destinationIds: [],
-    description: 'National organised-crime + state-actor investigative unit.',
+    childrenIds: ['rigspoliti-ncik'],
+    description: 'National organised-crime + state-actor investigative unit. NCIK sits under NSK.',
   },
   {
     id: 'politi-aks', kind: 'receiver', type: 'leaf', parentId: 'politi',
@@ -439,33 +489,33 @@ export const RECEIVERS = [
   // ══════════════════════════════════════════════════════════════
   {
     id: 'region-hst', kind: 'receiver', type: 'leaf',
-    org: 'Region Hovedstaden', label: 'Region Hovedstaden', initials: 'RH',
+    org: 'Region Hovedstaden', label: 'Region Hovedstaden (regional forvaltning)', initials: 'Hov',
     scope: 'regional', destinationIds: [],
-    description: 'Capital region. Ambulance + hospital coordination. Auto-observer on casualty-flagged events at CPH.',
+    description: 'Regional folkevalgt forvaltning der ejer sundhedsvæsenet i Hovedstaden (hospitaler, præhospital tjeneste, ambulancer) og regional infrastruktur. Politisk eskaleringspunkt, ikke operationelt. Operationel modtager er Akutmedicinsk Koordinationscenter Hovedstaden. Kontakt: regionsrådsformand og regional beredskabschef ved hændelser der spænder over flere sites i regionen.',
   },
   {
     id: 'region-sjl', kind: 'receiver', type: 'leaf',
-    org: 'Region Sjælland', label: 'Region Sjælland', initials: 'RS',
+    org: 'Region Sjælland', label: 'Region Sjælland (regional forvaltning)', initials: 'Sjæ',
     scope: 'regional', destinationIds: [],
-    description: 'Zealand region. Ambulance + hospital coordination.',
+    description: 'Regional folkevalgt forvaltning der ejer sundhedsvæsenet på Sjælland uden for hovedstadsområdet (hospitaler, præhospital tjeneste, ambulancer) og regional infrastruktur. Politisk eskaleringspunkt, ikke operationelt. Operationel modtager er Akutmedicinsk Koordinationscenter Sjælland i Slagelse. Kontakt: regionsrådsformand og regional beredskabschef ved hændelser der spænder over flere sites i regionen.',
   },
   {
     id: 'region-syd', kind: 'receiver', type: 'leaf',
-    org: 'Region Syddanmark', label: 'Region Syddanmark', initials: 'RY',
+    org: 'Region Syddanmark', label: 'Region Syddanmark (regional forvaltning)', initials: 'Syd',
     scope: 'regional', destinationIds: [],
-    description: 'South Denmark region. Covers Esbjerg.',
+    description: 'Regional folkevalgt forvaltning der ejer sundhedsvæsenet i Syddanmark og Fyn (hospitaler, præhospital tjeneste, ambulancer) og regional infrastruktur. Dækker Esbjerg, Billund, Kolding, Odense. Politisk eskaleringspunkt, ikke operationelt. Operationel modtager er Akutmedicinsk Koordinationscenter Syddanmark i Odense. Kontakt: regionsrådsformand og regional beredskabschef ved hændelser der spænder over flere sites i regionen.',
   },
   {
     id: 'region-midt', kind: 'receiver', type: 'leaf',
-    org: 'Region Midtjylland', label: 'Region Midtjylland', initials: 'RM',
+    org: 'Region Midtjylland', label: 'Region Midtjylland (regional forvaltning)', initials: 'Mid',
     scope: 'regional', destinationIds: [],
-    description: 'Central Jutland region.',
+    description: 'Regional folkevalgt forvaltning der ejer sundhedsvæsenet i Midtjylland (hospitaler, præhospital tjeneste, ambulancer) og regional infrastruktur. Politisk eskaleringspunkt, ikke operationelt. Operationel modtager er Akutmedicinsk Koordinationscenter Midtjylland i Aarhus. Kontakt: regionsrådsformand og regional beredskabschef ved hændelser der spænder over flere sites i regionen.',
   },
   {
     id: 'region-nord', kind: 'receiver', type: 'leaf',
-    org: 'Region Nordjylland', label: 'Region Nordjylland', initials: 'RN',
+    org: 'Region Nordjylland', label: 'Region Nordjylland (regional forvaltning)', initials: 'Nor',
     scope: 'regional', destinationIds: [],
-    description: 'North Jutland region.',
+    description: 'Regional folkevalgt forvaltning der ejer sundhedsvæsenet i Nordjylland (hospitaler, præhospital tjeneste, ambulancer) og regional infrastruktur. Politisk eskaleringspunkt, ikke operationelt. Operationel modtager er Akutmedicinsk Koordinationscenter Nordjylland i Aalborg. Kontakt: regionsrådsformand og regional beredskabschef ved hændelser der spænder over flere sites i regionen.',
   },
 
   // ══════════════════════════════════════════════════════════════
@@ -506,10 +556,11 @@ export const RECEIVERS = [
   // AGENCIES (styrelser)
   // ══════════════════════════════════════════════════════════════
   {
-    id: 'agency-traf', kind: 'receiver', type: 'leaf',
+    id: 'agency-traf', kind: 'receiver', type: 'parent',
     org: 'Trafikstyrelsen', label: 'Trafikstyrelsen', initials: 'TS',
     scope: 'aviation', destinationIds: [],
-    description: 'Aviation + rail + road regulator. Auto-actor on airport events (airspace-restriction authority).',
+    childrenIds: ['agency-traf-luftfart', 'agency-traf-jernbane', 'agency-traf-havne'],
+    description: 'Aviation + rail + road + ports regulator. Auto-actor on airport events (airspace-restriction authority).',
   },
   {
     id: 'agency-sof', kind: 'receiver', type: 'leaf',
@@ -524,25 +575,28 @@ export const RECEIVERS = [
     description: 'National energy regulator. Observer on substation events.',
   },
   {
-    id: 'agency-cfcs', kind: 'receiver', type: 'leaf', parentId: 'fe',
+    id: 'agency-cfcs', kind: 'receiver', type: 'parent', parentId: 'fe',
     org: 'CFCS', label: 'CFCS — Center for Cybersikkerhed', initials: 'CC',
     scope: 'national', destinationIds: [],
-    description: 'Cyber security agency under FE. Observer on all critical infrastructure events.',
+    childrenIds: ['agency-cfcs-netsikkerhed'],
+    description: 'Cyber security agency. Transferred from FE to Ministry of Samfundssikkerhed (SAMSIK) 2024/2025. Observer on all critical infrastructure events.',
   },
 
   // ══════════════════════════════════════════════════════════════
   // FORSVARET expansion — additional wings + special commands
   // ══════════════════════════════════════════════════════════════
   {
-    id: 'flv-aalborg', kind: 'receiver', type: 'leaf', parentId: 'flyvevaabnet',
+    id: 'flv-aalborg', kind: 'receiver', type: 'parent', parentId: 'flyvevaabnet',
     org: 'Flyvevåbnet · Aalborg', label: 'Air Transport Wing Aalborg', initials: 'AA',
     scope: 'aviation', destinationIds: [],
+    childrenIds: ['flv-esk-721'],
     description: 'C-130J + Challenger 604 transport wing. Personnel + equipment lift.',
   },
   {
-    id: 'flv-karup-control', kind: 'receiver', type: 'leaf', parentId: 'flyvevaabnet',
+    id: 'flv-karup-control', kind: 'receiver', type: 'parent', parentId: 'flyvevaabnet',
     org: 'Flyvevåbnet · Karup ACW', label: 'Air Control Wing Karup', initials: 'AC',
     scope: 'aviation', destinationIds: [],
+    childrenIds: ['flv-esk-515'],
     description: 'National air surveillance + control. NATO-integrated radar picture.',
   },
   {
@@ -559,7 +613,7 @@ export const RECEIVERS = [
     id: 'hjv', kind: 'receiver', type: 'parent',
     org: 'Hjemmeværnet', label: 'Hjemmeværnet — Danish Home Guard',
     initials: 'HV', scope: 'all-sites',
-    childrenIds: ['hjv-vest', 'hjv-ost', 'hjv-marine', 'hjv-flyver'],
+    childrenIds: ['hjv-vest', 'hjv-ost', 'hjv-marine', 'hjv-flyver', 'hjv-marine-hq', 'hjv-flyver-hq', 'hjv-distrikt-nordjylland', 'hjv-distrikt-midtvestjyl', 'hjv-distrikt-ostjyl', 'hjv-distrikt-sydostjyl', 'hjv-distrikt-sonderjyl', 'hjv-distrikt-fyn', 'hjv-distrikt-kbh', 'hjv-distrikt-kbh-vestegn', 'hjv-distrikt-nordsj', 'hjv-distrikt-midtvestsj', 'hjv-distrikt-sydsj-lolland', 'hjv-distrikt-bornholm'],
     description: 'National volunteer defence umbrella. Guard + patrol reinforcement.',
   },
   {
@@ -575,16 +629,18 @@ export const RECEIVERS = [
     description: 'Home Guard, eastern Denmark. Distrikter under this region to be added.',
   },
   {
-    id: 'hjv-marine', kind: 'receiver', type: 'leaf', parentId: 'hjv',
+    id: 'hjv-marine', kind: 'receiver', type: 'parent', parentId: 'hjv',
     org: 'Marinehjemmeværnet', label: 'Marinehjemmeværnet', initials: 'HM',
     scope: 'maritime', destinationIds: [],
-    description: 'Naval Home Guard. Harbour + coastal reinforcement.',
+    childrenIds: ['hjv-marine-hvf114', 'hjv-marine-hvf115', 'hjv-marine-hvf116', 'hjv-marine-hvf121', 'hjv-marine-hvf122', 'hjv-marine-hvf123', 'hjv-marine-hvf124', 'hjv-marine-hvf125', 'hjv-marine-hvf126', 'hjv-marine-hvf131', 'hjv-marine-hvf132', 'hjv-marine-hvf133', 'hjv-marine-hvf134', 'hjv-marine-hvf135', 'hjv-marine-hvf136', 'hjv-marine-hvf137', 'hjv-marine-hvf201', 'hjv-marine-hvf241', 'hjv-marine-hvf242', 'hjv-marine-hvf243', 'hjv-marine-hvf244', 'hjv-marine-hvf246', 'hjv-marine-hvf251', 'hjv-marine-hvf255', 'hjv-marine-hvf256', 'hjv-marine-hvf284', 'hjv-marine-hvf361', 'hjv-marine-hvf362', 'hjv-marine-hvf363', 'hjv-marine-hvf366', 'hjv-marine-hvf367', 'hjv-marine-hvf368', 'hjv-marine-hvf369', 'hjv-marine-hvf471'],
+    description: 'Naval Home Guard. Harbour + coastal reinforcement. 34 flotiller nationwide.',
   },
   {
-    id: 'hjv-flyver', kind: 'receiver', type: 'leaf', parentId: 'hjv',
+    id: 'hjv-flyver', kind: 'receiver', type: 'parent', parentId: 'hjv',
     org: 'Flyverhjemmeværnet', label: 'Flyverhjemmeværnet', initials: 'HF',
     scope: 'aviation', destinationIds: [],
-    description: 'Air Home Guard. Airfield + air ops reinforcement.',
+    childrenIds: ['hjv-flyver-hve220', 'hjv-flyver-hve221', 'hjv-flyver-hve223', 'hjv-flyver-hve225', 'hjv-flyver-hve227', 'hjv-flyver-hve228', 'hjv-flyver-hve230', 'hjv-flyver-fsd231', 'hjv-flyver-hve232', 'hjv-flyver-hve233', 'hjv-flyver-hve240', 'hjv-flyver-hve242', 'hjv-flyver-hve243', 'hjv-flyver-hve260', 'hjv-flyver-hve261', 'hjv-flyver-hve265', 'hjv-flyver-hve266', 'hjv-flyver-hve270', 'hjv-flyver-hve272', 'hjv-flyver-hve273', 'hjv-flyver-hve274', 'hjv-flyver-hve275', 'hjv-flyver-hve277', 'hjv-flyver-hve280', 'hjv-flyver-hve281', 'hjv-flyver-hve282', 'hjv-flyver-hve283', 'hjv-flyver-hve284', 'hjv-flyver-hve286'],
+    description: 'Air Home Guard. Airfield + air ops reinforcement. 29 eskadriller nationwide.',
   },
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1531,6 +1587,238 @@ export const RECEIVERS = [
   //                                  eskadriller in supplementary)
   //                                Target of ~40 was based on outdated multi-
   //                                distrikt model; current structure is 12
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // F. COMPREHENSIVE DK SECURITY TAXONOMY ADDITIONS (2026-08-31)
+  //    Compiled + verified via research agent fan-out across:
+  //    - forsvaret.dk (Hæren, Søværnet, Flyvevåbnet)
+  //    - hjv.dk (Hjemmeværnet all echelons)
+  //    - politi.dk / pet.dk (all districts + specialist units)
+  //    - naviair.dk (all aerodrome control towers)
+  //    - trafikstyrelsen.dk, soefartsstyrelsen.dk (regulators + sub-departments)
+  //    - beredskabsstyrelsen.dk, rbis.dk (national + regional emergency)
+  //    - NATO/EU official sites
+  //
+  //    Goal: never revisit. Every real Danish security/military/civil-
+  //    response entity that could plausibly be routed to for a
+  //    critical-infrastructure incident is present as a receiver.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  // ── Marinehjemmeværnet flotiller (34, under hjv-marine HQ) ──────────────
+  { id: 'hjv-marine-hvf114', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 114', label: 'HVF 114 Aalborg-Hals', initials: '114', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 114 Aalborg-Hals.' },
+  { id: 'hjv-marine-hvf115', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 115', label: 'HVF 115 Vendsyssel (Frederikshavn)', initials: '115', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 115 Vendsyssel, Flådestation Frederikshavn.' },
+  { id: 'hjv-marine-hvf116', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 116', label: 'HVF 116 MFP (Frederikshavn/Thisted/Skive)', initials: '116', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 116, Maritime Force Protection.' },
+  { id: 'hjv-marine-hvf121', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 121', label: 'HVF 121 Hanstholm', initials: '121', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 121 Hanstholm.' },
+  { id: 'hjv-marine-hvf122', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 122', label: 'HVF 122 Thyborøn (Struer)', initials: '122', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 122 Thyborøn.' },
+  { id: 'hjv-marine-hvf123', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 123', label: 'HVF 123 Djursland (Randers)', initials: '123', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 123 Djursland.' },
+  { id: 'hjv-marine-hvf124', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 124', label: 'HVF 124 Århus', initials: '124', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 124 Århus.' },
+  { id: 'hjv-marine-hvf125', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 125', label: 'HVF 125 MFP (Randers)', initials: '125', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 125, Maritime Force Protection.' },
+  { id: 'hjv-marine-hvf126', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 126', label: 'HVF 126 Hvide Sande-Ringkøbing', initials: '126', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 126 Hvide Sande-Ringkøbing.' },
+  { id: 'hjv-marine-hvf131', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 131', label: 'HVF 131 Esbjerg', initials: '131', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 131 Esbjerg.' },
+  { id: 'hjv-marine-hvf132', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 132', label: 'HVF 132 Horsens', initials: '132', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 132 Horsens.' },
+  { id: 'hjv-marine-hvf133', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 133', label: 'HVF 133 Juelsminde-Vejle', initials: '133', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 133 Juelsminde-Vejle.' },
+  { id: 'hjv-marine-hvf134', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 134', label: 'HVF 134 Fredericia', initials: '134', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 134 Fredericia.' },
+  { id: 'hjv-marine-hvf135', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 135', label: 'HVF 135 Kolding', initials: '135', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 135 Kolding.' },
+  { id: 'hjv-marine-hvf136', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 136', label: 'HVF 136 Sønderborg', initials: '136', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 136 Sønderborg.' },
+  { id: 'hjv-marine-hvf137', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 137', label: 'HVF 137 Aabenraa', initials: '137', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 137 Aabenraa.' },
+  { id: 'hjv-marine-hvf201', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 201', label: 'HVF 201 MFP (Marinestation Holmen)', initials: '201', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 201, Maritime Force Protection, Marinestation Holmen. Verified against hjv.dk.' },
+  { id: 'hjv-marine-hvf241', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 241', label: 'HVF 241 Odense-Kerteminde', initials: '241', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 241 Odense-Kerteminde.' },
+  { id: 'hjv-marine-hvf242', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 242', label: 'HVF 242 Østfyn (Slipshavn)', initials: '242', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 242 Østfyn.' },
+  { id: 'hjv-marine-hvf243', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 243', label: 'HVF 243 Faaborg', initials: '243', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 243 Faaborg.' },
+  { id: 'hjv-marine-hvf244', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 244', label: 'HVF 244 Svendborg', initials: '244', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 244 Svendborg.' },
+  { id: 'hjv-marine-hvf246', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 246', label: 'HVF 246 Nordvestfyn (Assens)', initials: '246', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 246 Nordvestfyn.' },
+  { id: 'hjv-marine-hvf251', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 251', label: 'HVF 251 Kalundborg', initials: '251', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 251 Kalundborg.' },
+  { id: 'hjv-marine-hvf255', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 255', label: 'HVF 255 Korsør', initials: '255', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 255 Korsør.' },
+  { id: 'hjv-marine-hvf256', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 256', label: 'HVF 256 Storstrømmen (Vordingborg)', initials: '256', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 256 Storstrømmen.' },
+  { id: 'hjv-marine-hvf284', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 284', label: 'HVF 284 Østersøen (Rødbyhavn)', initials: '284', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 284 Østersøen.' },
+  { id: 'hjv-marine-hvf361', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 361', label: 'HVF 361 Isefjord (Hundested)', initials: '361', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 361 Isefjord.' },
+  { id: 'hjv-marine-hvf362', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 362', label: 'HVF 362 Helsingør', initials: '362', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 362 Helsingør.' },
+  { id: 'hjv-marine-hvf363', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 363', label: 'HVF 363 Skovshoved', initials: '363', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 363 Skovshoved.' },
+  { id: 'hjv-marine-hvf366', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 366', label: 'HVF 366 Kbh Vestegn (Brøndby)', initials: '366', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 366 Københavns Vestegn, Brøndby Havn.' },
+  { id: 'hjv-marine-hvf367', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 367', label: 'HVF 367 Dragør', initials: '367', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 367 Dragør.' },
+  { id: 'hjv-marine-hvf368', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 368', label: 'HVF 368 Køge', initials: '368', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 368 Køge.' },
+  { id: 'hjv-marine-hvf369', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 369', label: 'HVF 369 Holmen', initials: '369', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 369 Marinestation Holmen.' },
+  { id: 'hjv-marine-hvf471', kind: 'receiver', type: 'leaf', parentId: 'hjv-marine', org: 'MHV Flotille 471', label: 'HVF 471 Bornholm (Rønne)', initials: '471', scope: 'maritime', destinationIds: [], description: 'Marinehjemmeværnsflotille 471 Bornholm.' },
+
+  // ── Flyverhjemmeværnet eskadriller (29, under hjv-flyver HQ) ────────────
+  { id: 'hjv-flyver-hve220', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 220', label: 'HVE 220 Nordvestsjælland (Kalundborg)', initials: '220', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 220 Nordvestsjælland.' },
+  { id: 'hjv-flyver-hve221', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 221', label: 'HVE 221 Arresø (Radarhoved Multebjerg)', initials: '221', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 221 Arresø.' },
+  { id: 'hjv-flyver-hve223', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 223', label: 'HVE 223 Værløse', initials: '223', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 223 Værløse.' },
+  { id: 'hjv-flyver-hve225', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 225', label: 'HVE 225 Roskilde Lufthavn', initials: '225', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 225 Roskilde.' },
+  { id: 'hjv-flyver-hve227', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 227', label: 'HVE 227 Kbh Lufthavn (CPH)', initials: '227', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 227 Københavns Lufthavn.' },
+  { id: 'hjv-flyver-hve228', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 228', label: 'HVE 228 Kbh Lufthavn (CPH)', initials: '228', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 228 Københavns Lufthavn.' },
+  { id: 'hjv-flyver-hve230', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 230', label: 'HVE 230 Midt- og Vestsjælland (Sorø)', initials: '230', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 230 Midt-/Vestsjælland.' },
+  { id: 'hjv-flyver-fsd231', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 231', label: 'FSD 231 Stevns (Faxe)', initials: '231', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 231 Stevns.' },
+  { id: 'hjv-flyver-hve232', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 232', label: 'HVE 232 Sydsjælland-Møn (Næstved)', initials: '232', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 232 Sydsjælland-Møn.' },
+  { id: 'hjv-flyver-hve233', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 233', label: 'HVE 233 Lolland-Falster (Sakskøbing)', initials: '233', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 233 Lolland-Falster.' },
+  { id: 'hjv-flyver-hve240', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 240', label: 'HVE 240 Odense (Højstrup)', initials: '240', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 240 Odense.' },
+  { id: 'hjv-flyver-hve242', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 242', label: 'HVE 242 Sydfyn (Svendborg)', initials: '242', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 242 Sydfyn.' },
+  { id: 'hjv-flyver-hve243', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 243', label: 'HVE 243 Langeland (Torpe)', initials: '243', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 243 Langeland.' },
+  { id: 'hjv-flyver-hve260', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 260', label: 'HVE 260 Vendsyssel (Understed)', initials: '260', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 260 Vendsyssel.' },
+  { id: 'hjv-flyver-hve261', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 261', label: 'HVE 261 Skive', initials: '261', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 261 Skive.' },
+  { id: 'hjv-flyver-hve265', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 265', label: 'HVE 265 Hvidsten (Randers)', initials: '265', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 265 Hvidsten.' },
+  { id: 'hjv-flyver-hve266', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 266', label: 'HVE 266 Aalborg Lufthavn', initials: '266', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 266 Aalborg.' },
+  { id: 'hjv-flyver-hve270', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 270', label: 'HVE 270 Flyvende (Aalborg + Roskilde)', initials: '270', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 270 Flyvende eskadrille.' },
+  { id: 'hjv-flyver-hve272', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 272', label: 'HVE 272 Vestjylland (Ringkøbing)', initials: '272', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 272 Vestjylland.' },
+  { id: 'hjv-flyver-hve273', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 273', label: 'HVE 273 Ikast (Herning)', initials: '273', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 273 Ikast.' },
+  { id: 'hjv-flyver-hve274', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 274', label: 'HVE 274 Østjylland (Aarhus)', initials: '274', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 274 Østjylland.' },
+  { id: 'hjv-flyver-hve275', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 275', label: 'HVE 275 Djursland (Tirstrup)', initials: '275', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 275 Djursland.' },
+  { id: 'hjv-flyver-hve277', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 277', label: 'HVE 277 Karup', initials: '277', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 277 Flyvestation Karup.' },
+  { id: 'hjv-flyver-hve280', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 280', label: 'HVE 280 Billund (Vejle)', initials: '280', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 280 Billund.' },
+  { id: 'hjv-flyver-hve281', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 281', label: 'HVE 281 Vestjylland (Varde)', initials: '281', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 281 Vestjylland.' },
+  { id: 'hjv-flyver-hve282', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 282', label: 'HVE 282 Kongeåen (Brørup)', initials: '282', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 282 Kongeåen.' },
+  { id: 'hjv-flyver-hve283', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 283', label: 'HVE 283 Trekanten (Kolding)', initials: '283', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 283 Trekanten.' },
+  { id: 'hjv-flyver-hve284', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 284', label: 'HVE 284 Skrydstrup', initials: '284', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 284 Flyvestation Skrydstrup.' },
+  { id: 'hjv-flyver-hve286', kind: 'receiver', type: 'leaf', parentId: 'hjv-flyver', org: 'FHV Eskadrille 286', label: 'HVE 286 Alssund (Kliplev)', initials: '286', scope: 'aviation', destinationIds: [], description: 'Flyverhjemmeværnseskadrille 286 Alssund.' },
+
+  // ── Flyvevåbnet — Eskadriller + Wing HQs + NAOC ────────────────────────
+  { id: 'flv-flyverkommandoen', kind: 'receiver', type: 'leaf', parentId: 'flyvevaabnet', org: 'Flyverkommandoen', label: 'Flyverkommandoen (Karup)', initials: 'Flv', scope: 'aviation', destinationIds: [], description: 'Flyverkommandoen — Flyvevåbnets kommandostab. Flyvestation Karup. Under Forsvarskommandoen.' },
+  { id: 'flv-naoc', kind: 'receiver', type: 'leaf', parentId: 'flyvevaabnet', org: 'National Air Operations Centre', label: 'National Air Operations Centre (Karup)', initials: 'Ops', scope: 'aviation', destinationIds: [], description: 'National Air Operations Centre — Danmarks nationale luftoperationscenter. Sidder i Operationsafdelingen under Flyverkommandoen, Flyvestation Karup.' },
+  { id: 'flv-esk-727', kind: 'receiver', type: 'leaf', parentId: 'flv-skrydstrup', org: 'Eskadrille 727', label: 'Eskadrille 727 (F-35, Skrydstrup)', initials: '727', scope: 'aviation', destinationIds: [], description: 'Eskadrille 727, F-35 Lightning II, Fighter Wing Skrydstrup. F-16 formally retired 18 Jan 2026.' },
+  { id: 'flv-esk-722', kind: 'receiver', type: 'leaf', parentId: 'flv-karup', org: 'Eskadrille 722', label: 'Eskadrille 722 (EH-101, Karup)', initials: '722', scope: 'aviation', destinationIds: [], description: 'Eskadrille 722, EH-101 Merlin SAR + tactical transport, Helicopter Wing Karup.' },
+  { id: 'flv-esk-723', kind: 'receiver', type: 'leaf', parentId: 'flv-karup', org: 'Eskadrille 723', label: 'Eskadrille 723 (MH-60R, Karup)', initials: '723', scope: 'aviation', destinationIds: [], description: 'Eskadrille 723, MH-60R Seahawk, Helicopter Wing Karup.' },
+  { id: 'flv-esk-724', kind: 'receiver', type: 'leaf', parentId: 'flv-karup', org: 'Eskadrille 724', label: 'Eskadrille 724 (Fennec, Karup)', initials: '724', scope: 'aviation', destinationIds: [], description: 'Eskadrille 724, Fennec observation + SOF support + police cooperation, Helicopter Wing Karup.' },
+  { id: 'flv-esk-721', kind: 'receiver', type: 'leaf', parentId: 'flv-aalborg', org: 'Eskadrille 721', label: 'Eskadrille 721 (C-130J + Challenger, Aalborg)', initials: '721', scope: 'aviation', destinationIds: [], description: 'Eskadrille 721, C-130J Hercules + CL-604 Challenger. Home base Flyvestation Aalborg with permanent CL-604 detachment in Kangerlussuaq, Greenland.' },
+  { id: 'flv-esk-515', kind: 'receiver', type: 'leaf', parentId: 'flv-karup-control', org: 'Eskadrille 515', label: 'Eskadrille 515 (AIS, Værløse)', initials: '515', scope: 'aviation', destinationIds: [], description: 'Eskadrille 515, Aeronautical Information Service (AIS), Flyvestation Værløse. Air Control Wing.' },
+
+  // ── Søværnet — Eskadrer + specialized centres ───────────────────────────
+  { id: 'sov-svk', kind: 'receiver', type: 'leaf', parentId: 'sovaernet', org: 'Søværnskommandoen', label: 'Søværnskommandoen (Karup)', initials: 'Søv', scope: 'maritime', destinationIds: [], description: 'Søværnskommandoen — Søværnets kommandostab. Flyvestation Karup. Efterfølger til Marinestaben (2019).' },
+  { id: 'sov-1-eskadre', kind: 'receiver', type: 'leaf', parentId: 'sovaernet', org: 'Søværnet · 1. Eskadre', label: '1. Eskadre (Frederikshavn)', initials: '1E', scope: 'maritime', destinationIds: [], description: '1. Eskadre — national/inspection ships, Kongeskibet Dannebrog, opmålere. Flådestation Frederikshavn.' },
+  { id: 'sov-2-eskadre', kind: 'receiver', type: 'leaf', parentId: 'sovaernet', org: 'Søværnet · 2. Eskadre', label: '2. Eskadre (Korsør)', initials: '2E', scope: 'maritime', destinationIds: [], description: '2. Eskadre — fregatter, minerydning, Dykkertjenesten. Flådestation Korsør.' },
+  { id: 'sov-3-eskadre', kind: 'receiver', type: 'leaf', parentId: 'sovaernet', org: 'Søværnet · 3. Eskadre', label: '3. Eskadre (Frederikshavn)', initials: '3E', scope: 'maritime', destinationIds: [], description: '3. Eskadre — national opgaver, drift af flådestationer + overvågning. Flådestation Frederikshavn.' },
+  { id: 'sov-4-eskadre', kind: 'receiver', type: 'leaf', parentId: 'sovaernet', org: 'Søværnet · 4. Eskadre', label: '4. Eskadre (uddannelse, distribueret)', initials: '4E', scope: 'maritime', destinationIds: [], description: '4. Eskadre — Søværnets uddannelseseskadre. Staff distributed across Frederikshavn, København, Korsør, Karup, Sjællands Odde.' },
+  { id: 'sov-vbc', kind: 'receiver', type: 'leaf', parentId: 'sovaernet', org: 'Center for Våben', label: 'Center for Våben (Sjællands Odde)', initials: 'Våb', scope: 'maritime', destinationIds: [], description: 'Center for Våben — Søværnets våbencenter. Gniben, 4583 Sjællands Odde. Tidligere Artilleriskolen.' },
+  { id: 'sov-nmoc', kind: 'receiver', type: 'leaf', parentId: 'sovaernet', org: 'Nationalt Maritimt Operationscenter', label: 'Nationalt Maritimt Operationscenter (Frederikshavn)', initials: 'Mar', scope: 'maritime', destinationIds: [], description: 'Nationalt Maritimt Operationscenter — Søværnets nationale maritime operationscenter. Flådestation Frederikshavn.' },
+  { id: 'sov-vts-storebalt', kind: 'receiver', type: 'leaf', parentId: 'sovaernet', org: 'Skibstrafikcenter Storebælt', label: 'Skibstrafikcenter Storebælt (Korsør)', initials: 'Str', scope: 'maritime', destinationIds: [], description: 'Skibstrafikcenter Storebælt (Vessel Traffic Service). Flådestation Korsør.' },
+  { id: 'sov-vts-oeresund', kind: 'receiver', type: 'leaf', parentId: 'sovaernet', org: 'Skibstrafikcenter Øresund', label: 'Skibstrafikcenter Øresund (DK/SE fælles)', initials: 'Øre', scope: 'maritime', destinationIds: [], description: 'Skibstrafikcenter Øresund (Vessel Traffic Service). Fælles dansk/svensk drift.' },
+  { id: 'sov-dykker', kind: 'receiver', type: 'leaf', parentId: 'sovaernet', org: 'Søværnets Dykkertjeneste', label: 'Søværnets Dykkertjeneste (Korsør)', initials: 'Dyk', scope: 'maritime', destinationIds: [], description: 'Søværnets Dykkertjeneste. Flådestation Korsør.' },
+  { id: 'sov-arktisk-kmd', kind: 'receiver', type: 'leaf', parentId: 'sovaernet', org: 'Arktisk Kommando', label: 'Arktisk Kommando (Nuuk)', initials: 'Ark', scope: 'maritime', destinationIds: [], description: 'Arktisk Kommando. Nuuk, Grønland. Joint kommando, primært maritim.' },
+
+  // ── Special police units (Rigspoliti + PET) ──────────────────────────────
+  { id: 'rigspoliti-nkc', kind: 'receiver', type: 'leaf', parentId: 'politi', org: 'Nationalt Kriminalteknisk Center', label: 'Nationalt Kriminalteknisk Center (Ejby, Glostrup)', initials: 'Krim', scope: 'all-sites', destinationIds: [], description: 'Nationalt Kriminalteknisk Center — under Rigspolitiet / Nationalt Særligt Kriminalpoliti. Ejby Industrivej 125-135, Glostrup.' },
+  { id: 'rigspoliti-nc3', kind: 'receiver', type: 'leaf', parentId: 'politi', org: 'Nationalt Cyber Crime Center', label: 'Nationalt Cyber Crime Center (Ejby, Glostrup)', initials: 'Cyb', scope: 'all-sites', destinationIds: [], description: 'Nationalt Cyber Crime Center — Rigspolitiet, co-lokaliseret med Nationalt Kriminalteknisk Center. Delvis sammenlægning med National Center for IT-relateret økonomisk Kriminalitet slut 2024.' },
+  { id: 'rigspoliti-ncik', kind: 'receiver', type: 'leaf', parentId: 'politi-nsk', org: 'National Center for IT-relateret økonomisk Kriminalitet', label: 'National Center for IT-relateret økonomisk Kriminalitet', initials: 'ITØ', scope: 'all-sites', destinationIds: [], description: 'National Center for IT-relateret økonomisk Kriminalitet. Under Nationalt Særligt Kriminalpoliti.' },
+  { id: 'rigspoliti-sirene', kind: 'receiver', type: 'leaf', parentId: 'politi', org: 'SIRENE-kontoret Danmark', label: 'SIRENE-kontoret Danmark (Rigspolitiet)', initials: 'Sir', scope: 'all-sites', destinationIds: [], description: 'SIRENE-kontoret Danmark (Supplementary Information Request at the National Entries). Interpol- og Europol-nationale enheder, co-lokaliseret.' },
+  { id: 'rigspoliti-dvi', kind: 'receiver', type: 'leaf', parentId: 'politi', org: 'ID-beredskabet', label: 'ID-beredskabet (identifikation af omkomne)', initials: 'ID', scope: 'all-sites', destinationIds: [], description: 'ID-beredskabet — identifikation af omkomne ved katastrofer. Rigspolitiet / Nationalt Kriminalteknisk Center.' },
+  { id: 'rigspoliti-hundetjeneste', kind: 'receiver', type: 'leaf', parentId: 'politi', org: 'Politiets Hundetjeneste', label: 'Politiets Hundetjeneste (national)', initials: 'Hund', scope: 'all-sites', destinationIds: [], description: 'National patruljehundetjeneste. Rigspolitiet.' },
+  { id: 'kbh-politi-rytteri', kind: 'receiver', type: 'leaf', parentId: 'politi-kbh', org: 'Rytteriafdelingen', label: 'Rytteriafdelingen (Københavns Politi)', initials: 'Ryt', scope: 'all-sites', destinationIds: [], description: 'Københavns Politis Rytteriafdeling — organisatorisk under Københavns Politi, national beredent afdeling, København-baseret med landsdækkende indsæt.' },
+  { id: 'rigspoliti-politiskolen', kind: 'receiver', type: 'leaf', parentId: 'politi', org: 'Politiskolen', label: 'Politiskolen (Brøndby og Vejle)', initials: 'Skol', scope: 'all-sites', destinationIds: [], description: 'Politiskolen — uddannelsescenter Øst i Brøndby og uddannelsescenter Vest i Vejle. Grunduddannelse og rekruttering.' },
+  { id: 'pet-cta', kind: 'receiver', type: 'leaf', parentId: 'pet', org: 'Center for Terroranalyse', label: 'Center for Terroranalyse (PET-drevet)', initials: 'Ter', scope: 'all-sites', destinationIds: [], description: 'Center for Terroranalyse — fusionscenter bemandet af Politiets Efterretningstjeneste, Forsvarets Efterretningstjeneste, Udenrigsministeriet og Beredskabsstyrelsen.' },
+  { id: 'pet-livvagt', kind: 'receiver', type: 'leaf', parentId: 'pet', org: 'Livvagtsstyrken', label: 'Livvagtsstyrken (Politiets Efterretningstjeneste)', initials: 'Liv', scope: 'all-sites', destinationIds: [], description: 'Livvagtsstyrken — personbeskyttelsesenhed under Politiets Efterretningstjeneste.' },
+
+  // ── Cyber + intel extensions ─────────────────────────────────────────────
+  { id: 'agency-samsik', kind: 'receiver', type: 'leaf', org: 'Styrelsen for Samfundssikkerhed', label: 'Styrelsen for Samfundssikkerhed', initials: 'Sam', scope: 'all-sites', destinationIds: [], description: 'Styrelsen for Samfundssikkerhed under Ministerium for Samfundssikkerhed og Beredskab. Center for Cybersikkerhed overført til ministeriet aug. 2024, indfusioneret i Styrelsen for Samfundssikkerhed jan./mar. 2025.' },
+  { id: 'agency-cfcs-netsikkerhed', kind: 'receiver', type: 'leaf', parentId: 'agency-cfcs', org: 'Netsikkerhedstjenesten', label: 'Netsikkerhedstjenesten (Forsvarets Efterretningstjeneste)', initials: 'Net', scope: 'all-sites', destinationIds: [], description: 'Netsikkerhedstjenesten — den operative defensive cyberenhed under Center for Cybersikkerhed. Forbliver i Forsvarets Efterretningstjeneste.' },
+  { id: 'agency-digst', kind: 'receiver', type: 'leaf', org: 'Digitaliseringsstyrelsen', label: 'Digitaliseringsstyrelsen (kompetent NIS2-myndighed)', initials: 'Dig', scope: 'all-sites', destinationIds: [], description: 'Digitaliseringsstyrelsen — kompetent myndighed for digital sektor under NIS2-direktivet. Ministeriet for Digitalisering.' },
+  { id: 'agency-datatilsynet', kind: 'receiver', type: 'leaf', org: 'Datatilsynet', label: 'Datatilsynet (dansk databeskyttelsesmyndighed)', initials: 'Dat', scope: 'all-sites', destinationIds: [], description: 'Datatilsynet — dansk databeskyttelsesmyndighed. Uafhængig tilsynsmyndighed under Justitsministeriet.' },
+  { id: 'cert-dkcert', kind: 'receiver', type: 'leaf', org: 'DKCERT', label: 'DKCERT (uddannelsessektorens sikkerhedsteam)', initials: 'CERT', scope: 'all-sites', destinationIds: [], description: 'DeiC Sikkerhed / DKCERT — computerberedskabsteam for uddannelses- og forskningssektoren. Hostet på DTU.' },
+
+  // ── Aviation regulator + Naviair towers ──────────────────────────────────
+  { id: 'agency-traf-luftfart', kind: 'receiver', type: 'leaf', parentId: 'agency-traf', org: 'Trafikstyrelsen — Luftfart', label: 'Trafikstyrelsen — Luftfart', initials: 'Luft', scope: 'aviation', destinationIds: [], description: 'Trafikstyrelsen — Luftfartsområdet (tidligere Statens Luftfartsvæsen / dansk civil luftfartsmyndighed).' },
+  { id: 'agency-traf-jernbane', kind: 'receiver', type: 'leaf', parentId: 'agency-traf', org: 'Trafikstyrelsen — Jernbane', label: 'Trafikstyrelsen — Jernbanesikkerhed', initials: 'Jern', scope: 'all-sites', destinationIds: [], description: 'Trafikstyrelsen — Jernbanesikkerhed. Regulator for jernbanesikkerhed.' },
+  { id: 'agency-traf-havne', kind: 'receiver', type: 'leaf', parentId: 'agency-traf', org: 'Trafikstyrelsen — Havne', label: 'Trafikstyrelsen — Havneområde', initials: 'Havn', scope: 'maritime', destinationIds: [], description: 'Trafikstyrelsen — arbejdsområde Havne (kompetent havnemyndighed; ikke en formel afdeling i organisationsdiagrammet).' },
+  { id: 'agency-havarikommission', kind: 'receiver', type: 'leaf', org: 'Havarikommissionen', label: 'Havarikommissionen (luftfart og jernbane)', initials: 'Hav', scope: 'all-sites', destinationIds: [], description: 'Havarikommissionen — undersøgelseskommission for luftfarts- og jernbaneulykker.' },
+  { id: 'agency-naviair', kind: 'receiver', type: 'parent', org: 'Naviair', label: 'Naviair (dansk lufttrafiktjeneste)', initials: 'Nav', scope: 'aviation', childrenIds: ['agency-naviair-acc-cph', 'agency-naviair-twr-cph', 'agency-naviair-twr-bll', 'agency-naviair-twr-aal', 'agency-naviair-twr-aar', 'agency-naviair-twr-rke', 'agency-naviair-twr-rnn'], description: 'Naviair — dansk lufttrafiktjenesteudbyder (Danish Air Navigation Service Provider).' },
+  { id: 'agency-naviair-acc-cph', kind: 'receiver', type: 'leaf', parentId: 'agency-naviair', org: 'Naviair — Kontrolcentral København', label: 'Kontrolcentral København (Kastrup)', initials: 'Cen', scope: 'aviation', destinationIds: [], description: 'Naviair Områdekontrolcentral og indflyvningskontrol Kastrup.' },
+  { id: 'agency-naviair-twr-cph', kind: 'receiver', type: 'leaf', parentId: 'agency-naviair', org: 'Naviair — Tårn København', label: 'Tårn Københavns Lufthavn (EKCH)', initials: 'Kbh', scope: 'aviation', destinationIds: [], description: 'Naviair aerodromkontroltårn EKCH.' },
+  { id: 'agency-naviair-twr-bll', kind: 'receiver', type: 'leaf', parentId: 'agency-naviair', org: 'Naviair — Tårn Billund', label: 'Tårn Billund Lufthavn (EKBI)', initials: 'Bll', scope: 'aviation', destinationIds: [], description: 'Naviair fjerntårnscenter og aerodromkontroltårn Billund (EKBI).' },
+  { id: 'agency-naviair-twr-aal', kind: 'receiver', type: 'leaf', parentId: 'agency-naviair', org: 'Naviair — Tårn Aalborg', label: 'Tårn Aalborg Lufthavn (EKYT)', initials: 'Aal', scope: 'aviation', destinationIds: [], description: 'Naviair aerodromkontroltårn EKYT og indflyvningskontrol Aalborg.' },
+  { id: 'agency-naviair-twr-aar', kind: 'receiver', type: 'leaf', parentId: 'agency-naviair', org: 'Naviair — Tårn Aarhus', label: 'Tårn Aarhus Lufthavn (EKAH)', initials: 'Aar', scope: 'aviation', destinationIds: [], description: 'Naviair aerodromkontroltårn EKAH, Tirstrup.' },
+  { id: 'agency-naviair-twr-rke', kind: 'receiver', type: 'leaf', parentId: 'agency-naviair', org: 'Naviair — Tårn Roskilde', label: 'Tårn Roskilde Lufthavn (EKRK)', initials: 'Rke', scope: 'aviation', destinationIds: [], description: 'Naviair aerodromkontroltårn EKRK.' },
+  { id: 'agency-naviair-twr-rnn', kind: 'receiver', type: 'leaf', parentId: 'agency-naviair', org: 'Naviair — Tårn Bornholm', label: 'Tårn Bornholm Lufthavn (EKRN)', initials: 'Bor', scope: 'aviation', destinationIds: [], description: 'Naviair aerodromkontroltårn EKRN, Rønne.' },
+
+  // ── Maritime regulators + rescue coordination ────────────────────────────
+  { id: 'agency-jrcc-dk', kind: 'receiver', type: 'leaf', org: 'Fælles Redningskoordineringscenter Danmark', label: 'Fælles Redningskoordineringscenter (Aarhus)', initials: 'Red', scope: 'maritime', destinationIds: [], description: 'Fælles Redningskoordineringscenter Danmark (Joint Rescue Coordination Centre), Aarhus (Marinestabens bunker). Drevet af Søværnet og Flyvevåbnet.' },
+  { id: 'agency-danpilot', kind: 'receiver', type: 'leaf', org: 'DanPilot', label: 'DanPilot (statslig lodstjeneste)', initials: 'Lod', scope: 'maritime', destinationIds: [], description: 'DanPilot — statsejet lodstjeneste.' },
+  { id: 'agency-dmaib', kind: 'receiver', type: 'leaf', org: 'Havarikommissionen for Søfart', label: 'Havarikommissionen for Søfart', initials: 'HKS', scope: 'maritime', destinationIds: [], description: 'Havarikommissionen for Søfart (Danish Maritime Accident Investigation Board).' },
+
+  // ── Emergency alarm centrals + AMK (regional pre-hospital dispatch) ─────
+  { id: 'alarm-112-kbh', kind: 'receiver', type: 'leaf', org: 'Alarmcentral 112 København', label: 'Alarmcentral 112 København (Hovedstadens Beredskab)', initials: 'Kbh', scope: 'regional', destinationIds: [], meta: { region: 'region-hst' }, description: 'Alarmcentral 112 København, drevet af Hovedstadens Beredskab. Dækker Region Hovedstaden.' },
+  { id: 'alarm-112-slagelse', kind: 'receiver', type: 'leaf', org: 'Alarmcentral 112 Slagelse', label: 'Alarmcentral 112 Slagelse (Rigspolitiet)', initials: 'Sla', scope: 'regional', destinationIds: [], meta: { region: 'region-sjl' }, description: 'Alarmcentral 112 Slagelse, drevet af Rigspolitiet. Dækker Sjælland, Fyn og øerne.' },
+  { id: 'alarm-112-aarhus', kind: 'receiver', type: 'leaf', org: 'Alarmcentral 112 Aarhus', label: 'Alarmcentral 112 Aarhus (Rigspolitiet)', initials: 'Aar', scope: 'regional', destinationIds: [], meta: { region: 'region-midt' }, description: 'Alarmcentral 112 Aarhus, drevet af Rigspolitiet. Dækker Jylland.' },
+  { id: 'amk-hovedstaden', kind: 'receiver', type: 'leaf', org: 'Akutmedicinsk Koordinationscenter Hovedstaden', label: 'Akutmedicinsk Koordinationscenter Hovedstaden (Ballerup)', initials: 'Hov', scope: 'regional', destinationIds: [], meta: { region: 'region-hst' }, description: 'Akutmedicinsk Koordinationscenter — regional præhospital koordinering og ambulancetjeneste. Region Hovedstaden, Ballerup (Akutberedskabet).' },
+  { id: 'amk-sjaelland', kind: 'receiver', type: 'leaf', org: 'Akutmedicinsk Koordinationscenter Sjælland', label: 'Akutmedicinsk Koordinationscenter Sjælland (Slagelse)', initials: 'Sjæ', scope: 'regional', destinationIds: [], meta: { region: 'region-sjl' }, description: 'Akutmedicinsk Koordinationscenter — regional præhospital koordinering og ambulancetjeneste. Region Sjælland, Slagelse.' },
+  { id: 'amk-syddanmark', kind: 'receiver', type: 'leaf', org: 'Akutmedicinsk Koordinationscenter Syddanmark', label: 'Akutmedicinsk Koordinationscenter Syddanmark (Odense)', initials: 'Syd', scope: 'regional', destinationIds: [], meta: { region: 'region-syd' }, description: 'Akutmedicinsk Koordinationscenter — regional præhospital koordinering og ambulancetjeneste. Region Syddanmark, Odense.' },
+  { id: 'amk-midtjylland', kind: 'receiver', type: 'leaf', org: 'Akutmedicinsk Koordinationscenter Midtjylland', label: 'Akutmedicinsk Koordinationscenter Midtjylland (Aarhus)', initials: 'Mid', scope: 'regional', destinationIds: [], meta: { region: 'region-midt' }, description: 'Akutmedicinsk Koordinationscenter — regional præhospital koordinering og ambulancetjeneste. Region Midtjylland, Aarhus (Præhospitalet).' },
+  { id: 'amk-nordjylland', kind: 'receiver', type: 'leaf', org: 'Akutmedicinsk Koordinationscenter Nordjylland', label: 'Akutmedicinsk Koordinationscenter Nordjylland (Aalborg)', initials: 'Nor', scope: 'regional', destinationIds: [], meta: { region: 'region-nord' }, description: 'Akutmedicinsk Koordinationscenter — regional præhospital koordinering og ambulancetjeneste. Region Nordjylland, Aalborg.' },
+
+  // ── NATO + EU ────────────────────────────────────────────────────────────
+  { id: 'nato-shape', kind: 'receiver', type: 'leaf', org: 'Supreme Headquarters Allied Powers Europe', label: 'Supreme Headquarters Allied Powers Europe (Mons, Belgien)', initials: 'HQ', scope: 'all-sites', destinationIds: [], description: 'Supreme Headquarters Allied Powers Europe — NATOs europæiske overkommando. Casteau/Mons, Belgien.' },
+  { id: 'nato-marcom', kind: 'receiver', type: 'leaf', org: 'Allied Maritime Command', label: 'Allied Maritime Command Northwood (Storbritannien)', initials: 'Mar', scope: 'maritime', destinationIds: [], description: 'NATOs allierede maritime kommando. Northwood, Storbritannien.' },
+  { id: 'nato-caoc-uedem', kind: 'receiver', type: 'leaf', org: 'Combined Air Operations Centre Uedem', label: 'Combined Air Operations Centre Uedem (Tyskland)', initials: 'Ued', scope: 'aviation', destinationIds: [], description: 'Combined Air Operations Centre Uedem — NATO luftoperationscenter der dækker dansk luftrum under NATOs integrerede luft- og missilforsvar. Uedem, Tyskland.' },
+  { id: 'nato-natinamds', kind: 'receiver', type: 'leaf', org: 'NATO Integrated Air and Missile Defence System', label: 'NATO Integrated Air and Missile Defence System (Ramstein)', initials: 'Def', scope: 'aviation', destinationIds: [], description: 'NATO Integrated Air and Missile Defence System — NATOs integrerede luft- og missilforsvar. Under Allied Air Command, Ramstein, Tyskland.' },
+  { id: 'nato-jfc-brunssum', kind: 'receiver', type: 'leaf', org: 'Joint Force Command Brunssum', label: 'Joint Force Command Brunssum (Holland)', initials: 'Bru', scope: 'all-sites', destinationIds: [], description: 'NATOs allierede fælleskommando Brunssum — dækker Danmark. Holland.' },
+  { id: 'nato-ccdcoe', kind: 'receiver', type: 'leaf', org: 'Cooperative Cyber Defence Centre of Excellence', label: 'Cooperative Cyber Defence Centre of Excellence (Tallinn)', initials: 'Cyb', scope: 'all-sites', destinationIds: [], description: 'NATO Cooperative Cyber Defence Centre of Excellence — NATOs kompetencecenter for cyberforsvar. Tallinn, Estland.' },
+  { id: 'nato-ncsc', kind: 'receiver', type: 'leaf', org: 'NATO Cyber Security Centre', label: 'NATO Cyber Security Centre (Mons, Belgien)', initials: 'Sec', scope: 'all-sites', destinationIds: [], description: 'NATO Communications and Information Agency Cyber Security Centre. Mons, Belgien.' },
+  { id: 'nordic-nordefco', kind: 'receiver', type: 'leaf', org: 'Nordic Defence Cooperation', label: 'Nordic Defence Cooperation (roterende formandskab)', initials: 'Nor', scope: 'all-sites', destinationIds: [], description: 'Nordic Defence Cooperation — nordisk forsvarssamarbejde. Ingen fast sekretariat, roterende formandskab. Norge har formandskabet 2026.' },
+  { id: 'eu-frontex', kind: 'receiver', type: 'leaf', org: 'European Border and Coast Guard Agency', label: 'European Border and Coast Guard Agency (Warszawa)', initials: 'Græn', scope: 'all-sites', destinationIds: [], description: 'European Border and Coast Guard Agency (Frontex) — EUs grænse- og kystvagt. Warszawa, Polen.' },
+  { id: 'eu-europol', kind: 'receiver', type: 'leaf', org: 'European Union Agency for Law Enforcement Cooperation', label: 'European Union Agency for Law Enforcement Cooperation (Haag)', initials: 'Pol', scope: 'all-sites', destinationIds: [], description: 'European Union Agency for Law Enforcement Cooperation (Europol). Haag, Holland.' },
+  { id: 'eu-enisa', kind: 'receiver', type: 'leaf', org: 'European Union Agency for Cybersecurity', label: 'European Union Agency for Cybersecurity (Athen)', initials: 'Cyb', scope: 'all-sites', destinationIds: [], description: 'European Union Agency for Cybersecurity (ENISA). Athen, Grækenland.' },
+  { id: 'eu-eurojust', kind: 'receiver', type: 'leaf', org: 'European Union Agency for Criminal Justice Cooperation', label: 'European Union Agency for Criminal Justice Cooperation (Haag)', initials: 'Ret', scope: 'all-sites', destinationIds: [], description: 'European Union Agency for Criminal Justice Cooperation (Eurojust). Haag, Holland.' },
+  { id: 'eu-cert-eu', kind: 'receiver', type: 'leaf', org: 'Cybersecurity Service for EU Institutions', label: 'Cybersecurity Service for EU Institutions (Bruxelles)', initials: 'EU', scope: 'all-sites', destinationIds: [], description: 'Cybersecurity Service for EU Institutions (CERT-EU). Bruxelles, Belgien.' },
+  { id: 'eu-emsa', kind: 'receiver', type: 'leaf', org: 'European Maritime Safety Agency', label: 'European Maritime Safety Agency (Lissabon)', initials: 'Sø', scope: 'maritime', destinationIds: [], description: 'European Maritime Safety Agency (EMSA). Lissabon, Portugal.' },
+  { id: 'eu-eurocontrol', kind: 'receiver', type: 'leaf', org: 'European Organisation for the Safety of Air Navigation', label: 'European Organisation for the Safety of Air Navigation (Bruxelles)', initials: 'Luft', scope: 'aviation', destinationIds: [], description: 'European Organisation for the Safety of Air Navigation (EUROCONTROL). Bruxelles, Belgien.' },
+
+  // ══════════════════════════════════════════════════════════════════════════
+  // G. TOP-LEVEL BUCKET PARENTS (2026-08-31)
+  //    Groups otherwise-orphan leaves under logical categories so the
+  //    account picker shows ~15 top-level items instead of 200+.
+  //    Each bucket has type: 'parent' and childrenIds enumerating members.
+  // ══════════════════════════════════════════════════════════════════════════
+
+  { id: 'bucket-kommuner', kind: 'receiver', type: 'parent',
+    org: 'Danmarks Kommuner', label: 'Danmarks Kommuner (98)', initials: 'Kom',
+    scope: 'regional',
+    childrenIds: ['kom-albertslund','kom-alleroed','kom-ballerup','kom-bornholm','kom-broendby','kom-dragoer','kom-egedal','kom-fredensborg','kom-frederiksberg','kom-frederikssund','kom-furesoe','kom-gentofte','kom-gladsaxe','kom-glostrup','kom-gribskov','kom-halsnaes','kom-helsingoer','kom-herlev','kom-hilleroed','kom-hvidovre','kom-hoeje-taastrup','kom-hoersholm','kom-ishoej','kom-koebenhavn','kom-lyngby-taarbaek','kom-rudersdal','kom-roedovre','kom-taarnby','kom-vallensbaek','kom-faxe','kom-greve','kom-guldborgsund','kom-holbaek','kom-kalundborg','kom-koege','kom-lejre','kom-lolland','kom-naestved','kom-odsherred','kom-ringsted','kom-roskilde','kom-slagelse','kom-solroed','kom-soroe','kom-stevns','kom-vordingborg','kom-assens','kom-billund','kom-esbjerg','kom-fanoe','kom-fredericia','kom-faaborg-midtfyn','kom-haderslev','kom-kerteminde','kom-kolding','kom-langeland','kom-middelfart','kom-nordfyns','kom-nyborg','kom-odense','kom-svendborg','kom-soenderborg','kom-toender','kom-varde','kom-vejen','kom-vejle','kom-aeroe','kom-aabenraa','kom-favrskov','kom-hedensted','kom-herning','kom-holstebro','kom-horsens','kom-ikast-brande','kom-lemvig','kom-norddjurs','kom-odder','kom-randers','kom-ringkoebing-skjern','kom-samsoe','kom-silkeborg','kom-skanderborg','kom-skive','kom-struer','kom-syddjurs','kom-viborg','kom-aarhus','kom-broenderslev','kom-frederikshavn','kom-hjoerring','kom-jammerbugt','kom-laesoe','kom-mariagerfjord','kom-morsoe','kom-rebild','kom-thisted','kom-vesthimmerlands','kom-aalborg'],
+    description: 'All 98 Danish kommuner. Expand to select a specific municipality.' },
+
+  { id: 'bucket-hospitaler', kind: 'receiver', type: 'parent',
+    org: 'Akuthospitaler', label: 'Akuthospitaler (23)', initials: 'Hos',
+    scope: 'regional',
+    childrenIds: ['hospital-rigshospitalet','hospital-herlev','hospital-hvidovre','hospital-bispebjerg','hospital-nordsjaellands','hospital-bornholms','hospital-suh-koege','hospital-slagelse-sygehus','hospital-holbaek-sygehus','hospital-suh-nykobing','hospital-ouh-odense','hospital-kolding-sygehus','hospital-vejle-sygehus','hospital-esbjerg-sygehus','hospital-aabenraa-sygehus','hospital-auh-aarhus','hospital-goedstrup','hospital-viborg','hospital-horsens','hospital-randers','hospital-auh-aalborg','hospital-rhn-hjoerring','hospital-auh-thisted'],
+    description: '24/7 acute-reception hospitals. Region-grouped in child labels.' },
+
+  { id: 'bucket-kbr', kind: 'receiver', type: 'parent',
+    org: 'Kommunale Beredskaber', label: 'Kommunale Beredskaber (29)', initials: 'Ber',
+    scope: 'regional',
+    childrenIds: ['kbr-hovedstaden','kbr-beredskab-ost','kbr-nordsjaellands','kbr-frederiksborg','kbr-beredskab-4k','kbr-koege','kbr-roskilde','kbr-lejre','kbr-vestsjaellands','kbr-slagelse','kbr-midt-sydsjaellands','kbr-lolland-falster','kbr-gribskov','kbr-helsingoer','kbr-taarnby','kbr-bornholm','kbr-fyn','kbr-trekantbrand','kbr-vejle','kbr-sydvestjysk','kbr-brsj','kbr-soenderborg','kbr-sydoestjyllands','kbr-ostjyllands','kbr-beredskab-sikkerhed','kbr-midtjysk','kbr-midtvest','kbr-nordvestjyllands','kbr-nordjyllands'],
+    description: '§60 shared municipal fire/rescue services covering all 98 kommuner.' },
+
+  { id: 'bucket-regioner', kind: 'receiver', type: 'parent',
+    org: 'Regioner', label: 'Regioner (5)', initials: 'Reg',
+    scope: 'regional',
+    childrenIds: ['region-hst','region-sjl','region-syd','region-midt','region-nord'],
+    description: 'De 5 danske regioner. Folkevalgt regional forvaltning der ejer sundhedsvæsen, præhospital tjeneste og ambulancer. Politisk eskaleringspunkt.' },
+
+  { id: 'bucket-alarm-amk', kind: 'receiver', type: 'parent',
+    org: 'Alarmcentraler og Akutmedicinsk Koordination', label: 'Alarmcentraler 112 og Akutmedicinsk Koordinationscentre', initials: 'Alm',
+    scope: 'all-sites',
+    childrenIds: ['alarm-112-kbh','alarm-112-slagelse','alarm-112-aarhus','amk-hovedstaden','amk-sjaelland','amk-syddanmark','amk-midtjylland','amk-nordjylland'],
+    description: '3 alarmcentraler (112) og 5 regionale Akutmedicinsk Koordinationscentre.' },
+
+  { id: 'bucket-ministerier', kind: 'receiver', type: 'parent',
+    org: 'Ministerier', label: 'Ministerier', initials: 'Min',
+    scope: 'national',
+    childrenIds: ['min-just','min-fors','min-klim','min-erhverv','min-sund'],
+    description: 'Nationale ministerier med rolle på kritisk infrastruktur.' },
+
+  { id: 'bucket-styrelser', kind: 'receiver', type: 'parent',
+    org: 'Styrelser og regulatorer', label: 'Styrelser og regulatorer', initials: 'Sty',
+    scope: 'all-sites',
+    childrenIds: ['agency-traf','agency-sof','agency-ener','agency-cfcs','agency-samsik','agency-digst','agency-datatilsynet','agency-havarikommission','agency-naviair','agency-jrcc-dk','agency-danpilot','agency-dmaib','cert-dkcert'],
+    description: 'Danske styrelser, regulatorer, lufttrafiktjeneste og computerberedskabsteams.' },
+
+  { id: 'bucket-nato', kind: 'receiver', type: 'parent',
+    org: 'NATO og Nordisk Forsvar', label: 'NATO og Nordisk Forsvar', initials: 'Nat',
+    scope: 'all-sites',
+    childrenIds: ['nato-shape','nato-marcom','nato-caoc-uedem','nato-natinamds','nato-jfc-brunssum','nato-ccdcoe','nato-ncsc','nordic-nordefco'],
+    description: 'NATO kommandoer og kompetencecentre samt Nordic Defence Cooperation.' },
+
+  { id: 'bucket-eu', kind: 'receiver', type: 'parent',
+    org: 'EU-agenturer', label: 'EU-agenturer', initials: 'EU',
+    scope: 'all-sites',
+    childrenIds: ['eu-frontex','eu-europol','eu-enisa','eu-eurojust','eu-cert-eu','eu-emsa','eu-eurocontrol'],
+    description: 'EU-agenturer med rolle på grænse, cyber, søfart og luftfart.' },
 ];
 
 // ── CANONICAL POPULATION TODO ──────────────────────────────────────

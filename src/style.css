@@ -235,14 +235,116 @@ html, body, #cesiumContainer {
   padding-left: 16px; border-left: 1px solid var(--border);
   height: 100%;
 }
+/* ── Render profile chip (photoreal / sovereign) ────────────────── */
+.tb-render-profile {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 12px 0 16px;
+  border-left: 1px solid var(--border);
+  height: 100%;
+  cursor: pointer;
+  transition: background 120ms;
+}
+.tb-render-profile:hover { background: rgba(180,200,220,0.03); }
+.tb-render-profile .rp-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-dim);
+  box-shadow: 0 0 6px rgba(180,200,220,0.4);
+}
+.tb-render-profile.sovereign .rp-dot {
+  background: #4dff9c;
+  box-shadow: 0 0 8px rgba(77,255,156,0.6);
+}
+.tb-render-profile.photoreal .rp-dot {
+  background: #4dd2ff;
+  box-shadow: 0 0 8px rgba(77,210,255,0.5);
+}
+.tb-render-profile .rp-label {
+  display: flex; flex-direction: column; line-height: 1.15;
+}
+.tb-render-profile .rp-name {
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.15em;
+  color: var(--text); text-transform: uppercase;
+  font-weight: 600;
+}
+.tb-render-profile .rp-sub {
+  font-family: var(--font-mono);
+  font-size: 8px; letter-spacing: 0.14em;
+  color: var(--text-dim); text-transform: uppercase;
+}
+
+/* Render profile switcher popup */
+.rp-switcher {
+  position: fixed;
+  z-index: 10000;
+  background: var(--surface-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 30px rgba(0,0,0,0.7);
+  padding: 6px;
+  min-width: 240px;
+}
+.rp-switcher-opt {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 3px;
+  width: 100%;
+  padding: 10px 12px;
+  background: transparent; border: 1px solid transparent;
+  color: var(--text); text-align: left; cursor: pointer;
+  border-radius: 3px;
+  transition: background 100ms, border-color 100ms;
+}
+.rp-switcher-opt:hover { background: rgba(180,200,220,0.05); border-color: var(--border); }
+.rp-switcher-opt.active {
+  border-color: rgba(77,255,156,0.4);
+  background: rgba(77,255,156,0.05);
+}
+.rp-switcher-opt .rp-opt-name {
+  font-family: var(--font-mono);
+  font-size: 11px; letter-spacing: 0.14em;
+  text-transform: uppercase; font-weight: 600;
+}
+.rp-switcher-opt .rp-opt-desc {
+  font-family: var(--font-body);
+  font-size: 10px; color: var(--text-dim);
+  line-height: 1.4;
+}
+.rp-switcher-hdr {
+  font-family: var(--font-mono);
+  font-size: 9px; letter-spacing: 0.2em;
+  color: var(--text-dim); text-transform: uppercase;
+  padding: 6px 12px 4px;
+}
+.rp-switcher-note {
+  font-family: var(--font-body);
+  font-size: 10px; color: var(--warn);
+  padding: 6px 12px 4px;
+  border-top: 1px solid var(--border);
+  margin-top: 4px;
+}
 .op-avatar {
   width: 26px; height: 26px; border-radius: 50%;
   background: linear-gradient(135deg, #2a3745, #141c26);
   border: 1px solid var(--border-strong);
   display: grid; place-items: center;
   font-family: var(--font-mono); font-size: 10px; color: var(--text);
-  overflow: hidden;
+  overflow: visible;
+  position: relative;
 }
+.op-sim-badge {
+  display: none;
+  position: absolute;
+  top: -6px; right: -12px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.15em;
+  color: #ffd54d;
+  background: rgba(20, 24, 28, 0.95);
+  border: 1px solid rgba(255, 213, 77, 0.65);
+  padding: 1px 4px;
+  border-radius: 2px;
+  line-height: 1.2;
+}
+body.mode-simulation .op-sim-badge { display: block; }
 .op-avatar.with-logo {
   background: var(--surface-bg);
   border-color: var(--border-strong);
@@ -985,6 +1087,74 @@ body.alerts-collapsed #site-overview {
   color: var(--hostile);
 }
 
+/* SIM POV variant of the badge — yellow to distinguish from operator-grade
+   sensor POV. Applied by main.js when _enterDronePOV activates. */
+#sensor-pov-controls.sim .pov-badge {
+  color: #ffd54d;
+  border: 1px solid rgba(255, 213, 77, 0.55);
+  padding: 3px 8px;
+  border-radius: 2px;
+}
+
+/* ─── Drone POV TV-static overlay (drone-loss moment) ───
+   Fires when the drone the operator is POV'd inside dies (jam-crash or
+   tracer take-down). Just noise — no sunburst pattern, no label plate.
+   Auto-exits after ~1.5s via _triggerDroneStatic's timer, so no need
+   for a button. Kept pointer-events off so clicks fall through if the
+   Exit view button in the POV chrome ever gets pressed early. */
+#drone-pov-static {
+  display: none;
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 400;
+  pointer-events: none;
+  background: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='2.4' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 3 -1'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  background-size: 200px 200px;
+  background-color: #000;
+  animation: povStaticJitter 90ms steps(4) infinite;
+}
+#drone-pov-static.active { display: block; }
+@keyframes povStaticJitter {
+  0%   { background-position: 0 0; }
+  25%  { background-position: 40px 20px; }
+  50%  { background-position: -30px 60px; }
+  75%  { background-position: 80px -30px; }
+  100% { background-position: 0 0; }
+}
+
+/* ─── Drone POV hit flash (tracer impact on the POV'd drone) ───
+   Screen-space red vignette that pulses once per bullet impact. The
+   3D-scene impact spark still fires at world position but at zero
+   distance from the camera it's visually swallowed, so we ALSO fire
+   this DOM overlay to give the operator the "took a hit" feedback. */
+#drone-pov-hit {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  z-index: 380;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    radial-gradient(ellipse at center,
+      transparent 30%,
+      rgba(255, 40, 40, 0.45) 75%,
+      rgba(255, 10, 10, 0.85) 100%);
+  transition: opacity 60ms ease-out;
+}
+#drone-pov-hit.hit { opacity: 1; }
+#drone-pov-hit.fade { opacity: 0; transition: opacity 220ms ease-out; }
+/* Big impact burst — full-screen white-red saturation, longer decay.
+   Fired once at the moment a tracer-kill lands, immediately before the
+   TV static kicks in. Reads as "you just took the killshot". */
+#drone-pov-hit.killshot {
+  opacity: 1;
+  background:
+    radial-gradient(ellipse at center,
+      rgba(255, 220, 220, 0.9) 0%,
+      rgba(255, 80, 80, 0.85) 30%,
+      rgba(180, 0, 0, 0.95) 100%);
+  transition: opacity 500ms ease-out;
+}
+
 /* ═════════════════ CONTROL PANEL — Palantir polish ═════════════════
    Class names + DOM structure preserved. Container bg darkened + subtle
    inset shadow, mono eyebrow labels widened, active toggle state uses
@@ -998,6 +1168,9 @@ body.alerts-collapsed #site-overview {
   border: 1px solid rgba(255, 255, 255, 0.06);
   padding: 14px;
   min-width: 200px;
+  max-width: 320px;                     /* hard cap — never bloat with sovereign content */
+  max-height: calc(100vh - 100px);      /* stay inside viewport */
+  overflow-y: auto;                     /* scroll inside the panel when content is long */
   display: flex; flex-direction: column; gap: 12px;
   backdrop-filter: blur(10px);
   -webkit-backdrop-filter: blur(10px);
@@ -1077,6 +1250,193 @@ body.details-collapsed #control-panel {
   text-align: left;
   padding: 8px 11px;
   letter-spacing: 0.10em;
+}
+
+/* ── Sovereign Layers panel (sovereign profile only) ─────────────────── */
+.cp-sovereign-body {
+  display: flex; flex-direction: column; gap: 12px;
+}
+.cp-sovereign-cat {
+  display: flex; flex-direction: column;
+  gap: 0;
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  border-radius: 3px;
+  padding: 4px 4px 3px;
+}
+.cp-sovereign-cat-label {
+  font-family: var(--font-mono);
+  font-size: 8px; letter-spacing: 0.22em;
+  color: var(--text-dimmer);
+  text-transform: uppercase;
+  padding: 2px 6px 5px;
+}
+.cp-sovereign-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 6px;
+  min-height: 22px;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background 100ms ease;
+}
+.cp-sovereign-row:hover {
+  background: rgba(77, 210, 255, 0.05);
+}
+.cp-sovereign-row:has(input:checked) {
+  background: rgba(77, 210, 255, 0.08);
+}
+.cp-sovereign-row input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 13px; height: 13px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.cp-sovereign-row input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+.cp-sovereign-name {
+  flex: 1;
+  font-family: var(--font-body);
+  font-size: 11px;
+  color: var(--text);
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cp-sovereign-row:has(input:checked) .cp-sovereign-name {
+  color: var(--accent);
+}
+.cp-sovereign-tag {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 2px 5px;
+  border-radius: 2px;
+  border: 1px solid transparent;
+}
+.cp-sovereign-tag.base {
+  color: var(--accent);
+  border-color: rgba(77, 210, 255, 0.35);
+  background: rgba(77, 210, 255, 0.06);
+}
+.cp-sovereign-tag.warn {
+  color: var(--warn);
+  border-color: rgba(255, 184, 77, 0.35);
+  background: rgba(255, 184, 77, 0.06);
+  cursor: help;
+}
+.cp-sovereign-tag.ok {
+  color: #4dff9c;
+  border-color: rgba(77, 255, 156, 0.30);
+  background: rgba(77, 255, 156, 0.05);
+}
+
+/* ── Sovereign SERVICES panel (click-to-lookup) ─────────────────────── */
+.cp-sovereign-svc-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  cursor: default;
+}
+.cp-sovereign-svc-line {
+  display: flex; align-items: center; gap: 6px;
+}
+.cp-sovereign-svc-desc {
+  font-family: var(--font-body);
+  font-size: 10px;
+  color: var(--text-dim);
+  line-height: 1.35;
+  padding-left: 2px;
+}
+.cp-btn.cp-svc-query {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+}
+.cp-btn.cp-svc-query:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+/* Response popup */
+.sov-svc-popup {
+  position: fixed;
+  top: 80px;
+  right: 24px;
+  z-index: 10000;
+  width: 460px;
+  max-height: 70vh;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+  background: var(--surface-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.6);
+  font-family: var(--font-body);
+}
+.sov-svc-popup-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.25);
+}
+.sov-svc-popup-title {
+  font-family: var(--font-mono);
+  font-size: 10px; letter-spacing: 0.18em;
+  color: var(--text); text-transform: uppercase;
+  font-weight: 600;
+}
+.sov-svc-popup-close {
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  font-size: 16px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+.sov-svc-popup-close:hover { color: var(--text); }
+.sov-svc-popup-body {
+  padding: 12px 14px;
+  overflow-y: auto;
+  min-height: 0;
+}
+.sov-svc-meta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.sov-svc-json {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text);
+  background: rgba(0, 0, 0, 0.3);
+  padding: 10px;
+  border-radius: 2px;
+  margin: 0;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.4;
+}
+.sov-svc-err {
+  font-family: var(--font-body);
+  font-size: 12px;
+  color: var(--warn);
+  line-height: 1.5;
+  padding: 8px 10px;
+  background: rgba(255, 184, 77, 0.08);
+  border-left: 2px solid var(--warn);
+  border-radius: 2px;
 }
 
 
@@ -3905,7 +4265,10 @@ body.replay-dragging * {
   top: 56px; right: 12px;
   z-index: 500;
   width: 440px; max-height: 80vh; overflow-y: auto;
-  background: var(--panel);
+  /* var(--panel) is 82% opacity — let Map Controls panel underneath
+     bleed through visually when the menu is open. Force solid bg here
+     so the account switcher is fully opaque and readable. */
+  background: var(--panel-solid);
   border: 1px solid var(--border-strong);
   border-radius: 6px;
   box-shadow: 0 20px 60px rgba(0,0,0,0.7);
@@ -3957,6 +4320,39 @@ body.replay-dragging * {
 .acct-card.on { background: rgba(77,210,255,0.08); border-color: rgba(77,210,255,0.35); }
 .acct-card.rx.on { background: rgba(255,184,77,0.08); border-color: rgba(255,184,77,0.35); }
 .acct-card.admin.on { background: rgba(180,200,220,0.06); border-color: rgba(180,200,220,0.3); }
+
+/* Receiver picker: parents show a chevron, children are indented under */
+.acct-card-wrap { display: block; }
+.acct-card-wrap.is-child { padding-left: 16px; }
+.acct-card.is-child { padding: 8px 10px; opacity: 0.88; }
+.acct-card.is-child .acct-mark { width: 26px; height: 26px; font-size: 9px; }
+.acct-card { position: relative; }
+.acct-expand {
+  position: absolute; top: 8px; right: 8px;
+  display: inline-flex; align-items: center; gap: 4px;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  padding: 3px 7px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  transition: background 120ms, color 120ms, transform 160ms;
+}
+.acct-expand:hover { background: rgba(180,200,220,0.08); color: var(--text); }
+.acct-expand.open svg { transform: rotate(180deg); }
+.acct-expand svg { transition: transform 160ms; display: block; }
+.acct-expand-count { font-weight: 600; letter-spacing: 0.02em; }
+.acct-children {
+  border-left: 1px solid var(--border);
+  margin-left: 22px;
+  padding-left: 6px;
+  margin-top: 2px;
+  margin-bottom: 6px;
+}
+.acct-children[hidden] { display: none; }
 
 .acct-mark {
   width: 34px; height: 34px;
@@ -5197,6 +5593,152 @@ body.mode-receiver #receiver-view { display: flex; }
   height: 100%; display: flex; align-items: center; justify-content: center;
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   Receiver standing-by hero — fills the empty inbox when no events
+   are dispatched to this desk. Replaces the small orphaned "no events"
+   text with a real dashboard so operators have proper situational
+   awareness. Advisory cards get promoted from the compact strip to
+   full-width blocks that own the viewport.
+   ═══════════════════════════════════════════════════════════════════ */
+.rcv-standby-hero {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: var(--space-5);
+  gap: var(--space-4);
+  min-height: 0;
+  background: var(--surface-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin: var(--space-4) var(--space-4) var(--space-4);
+}
+.rcv-standby-status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: var(--space-4);
+}
+.rcv-standby-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 12px rgba(77, 210, 255, 0.7);
+  animation: rcv-standby-pulse 2.4s ease-in-out infinite;
+}
+@keyframes rcv-standby-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50%      { opacity: 1;    transform: scale(1.25); }
+}
+.rcv-standby-label {
+  font-family: var(--font-mono);
+  font-size: 22px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--text);
+  font-weight: 600;
+}
+.rcv-standby-subtitle {
+  font-family: var(--font-body);
+  font-size: 13px;
+  color: var(--text-dim);
+  line-height: 1.55;
+  max-width: 640px;
+}
+.rcv-standby-adv-hdr {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  color: var(--warn);
+  font-weight: 600;
+  margin-top: var(--space-3);
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 184, 77, 0.28);
+}
+.rcv-standby-adv-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.rcv-standby-empty-adv {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.10em;
+  color: var(--text-dim);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+  text-align: left;
+  margin-top: var(--space-1);
+  background: rgba(0,0,0,0.15);
+  border-radius: 0 0 var(--radius) var(--radius);
+}
+.rcv-standby-empty-adv::before {
+  content: '○ ';
+  color: var(--text-dimmer);
+  margin-right: 4px;
+}
+.rcv-adv-hero-card {
+  border: 1px solid rgba(255, 184, 77, 0.35);
+  border-left: 3px solid var(--warn);
+  background: rgba(255, 184, 77, 0.06);
+  padding: var(--space-4) var(--space-5);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms, transform 120ms;
+}
+.rcv-adv-hero-card:hover {
+  background: rgba(255, 184, 77, 0.12);
+  border-color: rgba(255, 184, 77, 0.55);
+  transform: translateY(-1px);
+}
+.rcv-adv-hero-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  color: var(--warn);
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.rcv-adv-hero-headline {
+  font-family: var(--font-body);
+  font-size: 18px;
+  color: var(--text);
+  font-weight: 600;
+  margin-bottom: var(--space-3);
+  letter-spacing: 0.02em;
+}
+.rcv-adv-hero-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 14px 20px;
+  margin-bottom: var(--space-3);
+}
+.rcv-adv-hero-k {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-mute);
+  margin-bottom: 3px;
+}
+.rcv-adv-hero-v {
+  font-size: 13px;
+  color: var(--text);
+  font-weight: 500;
+}
+.rcv-adv-hero-v.strong { color: var(--warn); font-weight: 600; }
+.rcv-adv-hero-v.mono { font-family: var(--font-mono); font-size: 12px; }
+.rcv-adv-hero-cta {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding-top: 10px;
+  border-top: 1px dashed rgba(255, 184, 77, 0.22);
+}
+
 /* ─────────── RUNBOOK DRAWER (slides in from right edge) ─────────── */
 #runbook-drawer {
   position: fixed;
@@ -5485,6 +6027,63 @@ body.mode-receiver #receiver-view { display: flex; }
 }
 .tb-nav-btn:hover { color: var(--text); background: rgba(180,200,220,0.05); }
 .tb-nav-btn.on { color: var(--accent); background: rgba(77,210,255,0.08); }
+
+/* Mode toggle (Real / Sim) — lives inside the Config view as a
+   platform-level setting. See renderConfigView. */
+.cfg-mode-card {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 16px 20px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.cfg-mode-l {
+  flex: 1;
+  min-width: 0;
+}
+.cfg-mode-t {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.2em;
+  color: var(--text);
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.cfg-mode-desc {
+  font-size: 12px;
+  color: var(--text-dim);
+  line-height: 1.5;
+}
+.cfg-mode-seg {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 6px;
+}
+.cfg-mode-btn {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 8px 20px;
+  min-width: 80px;
+  text-align: center;
+  cursor: pointer;
+  border-radius: 3px;
+  transition: color 120ms ease, background 120ms ease, border-color 120ms ease;
+}
+.cfg-mode-btn:hover { color: var(--text); }
+.cfg-mode-btn.on {
+  color: #ffd54d;
+  border-color: rgba(255, 213, 77, 0.7);
+  background: rgba(255, 213, 77, 0.14);
+}
 
 /* Hide Live Ops widgets when in History/Fleet view */
 body.view-history #cesiumContainer,
@@ -6701,6 +7300,12 @@ body.view-fleet #fleet-view { display: block; }
   width: 100%;
   padding-left: var(--space-5);
   padding-right: var(--space-5);
+}
+.rcv-list.rcv-list--full .rcv-standby-hero {
+  max-width: 960px;
+  width: calc(100% - var(--space-10, 40px));
+  margin: var(--space-4) auto;
+  box-sizing: border-box;
 }
 
 /* Card reads as a clickable case — the entire card opens the workspace. */

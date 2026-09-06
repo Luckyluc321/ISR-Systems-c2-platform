@@ -1,0 +1,41 @@
+{
+  "fixtureId": "agent-b-class-transition-cph",
+  "agent": "agent_b_debrief",
+  "expectedTier": "notable",
+  "siteContextRef": "cph",
+  "event": {
+    "id": "DET-20260906-CLASSCHANGE-1",
+    "siteId": "cph",
+    "startTime": "2026-09-06T14:00:00Z",
+    "endTime":   "2026-09-06T14:11:00Z",
+    "classification": "hostile",
+    "threat": "elevated",
+    "platform": "loitering_munition",
+    "droneType": "1x reclassified: quadcopter → loitering munition",
+    "droneCount": 1,
+    "confidence": 0.87,
+    "entry": { "lat": 55.6320, "lon": 12.6390 },
+    "lastPosition": { "lat": 55.6188, "lon": 12.6689 },
+    "subject": {
+      "category": "aerial_platform",
+      "klass": "loitering_munition",
+      "class_change_log": [
+        { "at": "2026-09-06T14:04:00Z", "from": "quadcopter", "to": "loitering_munition", "reason": "sustained straight-line vector + payload-signature RF pattern emerged mid-flight" }
+      ]
+    }
+  },
+  "samples": [],
+  "analysis": {
+    "dwellProfile": { "hotspotIds": ["apron_east"], "peakDwellSeconds": 45 },
+    "closestAssetApproach": { "assetId": "apron_east", "assetName": "Apron East (main cargo apron)", "minDistanceM": 90 },
+    "classChangeLog": [
+      { "at": "2026-09-06T14:04:00Z", "from": "quadcopter", "to": "loitering_munition", "reason": "sustained straight-line vector + payload-signature RF pattern emerged mid-flight" }
+    ]
+  },
+  "signalsJsonBlock": "{\"signals\":[{\"id\":\"class_transition\",\"from\":\"quadcopter\",\"to\":\"loitering_munition\",\"at_sec\":240,\"outlier\":true},{\"id\":\"dwell_hotspot\",\"assetId\":\"apron_east\",\"value\":45,\"threshold\":60,\"outlier\":false}]}",
+  "signalsProseBlock": "Track reclassified from quadcopter to loitering munition 4 minutes into event when a sustained straight-line vector and payload-signature RF pattern emerged. Trajectory continued toward Apron East cargo area.",
+  "grounding": { "expectedAssetMentions": ["Apron East"] },
+  "subjectFidelity": { "requiredPlatformFamily": "loitering_munition" },
+  "assertions": ["writing_rules", "delimiter", "tier_caps", "grounding", "subject_fidelity", "model_version"],
+  "notes": "Mid-event class transition: quadcopter → loitering_munition. Tests that Agent B (a) uses the FINAL classification (loitering_munition), (b) references the transition in the narrative — the class-change log block explicitly asks Agent B to 'address why that matters'."
+}

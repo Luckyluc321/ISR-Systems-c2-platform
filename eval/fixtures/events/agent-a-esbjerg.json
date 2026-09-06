@@ -1,0 +1,8 @@
+{
+  "fixtureId": "agent-a-esbjerg",
+  "agent": "agent_a_digest",
+  "siteContextRef": "esbjerg",
+  "event": { "siteId": "esbjerg" },
+  "assertions": ["writing_rules", "model_version"],
+  "notes": "Site brief for Port of Esbjerg (port + offshore wind hub). Different site_type than the CPH aviation case — verifies Agent A can generalise across site types."
+}

@@ -1,0 +1,8 @@
+{
+  "fixtureId": "agent-a-cph",
+  "agent": "agent_a_digest",
+  "siteContextRef": "cph",
+  "event": { "siteId": "cph" },
+  "assertions": ["writing_rules", "model_version"],
+  "notes": "Verifies Agent A produces a plain-prose site brief under 300 words with no markdown, no em-dashes, no filler. Does NOT test tier_caps or delimiter (Agent A does not use the delimited body/reco protocol) or grounding (no highlights required)."
+}

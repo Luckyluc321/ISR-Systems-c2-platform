@@ -1,0 +1,58 @@
+{
+  "site_id": "cph",
+  "name": "København Airport (CPH)",
+  "site_type": "commercial_airport",
+  "schema_version": "1.2",
+  "generated_at": "2026-08-06T00:00:00Z",
+  "generated_by": "Compact eval snapshot derived from src/site_context.js cph record. Do not treat as authoritative — use src/site_context.js for prod. This file exists so the eval harness has a stable context to run against.",
+  "airport_reference_point": { "lat": 55.61806, "lon": 12.65611 },
+
+  "critical_areas": [
+    { "id": "runway_04L_22R", "name": "Runway 04L/22R (primary)", "center": { "lat": 55.62267, "lon": 12.64620 }, "criticality": "critical",
+      "reason": "Primary arrival axis. Airborne obstruction on approach triggers go-around; ground incursion closes the runway." },
+    { "id": "runway_04R_22L", "name": "Runway 04R/22L (parallel)", "center": { "lat": 55.61019, "lon": 12.63982 }, "criticality": "critical",
+      "reason": "Parallel arrival axis. Simultaneous ops with 04L; obstruction cascades to full airfield closure." },
+    { "id": "terminal_2", "name": "Terminal 2 (international check-in)", "center": { "lat": 55.62878, "lon": 12.64579 }, "criticality": "high",
+      "reason": "International check-in. Shares airside/arrivals hall with Terminal 3." },
+    { "id": "pier_e", "name": "Pier E (SAS long-haul, widebody stands)", "center": { "lat": 55.62682, "lon": 12.65581 }, "criticality": "critical",
+      "reason": "SAS long-haul hub since 2019. Widebody stands including A350 / 787 / 777 operations." },
+    { "id": "apron_east", "name": "Apron East (main cargo apron)", "center": { "lat": 55.61891, "lon": 12.66860 }, "criticality": "high",
+      "reason": "All commercial cargo operations at CPH. Runs along east edge adjacent to Øresund coast." }
+  ],
+
+  "high_value_assets": [
+    { "id": "atc_tower_syd", "name": "Tower Syd (ATC control tower)", "location": { "lat": 55.61180, "lon": 12.65760 }, "asset_type": "atc_control_tower", "criticality": "critical",
+      "reason": "Single point of airspace control. Loss = airspace closure with national-scale impact." },
+    { "id": "ils_04L", "name": "ILS Glideslope 04L", "location": { "lat": 55.62267, "lon": 12.64620 }, "asset_type": "ils_ground_installation", "criticality": "high",
+      "reason": "Instrument approach guidance for primary runway. Any interference triggers ILS re-certification." },
+    { "id": "fuel_farm", "name": "Airside fuel farm", "location": { "lat": 55.61600, "lon": 12.66500 }, "asset_type": "fuel_storage", "criticality": "critical",
+      "reason": "Consolidated Jet-A1 storage for the airfield. Dwell overhead reads as reconnaissance." }
+  ],
+
+  "response_doctrine": {
+    "authority": "Police (Politi) hold primary response. CPH Airports A/S security handles perimeter reporting. Naviair handles ATC-side airspace coordination.",
+    "triggers": [
+      "Any airborne unknown inside published control zone triggers immediate ATC notification.",
+      "Dwell over runway approach corridor or ILS glideslope triggers dispatch of ground unit within 5 minutes.",
+      "Formation of 2+ non-cooperative airframes triggers police + military liaison."
+    ],
+    "coordination": "Airport ops centre coordinates ground movements. Police make the go/no-go call on any escalation beyond monitor."
+  },
+
+  "site_red_flags": [
+    "Dwell overhead any runway threshold (approach or departure) beyond 60 seconds — reads as targeting the approach path.",
+    "Dwell over the airside fuel farm — reads as reconnaissance of the highest-consequence target.",
+    "Loitering over Pier E stands during widebody turnaround windows — payload exposure.",
+    "Non-cooperative airframe crossing runway centerline below 500 ft AGL — treat as runway incursion regardless of intent."
+  ],
+
+  "cooperative_traffic": {
+    "expected": true,
+    "source": "mock",
+    "match_radius_m": 800,
+    "match_time_window_s": 31536000,
+    "bbox_padding_deg": 0.15,
+    "_note": "match_time_window_s is 1 year (31536000s) for eval-only reasons: fixture event.startTime values are fixed (e.g. 2026-09-04T15:00:00Z) while the mock adapter timestamps tracks with new Date().toISOString() at eval-run time. A realistic 8s window would always fail temporal check. Production sites use 8s. Eval temporal axis effectively collapses to ~1.0; only class + spatial matching are exercised."
+  }
+}
+
