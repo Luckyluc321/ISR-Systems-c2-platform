@@ -317,13 +317,15 @@ export function registerPostIncidentReportGenerator(fn) { _pirGenerator = fn; }
 EVENTS.forEach(e => {
   e.escalations = e.escalations || [];
   syncEventSubject(e);
-  // domainScope backfill for seed events. addEvent handles this for
-  // dynamically-spawned events; the seed EVENTS constant array is
-  // declared inline above and misses the addEvent path.
-  if (!Array.isArray(e.domainScope) || !e.domainScope.length) {
-    e.domainScope = _computeInitialDomainScope(e);
-  }
 });
+// domainScope for seed events is populated by refreshSeedDomainScopes()
+// in main.js, called immediately after registerSiteDomains has been
+// invoked for every site. Doing the backfill HERE would crash on
+// TDZ (_computeInitialDomainScope reads _SITE_DEFAULT_DOMAINS which
+// is declared further down in this file). Any downstream reader that
+// hits a seed event before main.js boot completes falls through the
+// null-domainScope guard in destinations.js:destinationsForEvent
+// (returns the full unfiltered site list rather than throwing).
 
 // ── Escalation (mock UX, real dispatchers replace later) ──
 let _escalationCounter = 0;
