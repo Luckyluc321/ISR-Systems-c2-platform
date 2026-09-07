@@ -2644,56 +2644,69 @@ async function main() {
     return quadcopterIcon(hex); // default = quadcopter
   }
 
-  // Shahed-136 / Geran-2 planform. Delta wing, sharp nose, small
-  // V-tail at the back, rear-mounted pusher propeller circle. Reads
-  // as distinct from generic fixed-wing at map zoom while staying
-  // silhouette-clear (no gradient shading or texture that would
-  // muddy at small render size).
+  // Shahed-136 / Geran-2 planform. Sharp nose at top of canvas (=
+  // direction of travel), thin fuselage running the full length, wide
+  // delta wing planform swept back to trailing edge, twin canted
+  // V-tail fins at the rear. Convention matches fixedWingIcon so it
+  // rotates the right way when billboard.rotation applies bearing.
   function loiteringMunitionIcon(hex) {
     const c = document.createElement('canvas');
     c.width = 56; c.height = 56;
     const ctx = c.getContext('2d');
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    // 1) Delta wing (clean 3-point triangle, no self intersection).
+    //    Apex at nose, base spans the trailing edge across the back.
     ctx.fillStyle = hex;
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 1.5;
-    ctx.lineJoin = 'round';
-    // Delta wing (triangular planform). Sharp nose at top, wide
-    // trailing edge at bottom, wingtips pulled slightly forward of
-    // the actual trailing edge for the classic Shahed silhouette.
     ctx.beginPath();
-    ctx.moveTo(28, 4);       // nose
-    ctx.lineTo(52, 42);      // right wingtip
-    ctx.lineTo(46, 46);      // right trailing edge
-    ctx.lineTo(31, 44);      // right fuselage back
-    ctx.lineTo(31, 48);      // right rear fuselage
-    ctx.lineTo(25, 48);      // left rear fuselage
-    ctx.lineTo(25, 44);      // left fuselage back
-    ctx.lineTo(10, 46);      // left trailing edge
-    ctx.lineTo(4, 42);       // left wingtip
+    ctx.moveTo(28, 4);       // nose apex (forward)
+    ctx.lineTo(50, 42);      // right wingtip trailing edge
+    ctx.lineTo(6,  42);      // left  wingtip trailing edge
     ctx.closePath();
-    ctx.fill(); ctx.stroke();
-    // Twin V-tail fins at the rear, angled outward
+    ctx.fill();
+    ctx.stroke();
+    // 2) Fuselage stripe — thin white line running nose to tail so
+    //    the eye reads the direction of travel even at small zoom.
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2.2;
     ctx.beginPath();
-    ctx.moveTo(28, 46);
-    ctx.lineTo(23, 52);
+    ctx.moveTo(28, 5);
+    ctx.lineTo(28, 46);
+    ctx.stroke();
+    // 3) Nose triangle in a lighter tint so the front reads as
+    //    "pointed", not just an equilateral triangle.
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(28, 4);
+    ctx.lineTo(33, 16);
+    ctx.lineTo(23, 16);
+    ctx.closePath();
+    ctx.fill();
+    // 4) Twin canted V-tail fins at the rear (two small triangles).
+    ctx.fillStyle = hex;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(28, 42);
     ctx.lineTo(21, 51);
-    ctx.lineTo(26, 45);
+    ctx.lineTo(26, 48);
     ctx.closePath();
     ctx.fill(); ctx.stroke();
     ctx.beginPath();
-    ctx.moveTo(28, 46);
-    ctx.lineTo(33, 52);
+    ctx.moveTo(28, 42);
     ctx.lineTo(35, 51);
-    ctx.lineTo(30, 45);
+    ctx.lineTo(30, 48);
     ctx.closePath();
     ctx.fill(); ctx.stroke();
-    // Rear-mounted pusher propeller ring (small circle)
+    // 5) Rear-mounted pusher propeller disc.
     ctx.beginPath();
-    ctx.arc(28, 51, 2.2, 0, Math.PI * 2);
+    ctx.arc(28, 50, 2.6, 0, Math.PI * 2);
     ctx.fillStyle = '#fff';
     ctx.fill();
     ctx.strokeStyle = hex;
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1.2;
     ctx.stroke();
     return c;
   }
@@ -4722,24 +4735,36 @@ async function main() {
                       return killLive?.alt || 500;
                     })()
                   : (killLive?.alt || 500);
-                // Bright hit flash at kill altitude — the moment of impact
-                _spawnFlashEntity(killLon, killLat, 350, '#ffdb4d', 4, 12, startAlt);
-                // Descending fire pulses over 1.2 s — drone tumbles down
+                // Bright hit flash at kill altitude — the moment of impact.
+                // Sizes are pixel-space so they read at any map zoom.
+                _spawnFlashEntity(killLon, killLat, 380, '#ffe680', 24, 52, startAlt);
+                _spawnFlashEntity(killLon, killLat, 500, '#ff8f2a', 36, 68, startAlt);
+                // Descending fire pulses over 1.2 s — drone tumbles down.
                 const fallStages = [
-                  { delayMs: 200, altFrac: 0.75, color: '#ff8a3d', size: [4, 10] },
-                  { delayMs: 500, altFrac: 0.45, color: '#ff5a3d', size: [3, 9] },
-                  { delayMs: 850, altFrac: 0.18, color: '#a04030', size: [3, 8] },
+                  { delayMs: 180, altFrac: 0.78, color: '#ff8a3d', size: [30, 46] },
+                  { delayMs: 420, altFrac: 0.52, color: '#ff5a3d', size: [26, 42] },
+                  { delayMs: 720, altFrac: 0.26, color: '#c04525', size: [24, 38] },
+                  // Trailing smoke wisps behind the fire pulses.
+                  { delayMs: 260, altFrac: 0.90, color: 'rgba(90,80,72,0.85)', size: [22, 44] },
+                  { delayMs: 520, altFrac: 0.68, color: 'rgba(72,64,58,0.80)', size: [24, 46] },
+                  { delayMs: 820, altFrac: 0.40, color: 'rgba(58,50,44,0.78)', size: [26, 48] },
                 ];
                 fallStages.forEach(s => {
                   setTimeout(() => {
                     const alt = startAlt * s.altFrac;
-                    _spawnFlashEntity(killLon, killLat, 400, s.color, s.size[0], s.size[1], alt);
+                    _spawnFlashEntity(killLon, killLat, 900, s.color, s.size[0], s.size[1], alt);
                   }, s.delayMs);
                 });
-                // Ground impact — smaller flash + dark smoke ring on the ground
+                // Ground impact — bright fireball + persistent smoke plume
+                // rising from the wreckage. Plume lingers ~6 s so the
+                // operator can see where the drone came down even after
+                // panning away and back.
                 setTimeout(() => {
-                  _spawnFlashEntity(killLon, killLat, 500, '#ff5a5a', 5, 14, 2);
-                  _spawnFlashEntity(killLon, killLat, 900, '#4a3830', 8, 20, 4);
+                  _spawnFlashEntity(killLon, killLat, 700, '#ffb040', 40, 90, 4);
+                  _spawnFlashEntity(killLon, killLat, 900, '#ff5a1a', 36, 78, 6);
+                  _spawnFlashEntity(killLon, killLat, 6000, 'rgba(60,52,48,0.75)', 44, 90, 8);
+                  _spawnFlashEntity(killLon, killLat, 5200, 'rgba(90,82,76,0.55)', 30, 70, 22);
+                  _spawnFlashEntity(killLon, killLat, 4600, 'rgba(120,110,102,0.35)', 20, 55, 42);
                 }, 1200);
                 const killEnt = viewer.entities.add({
                   position: Cesium.Cartesian3.fromDegrees(killLon, killLat, 0),
@@ -6082,11 +6107,9 @@ async function main() {
         }, 6000);
       }
     }
-    // Auto-fly camera to the re-acquisition site so the audience sees the
-    // action without having to navigate manually.
-    if (siteId && FLY_TARGETS[siteId]) {
-      setTimeout(() => flyTo(siteId), 400);
-    }
+    // Deliberately DO NOT auto-fly the camera to the re-acquiring
+    // site. The operator picks their view; the platform never steals
+    // POV. Escalation and toast make the re-acquisition discoverable.
     // Cross-cue the F-35: it now has a live track and flips from cruise
     // heading to chase mode on this event. Only fires if the airborne
     // fighter isn't already chasing something.
