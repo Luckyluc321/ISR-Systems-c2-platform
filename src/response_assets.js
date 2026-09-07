@@ -357,10 +357,12 @@ export function tacticalKindsForSubject(subject) {
       // Slow enough that helicopter + counter drone combo works. F-35
       // only if the loitering munition sprints toward high-value asset.
       // Police counter drone patrol added as the ground-response first
-      // layer: Danish police stations in inner Copenhagen are being
-      // equipped with counter drone capability and belong in the
-      // response bundle alongside military assets, not held out of it.
-      return { kinds: ['police-c-uas', 'army-c-uas', 'helicopter-intercept', 'sof-tactical'], rationale: 'Loitering munition. Police counter drone patrol as first ground layer, army counter drone jammer for radio frequency disruption, tactical air intercept, special operations interdiction. F-35 held in reserve if terminal-phase sprint detected.' };
+      // layer (Danish police in inner Copenhagen are being equipped
+      // with counter drone capability). Counter drone interceptor pack
+      // added as a kinetic option — Ukrainian forces routinely engage
+      // Shahed with interceptor drones so this is real-world doctrine,
+      // not a swarm-only asset.
+      return { kinds: ['police-c-uas', 'counter-drone-swarm', 'army-c-uas', 'helicopter-intercept', 'sof-tactical'], rationale: 'Loitering munition. Police counter drone patrol as first ground layer, counter drone interceptor pack for airborne kinetic engagement, army counter drone jammer for radio frequency disruption, tactical air intercept, special operations interdiction. F-35 held in reserve if terminal-phase sprint detected.' };
     }
     // Cruise / ballistic / hypersonic — peer-level airborne intercept
     return { kinds: ['air-force-qra'], rationale: 'Kinetic weapon. F-35 QRA is the only asset with the closure rate. NASAMS coordination if in-range.' };
