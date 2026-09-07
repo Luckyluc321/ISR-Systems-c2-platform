@@ -5094,17 +5094,38 @@ async function main() {
     // bullet in perceptual terms and gives the streak time to render.
     const travelMs = 220;
 
-    // Live-target lookup reads the assigned enemy drone's billboard
-    // position DIRECTLY each frame — same source Cesium uses to draw
-    // the drone icon, so tracer endpoint and drone icon are always
-    // pixel-aligned. INCLUDES ALTITUDE now: enemy drones fly at
-    // 50-100 m AGL, tracer was previously drawn at 8 m — in a tilted
-    // 3D view the tracer visibly ran along the ground below the
-    // airborne drone. Reading .height gives the actual altitude so
-    // the tracer connects to the drone icon in 2D AND 3D.
+    // Live-target lookup reads the target's billboard position
+    // DIRECTLY each frame — same source Cesium uses to draw the drone
+    // icon, so tracer endpoint and drone icon are always pixel-aligned
+    // even as the target moves during the tracer's ~220 ms flight time.
+    //
+    // Fallback chain (same as _liveTargetPositionFor):
+    //   1. Assigned swarm member billboard (swarm scenarios)
+    //   2. Event's own droneState billboard (single-drone events like
+    //      Shahed — this was missing, causing tracers to freeze at the
+    //      fire-time snapshot of the target position while the Shahed
+    //      moved 50 m/s ahead. From POV of the Shahed the shots
+    //      appeared to land 10-50 m behind the camera.)
+    //   3. assignedTargetCoord snapshot (last-known)
+    //   4. Original target arg (fire-time snapshot)
     const _liveTarget = () => {
       if (d.assignedSwarmMember?.billboard?.position) {
         const cart = d.assignedSwarmMember.billboard.position.getValue?.(Cesium.JulianDate.now());
+        if (cart) {
+          const c = Cesium.Cartographic.fromCartesian(cart);
+          return {
+            lat: Cesium.Math.toDegrees(c.latitude),
+            lon: Cesium.Math.toDegrees(c.longitude),
+            alt: c.height || 8,
+          };
+        }
+      }
+      // Single-drone event fallback — read the target event's own
+      // billboard live position so tracers follow the Shahed as it
+      // flies through the tracer's flight time.
+      const st = droneState.get(d.eventId);
+      if (st?.billboard?.position) {
+        const cart = st.billboard.position.getValue?.(Cesium.JulianDate.now());
         if (cart) {
           const c = Cesium.Cartographic.fromCartesian(cart);
           return {
