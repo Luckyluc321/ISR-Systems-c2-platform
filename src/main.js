@@ -10667,11 +10667,17 @@ async function main() {
         // Uniform across every event type. beingChased keeps missile
         // targets visible through terminal chase.
         const leadInCov = _shouldAutoDetect(p.lat, p.lon, p.alt);
-        const shouldShow = leadDown ? false : (state.closedAt
+        // Suppress the lead billboard while the operator is POV'd inside
+        // this drone (single-drone events use state.billboard as the POV
+        // target). Without this the tick loop re-shows the billboard
+        // every frame and the operator sees the drone floating in front
+        // of their camera. Same _povActive gate the swarm branch uses.
+        const povSuppressed = !!state._singleDronePovRef?._povActive;
+        const shouldShow = (leadDown || povSuppressed) ? false : (state.closedAt
           ? false
           : (leadInCov || beingChased));
         state.billboard.show = shouldShow;
-        state.shadow.show = shouldShow;
+        state.shadow.show = shouldShow && !povSuppressed;
         // Also hide the lead's trail polyline once the lead is dead —
         // without this the DJI-1 trendline kept growing all the way
         // out over Øresund after the drone was neutralised at AMK.
