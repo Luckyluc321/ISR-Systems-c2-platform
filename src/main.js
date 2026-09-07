@@ -15955,20 +15955,80 @@ async function main() {
         </article>`;
     };
 
-    const otherRow = (a) => {
-      const cdState = counterDispatchStateFor(event.id, a.id);
-      const stateLabel = cdState
-        ? { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE' }[cdState]
-        : 'OTHER AGENCY';
+    // Group other agencies by response product kind. Each kind gets a
+    // collapsible row: header shows the response product name and how
+    // many agencies offer it, expanded body lists every agency ranked
+    // by real distance to the threat coordinate with a Request button
+    // per row. Clicking Request creates an escalation to that agency's
+    // owning role so they see the request in their inbox and can
+    // dispatch.
+    const threatLatForRank = event.lastKnownPosition?.lat ?? event.lastPosition?.lat ?? event.entry?.lat;
+    const threatLonForRank = event.lastKnownPosition?.lon ?? event.lastPosition?.lon ?? event.entry?.lon;
+    const distanceKmToThreat = (a) => {
+      if (a.lat == null || a.lon == null || threatLatForRank == null || threatLonForRank == null) return null;
+      const m = haversineM(threatLatForRank, threatLonForRank, a.lat, a.lon);
+      return m / 1000;
+    };
+    const otherByKind = {};
+    for (const a of otherList) {
+      const kindKey = a.kind || 'other';
+      if (!otherByKind[kindKey]) otherByKind[kindKey] = [];
+      otherByKind[kindKey].push(a);
+    }
+    // Rank each kind's asset list by real distance to the threat.
+    for (const k of Object.keys(otherByKind)) {
+      otherByKind[k].sort((x, y) => {
+        const dx = distanceKmToThreat(x) ?? Infinity;
+        const dy = distanceKmToThreat(y) ?? Infinity;
+        return dx - dy;
+      });
+    }
+    const _otherKindLabel = (kind) => {
+      const details = RESPONSE_OPTION_DETAILS[kind];
+      return details?.displayName || kind.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    };
+    const otherKindRow = (kind) => {
+      const list = otherByKind[kind];
+      if (!list?.length) return '';
+      const closest = list[0];
+      const closestDistKm = distanceKmToThreat(closest);
+      const closestDistText = closestDistKm != null ? `${closestDistKm.toFixed(0)} km closest` : '';
+      const kindKey = `${event.id}::${kind}`;
+      const isExpanded = _otherAgenciesExpanded.has(kindKey);
+      const chevron = isExpanded ? '▾' : '▸';
+      const agenciesHtml = list.map(a => {
+        const distKm = distanceKmToThreat(a);
+        const distText = distKm != null ? `${distKm.toFixed(0)} km` : '—';
+        const cdState = counterDispatchStateFor(event.id, a.id);
+        const stateLabel = cdState
+          ? { en_route: 'En route', engaging: 'Engaging', complete: 'Complete' }[cdState]
+          : null;
+        const requestButton = stateLabel
+          ? `<span style="font-size:var(--fs-2xs);color:var(--text-dim);font-family:var(--font-mono);letter-spacing:0.08em;text-transform:uppercase;">${stateLabel}</span>`
+          : `<button class="c-btn compact" data-rcv="other-agency-request" data-id="${event.id}" data-asset-id="${a.id}" style="padding:4px 10px;font-size:var(--fs-2xs);background:rgba(77,210,255,0.08);color:var(--accent);border:1px solid rgba(77,210,255,0.4);border-radius:2px;font-family:var(--font-mono);letter-spacing:0.10em;text-transform:uppercase;cursor:pointer;">Send request</button>`;
+        return `
+          <div style="display:flex;align-items:center;gap:var(--space-2);padding:8px 0;border-top:1px solid var(--border);font-size:var(--fs-xs);">
+            <div style="flex:1 1 auto;min-width:0;">
+              <div style="color:var(--text);">${a.name}</div>
+              <div class="c-label" style="color:var(--text-dim);margin-top:2px;">${a.response || 'Response capability'}</div>
+            </div>
+            <div style="font-family:var(--font-mono);color:var(--text-dim);font-size:var(--fs-2xs);letter-spacing:0.06em;text-align:right;min-width:60px;">${distText}</div>
+            <div style="min-width:110px;text-align:right;">${requestButton}</div>
+          </div>`;
+      }).join('');
       return `
-        <div class="c-row" style="align-items: flex-start; opacity: 0.7;">
-          <div style="flex: 1 1 auto; min-width: 0;">
-            <div style="font-size: var(--fs-sm); color: var(--text-dim); font-weight: 500;">${a.name}</div>
-            <div class="c-label" style="margin-top: 2px;">${a.response}</div>
+        <div class="c-row-collapsible" style="border-top:1px solid var(--border);padding:10px 0;">
+          <div style="display:flex;align-items:center;gap:var(--space-2);cursor:pointer;" data-rcv="other-agency-toggle" data-kind-key="${kindKey}">
+            <span style="font-family:var(--font-mono);color:var(--text-dim);font-size:var(--fs-xs);width:12px;">${chevron}</span>
+            <div style="flex:1 1 auto;min-width:0;">
+              <div style="font-size:var(--fs-sm);color:var(--text);font-weight:500;">${_otherKindLabel(kind)}</div>
+              <div class="c-label" style="color:var(--text-dim);margin-top:2px;">${list.length} agenc${list.length === 1 ? 'y' : 'ies'} available · ${closestDistText}</div>
+            </div>
           </div>
-          <div style="font-size: var(--fs-2xs); color: var(--text-dim); font-family: var(--font-mono); letter-spacing: 0.08em; padding-left: var(--space-2);">${stateLabel}</div>
+          ${isExpanded ? `<div style="padding-left:20px;margin-top:6px;">${agenciesHtml}</div>` : ''}
         </div>`;
     };
+    const otherAgenciesHtml = Object.keys(otherByKind).map(otherKindRow).join('');
 
     // Acknowledgment gate — options unlock only after this role has
     // acked. Mirrors real command-room doctrine: read, ack, deliberate,
@@ -16027,8 +16087,9 @@ async function main() {
 
       ${otherList.length ? `
         <div class="c-panel">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Other Agencies On Case</div>
-          ${otherList.map(otherRow).join('')}
+          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Other agencies on case</div>
+          <div class="c-label" style="margin-bottom: var(--space-2); text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">Response products available from other agencies. Ranked by real distance to the threat coordinate. Click Send request to route it to that agency for their acceptance.</div>
+          ${otherAgenciesHtml}
         </div>` : ''}
     `;
   }
@@ -17563,6 +17624,39 @@ async function main() {
   // description, and a "Drill in" affordance. Clicking sets the child
   // as the active role and renders the normal receiver view.
   function renderReceiverParentLanding(role, children) {
+    // Direct department inbox tile. When the parent role has its own
+    // destinationIds (Politi København owns cph-t2-politi, escalations
+    // to that destination land in the parent's inbox NOT the children's)
+    // we need to give the operator a way to open that inbox from the
+    // landing page. Without this tile, the parent shows "1 active event"
+    // in the account switcher but drilling in only shows sub-units with
+    // empty inboxes.
+    const parentDirectDests = role.destinationIds || [];
+    const parentDirectEvents = parentDirectDests.length
+      ? eventsForDestinations(parentDirectDests).filter(e => e.status === 'active')
+      : [];
+    const parentSelfTile = parentDirectEvents.length
+      ? `
+        <button class="rcv-parent-tile" data-parent-pick-self="${role.id}" style="
+          text-align: left; padding: var(--space-4); border-radius: var(--radius);
+          background: rgba(77, 210, 255, 0.05); border: 1px solid rgba(77, 210, 255, 0.4);
+          cursor: pointer; display: flex; flex-direction: column; gap: var(--space-2);
+          transition: border-color 120ms, background 120ms;
+        ">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);">
+            <div>
+              <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent); font-size: var(--fs-2xs);">DIRECT DEPARTMENT INBOX</div>
+              <div style="font-size: var(--fs-lg); color: var(--text); font-weight: 600; margin-top: 2px;">${role.org}</div>
+            </div>
+            <span class="c-chip warn" style="align-self: flex-start; max-width: max-content;">${parentDirectEvents.length} ACTIVE</span>
+          </div>
+          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">Events escalated directly to this department, not routed through a sub-unit.</div>
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: var(--space-2); border-top: 1px solid var(--border);">
+            <div class="c-label" style="color: var(--text-dim);">${role.person || 'Department duty officer'}</div>
+            <div class="c-label" style="color: var(--accent);">Open inbox →</div>
+          </div>
+        </button>`
+      : '';
     const tiles = children.map(child => {
       const dests = child.destinationIds || getRoleDestinationIdsRolledUp(child.id);
       const activeEvents = eventsForDestinations(dests).filter(e => e.status === 'active');
@@ -17604,6 +17698,7 @@ async function main() {
           <div class="c-label" style="margin-top: var(--space-2); color: var(--text-dim); font-size: var(--fs-2xs); letter-spacing: 0.1em;">${children.length} SUB-UNIT${children.length === 1 ? '' : 'S'}</div>
         </div>
         <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--space-3);">
+          ${parentSelfTile}
           ${tiles}
         </div>
       </div>
@@ -17628,7 +17723,23 @@ async function main() {
         setActiveRole(childId);
       });
     });
+    receiverView.querySelectorAll('[data-parent-pick-self]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        // "Direct department inbox" tile: parent role has its own
+        // destinationIds and events. Skip the landing and render as
+        // if it were a leaf inbox using the parent's own destinations.
+        const roleId = btn.dataset.parentPickSelf;
+        if (!roleId) return;
+        _parentAsLeafRoleId = roleId;
+        _lastReceiverViewSig = null;
+        renderReceiverView({ immediate: true });
+      });
+    });
   }
+  // When set, causes renderReceiverView to skip the parent landing
+  // for the matching role and render it as a leaf inbox using its
+  // own destinationIds. Cleared by the back button on that inbox.
+  let _parentAsLeafRoleId = null;
 
   // P94: Memoize renderReceiverView. Rebuilding receiverView.innerHTML on
   // every _listeners fire (escalation status transitions, addNote,
@@ -17776,7 +17887,14 @@ async function main() {
     // branches, Hæren → bases, Politi → districts). Leaf roles get the
     // normal inbox flow below. Signature includes children active-count
     // so newly incoming events refresh the tile counts.
-    if (role.type === 'parent') {
+    // Parent-as-leaf override: when the operator clicked the Direct
+    // department inbox tile, skip the landing and render as a leaf
+    // using the parent's own destinationIds. The back button on the
+    // inbox clears the flag and returns to the landing.
+    if (role.type === 'parent' && _parentAsLeafRoleId === role.id) {
+      // Fall through to the leaf inbox render below by NOT entering
+      // the parent-landing branch.
+    } else if (role.type === 'parent') {
       const children = getRoleChildren(role.id);
       const sig = `parent:${role.id}:${children.map(c => eventsForDestinations(c.destinationIds || getRoleDestinationIdsRolledUp(c.id)).length).join(',')}`;
       if (!opts.force && sig === _lastReceiverViewSig) return;
@@ -18002,13 +18120,20 @@ async function main() {
     if (!opts.force && sig === _lastReceiverViewSig) return;
     _lastReceiverViewSig = sig;
 
-    // Parent role for hierarchy back-nav. E.g. rigspoliti → politi so
-    // the duty officer can go back UP one level (case inbox → parent
-    // chooser) after coming in via Politi → Rigspolitiet drill.
+    // Parent role for hierarchy back-nav. Three cases:
+    //   1. role has parentId (leaf under a parent, e.g. Rytteriafdelingen
+    //      under Politi København) → back returns to that parent
+    //   2. role is a parent AND we're rendering it as its own leaf
+    //      inbox (Direct department inbox tile flow) → back returns
+    //      to this same role's landing page (clears the flag)
+    //   3. otherwise no back button
+    const parentAsSelf = _parentAsLeafRoleId === role.id;
     const parentRole = role.parentId ? RECEIVERS.find(r => r.id === role.parentId) : null;
-    const parentBackBtn = parentRole
-      ? `<button class="rcv-list-back" data-rcv="role-back-parent" title="Back to ${parentRole.org || parentRole.label}">← ${parentRole.org || parentRole.label}</button>`
-      : '';
+    const parentBackBtn = parentAsSelf
+      ? `<button class="rcv-list-back" data-rcv="role-back-parent-self" title="Back to ${role.org} landing">← ${role.org} sub-units</button>`
+      : parentRole
+        ? `<button class="rcv-list-back" data-rcv="role-back-parent" title="Back to ${parentRole.org || parentRole.label}">← ${parentRole.org || parentRole.label}</button>`
+        : '';
 
     // Two-box layout: Inbox on the left (fixed ~440px), Reports on the
     // right (flex-fill). flex-wrap so on narrow viewports the Reports
@@ -18046,6 +18171,11 @@ async function main() {
     receiverView.style.display = 'flex';
     _bindReceiverActions();
   }
+
+  // Other Agencies On Case expanded-kind state. Set of "eventId::kind"
+  // keys. Preserved across re-renders so the operator's expanded
+  // dropdowns stay open while telemetry updates fire.
+  const _otherAgenciesExpanded = new Set();
 
   // ── Collapsible step panels state (per step key) ──
   // Persists across re-renders so a panel Lucas collapsed stays
@@ -18259,6 +18389,52 @@ async function main() {
       //
       // Toast + view re-render stay inline (UI concerns, not adapter
       // concerns). Adapter is transport-only.
+      else if (action === 'other-agency-toggle') {
+        const kindKey = el.dataset.kindKey;
+        if (!kindKey) return;
+        if (_otherAgenciesExpanded.has(kindKey)) _otherAgenciesExpanded.delete(kindKey);
+        else _otherAgenciesExpanded.add(kindKey);
+        _lastConsoleSig = null;
+        _lastReceiverViewSig = null;
+        renderReceiverView({ immediate: true });
+      }
+      else if (action === 'other-agency-request') {
+        // Send a request to the owning agency of a specific asset.
+        // Creates an escalation targeting that agency's destination so
+        // the receiver sees the request in their inbox and can dispatch
+        // the asset from their own console.
+        const eventId = id || _selectedReceiverEventId || _workspaceEventId;
+        const assetId = el.dataset.assetId;
+        if (!eventId || !assetId) { toast('Missing event or asset context.', 'err'); return; }
+        const ev = getEvent(eventId);
+        if (!ev) { toast('Event not found.', 'err'); return; }
+        // Map the response_assets.js id to the closest matching real
+        // destination for that site. Simplest: look through the site's
+        // destinations for one whose id contains the asset id root.
+        // Fallback: escalate to any destination whose name matches the
+        // asset name. If nothing matches, warn and abort.
+        const dests = destinationsForSite(ev.siteId) || [];
+        const assetIdRoot = assetId.split('-').slice(0, 2).join('-');
+        let targetDest = dests.find(d => d.id.includes(assetIdRoot)) || null;
+        if (!targetDest) {
+          toast(`No destination configured for ${assetId} at this site.`, 'err');
+          return;
+        }
+        const activeRole = getActiveRole();
+        const requesterName = activeRole?.org || activeRole?.label || 'Receiver';
+        const records = escalateEvent(eventId, {
+          destinationIds: [targetDest.id],
+          payload: 'summary',
+          message: `Assistance request from ${requesterName}. Requesting ${targetDest.name} dispatch.`,
+          operator: `${requesterName} (assistance request)`,
+        });
+        if (records.length === 0) {
+          toast(`${targetDest.name} already notified.`, 'info');
+        } else {
+          toast(`Request sent to ${targetDest.name}. Awaiting their dispatch.`, 'ok');
+        }
+        renderReceiverView({ immediate: true });
+      }
       else if (action === 'receiver-dispatch') {
         // Real receiver-side dispatch. Spawns the asset from the
         // role's home base coordinate and animates it to the incident
@@ -18564,6 +18740,15 @@ async function main() {
         _reportsFilter = { ..._REPORTS_FILTER_DEFAULTS };
         renderReceiverView({ immediate: true });
       }
+      else if (action === 'role-back-parent-self') {
+        // Return from parent-as-leaf inbox back to the parent landing.
+        // Clears the flag so the next render lands on the landing page.
+        _parentAsLeafRoleId = null;
+        _selectedReceiverEventId = null;
+        _workspaceEventId = null;
+        _lastReceiverViewSig = null;
+        renderReceiverView({ immediate: true });
+      }
       else if (action === 'role-back-parent') {
         // Hierarchy back-nav: switch active role UP one level so the
         // duty officer returns to the parent chooser (e.g. Rigspoliti
@@ -18614,6 +18799,7 @@ async function main() {
     _mistralFiredForEvent = null;
     _lastReceiverViewSig = null;
     _reportsFilter = { ..._REPORTS_FILTER_DEFAULTS };   // session-only, reset per role
+    _parentAsLeafRoleId = null;   // clear direct-inbox flag on role switch
     _lastReceiverWorkspaceId = null;
     _lastReceiverWorkspaceMode = null;
     _lastConsoleSig = null;
