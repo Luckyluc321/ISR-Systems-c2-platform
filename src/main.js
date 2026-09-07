@@ -2637,6 +2637,10 @@ async function main() {
     if (platform === 'fixed-wing') return fixedWingIcon(hex);
     if (platform === 'jet') return jetIcon(hex);
     if (platform === 'missile') return missileIcon(hex);
+    // Shahed-136 and similar loitering munitions have a delta-wing
+    // planform, not rotors. Render as fixed-wing rather than the
+    // default quadcopter icon.
+    if (platform === 'loitering-munition' || platform === 'loitering_munition') return fixedWingIcon(hex);
     if (platform === 'non-identifiable') return nonIdentifiableIcon(hex);
     return quadcopterIcon(hex); // default = quadcopter
   }
@@ -7270,11 +7274,13 @@ async function main() {
   // sample at the same rate — no lead-vs-wingmen asymmetry from lead
   // reading p.speed while wingmen compute from position deltas).
   //   missile              → 100 ms (10 Hz)  — cruise missile at Mach 0.8
+  //   loitering-munition   → 200 ms (5 Hz)   — Shahed-136 cruise + terminal
   //   fixed-wing           → 250 ms (4 Hz)   — reconnaissance / high-speed
   //   quadcopter (default) → 500 ms (2 Hz)   — swarm / loiter
   function _sampleIntervalForEvent(event) {
     const platform = (event?.platform || 'quadcopter').toLowerCase();
     if (platform === 'missile') return 100;
+    if (platform === 'loitering-munition' || platform === 'loitering_munition') return 200;
     if (platform === 'fixed-wing' || platform === 'fixed_wing') return 250;
     return 500;
   }
@@ -7727,10 +7733,12 @@ async function main() {
       'fixed_wing': 'Fixed-wing UAS',
       'jet': 'Jet platform',
       'missile': 'Cruise/ballistic missile',
+      'loitering-munition': 'Shahed-136 / Geran-2',
+      'loitering_munition': 'Shahed-136 / Geran-2',
       'non-identifiable': 'Non-identified platform',
     };
     const drones = [{
-      id: platform === 'missile' ? 'MSL-1' : 'UAS-1',
+      id: platform === 'missile' ? 'MSL-1' : (platform === 'loitering-munition' || platform === 'loitering_munition' ? 'LM-1' : 'UAS-1'),
       model: modelByPlatform[platform] || (event.droneType || 'Unknown platform'),
       role: 'lead',
     }];
