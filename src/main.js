@@ -10695,11 +10695,17 @@ async function main() {
         // (needed for AMK to log its own OUT OF RANGE once the last
         // live drone crosses AMK sensor coverage).
         // Lead's own per-site transitions — polygon + coverage, with
-        // swarm-density aggregation applied inside the helper.
-        if (!leadDown && state.leadSwarmMember) {
-          const leadCur  = { lat: p.lat, lon: p.lon };
+        // swarm-density aggregation applied inside the helper. Fires
+        // for BOTH swarm events (state.leadSwarmMember present) and
+        // single-drone events (Shahed, cruise missile, single fixed-
+        // wing — no swarm formation, so leadSwarmMember is null but
+        // the drone itself still needs entry/exit/OOR markers).
+        // Gated on !closedAt so no markers fire after neutralisation.
+        if (!leadDown && !state.closedAt) {
+          const leadCur  = { lat: p.lat, lon: p.lon, alt: p.alt };
           const leadPrev = state._leadMarkerPrevPos || leadCur;
-          processDroneSiteMarkers(event, state, 'lead', leadCur, leadPrev, state.leadSwarmMember.model || 'lead');
+          const label = state.leadSwarmMember?.model || event.droneType || 'target';
+          processDroneSiteMarkers(event, state, 'lead', leadCur, leadPrev, label);
           state._leadMarkerPrevPos = leadCur;
         }
         state.billboard.position = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.alt);
