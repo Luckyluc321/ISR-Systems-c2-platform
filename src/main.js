@@ -3577,7 +3577,7 @@ async function main() {
     if (!event) { toast('Event not found', 'err'); return null; }
     const spec = getReceiverRequestAsset(roleId, requestId);
     if (!spec) { toast('No request spec for that action.', 'err'); return null; }
-    const targetRoleId = spec.routesTo;
+    const targetRoleId = spec.from;
     if (!targetRoleId) { toast('Request has no target profile.', 'err'); return null; }
     // Resolve target role's destinationIds so the escalation lands
     // in their inbox via existing escalateEvent + destinationIds
@@ -17340,26 +17340,43 @@ async function main() {
     // dispatchReceiverAsset in this file for the full flow.
     const _receiverAssetSpec = isActive ? assetsForReceiverRole(roleId) : null;
     if (_receiverAssetSpec) {
-      _receiverAssetSpec.direct.forEach(a => {
+      // Dispatchable assets: fire from profile's own home base.
+      // Descriptive metadata (useCases, deployTime, limitations)
+      // surfaces as multi-line tooltip so operators understand
+      // capability before clicking. See receiver_assets.js schema
+      // and docs/agentic-receiver-asset-plugin-architecture.md.
+      _receiverAssetSpec.dispatchable.forEach(a => {
+        const countStr = a.count && a.count > 1 ? ` (${a.count} units)` : '';
+        const useCasesStr = Array.isArray(a.useCases) && a.useCases.length
+          ? `\n\nUse cases:\n- ${a.useCases.join('\n- ')}`
+          : '';
+        const deployStr = a.deployTime ? `\n\nDeploy time: ${a.deployTime}` : '';
+        const limitStr = a.limitations ? `\n\nLimitations: ${a.limitations}` : '';
         ctas.push({
-          label: a.label,
-          sub: a.sub,
+          label: a.name || a.label,
+          sub: `${a.count && a.count > 1 ? a.count + ' units available' : 'Single unit'}`,
           icon: a.icon,
           tone: 'accent',
           action: 'receiver-dispatch',
           assetKey: a.assetKey,
-          tooltip: `${a.label}. ${a.sub}.`,
+          tooltip: `${a.name}${countStr}.${useCasesStr}${deployStr}${limitStr}`,
         });
       });
-      _receiverAssetSpec.request.forEach(r => {
+      // Requestable assets: route to another profile that owns the
+      // capability. Same metadata surface applies.
+      _receiverAssetSpec.requestable.forEach(r => {
+        const useCasesStr = Array.isArray(r.useCases) && r.useCases.length
+          ? `\n\nUse cases:\n- ${r.useCases.join('\n- ')}`
+          : '';
+        const expectedStr = r.expectedResponse ? `\n\nExpected response: ${r.expectedResponse}` : '';
         ctas.push({
-          label: r.label,
-          sub: r.sub,
+          label: `Request ${r.name.toLowerCase()}`,
+          sub: `Routes to ${r.from}. Priority ${r.priority || 'standard'}`,
           icon: '⚡',
           tone: 'neutral',
           action: 'receiver-request',
-          requestId: r.id,
-          tooltip: `${r.label}. Routes the request to another profile that owns the capability. ${r.sub}.`,
+          requestId: r.requestKey,
+          tooltip: `Request ${r.name} from ${r.from}. They see the request in their inbox and dispatch their own asset.${useCasesStr}${expectedStr}`,
         });
       });
     }
