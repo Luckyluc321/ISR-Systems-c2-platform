@@ -585,6 +585,35 @@ if (Array.isArray(overrides) && overrides.length) {
   DESTINATIONS.push(...overrides);
 }
 
+// Auto-add Aktionsstyrken destinations per site. AKS is the national
+// police tactical unit that responds to any critical incident. Rather
+// than adding one entry per site inline in every site's block above
+// (repetitive, easy to miss when adding a new site), add them at boot
+// by scanning existing site IDs and adding a matching AKS entry per
+// site if one doesn't already exist. Same pattern any national-role
+// service could adopt (PET, FE, Beredskabsstyrelsen national coord).
+(() => {
+  const existingSiteIds = new Set(DESTINATIONS.map(d => d.siteId));
+  const existingAksIds = new Set(DESTINATIONS.filter(d => /-t3-aks$/.test(d.id)).map(d => d.siteId));
+  for (const sid of existingSiteIds) {
+    if (existingAksIds.has(sid)) continue;
+    // Site-code prefix derived from existing destinations. Falls back
+    // to the siteId itself if no naming convention detected.
+    const sample = DESTINATIONS.find(d => d.siteId === sid);
+    const prefix = sample?.id?.split('-')[0] || sid;
+    DESTINATIONS.push({
+      id: `${prefix}-t3-aks`,
+      siteId: sid,
+      tier: 3,
+      type: 'agency',
+      name: 'Aktionsstyrken, national police tactical unit',
+      contactMethods: ['api', 'encrypted-email', 'phone'],
+      availabilityStatus: 'on-shift',
+      domains: ['ground'],
+    });
+  }
+})();
+
 const _listeners = new Set();
 function _notify() { _listeners.forEach(fn => fn()); }
 export function onDestinationsChange(fn) { _listeners.add(fn); return () => _listeners.delete(fn); }

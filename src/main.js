@@ -44,6 +44,22 @@ refreshSeedDomainScopes();
 // events.js has no import-time dependency on destinations or the
 // generator module.
 registerPostIncidentReportGenerator((event, opts) => buildPostIncidentReport(event, opts));
+
+// Populate destinationIds for roles that declare an autoDestPattern
+// (e.g. politi-aks matches /-t3-aks$/ across every site's auto-added
+// Aktionsstyrken destination). Runs once at boot after destinations.js
+// has finalized its catalogue. Keeps role-to-destination membership
+// in sync with the site list without requiring per-role manual edits.
+for (const r of RECEIVERS) {
+  if (r.autoDestPattern instanceof RegExp) {
+    const matches = getAllDestinations()
+      .filter(d => r.autoDestPattern.test(d.id))
+      .map(d => d.id);
+    if (matches.length) {
+      r.destinationIds = Array.from(new Set([...(r.destinationIds || []), ...matches]));
+    }
+  }
+}
 // Window-scoped destination resolver so the PIR generator (called from
 // events.js closeEvent) can look up display names without importing
 // destinations.js (would create a cycle). Present at load; consumers
@@ -86,6 +102,8 @@ import {
 } from './events.js';
 import { buildPostIncidentReport, emphasisForBranch } from './post_incident_report.js';
 import { evaluateClassificationPipeline, evaluateAttackProfileDetector } from './classification_pipeline.js';
+import { RECEIVER_BASES, baseForReceiverRole } from './receiver_bases.js';
+import { RECEIVER_ASSETS, assetsForReceiverRole, getReceiverDirectAsset, getReceiverRequestAsset } from './receiver_assets.js';
 import {
   destinationsForSite, destinationsForEvent, getDestination, destinationTypeLabel,
   destinationParent, destinationShortLabel, groupByParent,
@@ -3256,6 +3274,61 @@ async function main() {
       maxPursuitKm: 30,
       label: 'Interceptor Swarm',
     },
+
+    // ── Receiver-side dispatch profiles ─────────────────────────
+    // Assets a receiver profile can dispatch from their own home
+    // base. Kinds mirror the roles listed in receiver_assets.js. Each
+    // profile is tuned to what the real unit looks like on the map:
+    // patrol cars follow real roads via OSRM, tactical vans are
+    // faster armored vehicles, cordon squads arrive and stay static,
+    // coordination cells are static (activate in place, no vehicle).
+    'receiver-patrol-car': {
+      cruiseKmh: 80, arriveAtM: 400, engageSec: 30,
+      icon: 'police-vehicle', trail: false, airborne: false,
+      useRoadRouting: true, supportsMultiDispatch: true, maxUnitsPerDispatch: 5,
+      billboardScale: 0.55, swarmSpacingM: 40, cordonSlotSpreadM: 18,
+      label: 'Police patrol responder',
+    },
+    'receiver-k9-unit': {
+      cruiseKmh: 70, arriveAtM: 300, engageSec: 60,
+      icon: 'police-vehicle', trail: false, airborne: false,
+      useRoadRouting: true, billboardScale: 0.5,
+      label: 'K9 search unit',
+    },
+    'receiver-cordon-squad': {
+      cruiseKmh: 60, arriveAtM: 500, engageSec: 300,
+      icon: 'police-vehicle', trail: false, airborne: false,
+      useRoadRouting: true, billboardScale: 0.6,
+      label: 'Cordon squad',
+    },
+    'receiver-forensic-van': {
+      cruiseKmh: 65, arriveAtM: 300, engageSec: 600,
+      icon: 'police-vehicle', trail: false, airborne: false,
+      useRoadRouting: true, billboardScale: 0.55,
+      label: 'Forensic team',
+    },
+    'receiver-tactical-van': {
+      cruiseKmh: 110, arriveAtM: 200, engageSec: 120,
+      icon: 'sof', trail: false, airborne: false,
+      useRoadRouting: true, billboardScale: 0.65,
+      label: 'Aktionsstyrken tactical van',
+    },
+    'receiver-strike-team': {
+      cruiseKmh: 110, arriveAtM: 200, engageSec: 180,
+      icon: 'sof', trail: false, airborne: false,
+      useRoadRouting: true, billboardScale: 0.65,
+      label: 'Aktionsstyrken strike team',
+    },
+    'receiver-coord-cell': {
+      cruiseKmh: 0, arriveAtM: null, engageSec: 30,
+      icon: 'sof', trail: false, airborne: false,
+      label: 'National coordination cell',
+    },
+    'receiver-cyber-team': {
+      cruiseKmh: 0, arriveAtM: null, engageSec: 60,
+      icon: 'sof', trail: false, airborne: false,
+      label: 'National cyber crime team',
+    },
   };
 
   function _bearingRad(lat1, lon1, lat2, lon2) {
@@ -3445,6 +3518,94 @@ async function main() {
   // profile has swarmSize > 1, spawns that many instances offset in
   // a small formation around the asset origin. All members share a
   // dispatchGroupId so Steps 3+4 can group them in the UI.
+  // Receiver-side dispatch. Clicking a direct-asset button in the
+  // receiver console spawns the asset billboard at the receiver's
+  // home base coordinate (from receiver_bases.js) and animates it
+  // toward the incident site using the existing counter-dispatch
+  // engine. Same visual pattern the operator uses today.
+  //
+  // Handles two cases:
+  //   - Role has an explicit home base coordinate → asset spawns
+  //     there, routes to the incident via OSRM road network if the
+  //     profile has useRoadRouting.
+  //   - Role has no base (national coordination cell, remote cyber
+  //     team) → static profile (cruiseKmh 0) so the asset renders
+  //     in engaging state without a movement animation.
+  //
+  // Returns the constructed asset object or null on failure.
+  function dispatchReceiverAsset(eventId, roleId, assetKey, opts = {}) {
+    const event = getEvent(eventId);
+    if (!event) { toast('Event not found', 'err'); return null; }
+    const spec = getReceiverDirectAsset(roleId, assetKey);
+    if (!spec) { toast('No asset spec for that receiver action.', 'err'); return null; }
+    const base = baseForReceiverRole(roleId);
+    if (!base) {
+      // Static profile: no home base needed. Spawn at the incident
+      // site itself so the coordination cell shows up as a static
+      // activation marker there.
+      const targetLat = event.lastKnownPosition?.lat ?? event.lastPosition?.lat ?? event.entry?.lat ?? SITES[event.siteId]?.coordinates?.lat;
+      const targetLon = event.lastKnownPosition?.lon ?? event.lastPosition?.lon ?? event.entry?.lon ?? SITES[event.siteId]?.coordinates?.lon;
+      if (targetLat == null || targetLon == null) { toast('No home base or target coordinate for dispatch.', 'err'); return null; }
+      const asset = { id: `${roleId}-${assetKey}-${Date.now()}`, name: spec.label, kind: spec.kind, lat: targetLat, lon: targetLon };
+      dispatchCounterResponse(eventId, asset, opts);
+      toast(`${spec.label} activated.`, 'ok');
+      return asset;
+    }
+    // Real home base dispatch: asset spawns at the base coord and
+    // animates to the incident. dispatchCounterResponse handles the
+    // rest (route fetch, state machine, engage timer).
+    const asset = {
+      id: `${roleId}-${assetKey}-${Date.now()}`,
+      name: spec.label,
+      kind: spec.kind,
+      lat: base.lat,
+      lon: base.lon,
+    };
+    dispatchCounterResponse(eventId, asset, opts);
+    toast(`${spec.label} dispatched from ${base.name}.`, 'ok');
+    return asset;
+  }
+
+  // Receiver-side request-routing. Politi requesting Aktionsstyrken
+  // creates a new escalation record targeting the AKS role with
+  // flow='assistance-request'. The AKS profile sees it in their
+  // inbox, can dispatch their own direct asset from THEIR home base.
+  // Requester sees status updates flow back via the escalation
+  // record's statusHistory.
+  function requestReceiverAsset(eventId, roleId, requestId) {
+    const event = getEvent(eventId);
+    if (!event) { toast('Event not found', 'err'); return null; }
+    const spec = getReceiverRequestAsset(roleId, requestId);
+    if (!spec) { toast('No request spec for that action.', 'err'); return null; }
+    const targetRoleId = spec.routesTo;
+    if (!targetRoleId) { toast('Request has no target profile.', 'err'); return null; }
+    // Resolve target role's destinationIds so the escalation lands
+    // in their inbox via existing escalateEvent + destinationIds
+    // machinery. If the target is a role rather than a destination,
+    // we need to map role → destinationId(s). For now use the target
+    // role id directly and let escalateEvent match it.
+    const targetRole = RECEIVERS.find(r => r.id === targetRoleId);
+    if (!targetRole) { toast(`Target profile ${targetRoleId} not found.`, 'err'); return null; }
+    const targetDestIds = (Array.isArray(targetRole.destinationIds) && targetRole.destinationIds.length)
+      ? targetRole.destinationIds
+      : [targetRoleId];
+    const requesterRole = getActiveRole();
+    const requesterName = requesterRole?.org || requesterRole?.label || roleId;
+    const targetName = targetRole.org || targetRole.label || targetRoleId;
+    const records = escalateEvent(event.id, {
+      destinationIds: targetDestIds,
+      payload: 'summary',
+      message: `Assistance request from ${requesterName}: ${spec.label}. ${spec.sub || ''}`,
+      operator: `${requesterName} (assistance request)`,
+    });
+    if (records.length === 0) {
+      toast(`${targetName} already notified for this event.`, 'info');
+    } else {
+      toast(`Request sent to ${targetName}. Awaiting their dispatch.`, 'ok');
+    }
+    return records[0] || null;
+  }
+
   function dispatchCounterResponse(eventId, asset, opts = {}) {
     const event = getEvent(eventId);
     if (!event) return;
@@ -16565,7 +16726,7 @@ async function main() {
         ${_participantsStrip}
         <div class="rer-cta-rail">
           ${ctas.map(c => `
-            <button class="rer-cta ${c.tone}" data-rcv="${c.action}" data-id="${event.id}" ${c.esc ? `data-esc="${c.esc}"` : ''} title="${c.tooltip}" ${c.disabled ? 'disabled' : ''}>
+            <button class="rer-cta ${c.tone}" data-rcv="${c.action}" data-id="${event.id}" ${c.esc ? `data-esc="${c.esc}"` : ''} ${c.assetKey ? `data-asset-key="${c.assetKey}"` : ''} ${c.requestId ? `data-request-id="${c.requestId}"` : ''} title="${c.tooltip}" ${c.disabled ? 'disabled' : ''}>
               <span class="rer-cta-icon">${c.icon}</span>
               <span class="rer-cta-body">
                 <span class="rer-cta-label">${c.label}</span>
@@ -17108,8 +17269,45 @@ async function main() {
     const isKommune         = roleId.startsWith('kom-');
     const roleScope         = role.scope || '';
 
-    // Politi actors
-    if (isActive && isPolitiBranch) {
+    // Receiver asset library injection. Roles defined in
+    // receiver_assets.js get REAL dispatch buttons (spawn assets from
+    // their home base coordinate, animate to incident, state machine
+    // through en_route to engaging to complete) instead of the older
+    // stub buttons. Direct assets fire the receiver-dispatch handler.
+    // Request-only assets fire receiver-request which routes the
+    // request to another profile's inbox. See receiver_assets.js and
+    // dispatchReceiverAsset in this file for the full flow.
+    const _receiverAssetSpec = isActive ? assetsForReceiverRole(roleId) : null;
+    if (_receiverAssetSpec) {
+      _receiverAssetSpec.direct.forEach(a => {
+        ctas.push({
+          label: a.label,
+          sub: a.sub,
+          icon: a.icon,
+          tone: 'accent',
+          action: 'receiver-dispatch',
+          assetKey: a.assetKey,
+          tooltip: `${a.label}. ${a.sub}.`,
+        });
+      });
+      _receiverAssetSpec.request.forEach(r => {
+        ctas.push({
+          label: r.label,
+          sub: r.sub,
+          icon: '⚡',
+          tone: 'neutral',
+          action: 'receiver-request',
+          requestId: r.id,
+          tooltip: `${r.label}. Routes the request to another profile that owns the capability. ${r.sub}.`,
+        });
+      });
+    }
+
+    // Politi actors — legacy stub buttons. Only rendered when the
+    // role does NOT have a defined asset library yet (older Politi
+    // districts pending real asset spec). Once assetsForReceiverRole
+    // returns a spec for the role, these stubs are skipped.
+    if (isActive && isPolitiBranch && !_receiverAssetSpec) {
       if (_siteAllowsAction(event, 'deploy-patrol')) ctas.push({
         label: 'Deploy patrol', sub: 'Local district cars', icon: '🚔', tone: 'accent',
         action: 'deploy-patrol',
@@ -18061,6 +18259,44 @@ async function main() {
       //
       // Toast + view re-render stay inline (UI concerns, not adapter
       // concerns). Adapter is transport-only.
+      else if (action === 'receiver-dispatch') {
+        // Real receiver-side dispatch. Spawns the asset from the
+        // role's home base coordinate and animates it to the incident
+        // via the counter-dispatch engine. See dispatchReceiverAsset.
+        const eventId = id || _selectedReceiverEventId || _workspaceEventId;
+        const ev = getEvent(eventId);
+        if (!ev) { toast('Event not found', 'err'); return; }
+        const role = getActiveRole();
+        const assetKey = el.dataset.assetKey;
+        if (!role?.id || !assetKey) { toast('Missing role or asset context.', 'err'); return; }
+        // Also flip the receiver's escalation record to in-progress
+        // so the operator sees status advancing on the escalation log.
+        try {
+          const roleDestSet = new Set(role.destinationIds || []);
+          const myRec = (ev.escalations || []).find(r => roleDestSet.has(r.destinationId));
+          if (myRec && myRec.progressStatus !== 'resolved') {
+            updateEscalationProgress(eventId, myRec.id, 'in-progress', {
+              reason: null,
+              by: role.id,
+            });
+          }
+        } catch (err) { console.warn('[progress] auto-advance failed:', err.message); }
+        dispatchReceiverAsset(eventId, role.id, assetKey, {});
+        renderReceiverView({ immediate: true });
+      }
+      else if (action === 'receiver-request') {
+        // Request-routing. Creates an escalation record targeting the
+        // profile that owns the requested capability. Target profile
+        // sees it in their inbox and can dispatch their own asset.
+        const eventId = id || _selectedReceiverEventId || _workspaceEventId;
+        const ev = getEvent(eventId);
+        if (!ev) { toast('Event not found', 'err'); return; }
+        const role = getActiveRole();
+        const requestId = el.dataset.requestId;
+        if (!role?.id || !requestId) { toast('Missing role or request context.', 'err'); return; }
+        requestReceiverAsset(eventId, role.id, requestId);
+        renderReceiverView({ immediate: true });
+      }
       else if (STUB_DISPATCH_ACTIONS.has(action)) {
         const eventId = id || _selectedReceiverEventId || _workspaceEventId;
         const ev = getEvent(eventId);

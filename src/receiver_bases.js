@@ -363,6 +363,8 @@ export function baseForReceiverRole(roleId) {
   // here as roles.js and this file stay in sync.
   const alias = {
     'rigspoliti': 'rigspolitiet',
+    'politi-kbh': 'politi-koebenhavn',
+    'politi-aks': 'aks-cta',
     'pet': 'pet-soeborg',
     'fe': 'fe-kastellet',
   };

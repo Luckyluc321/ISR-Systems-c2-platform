@@ -424,8 +424,14 @@ export const RECEIVERS = [
   },
   {
     id: 'politi-aks', kind: 'receiver', type: 'leaf', parentId: 'politi',
-    org: 'AKS', label: 'AKS — Aktionsstyrken', initials: 'AK',
-    scope: 'all-sites', destinationIds: [],
+    org: 'Aktionsstyrken', label: 'Aktionsstyrken, national police tactical unit', initials: 'AK',
+    scope: 'all-sites',
+    // destinationIds populated at boot by main.js from every site's
+    // auto-generated *-t3-aks entry in destinations.js. Keeps
+    // Aktionsstyrken's inbox in sync with the site catalogue without
+    // requiring manual edits when a new site comes online.
+    destinationIds: [],
+    autoDestPattern: /-t3-aks$/,
     description: 'Danish police tactical intervention unit. Armed hostage / active shooter response.',
   },
 
