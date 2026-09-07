@@ -5071,7 +5071,7 @@ async function main() {
 
   <h2>Intelligence Handoff</h2>
   <div class="grid">
-    <div class="kv"><span class="k">Delivered to</span><span>PET · FE · Rigspoliti</span></div>
+    <div class="kv"><span class="k">Delivered to</span><span>Politiets Efterretningstjeneste, Forsvarets Efterretningstjeneste, Rigspolitiet</span></div>
     <div class="kv"><span class="k">Purpose</span><span>Pattern of life · Attribution · Follow on surveillance</span></div>
     <div class="kv"><span class="k">Delivery status</span><span>${(e.postIncidentDispatched || []).includes('intel-brief') ? 'DISPATCHED' : 'PENDING'}</span></div>
   </div>
@@ -13422,7 +13422,7 @@ async function main() {
           No response asset dispatched. Track lost on exit.
         </div>
         <div class="dp-brief-cta-row">
-          <button class="dp-brief-cta" data-brief="intel" data-id="${e.id}">Send to Intelligence (PET · FE · Rigspoliti)</button>
+          <button class="dp-brief-cta" data-brief="intel" data-id="${e.id}">Send to intelligence services (Politiets Efterretningstjeneste, Forsvarets Efterretningstjeneste, Rigspolitiet)</button>
           <button class="dp-brief-cta doc" data-brief="pdf" data-id="${e.id}">Download Brief (PDF)</button>
         </div>
       </div>` : '';
@@ -17123,24 +17123,24 @@ async function main() {
       // Only regional Politi (not HQ, not specialty) requests AKS backup — AND site must declare aks capability
       if (role.parentId === 'politi' && !roleId.startsWith('politi-special') && _siteAllowsAction(event, 'request-aks')) {
         ctas.push({
-          label: 'Request tactical backup', sub: 'AKS (Aktionsstyrken, national police tactical unit)', icon: '⚡', tone: 'neutral',
+          label: 'Request tactical intervention', sub: 'Aktionsstyrken, national police tactical unit', icon: '⚡', tone: 'neutral',
           action: 'request-aks',
-          tooltip: 'Requests AKS (Aktionsstyrken) — the Danish national police special tactical unit — for armed or hostage-taking incidents.',
+          tooltip: 'Requests Aktionsstyrken, the Danish national police tactical unit, for armed or hostage-taking incidents.',
         });
       }
     }
 
-    // BRS actors (Beredskabsstyrelsen — Danish Emergency Management Agency)
+    // Beredskabsstyrelsen (Danish Emergency Management Agency) actors
     if (isActive && isBrsBranch) {
       if (_siteAllowsAction(event, 'brs-standby')) ctas.push({
-        label: 'Standby response', sub: 'BRS (Beredskabsstyrelsen) teams on alert', icon: '⏳', tone: 'accent',
+        label: 'Standby response', sub: 'Beredskabsstyrelsen teams on alert', icon: '⏳', tone: 'accent',
         action: 'brs-standby',
-        tooltip: 'Places Beredskabsstyrelsen (Danish Emergency Management Agency) response teams on active standby without deploying yet.',
+        tooltip: 'Places Beredskabsstyrelsen, the Danish Emergency Management Agency, response teams on active standby without deploying yet.',
       });
       if (_siteAllowsAction(event, 'brs-deploy')) ctas.push({
-        label: 'Full deployment', sub: 'BRS · CBRN, rescue, medical', icon: '🚨', tone: 'accent',
+        label: 'Full deployment', sub: 'Beredskabsstyrelsen: hazmat, rescue, medical', icon: '🚨', tone: 'accent',
         action: 'brs-deploy',
-        tooltip: 'Full Beredskabsstyrelsen deployment. CBRN (chemical, biological, radiological, nuclear), rescue, and medical teams en route.',
+        tooltip: 'Full Beredskabsstyrelsen deployment. Chemical, biological, radiological, nuclear, rescue, and medical teams en route.',
       });
     }
 
@@ -17158,9 +17158,9 @@ async function main() {
     const isHaer = roleId.startsWith('haer-') || role.parentId === 'haeren';
     if (isActive && isForsvaretBranch && isHaer) {
       if (_siteAllowsAction(event, 'army-c-uas')) ctas.push({
-        label: 'Deploy army C-UAS', sub: 'RF + electronic warfare', icon: '⚡', tone: 'neutral',
+        label: 'Deploy army counter drone unit', sub: 'Radio frequency and electronic warfare', icon: '⚡', tone: 'neutral',
         action: 'army-c-uas',
-        tooltip: 'Requests army counter-drone unit deployment. Radio frequency and electronic warfare capability.',
+        tooltip: 'Requests army counter drone unit deployment. Radio frequency jamming and electronic warfare capability.',
       });
       if (_siteAllowsAction(event, 'army-ground')) ctas.push({
         label: 'Deploy ground force', sub: 'Rapid reinforcement', icon: '🪖', tone: 'neutral',
@@ -17218,12 +17218,12 @@ async function main() {
       }
     }
 
-    // Hjemmeværnet (HJV — Danish Home Guard) actors
+    // Hjemmeværnet (Danish Home Guard) actors
     if (isActive && isHjvBranch) {
       if (_siteAllowsAction(event, 'hjv-reinforce')) ctas.push({
-        label: 'Reinforce guard', sub: 'HJV (Hjemmeværnet) volunteer callout', icon: '🛡', tone: 'neutral',
+        label: 'Reinforce guard', sub: 'Hjemmeværnet volunteer callout', icon: '🛡', tone: 'neutral',
         action: 'hjv-reinforce',
-        tooltip: 'Calls out Hjemmeværnet (HJV, Danish Home Guard) volunteer patrols to reinforce perimeter or hold cordon.',
+        tooltip: 'Calls out Hjemmeværnet, the Danish Home Guard, volunteer patrols to reinforce perimeter or hold cordon.',
       });
     }
 
@@ -17253,9 +17253,9 @@ async function main() {
     }
     if (isActive && !isIntel && roleId !== 'fe' && roleId !== 'pet') {
       ctas.push({
-        label: 'Cascade to intelligence services', sub: 'FE (defence intel) + PET (police intel)', icon: '⇧', tone: 'neutral',
+        label: 'Cascade to intelligence services', sub: 'Forsvarets Efterretningstjeneste and Politiets Efterretningstjeneste', icon: '⇧', tone: 'neutral',
         action: 'cascade-fe-pet',
-        tooltip: 'Cascades this event to FE (Forsvarets Efterretningstjeneste, Danish Defence Intelligence Service) and PET (Politiets Efterretningstjeneste, Danish Security and Intelligence Service).',
+        tooltip: 'Cascades this event to Forsvarets Efterretningstjeneste, the Danish Defence Intelligence Service, and Politiets Efterretningstjeneste, the Danish Security and Intelligence Service.',
       });
     }
     ctas.push({
@@ -18025,7 +18025,7 @@ async function main() {
           message: `Strategic cascade requested from ${role.name || 'Receiver'} — event ${eventId}`,
           operator: `Receiver · ${role.name || role.org || role.person || 'Unknown'}`,
         });
-        if (records.length === 0) toast('FE / PET already notified for this event', 'info');
+        if (records.length === 0) toast('Intelligence services already notified for this event', 'info');
         else toast(`Cascaded to ${records.length} strategic intel destination${records.length === 1 ? '' : 's'}`, 'ok');
         renderReceiverView();
       }
