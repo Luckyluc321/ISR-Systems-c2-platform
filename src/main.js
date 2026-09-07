@@ -5961,15 +5961,17 @@ async function main() {
       const nowInside = perim ? pointInPolygon(curPos.lat, curPos.lon, perim) : false;
       const wasInside = droneInside.get(sid) || false;
 
-      const anySensorSees = (lat, lon) => {
+      // Cylindrical coverage gate — horizontal within radius AND
+      // altitude below sensor ceiling. curPos carries alt from the
+      // tick loop when available; otherwise ground level (0 m).
+      const anySensorSees = (lat, lon, altM) => {
         if (!hasSensors) return false;
         for (const s of site.sensors) {
-          if (s.status === 'offline') continue;
-          if (haversineM(lat, lon, s.lat, s.lon) <= s.coverageRadius) return true;
+          if (_sensorSeesPoint(s, lat, lon, altM)) return true;
         }
         return false;
       };
-      const nowInCov = anySensorSees(curPos.lat, curPos.lon);
+      const nowInCov = anySensorSees(curPos.lat, curPos.lon, curPos.alt);
       const wasInCov = droneCov.get(sid) || false;
 
       const relevantToSite = nowInside || wasInside || nowInCov || wasInCov;
@@ -6215,14 +6217,46 @@ async function main() {
     }
   }
 
+  // Detection envelope for a passive fused-modality sensor is modeled
+  // as a cylinder: coverageRadius meters horizontal, detectionCeilingM
+  // meters altitude ceiling. Both must hold for detection. Matches how
+  // real vendors (Squarehead, DroneShield, Aveillant) publish specs
+  // and matches the fused-mesh physics: acoustic + RF + visual all
+  // drop off sharply above ~1.5-2 km altitude, then the platform is
+  // blind unless the customer has active radar (not in current fleet).
+  //
+  // Ceiling per hardware family, overridable per-sensor via explicit
+  // sensor.detectionCeilingM field:
+  //   Radxa Rock 4SE + HackRF  → 2000 m (stronger RF pickup)
+  //   Radxa Rock 4SE (default) → 1500 m
+  function _sensorCeilingM(sensor) {
+    if (typeof sensor.detectionCeilingM === 'number') return sensor.detectionCeilingM;
+    if (/HackRF/i.test(sensor.hardware || '')) return 2000;
+    return 1500;
+  }
+  // Cylindrical coverage check for a single sensor. altM is the drone
+  // altitude in meters. When altM is null/undefined (callers that
+  // haven't threaded altitude yet), defaults to 0 so the check
+  // remains backwards compatible with legacy ground-level assumptions.
+  function _sensorSeesPoint(sensor, lat, lon, altM) {
+    if (sensor.status === 'offline') return false;
+    if (haversineM(lat, lon, sensor.lat, sensor.lon) > sensor.coverageRadius) return false;
+    const alt = typeof altM === 'number' ? altM : 0;
+    if (alt > _sensorCeilingM(sensor)) return false;
+    return true;
+  }
+
   function nearestSensorInCoverage(p, site) {
     if (!site || !site.sensors || !site.sensors.length) return null;
     let nearest = null, minDist = Infinity, inCoverage = false;
+    const altM = typeof p.alt === 'number' ? p.alt : 0;
     for (const s of site.sensors) {
       if (s.status === 'offline') continue;
       const d = haversineM(p.lat, p.lon, s.lat, s.lon);
       if (d < minDist) { minDist = d; nearest = s; }
-      if (d <= s.coverageRadius) inCoverage = true;
+      // Cylindrical gate: horizontal within radius AND altitude below
+      // hardware-specific ceiling. See _sensorSeesPoint.
+      if (d <= s.coverageRadius && altM <= _sensorCeilingM(s)) inCoverage = true;
     }
     return { nearest, minDist, inCoverage };
   }
@@ -6230,13 +6264,13 @@ async function main() {
   // Global coverage check: is a lat/lon inside ANY site's sensor coverage?
   // Used for per-drone visibility gating in swarm scenarios where each
   // drone is independently checked (not just derived from lead's coverage).
-  function _anySensorSeesPoint(lat, lon) {
+  // altM optional; defaults to 0 for legacy 2D callers.
+  function _anySensorSeesPoint(lat, lon, altM) {
     for (const sid of Object.keys(SITES)) {
       const site = SITES[sid];
       if (!site?.sensors) continue;
       for (const s of site.sensors) {
-        if (s.status === 'offline') continue;
-        if (haversineM(lat, lon, s.lat, s.lon) <= s.coverageRadius) return true;
+        if (_sensorSeesPoint(s, lat, lon, altM)) return true;
       }
     }
     return false;
@@ -6245,15 +6279,14 @@ async function main() {
   // Per-site coverage check: returns the Set of siteIds where any online
   // sensor of that site currently sees the given point. Used by the
   // per-site event lifecycle handler to determine which sites a threat
-  // group is currently touching.
-  function _sitesSeeingPoint(lat, lon) {
+  // group is currently touching. altM optional; defaults to 0.
+  function _sitesSeeingPoint(lat, lon, altM) {
     const hits = new Set();
     for (const sid of Object.keys(SITES)) {
       const site = SITES[sid];
       if (!site?.sensors) continue;
       for (const s of site.sensors) {
-        if (s.status === 'offline') continue;
-        if (haversineM(lat, lon, s.lat, s.lon) <= s.coverageRadius) {
+        if (_sensorSeesPoint(s, lat, lon, altM)) {
           hits.add(sid);
           break;
         }
@@ -6296,10 +6329,10 @@ async function main() {
   // that will be registered when the first WS site is wired.
   //
   // See docs/interface-design-document.md IF-1 for the source contract.
-  function _updateContributingSensorsForPosition(event, lat, lon) {
+  function _updateContributingSensorsForPosition(event, lat, lon, altM) {
     try {
       const tickSeq = _contribTickSeq;
-      const hitSites = _sitesSeeingPoint(lat, lon);
+      const hitSites = _sitesSeeingPoint(lat, lon, altM);
       for (const sid of hitSites) {
         let targetEvent = event;
         if (event.siteId !== sid) {
@@ -6458,7 +6491,10 @@ async function main() {
     const hits = new Set();
     for (const p of dronePositions) {
       if (p?.lat == null || p?.lon == null) continue;
-      const s = _sitesSeeingPoint(p.lat, p.lon);
+      // Threads altitude when the position carries it so the cylinder
+      // ceiling check applies. Group positions without alt fall back to
+      // ground level (0 m) — cheap conservative default.
+      const s = _sitesSeeingPoint(p.lat, p.lon, typeof p.alt === 'number' ? p.alt : 0);
       for (const sid of s) hits.add(sid);
     }
     return hits;
@@ -6644,8 +6680,8 @@ async function main() {
   // modality quorum, drone-vs-bird discriminators) in one place without
   // hunting call sites.
   // ═══════════════════════════════════════════════════════════════════
-  function _shouldAutoDetect(lat, lon) {
-    return _anySensorSeesPoint(lat, lon);
+  function _shouldAutoDetect(lat, lon, altM) {
+    return _anySensorSeesPoint(lat, lon, altM);
   }
 
   // Binary-search the segment prev→cur for the point where the drone
@@ -6785,15 +6821,19 @@ async function main() {
   // prefix is not used for reads/writes.
   const _P5A_STORAGE_PREFIX = 'isr_trajectory_';
 
-  function _computeSensorsDetecting(lat, lon) {
+  function _computeSensorsDetecting(lat, lon, altM) {
     const result = [];
+    const alt = typeof altM === 'number' ? altM : 0;
     for (const sid of Object.keys(SITES)) {
       const site = SITES[sid];
       if (!site?.sensors) continue;
       for (const s of site.sensors) {
         if (s.status === 'offline') continue;
         const d = haversineM(lat, lon, s.lat, s.lon);
-        if (d <= s.coverageRadius) {
+        // Cylindrical coverage gate: horizontal within radius AND
+        // altitude below the sensor's ceiling. Above ceiling the
+        // sensor is blind to this position even directly overhead.
+        if (d <= s.coverageRadius && alt <= _sensorCeilingM(s)) {
           result.push({
             sensor_id: s.id,
             site_id: sid,
@@ -7140,7 +7180,12 @@ async function main() {
   }
 
   function _buildDroneSample({ event, droneId, droneIdx, model, role, pos, hdgDeg, speedMs, conf, rfMHz, inCov, tipInCov, tSec }) {
-    const sensors = _computeSensorsDetecting(pos.lat, pos.lon);
+    // Thread altitude through the cylinder gate so recorded samples
+    // don't list ground-projected sensors as "detecting" a HALE drone
+    // that's above the passive-sensor ceiling. Live event closure
+    // already gates on altitude; this keeps the persisted trajectory
+    // in sync with what the operator actually saw.
+    const sensors = _computeSensorsDetecting(pos.lat, pos.lon, pos.alt);
     const detState = inCov ? 'detected' : (tipInCov ? 'tip_cued' : (tSec < 5 ? 'pre_ingress' : 'sensor_gap'));
     return {
       droneId,
@@ -9536,6 +9581,7 @@ async function main() {
         let bestSid = null;
         let bestDist = Infinity;
         let bestRadius = 1000;
+        let bestSensor = null;
         for (const sid of Object.keys(SITES)) {
           const site = SITES[sid];
           if (!site?.sensors?.length) continue;
@@ -9546,10 +9592,18 @@ async function main() {
               bestDist = d;
               bestSid = sid;
               bestRadius = s.coverageRadius;
+              bestSensor = s;
             }
           }
         }
-        if (bestSid && bestDist <= bestRadius + VIS_BUFFER_M) {
+        // Cylindrical coverage gate: within horizontal radius AND below
+        // the sensor's altitude ceiling. Above the ceiling the drone is
+        // invisible to this passive fused-modality gear even directly
+        // overhead. See _sensorCeilingM at line ~6240 for defaults.
+        const altGate = typeof p.alt === 'number'
+          ? p.alt <= _sensorCeilingM(bestSensor || {})
+          : true;
+        if (bestSid && bestDist <= bestRadius + VIS_BUFFER_M && altGate) {
           inAnyCoverage = true;
           // Freeze a snapshot of live telemetry each tick we're in
           // coverage — the detail panel shows THIS when the missile
@@ -9586,14 +9640,14 @@ async function main() {
         // elsewhere. Uses the per-site aggregate maintained by
         // processDroneSiteMarkers so it stays consistent with markers.
         let anyLiveInCov = false;
-        if (state.leadSwarmMember && !state.leadSwarmMember.neutralised && _shouldAutoDetect(p.lat, p.lon)) {
+        if (state.leadSwarmMember && !state.leadSwarmMember.neutralised && _shouldAutoDetect(p.lat, p.lon, p.alt)) {
           anyLiveInCov = true;
         }
         if (!anyLiveInCov && state.swarmBillboards) {
           for (const sw of state.swarmBillboards) {
             if (sw.neutralised) continue;
             if (sw.stats?.lat == null) continue;
-            if (_shouldAutoDetect(sw.stats.lat, sw.stats.lon)) { anyLiveInCov = true; break; }
+            if (_shouldAutoDetect(sw.stats.lat, sw.stats.lon, sw.stats.alt)) { anyLiveInCov = true; break; }
           }
         }
         event.currentlyInCoverage = anyLiveInCov;
@@ -9712,7 +9766,7 @@ async function main() {
         // Lucas's rule: symbol visible IFF drone inside ANY sensor cov at ANY site.
         // Uniform across every event type. beingChased keeps missile
         // targets visible through terminal chase.
-        const leadInCov = _shouldAutoDetect(p.lat, p.lon);
+        const leadInCov = _shouldAutoDetect(p.lat, p.lon, p.alt);
         const shouldShow = leadDown ? false : (state.closedAt
           ? false
           : (leadInCov || beingChased));
@@ -9756,7 +9810,7 @@ async function main() {
         // Applies to primary AND linked/shadow events at other sites
         // (fixes: AMK shadow event had zero sensor data because template's
         // contributingSensors were CPH's — no dynamic update ever ran).
-        _updateContributingSensorsForPosition(event, p.lat, p.lon);
+        _updateContributingSensorsForPosition(event, p.lat, p.lon, p.alt);
 
         // ── P55: single-drone recording capture (fixed-wing / jet / missile)
         // Additive path. If the event has NO swarm formation and no recording
@@ -9786,7 +9840,14 @@ async function main() {
                 speedMs: p.speed || 0,
                 conf: event.confidence,
                 rfMHz: event.platform === 'missile' ? 0 : 2412,
-                inCov: (inAnyCoverage === null ? true : inAnyCoverage) || false,
+                // Single-site events fall through inAnyCoverage=null (the
+                // initializer runs only inside the multiSite branch). Compute
+                // the cylinder gate directly on this tick's position so the
+                // persisted trajectory shows accurate detection state even
+                // above the passive-sensor ceiling.
+                inCov: inAnyCoverage === null
+                  ? _shouldAutoDetect(p.lat, p.lon, p.alt)
+                  : (inAnyCoverage || false),
                 tipInCov: false,
                 tSec: p.tSec,
               }));
@@ -9979,7 +10040,7 @@ async function main() {
               && (!state._leadLastSampleMs || (nowMs - state._leadLastSampleMs) >= _sampleIntervalForEvent(event))) {
             const _template_lead = TEMPLATES[event.templateKey];
             const _leadSlot = _template_lead?.swarm?.formation?.[0] || {};
-            const _leadInCov = _shouldAutoDetect(p.lat, p.lon);
+            const _leadInCov = _shouldAutoDetect(p.lat, p.lon, p.alt);
             // Sticky ever-detected flag on the lead wrapper (matches
             // wingmen). Roster filter reads this to show only drones
             // that have been detected at least once.
@@ -10236,7 +10297,7 @@ async function main() {
           // the drone (points to where it CAME from), not forward. The
           // tip-cue calculation below uses the drone's own position for
           // coverage entry, no forward projection needed.
-          const inCov = _shouldAutoDetect(pos.lat, pos.lon);
+          const inCov = _shouldAutoDetect(pos.lat, pos.lon, pos.alt);
           const tipInCov = false;
           // Sticky "ever detected" flag — once a drone has been in any
           // sensor coverage, it stays in the swarm roster even after it
@@ -10311,7 +10372,7 @@ async function main() {
               : Math.max(0.4, Math.min(0.98, 0.75 + (i * 0.04) + Math.sin(tSec * 0.3 + i * 1.7) * 0.08)),
           };
           // P68: dynamic contributingSensors for the WINGMAN's position too
-          _updateContributingSensorsForPosition(event, pos.lat, pos.lon);
+          _updateContributingSensorsForPosition(event, pos.lat, pos.lon, pos.alt);
           // P5A: adaptive sample capture (interval decided ONCE per event by platform)
           if (state.recording && (!sw._lastSampleMs || (nowMs - sw._lastSampleMs) >= _sampleIntervalForEvent(event))) {
             state.recording.timeseries.push(_buildDroneSample({
@@ -11253,7 +11314,8 @@ async function main() {
           const c0 = Cesium.Cartographic.fromCartesian(cart0);
           const lat0 = Cesium.Math.toDegrees(c0.latitude);
           const lon0 = Cesium.Math.toDegrees(c0.longitude);
-          if (!_shouldAutoDetect(lat0, lon0)) {
+          const alt0 = c0.height;
+          if (!_shouldAutoDetect(lat0, lon0, alt0)) {
             toast('Drone left sensor coverage. Exiting POV.', 'info');
             _exitDronePOV();
             return;

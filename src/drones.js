@@ -113,29 +113,46 @@ export const TEMPLATES = {
     platform: 'fixed-wing',
     droneType: 'HALE reconnaissance (MQ-9 Reaper class)',
     confidence: 0.62,
-    confidenceTrend: 'Slow climb 0.35 to 0.62 via PCL + SATCOM correlation',
+    confidenceTrend: 'Detected on ingress at 800 m, climbing beyond passive-sensor ceiling',
     contributingSensors: [
-      { id: 'N03', confidence: 0.68 },   // Tower Syd (ATC has best altitude reach)
+      { id: 'N03', confidence: 0.68 },
       { id: 'N15', confidence: 0.65 },
       { id: 'N20', confidence: 0.61 },
       { id: 'N07', confidence: 0.58 },
       { id: 'N22', confidence: 0.55 },
     ],
-    evidence: { rfCarrier: 'Ku band SATCOM (12.5 GHz) + PCL from DVB T reflection', rfMatch: 'Loiter signature 71%', modality: 'RF passive + IR thermal', evidenceSize: '84.6 MB', note: 'High altitude loiter over site. Detection via passive RF fusion, no active emitter required. Confidence lower than close range due to weak signal. Persistent surveillance pattern flagged for FE review.' },
+    evidence: {
+      rfCarrier: 'Ku band SATCOM (12.5 GHz) + PCL from DVB T reflection',
+      rfMatch: 'Loiter signature 71%',
+      modality: 'RF passive + IR thermal',
+      evidenceSize: '84.6 MB',
+      note: 'HALE recon platform. Ingressed at 800 m, initial pass detected clearly by passive fused mesh. Climbed to 3,000 m loiter altitude, exceeding the sensor grid ceiling around 2 km. Track lost as it climbed past the passive-sensor detection envelope. Active radar hardware required for sustained detection above 2 km.',
+    },
     waypoints: [
-      // Circular loiter at 9,000m altitude, ~2km radius around CPH center (55.618, 12.650)
-      // 8-point circle, one full orbit in ~150s
-      { lat: 55.63600, lon: 12.65000, alt: 9000, heading: 90,  tSec: 0   },
-      { lat: 55.63200, lon: 12.67500, alt: 9000, heading: 135, tSec: 20  },
-      { lat: 55.61800, lon: 12.68500, alt: 9000, heading: 180, tSec: 40  },
-      { lat: 55.60400, lon: 12.67500, alt: 9000, heading: 225, tSec: 60  },
-      { lat: 55.60000, lon: 12.65000, alt: 9000, heading: 270, tSec: 80  },
-      { lat: 55.60400, lon: 12.62500, alt: 9000, heading: 315, tSec: 100 },
-      { lat: 55.61800, lon: 12.61500, alt: 9000, heading: 0,   tSec: 120 },
-      { lat: 55.63200, lon: 12.62500, alt: 9000, heading: 45,  tSec: 140 },
-      { lat: 55.63600, lon: 12.65000, alt: 9000, heading: 90,  tSec: 150 },
+      // Spiraling climb over CPH airport centre. Drone stays inside the
+      // horizontal coverage of the sensor spine (N15 / N16 / N17 / N03)
+      // for the whole orbit, so signal is only lost when altitude
+      // exceeds the sensor ceilings, not when it exits horizontal range.
+      //   alt < 1500 m: every CPH sensor sees it (base Radxa 4SE ceiling)
+      //   alt 1500-2000 m: only HackRF-equipped sensors (N03, N15) see it
+      //   alt > 2000 m: no passive sensor sees it, coverage exit fires,
+      //   event auto-closes as fled (fled = out of sensor envelope, in
+      //   this case vertically not horizontally). Real Reaper-class HALE
+      //   operates 6-12 km altitude — this scenario demonstrates the
+      //   capability edge of passive-only gear and why active radar is
+      //   required for sustained high-altitude tracking.
+      // 500 m radius diamond orbit centred at (55.618, 12.650), climbing
+      // 300 m per waypoint. Loses signal around tSec 75 (alt 2300 m).
+      { lat: 55.62250, lon: 12.65000, alt: 800,  heading: 90,  tSec: 0  },   // N point
+      { lat: 55.61800, lon: 12.65800, alt: 1100, heading: 180, tSec: 15 },   // E point
+      { lat: 55.61350, lon: 12.65000, alt: 1400, heading: 270, tSec: 30 },   // S point
+      { lat: 55.61800, lon: 12.64200, alt: 1700, heading: 0,   tSec: 45 },   // W point (last altitude all sensors see)
+      { lat: 55.62250, lon: 12.65000, alt: 2000, heading: 90,  tSec: 60 },   // Only HackRF sensors still see (N03, N15)
+      { lat: 55.61800, lon: 12.65800, alt: 2300, heading: 180, tSec: 75 },   // Above all sensor ceilings, coverage exit fires here
+      { lat: 55.61350, lon: 12.65000, alt: 2600, heading: 270, tSec: 90 },   // Track sustained by scripted trajectory only, no sensor contact
+      { lat: 55.61800, lon: 12.64200, alt: 3000, heading: 0,   tSec: 105 },  // Full loiter altitude — event should have closed by this point
     ],
-    durationSec: 150,
+    durationSec: 105,
   },
 
   // ── Shahed-136 / Geran-2 attack profile ──
