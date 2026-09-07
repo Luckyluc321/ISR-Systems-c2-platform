@@ -10681,7 +10681,13 @@ async function main() {
         // Also hide the lead's trail polyline once the lead is dead —
         // without this the DJI-1 trendline kept growing all the way
         // out over Øresund after the drone was neutralised at AMK.
-        if (leadDown && state.trail) state.trail.show = false;
+        // Also hide when POV'd inside this drone: the past-track polyline
+        // ends AT the drone position, so from POV the last segment
+        // renders inside/across the camera view. Projected trajectory
+        // (yellow dashed line extending forward from the drone) is
+        // hidden by the POV entry/exit hooks — see _enterDronePOV.
+        if ((leadDown || povSuppressed) && state.trail) state.trail.show = false;
+        else if (!leadDown && state.trail && !povSuppressed) state.trail.show = true;
         // Purge lead from aggregate sets ONCE on death so surviving
         // wingmen's transitions can flip aggregates to empty and
         // fire OUT OF RANGE / EXIT normally.
@@ -12185,6 +12191,16 @@ async function main() {
     // (drone tick reads swRef._povActive and drops show accordingly).
     swRef._povActive = true;
     swRef.billboard.show = false;
+    // Hide the yellow projected-trajectory polyline extending forward
+    // from the drone's current position — from POV it appears as a
+    // trend line 100m in front of the camera which is jarring and
+    // duplicates information the operator already infers from heading.
+    const _projEnts = projectedTrajectoryEntities.get(eventId);
+    if (_projEnts) {
+      if (_projEnts.line) _projEnts.line.show = false;
+      if (Array.isArray(_projEnts.secondaryLines)) _projEnts.secondaryLines.forEach(e => { if (e) e.show = false; });
+      if (Array.isArray(_projEnts.impactRings)) _projEnts.impactRings.forEach(e => { if (e) e.show = false; });
+    }
     // Drone's current heading at entry — camera looks along drone travel.
     const bbCart = swRef.billboard.position?.getValue?.(Cesium.JulianDate.now());
     const bc = Cesium.Cartographic.fromCartesian(bbCart);
@@ -12290,6 +12306,13 @@ async function main() {
     // logic dictates on the next tick.
     if (_dronePov.swRef) {
       _dronePov.swRef._povActive = false;
+    }
+    // Restore the projected-trajectory polyline hidden on POV entry.
+    const _exitProjEnts = projectedTrajectoryEntities.get(_dronePov.eventId);
+    if (_exitProjEnts) {
+      if (_exitProjEnts.line) _exitProjEnts.line.show = true;
+      if (Array.isArray(_exitProjEnts.secondaryLines)) _exitProjEnts.secondaryLines.forEach(e => { if (e) e.show = true; });
+      if (Array.isArray(_exitProjEnts.impactRings)) _exitProjEnts.impactRings.forEach(e => { if (e) e.show = true; });
     }
     _dronePov.active = false;
     _dronePov.eventId = null;
