@@ -4551,7 +4551,11 @@ async function main() {
         if (live) {
           const enemyLat = live.lat;
           const enemyLon = live.lon;
-          d.assignedTargetCoord = { lat: enemyLat, lon: enemyLon };
+          // Include altitude so tracer rounds aim at the target's real
+          // 3D position. Prior omission caused tracers to aim at ground
+          // level when firing against a single-drone target like Shahed
+          // (fallback in _fireSingleTracerRound defaults alt to 8 m).
+          d.assignedTargetCoord = { lat: enemyLat, lon: enemyLon, alt: live.alt };
 
           // Altitude chase during engagement: interceptor tracks target
           // altitude at climb rate. Enforces service ceiling: cannot
@@ -4617,9 +4621,71 @@ async function main() {
             // outcome flip. For single-target events without a swarm
             // member, mark the event neutralized directly.
             if (!d.assignedSwarmMember && targetEv && targetEv.status === 'active') {
+              // Capture the kill location from live target position (or
+              // fall back to the interceptor's current position if that
+              // lookup fails). This is the "wreckage" coordinate that
+              // Politi will cordon and that the Post Incident Report
+              // will surface in the sensor path.
+              const killLive = _liveTargetPositionFor(d);
+              const killLat = killLive?.lat ?? d.curLat;
+              const killLon = killLive?.lon ?? d.curLon;
               targetEv.outcome = 'neutralized';
               targetEv.neutralizedAt = new Date().toISOString();
               targetEv.neutralizedBy = d.assetName;
+              targetEv.exit = {
+                lat: killLat,
+                lon: killLon,
+                alt: Math.round(killLive?.alt || 0),
+                timestamp: new Date().toISOString(),
+                heading: 0,
+                leftCoverageOf: 'interceptor-neutralised',
+              };
+              // Perimeter-cordon coordinate. Same field the swarm
+              // scenario writes so the post-incident Politi cordon
+              // dispatch has a real location to route to.
+              targetEv.lastSpottedLocation = {
+                lat: killLat,
+                lon: killLon,
+                at: new Date().toISOString(),
+              };
+              // Kill visuals: flash entity + DOWNED marker anchored to
+              // the event so it appears/disappears per event selection
+              // filter. Same pattern _resolveEngagement uses for swarm
+              // kills so both scenarios read identical on the map.
+              try {
+                _spawnFlashEntity(killLon, killLat, 500, '#ff5a5a', 6, 22);
+                const killEnt = viewer.entities.add({
+                  position: Cesium.Cartesian3.fromDegrees(killLon, killLat, 0),
+                  properties: { markerEventId: targetEv.id, markerKind: 'kill' },
+                  point: {
+                    pixelSize: 6,
+                    color: Cesium.Color.fromCssColorString('#8b0e0e'),
+                    outlineColor: Cesium.Color.fromCssColorString('#ff5a5a'),
+                    outlineWidth: 1,
+                    heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                  },
+                  label: {
+                    text: '× DOWNED',
+                    font: '9px system-ui',
+                    fillColor: Cesium.Color.fromCssColorString('#ff8a8a'),
+                    outlineColor: Cesium.Color.BLACK,
+                    outlineWidth: 2,
+                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                    pixelOffset: new Cesium.Cartesian2(0, -14),
+                    showBackground: true,
+                    backgroundColor: Cesium.Color.fromCssColorString('rgba(8, 11, 16, 0.85)'),
+                    backgroundPadding: new Cesium.Cartesian2(5, 2),
+                    heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+                    disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                  },
+                });
+                // Route the kill marker into per-event visibility so
+                // it participates in selection-driven show/hide.
+                const arr = _perEventMarkers.get(targetEv.id) || [];
+                arr.push(killEnt);
+                _perEventMarkers.set(targetEv.id, arr);
+              } catch (err) { console.warn('[kill visuals] failed:', err.message); }
               const stTarget = droneState.get(d.eventId);
               if (stTarget) {
                 stTarget.closedAt = performance.now();
@@ -4629,7 +4695,7 @@ async function main() {
               }
               markTrackClosed(d.eventId);
               closeEvent(d.eventId, targetEv.exit || null);
-              toast(`${d.assetName} kill confirmed on ${targetEv.droneType || 'target'}. Track neutralised.`, 'ok');
+              toast(`${d.assetName} kill confirmed on ${targetEv.droneType || 'target'}. Track neutralised at ${killLat.toFixed(4)} ${killLon.toFixed(4)}.`, 'ok');
             }
             d.state = 'complete';
             _resolveEngagement(d);
