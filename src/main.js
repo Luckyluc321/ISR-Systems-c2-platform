@@ -3331,6 +3331,30 @@ async function main() {
     },
   };
 
+  // Simulation-only physics constants. In live operations the platform
+  // receives real telemetry from actual assets via adapters (per
+  // docs/interface-design-document.md IF-9) and just renders whatever
+  // the sensors report. These fields drive the counter-dispatch tick
+  // loop's altitude climb, service ceiling checks, and engagement
+  // outcome calculation ONLY for simulated events (event.templateKey
+  // set). Real customer events bypass all of this and use adapter
+  // reports directly.
+  //
+  // Numbers sourced from real hardware envelopes:
+  //   interceptor swarm (Ukrainian pattern vs Shahed): 3000 m ceiling,
+  //     8 m/s climb rate
+  //   helicopter (EH-101 / Fennec): 5000 m ceiling, 15 m/s climb rate
+  //   police counter drone patrol (consumer/prosumer quad): 500 m
+  //     ceiling, 4 m/s climb rate
+  //   army counter drone jammer, SOF tactical, wildlife: ground assets,
+  //     no ceiling (n/a)
+  const _SIM_INTERCEPTOR_PHYSICS = {
+    'counter-drone-swarm':  { serviceCeilingM: 3000, climbRateMs: 8 },
+    'helicopter-intercept': { serviceCeilingM: 5000, climbRateMs: 15 },
+    'police-c-uas':         { serviceCeilingM: 500,  climbRateMs: 4 },
+    'army-isr-drone':       { serviceCeilingM: 3500, climbRateMs: 6 },
+  };
+
   function _bearingRad(lat1, lon1, lat2, lon2) {
     return Math.atan2(lon2 - lon1, lat2 - lat1);
   }
@@ -3604,6 +3628,98 @@ async function main() {
       toast(`Request sent to ${targetName}. Awaiting their dispatch.`, 'ok');
     }
     return records[0] || null;
+  }
+
+  // Read the target's CURRENT live position for interceptor chase logic.
+  // Priority order:
+  //   1. Assigned swarm member billboard (swarm scenarios)
+  //   2. Target event's own droneState billboard position (single-drone
+  //      scenarios like Shahed)
+  //   3. Event.lastPosition (frozen last-known if the drone is currently
+  //      out of sensor coverage)
+  // Returns {lat, lon, alt} or null. Used by en_route to keep the
+  // interceptor's target coord fresh and by engaging to chase a moving
+  // target instead of freezing at the arrival coord.
+  function _liveTargetPositionFor(d) {
+    if (d.assignedSwarmMember?.billboard?.position) {
+      try {
+        const cart = d.assignedSwarmMember.billboard.position.getValue?.(Cesium.JulianDate.now());
+        if (cart) {
+          const c = Cesium.Cartographic.fromCartesian(cart);
+          return {
+            lat: Cesium.Math.toDegrees(c.latitude),
+            lon: Cesium.Math.toDegrees(c.longitude),
+            alt: c.height,
+          };
+        }
+      } catch (_) { /* fall through */ }
+    }
+    const ev = getEvent(d.eventId);
+    if (!ev) return null;
+    const st = droneState.get(d.eventId);
+    if (st?.billboard?.position) {
+      try {
+        const cart = st.billboard.position.getValue?.(Cesium.JulianDate.now());
+        if (cart) {
+          const c = Cesium.Cartographic.fromCartesian(cart);
+          return {
+            lat: Cesium.Math.toDegrees(c.latitude),
+            lon: Cesium.Math.toDegrees(c.longitude),
+            alt: c.height,
+          };
+        }
+      } catch (_) { /* fall through */ }
+    }
+    if (ev.lastPosition) {
+      return {
+        lat: ev.lastPosition.lat,
+        lon: ev.lastPosition.lon,
+        alt: ev.lastPosition.alt || 0,
+      };
+    }
+    return null;
+  }
+
+  // Compute engagement outcome for sim-mode interceptors when the
+  // engagement window closes. Physics-driven kill probability + a
+  // small variance factor to represent unmodelled real-world factors
+  // (wind, sensor noise, evasive maneuvers we do not simulate).
+  //
+  // Returns { hit: boolean, reason: string, quality: 0..1 } so the
+  // caller can surface a specific failure state to the operator.
+  function _simComputeEngagementOutcome(d) {
+    const physics = _SIM_INTERCEPTOR_PHYSICS[d.kind];
+    if (!physics) return { hit: true, reason: 'no-physics-model', quality: 1 };
+    const live = _liveTargetPositionFor(d);
+    if (!live) {
+      return { hit: false, reason: 'target-lost', quality: 0 };
+    }
+    // Distance at engagement close
+    const engageDistM = haversineM(d.curLat, d.curLon, live.lat, live.lon);
+    // Altitude gap
+    const altGapM = Math.abs((d.curAlt || 60) - (live.alt || 0));
+    // Speed of target (rough estimate from event, defaults to 50 m/s for Shahed cruise)
+    const ev = getEvent(d.eventId);
+    const targetSpeedMs = ev?.lastPosition?.speed || ev?.subject?.kinematics?.speed_ms || 50;
+    // Base quality from geometry
+    const distFactor = Math.max(0, Math.min(1, 1 - (engageDistM / 400)));   // 0m dist = 1.0, 400m = 0
+    const altFactor = Math.max(0, Math.min(1, 1 - (altGapM / 300)));         // 0m gap = 1.0, 300m = 0
+    const speedFactor = Math.max(0.3, Math.min(1, 1 - ((targetSpeedMs - 50) / 60)));  // 50 m/s = 1.0, 110 m/s = 0.3
+    // Weighted combination
+    const quality = (distFactor * 0.5 + altFactor * 0.3 + speedFactor * 0.2);
+    // Variance factor per Lucas's B option: 15% variance either way
+    const variance = 1 + ((Math.random() - 0.5) * 0.30);
+    const finalQuality = Math.max(0, Math.min(1, quality * variance));
+    const hit = Math.random() < finalQuality;
+    // Failure reason attribution for operator visibility
+    let reason = 'hit';
+    if (!hit) {
+      if (distFactor < 0.2) reason = 'target-outran-interceptor';
+      else if (altFactor < 0.3) reason = 'altitude-gap-too-large';
+      else if (speedFactor < 0.4) reason = 'target-too-fast-terminal-phase';
+      else reason = 'engagement-missed';
+    }
+    return { hit, reason, quality: finalQuality };
   }
 
   function dispatchCounterResponse(eventId, asset, opts = {}) {
@@ -4310,6 +4426,45 @@ async function main() {
       const speedMps = (d.profile.cruiseKmh * 1000) / 3600;
       const stepM = speedMps * dtSec;
 
+      // Live pursuit for airborne interceptors in sim mode: update
+      // target coord to the drone's CURRENT position each tick when
+      // the target is still in sensor coverage. Interceptor chases
+      // the live position, not a stale coord from dispatch time.
+      // When target is out of coverage the last cached targetLat/Lon
+      // stays as the destination (dead reckoning to last-known).
+      // Live vs sim mode: only sim events (templateKey set) get this
+      // physics — real events will get target updates from adapters.
+      const targetEv = getEvent(d.eventId);
+      const isSimEvent = !!targetEv?.templateKey;
+      if (isSimEvent && d.profile.airborne && !d.routePositions) {
+        const live = _liveTargetPositionFor(d);
+        if (live && targetEv.currentlyInCoverage !== false) {
+          d.targetLat = live.lat;
+          d.targetLon = live.lon;
+          if (typeof live.alt === 'number') d.targetAlt = live.alt;
+        }
+      }
+
+      // Altitude climb during en_route for sim mode. Interceptor
+      // climbs toward target altitude at hardware-realistic climb
+      // rate. If target altitude is above the interceptor's service
+      // ceiling, the interceptor levels off at ceiling and the
+      // engagement outcome later will fail with 'above ceiling'.
+      const physics = _SIM_INTERCEPTOR_PHYSICS[d.kind];
+      if (isSimEvent && d.profile.airborne && physics) {
+        const ceiling = physics.serviceCeilingM;
+        const climbRate = physics.climbRateMs;
+        const desiredAlt = Math.min(d.targetAlt || 60, ceiling);
+        const altGap = desiredAlt - (d.curAlt || 60);
+        if (Math.abs(altGap) > 1) {
+          const climbStep = climbRate * dtSec * Math.sign(altGap);
+          d.curAlt = (d.curAlt || 60) + climbStep;
+          if ((altGap > 0 && d.curAlt > desiredAlt) || (altGap < 0 && d.curAlt < desiredAlt)) {
+            d.curAlt = desiredAlt;
+          }
+        }
+      }
+
       if (d.routePositions && d.routeSegmentLengths) {
         // Follow OSRM street network route
         const step = advanceAlongPolyline(
@@ -4384,13 +4539,36 @@ async function main() {
       // stopped in mid-air before firing". Live-teleport-to-enemy
       // (version before that) was the 2km jump. Capped chase is the
       // in-between: visible movement, no teleport.
-      if (d.profile.airborne && d.assignedSwarmMember?.billboard?.position) {
-        const cart = d.assignedSwarmMember.billboard.position.getValue?.(Cesium.JulianDate.now());
-        if (cart) {
-          const cartographic = Cesium.Cartographic.fromCartesian(cart);
-          const enemyLat = Cesium.Math.toDegrees(cartographic.latitude);
-          const enemyLon = Cesium.Math.toDegrees(cartographic.longitude);
+      if (d.profile.airborne) {
+        // Live target position with fallback chain:
+        //   1. Assigned swarm member (swarm scenarios)
+        //   2. Event's own droneState billboard (single-drone like Shahed)
+        //   3. Event.lastPosition (frozen last-known)
+        // Fixes the earlier freeze bug on non-swarm targets where the
+        // interceptor lost its chase reference and hovered at the
+        // arrival point until Shahed passed through and behind it.
+        const live = _liveTargetPositionFor(d);
+        if (live) {
+          const enemyLat = live.lat;
+          const enemyLon = live.lon;
           d.assignedTargetCoord = { lat: enemyLat, lon: enemyLon };
+
+          // Altitude chase during engagement: interceptor tracks target
+          // altitude at climb rate. Enforces service ceiling: cannot
+          // climb above hardware limit even if target keeps climbing.
+          const physics = _SIM_INTERCEPTOR_PHYSICS[d.kind];
+          if (physics && typeof live.alt === 'number') {
+            const ceiling = physics.serviceCeilingM;
+            const desiredAlt = Math.min(live.alt, ceiling);
+            const altGap = desiredAlt - (d.curAlt || 60);
+            if (Math.abs(altGap) > 1) {
+              const climbStep = physics.climbRateMs * dtSecEng * Math.sign(altGap);
+              d.curAlt = (d.curAlt || 60) + climbStep;
+              if ((altGap > 0 && d.curAlt > desiredAlt) || (altGap < 0 && d.curAlt < desiredAlt)) {
+                d.curAlt = desiredAlt;
+              }
+            }
+          }
 
           const offsetM = d.profile.engageOffsetM || 100;
           const bearing = ((d.memberIndex || 0) * (Math.PI * 2 / 3));
@@ -4424,8 +4602,67 @@ async function main() {
         d._nextTracerTs = now + 1400;
       }
       if (engageDur >= d.profile.engageSec) {
-        d.state = 'complete';
-        _resolveEngagement(d);
+        // Sim-mode outcome: compute physics-driven hit chance the moment
+        // the engagement window closes. Real (live) events bypass this
+        // and use adapter-reported outcomes only. See
+        // _simComputeEngagementOutcome + _SIM_INTERCEPTOR_PHYSICS.
+        const targetEv = getEvent(d.eventId);
+        const isSimEvent = !!targetEv?.templateKey;
+        const hasPhysics = !!_SIM_INTERCEPTOR_PHYSICS[d.kind];
+        if (isSimEvent && hasPhysics) {
+          const outcome = _simComputeEngagementOutcome(d);
+          if (outcome.hit) {
+            // Fall through to the existing resolve logic which handles
+            // the kill animation, swarm-member neutralisation, and event
+            // outcome flip. For single-target events without a swarm
+            // member, mark the event neutralized directly.
+            if (!d.assignedSwarmMember && targetEv && targetEv.status === 'active') {
+              targetEv.outcome = 'neutralized';
+              targetEv.neutralizedAt = new Date().toISOString();
+              targetEv.neutralizedBy = d.assetName;
+              const stTarget = droneState.get(d.eventId);
+              if (stTarget) {
+                stTarget.closedAt = performance.now();
+                if (stTarget.billboard) stTarget.billboard.show = false;
+                if (stTarget.trail) stTarget.trail.show = false;
+                if (stTarget.shadow) stTarget.shadow.show = false;
+              }
+              markTrackClosed(d.eventId);
+              closeEvent(d.eventId, targetEv.exit || null);
+              toast(`${d.assetName} kill confirmed on ${targetEv.droneType || 'target'}. Track neutralised.`, 'ok');
+            }
+            d.state = 'complete';
+            _resolveEngagement(d);
+          } else {
+            // Physics-driven miss: log the reason and surface to the
+            // operator. Interceptor transitions to complete, will RTB
+            // in the next tick block.
+            const reasonLabelMap = {
+              'target-outran-interceptor': 'Interceptor could not close distance in time.',
+              'altitude-gap-too-large': 'Target above interceptor engagement altitude at engagement close.',
+              'target-too-fast-terminal-phase': 'Target in terminal-phase sprint, exceeded intercept envelope.',
+              'target-lost': 'Target signal lost before engagement resolved.',
+              'engagement-missed': 'Engagement missed. Target continued past intercept point.',
+            };
+            const reasonText = reasonLabelMap[outcome.reason] || 'Engagement failed.';
+            toast(`${d.assetName} miss. ${reasonText}`, 'warn');
+            if (targetEv) {
+              targetEv.notes = targetEv.notes || [];
+              targetEv.notes.push({
+                timestamp: new Date().toISOString(),
+                author: 'Interceptor telemetry',
+                text: `${d.assetName} engagement failed. Reason: ${reasonText} Engagement quality score ${(outcome.quality * 100).toFixed(0)} percent.`,
+                type: 'engagement-failed',
+              });
+            }
+            d.state = 'complete';
+            _resolveEngagement(d);
+          }
+        } else {
+          // Live event or non-physics kind: existing behaviour.
+          d.state = 'complete';
+          _resolveEngagement(d);
+        }
       }
     } else if (d.state === 'rtb_via_last_known') {
       // Mid-pursuit reacquisition — if the target reappears on the
