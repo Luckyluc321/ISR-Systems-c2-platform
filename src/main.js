@@ -12109,6 +12109,115 @@ async function main() {
   // in event.participants + the initiator's own role.
   // ═══════════════════════════════════════════════════════════════════
   let _observerPickerOpen = false;
+  // In-app modal for the receiver's Update status action. Replaces
+  // the earlier native window.prompt() which could not be styled,
+  // escaped cleanly, or matched to the app's visual language. Three
+  // radio-style options (in-progress, resolved, blocked) with a
+  // conditional reason field that unlocks only when blocked is
+  // selected. Escape or Cancel dismisses. Submit calls
+  // updateEscalationProgress.
+  function _openUpdateStatusModal(eventId, escId) {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'update-status-backdrop';
+    backdrop.style.cssText = `
+      position: fixed; inset: 0; background: rgba(6, 8, 11, 0.82);
+      backdrop-filter: blur(4px); z-index: 10000;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-body);
+    `;
+    const close = () => {
+      backdrop.remove();
+      document.removeEventListener('keydown', escHandler);
+    };
+    const escHandler = (ev) => { if (ev.key === 'Escape') close(); };
+    document.addEventListener('keydown', escHandler);
+    backdrop.addEventListener('click', (ev) => { if (ev.target === backdrop) close(); });
+
+    const optionButton = (val, label, subtitle) => `
+      <button class="update-status-option" data-val="${val}" style="
+        display: flex; flex-direction: column; align-items: flex-start;
+        text-align: left; padding: 12px 14px; border-radius: 3px;
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid var(--border);
+        cursor: pointer; transition: border-color 120ms, background 120ms;
+        font-family: var(--font-body); color: var(--text);
+        width: 100%; gap: 4px;
+      ">
+        <span style="font-size: var(--fs-sm); font-weight: 600;">${label}</span>
+        <span style="font-size: var(--fs-2xs); color: var(--text-dim); line-height: 1.4;">${subtitle}</span>
+      </button>`;
+
+    backdrop.innerHTML = `
+      <div style="width: min(480px, 92vw); background: var(--panel-solid, #0a0d11); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);">
+        <div style="padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);">
+          <div class="c-section-eyebrow" style="margin-bottom: 4px;">Update progress status</div>
+          <div style="font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.5;">Advances the case status back to the operator. Auto-flips to in-progress when a physical dispatch button is clicked; this action covers resolved, blocked, and freeform state changes.</div>
+        </div>
+        <div style="padding: var(--space-3) var(--space-4); display: flex; flex-direction: column; gap: 8px;">
+          ${optionButton('in-progress', 'In progress', 'Working the case, actions underway')}
+          ${optionButton('resolved', 'Resolved', 'Case handled, no further action needed from this profile')}
+          ${optionButton('blocked', 'Blocked', 'Cannot proceed. Requires a reason below.')}
+        </div>
+        <div id="update-status-reason-wrap" style="padding: 0 var(--space-4) var(--space-3); display: none;">
+          <div class="c-section-eyebrow" style="margin-bottom: 6px;">Reason</div>
+          <input id="update-status-reason" type="text" placeholder="Waiting on warrant. Radio comms down. Unit unavailable. etc."
+            style="width: 100%; padding: 10px 12px; background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border); border-radius: 2px; color: var(--text); font-family: var(--font-body); font-size: var(--fs-sm); box-sizing: border-box;" />
+        </div>
+        <div style="padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px;">
+          <button id="update-status-cancel" class="c-btn compact">Cancel</button>
+          <button id="update-status-submit" class="c-btn compact primary" disabled style="opacity: 0.55; cursor: not-allowed;">Submit</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+
+    let selectedVal = null;
+    const submitBtn = backdrop.querySelector('#update-status-submit');
+    const reasonWrap = backdrop.querySelector('#update-status-reason-wrap');
+    const reasonInput = backdrop.querySelector('#update-status-reason');
+
+    backdrop.querySelectorAll('.update-status-option').forEach(btn => {
+      btn.addEventListener('click', () => {
+        selectedVal = btn.dataset.val;
+        backdrop.querySelectorAll('.update-status-option').forEach(b => {
+          b.style.borderColor = 'var(--border)';
+          b.style.background = 'rgba(255, 255, 255, 0.02)';
+        });
+        btn.style.borderColor = 'var(--accent)';
+        btn.style.background = 'rgba(77, 210, 255, 0.06)';
+        reasonWrap.style.display = selectedVal === 'blocked' ? 'block' : 'none';
+        submitBtn.disabled = false;
+        submitBtn.style.opacity = '1';
+        submitBtn.style.cursor = 'pointer';
+        if (selectedVal === 'blocked') setTimeout(() => reasonInput?.focus(), 20);
+      });
+    });
+
+    backdrop.querySelector('#update-status-cancel').addEventListener('click', close);
+    submitBtn.addEventListener('click', () => {
+      if (!selectedVal) return;
+      let reason = null;
+      if (selectedVal === 'blocked') {
+        reason = (reasonInput?.value || '').trim();
+        if (!reason) {
+          toast('Blocked reason is required.', 'err');
+          reasonInput?.focus();
+          return;
+        }
+      }
+      const rec = updateEscalationProgress(eventId, escId, selectedVal, {
+        reason,
+        by: getActiveRole()?.id || 'receiver',
+      });
+      if (!rec) { toast('Update failed.', 'err'); close(); return; }
+      toast(`Status set to ${selectedVal.toUpperCase()}${reason ? ' · ' + reason : ''}`, 'ok');
+      _lastConsoleSig = null;
+      _lastReceiverViewSig = null;
+      close();
+      renderReceiverView({ immediate: true });
+    });
+  }
+
   function _openObserverPicker(eventId) {
     if (_observerPickerOpen) return;
     _observerPickerOpen = true;
@@ -18416,39 +18525,66 @@ async function main() {
         renderReceiverView({ immediate: true });
       }
       else if (action === 'other-agency-request') {
-        // Send a request to the owning agency of a specific asset.
-        // Creates an escalation targeting that agency's destination so
-        // the receiver sees the request in their inbox and can dispatch
-        // the asset from their own console.
+        // Send a request to the owning role of a specific asset.
+        // Strategy: the asset id in response_assets.js embeds the
+        // owning role's id as a prefix (e.g. flv-karup-helo-intercept
+        // owned by role flv-karup, sof-aalborg-jaeger owned by role
+        // sof-aalborg or similar). Progressive prefix match on the
+        // dash-separated tokens finds the longest matching role id.
+        // Fall back to a kind-based reverse lookup on
+        // ROLE_DISPATCH_SCOPE_LOOKUP if no prefix match resolves.
         const eventId = id || _selectedReceiverEventId || _workspaceEventId;
         const assetId = el.dataset.assetId;
         if (!eventId || !assetId) { toast('Missing event or asset context.', 'err'); return; }
         const ev = getEvent(eventId);
         if (!ev) { toast('Event not found.', 'err'); return; }
-        // Map the response_assets.js id to the closest matching real
-        // destination for that site. Simplest: look through the site's
-        // destinations for one whose id contains the asset id root.
-        // Fallback: escalate to any destination whose name matches the
-        // asset name. If nothing matches, warn and abort.
-        const dests = destinationsForSite(ev.siteId) || [];
-        const assetIdRoot = assetId.split('-').slice(0, 2).join('-');
-        let targetDest = dests.find(d => d.id.includes(assetIdRoot)) || null;
-        if (!targetDest) {
-          toast(`No destination configured for ${assetId} at this site.`, 'err');
+        // Progressive prefix match: try flv-karup-helo-intercept, then
+        // flv-karup-helo, then flv-karup, then flv. First hit wins.
+        const tokens = assetId.split('-');
+        let targetRole = null;
+        for (let n = tokens.length; n >= 1; n--) {
+          const candidate = tokens.slice(0, n).join('-');
+          const match = RECEIVERS.find(r => r.id === candidate);
+          if (match) { targetRole = match; break; }
+        }
+        // Fallback: reverse-lookup by asset kind via ROLE_DISPATCH_SCOPE_LOOKUP.
+        // Find any role whose dispatch scope includes this asset's kind.
+        if (!targetRole) {
+          const bundle = ev.subject
+            ? responseBundleForSubject(ev.subject, ev.lastPosition?.lat || 0, ev.lastPosition?.lon || 0)
+            : responseBundle(ev.lastPosition?.lat || 0, ev.lastPosition?.lon || 0);
+          const assetInBundle = [...(bundle.tactical || []), ...(bundle.ground || []), ...(bundle.consequence || [])]
+            .find(a => a.id === assetId);
+          const assetKind = assetInBundle?.kind;
+          if (assetKind) {
+            for (const [roleId, scope] of Object.entries(_ROLE_DISPATCH_SCOPE_LOOKUP)) {
+              if (scope.has(assetKind)) {
+                const candidateRole = RECEIVERS.find(r => r.id === roleId);
+                if (candidateRole) { targetRole = candidateRole; break; }
+              }
+            }
+          }
+        }
+        if (!targetRole) {
+          toast(`Could not resolve owning profile for ${assetId}.`, 'err');
           return;
         }
+        const targetDestIds = (Array.isArray(targetRole.destinationIds) && targetRole.destinationIds.length)
+          ? targetRole.destinationIds
+          : [targetRole.id];
         const activeRole = getActiveRole();
         const requesterName = activeRole?.org || activeRole?.label || 'Receiver';
+        const targetName = targetRole.org || targetRole.label || targetRole.id;
         const records = escalateEvent(eventId, {
-          destinationIds: [targetDest.id],
+          destinationIds: targetDestIds,
           payload: 'summary',
-          message: `Assistance request from ${requesterName}. Requesting ${targetDest.name} dispatch.`,
+          message: `Assistance request from ${requesterName}. Requesting dispatch from ${targetName}.`,
           operator: `${requesterName} (assistance request)`,
         });
         if (records.length === 0) {
-          toast(`${targetDest.name} already notified.`, 'info');
+          toast(`${targetName} already notified.`, 'info');
         } else {
-          toast(`Request sent to ${targetDest.name}. Awaiting their dispatch.`, 'ok');
+          toast(`Request sent to ${targetName}. Awaiting their dispatch.`, 'ok');
         }
         renderReceiverView({ immediate: true });
       }
@@ -18679,25 +18815,7 @@ async function main() {
       else if (action === 'update-status') {
         const eventId = _workspaceEventId || _selectedReceiverEventId || id;
         if (!eventId || !escId) { toast('No escalation context for status update', 'err'); return; }
-        const choice = (window.prompt('Set progress status — enter one: in-progress | resolved | blocked') || '').trim().toLowerCase();
-        if (!['in-progress', 'resolved', 'blocked'].includes(choice)) {
-          if (choice) toast('Invalid status. Use in-progress, resolved, or blocked.', 'err');
-          return;
-        }
-        let reason = null;
-        if (choice === 'blocked') {
-          reason = (window.prompt('Blocked reason (required):') || '').trim();
-          if (!reason) { toast('Blocked reason is required.', 'err'); return; }
-        }
-        const rec = updateEscalationProgress(eventId, escId, choice, {
-          reason,
-          by: getActiveRole()?.id || 'receiver',
-        });
-        if (!rec) { toast('Update failed.', 'err'); return; }
-        toast(`Status set to ${choice.toUpperCase()}${reason ? ' · ' + reason : ''}`, 'ok');
-        _lastConsoleSig = null;
-        _lastReceiverViewSig = null;
-        renderReceiverView({ immediate: true });
+        _openUpdateStatusModal(eventId, escId);
       }
       else if (action === 'respond-open') {
         // Composer lives in the center pane → needs full mount, not
