@@ -12107,7 +12107,39 @@ async function main() {
   function _getSwarmRef(eventId, swIdx) {
     const state = droneState.get(eventId);
     if (!state) return null;
-    if (swIdx === 0) return state.leadSwarmMember || null;
+    if (swIdx === 0) {
+      if (state.leadSwarmMember) return state.leadSwarmMember;
+      // Single-drone events (Shahed, cruise missile, single fixed-wing)
+      // have no swarm formation, so leadSwarmMember is null. Synthesize
+      // a lead-shaped wrapper around the state's own top-level billboard
+      // so POV works uniformly. Cached on state so repeated POV toggles
+      // reuse the same ref (needed for _povActive to persist).
+      if (!state._singleDronePovRef && state.billboard) {
+        const ev = getEvent(eventId);
+        state._singleDronePovRef = {
+          billboard: state.billboard,
+          role: 'single',
+          model: ev?.droneType || 'target',
+          isLead: true,
+          isSingleDrone: true,
+          get neutralised() { return !!state.closedAt; },
+          set neutralised(_v) { /* single-drone kill flows through closeEvent */ },
+          // POV entry reads _lastHeadingDeg to align the camera along
+          // the drone's current heading. For swarm members this is
+          // stamped by the tick loop; for single-drone events we expose
+          // the same value from state.stateHolder so camera enters
+          // facing the direction of travel, not north.
+          get _lastHeadingDeg() {
+            const rad = state.stateHolder?.headingRad;
+            if (typeof rad !== 'number') return 0;
+            // Convert negated-bearing back to compass degrees
+            const bearingDeg = (-rad * 180) / Math.PI;
+            return ((bearingDeg % 360) + 360) % 360;
+          },
+        };
+      }
+      return state._singleDronePovRef || null;
+    }
     return state.swarmBillboards?.[swIdx - 1] || null;
   }
 
