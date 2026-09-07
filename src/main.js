@@ -100,6 +100,70 @@ import { responseBundle, responseBundleForSubject, RESPONSE_OPTION_DETAILS, outc
 import { AIRCRAFT, aircraftAtBase, aircraftForResponseAsset } from './aircraft.js';
 import { playbookFor } from './response_playbook.js';
 import { ADMIN, OPERATORS, RECEIVERS, ACCOUNTS, getActiveRole, setActiveRole, onRoleChange, getRoleChildren, getRoleDestinationIdsRolledUp, impactedRoles as _impactedRoles, canInitiate as _canInitiate, agencyBranchOf, FLOW_TYPES } from './roles.js';
+
+// ── Tenant helpers ──
+// An "operator tenant" is one customer company (CPH Airports A/S,
+// Port of Esbjerg, Energinet, etc.). Each operator owns siteIds[].
+// Two sites are same-tenant iff the same operator's siteIds include
+// both. Cross-tenant data sharing (an operator seeing another
+// operator's linked events) requires legal basis we don't assume in
+// demo. Used by: Linked Events section filter, live-updating PIR
+// linked-event references. Receivers see full chains — they're the
+// response layer, escalated to per event.
+function _tenantForSite(siteId) {
+  if (!siteId) return null;
+  const owner = OPERATORS.find(o => Array.isArray(o.siteIds) && o.siteIds.includes(siteId));
+  return owner?.id || null;
+}
+function _sameTenant(siteIdA, siteIdB) {
+  if (!siteIdA || !siteIdB) return false;
+  const tA = _tenantForSite(siteIdA);
+  const tB = _tenantForSite(siteIdB);
+  return !!tA && tA === tB;
+}
+// Filter a linked-event ID list by tenant scope for the active role.
+// Operators: only see links within their own tenant (same operator's
+// siteIds). Receivers + Admin: see everything (no filter — receivers
+// need the full chain for response context, admin is ISR internal).
+function _tenantScopedLinkedIds(linkedIds, currentSiteId, activeRole) {
+  if (!Array.isArray(linkedIds) || !linkedIds.length) return [];
+  if (!activeRole || activeRole.kind !== 'operator') return linkedIds;
+  return linkedIds.filter(lid => {
+    const linkedEvent = EVENTS.find(x => x.id === lid);
+    if (!linkedEvent?.siteId) return false;
+    return _sameTenant(currentSiteId, linkedEvent.siteId);
+  });
+}
+
+// Live-updating PIR: when a new event gets linked to an already-closed
+// event AND both belong to the same operator tenant, append the new
+// link to the closed event's Post-Incident Report so the operator sees
+// "this incident continued at [same-tenant site]" the next time they
+// open the report. Cross-tenant continuations NEVER surface here —
+// receivers see the full chain via their own escalation membership,
+// operators only see their own tenant's continuations.
+//
+// Idempotent: dedupes by linked event ID. Safe to call from both link
+// endpoints (cross-cue spawn + auto-correlator) since only one of the
+// pair is typically closed at any given moment.
+function _appendLinkedEventToClosedPIR(closedEventId, newLinkedEventId) {
+  const closedEvent = EVENTS.find(x => x.id === closedEventId);
+  const newEvent = EVENTS.find(x => x.id === newLinkedEventId);
+  if (!closedEvent?.postIncidentReport || !newEvent) return null;
+  if (!_sameTenant(closedEvent.siteId, newEvent.siteId)) return null;
+  const pir = closedEvent.postIncidentReport;
+  if (!Array.isArray(pir.linkedAfterClose)) pir.linkedAfterClose = [];
+  if (pir.linkedAfterClose.some(l => l.id === newLinkedEventId)) return null;
+  pir.linkedAfterClose.push({
+    id: newLinkedEventId,
+    siteId: newEvent.siteId,
+    siteName: SITES[newEvent.siteId]?.name || newEvent.siteId,
+    droneType: newEvent.droneType || newEvent.platform || 'unknown platform',
+    linkedAt: new Date().toISOString(),
+    correlationScore: newEvent.correlationScore || null,
+  });
+  return pir.linkedAfterClose[pir.linkedAfterClose.length - 1];
+}
 import { getRenderProfile } from './render_profile.js';
 import { initSovereignLayers } from './sovereign_layers.js';
 import { initSovereignServices, DK_SERVICES, lookupBBR, reverseGeocodeDAR, findNearestWeatherStations } from './sovereign_services.js';
@@ -6443,6 +6507,12 @@ async function main() {
       unionLinkedEventDomains(primary.id);
       unionLinkedEventDomains(spawnedId);
     } catch (err) { console.warn('[domain] union on cross-cue failed:', err.message); }
+    // Live-updating PIR: if either side is already closed AND the pair
+    // is same-tenant, append the new link to the closed side's report.
+    try {
+      _appendLinkedEventToClosedPIR(primary.id, spawnedId);
+      _appendLinkedEventToClosedPIR(spawnedId, primary.id);
+    } catch (err) { console.warn('[pir] cross-cue link update failed:', err.message); }
     // Correlator validates the link with signature match audit note
     _autoCorrelate(spawned);
 
@@ -6861,6 +6931,16 @@ async function main() {
       unionLinkedEventDomains(event.id);
       unionLinkedEventDomains(best.prior.id);
     } catch (err) { console.warn('[domain] union on auto-link failed:', err.message); }
+    // Live-updating PIR: if either side of the auto-linked pair is
+    // already closed AND the pair is same-tenant, append the new link
+    // to the closed side's report. Common case: the correlator matches
+    // a fresh event to a recently-closed same-tenant event, and the
+    // closed side's report gains a "continued at [site]" reference
+    // the next time an operator opens it.
+    try {
+      _appendLinkedEventToClosedPIR(event.id, best.prior.id);
+      _appendLinkedEventToClosedPIR(best.prior.id, event.id);
+    } catch (err) { console.warn('[pir] auto-link update failed:', err.message); }
     addNote(event.id,
       `Auto-linked to ${best.prior.id} by signature match (composite ${pctStr(best.score)}: RF ${pctStr(best.rf)}, kinematic ${pctStr(best.kin)}, temporal ${pctStr(best.tmp)}). Same threat continuing across events.`,
       'AUTO-CORRELATOR');
@@ -9468,21 +9548,18 @@ async function main() {
         const MULTISITE_AUTOCLOSE_GRACE_MS = 12000;
         const f35Chasing = _f35.airborne && _f35.targetEventId === event.id;
         const missileChasing = _friendlyMissile.active && _friendlyMissile.targetEventId === event.id;
-        // Weapon-signature exemption: NEVER auto-close a weapon-class
-        // track when it exits sensor coverage. That is precisely the
-        // moment where the threat becomes MOST dangerous (terminal
-        // dive on target, no interceptor). Auto-close was designed
-        // for "the drone fled the country, no one is chasing it" —
-        // a hobbyist / recon story, not a Shahed on terminal. Weapon
-        // tracks close only on p.completed (waypoints exhausted, i.e.
-        // impact) or when a QRA neutralization resolves.
-        const isWeaponSignature = event.subject?.threat_profile?.weaponized_signature === true;
+        // Weapons close on coverage loss like everything else. The prior
+        // "keep weapon tracks alive through terminal dive" exemption was
+        // wrong per product model: the platform only knows what its
+        // sensors see. A drone that flies past our last sensor is
+        // invisible to us — the scripted trajectory is a sim artifact,
+        // not reality. Honest ISR product behavior: threat leaves all
+        // coverage → 12s grace for brief handoff blips → close → PIR.
         if (!state.closedAt
             && event.detected === true
             && !event.awaitingNeutralization
             && !f35Chasing
-            && !missileChasing
-            && !isWeaponSignature) {
+            && !missileChasing) {
           const noChase = !Array.isArray(event.counterDispatches)
             || event.counterDispatches.every(c => c.state === 'complete');
           const linkedActive = Array.isArray(event.linkedEventIds)
@@ -13040,16 +13117,20 @@ async function main() {
       }
     }
 
-    // For multi-site tracks: if event is active AND currently OUT of any
-    // sensor coverage, we cannot honestly claim live telemetry. Swap in a
-    // defense-style "SIGNAL LOST" panel that freezes the last confirmed
-    // snapshot and offers a View Summary CTA.
-    const outOfRange = e.multiSiteTrack && e.detected && isActive
-                       && e.currentlyInCoverage === false;
-    // PRE-INGRESS: event has spawned + is being tracked internally, but no
-    // sensor has confirmed detection yet. Realistic behaviour: we cannot
-    // show live telemetry we have not sensed. Blocks the telemetry section
-    // for multi-site tracks (swarm, cruise missile) that spawn off-map.
+    // Signal Lost stripe was deleted 2026-09-07. Per product model:
+    // no "signal lost but still active" limbo state exists. If a track
+    // leaves all sensor coverage with nothing chasing, the multi-site
+    // auto-close in onDroneTick fires within 12s and the event closes.
+    // The PIR (Post-Incident Report) generated at close IS the
+    // Detection Summary. During the brief 12s grace window the panel
+    // simply shows stale live telemetry — acceptable given how short
+    // the window is, and honest about what the platform actually
+    // knows (last confirmed sensor reading).
+    //
+    // PRE-INGRESS is a DIFFERENT product state: event tracked but no
+    // sensor has confirmed detection YET (inbound cruise missile
+    // before first radar contact). Kept — it's the legitimate "we
+    // know about this but haven't seen it" state.
     const preIngress = e.multiSiteTrack && !e.detected && isActive;
     let telemetry = '';
     if (preIngress) {
@@ -13060,23 +13141,6 @@ async function main() {
             <span class="dp-pre-title">PRE-INGRESS · AWAITING SENSOR CONTACT</span>
           </div>
           <div class="dp-pre-sub">Track inferred from cross-cue but not yet inside sensor coverage. Live telemetry populates once the first sensor confirms detection.</div>
-        </div>`;
-    } else if (outOfRange && e.lastKnownPosition) {
-      // Cool-grey factual stripe. No amber, no pulsing dot, no CTA.
-      // Signal loss during multi-site transit is EXPECTED product
-      // behaviour, not a warning — the amber styling and Detection
-      // Summary button were miscalibrated for that. Sensor path lives
-      // in the Linked Events section below; response state lives in
-      // the Escalation Log; header carries track identity. This just
-      // states what the last confirmed fix was, factually.
-      const lk = e.lastKnownPosition;
-      const lkSiteName = SITES[lk.siteId]?.name || lk.siteId || 'unknown site';
-      const stamp = lk.timestamp ? lk.timestamp.slice(11,19) + 'Z' : '—';
-      telemetry = `
-        <div class="dp-section dp-oor">
-          <div class="dp-oor-title">No sensor contact</div>
-          <div class="dp-oor-fact mono">Last fix ${stamp} · ${lkSiteName} · ${lk.lat.toFixed(4)}°N ${lk.lon.toFixed(4)}°E</div>
-          <div class="dp-oor-fact mono">${lk.speed} m/s · heading ${lk.heading}° · ${lk.alt} m AGL</div>
         </div>`;
     } else if (e.lastPosition) {
       // Swarm focused-drone override: only kicks in when override + stats
@@ -13261,7 +13325,7 @@ async function main() {
           <div class="dp-section-title">Swarm Roster · ${totalDrones} drones detected · click a row to focus</div>
           <div class="dp-swarm-rows">${droneList.map(fmtRow).join('')}</div>
         </div>`;
-    } else if (e.lastPosition && !preIngress && !outOfRange) {
+    } else if (e.lastPosition && !preIngress) {
       // Non-swarm platforms — fixed-wing, jet, missile, SAS commercial,
       // non-identifiable — get the SAME roster UI with a single row so
       // every event type has the platform-card treatment (was previously
@@ -13373,7 +13437,14 @@ async function main() {
     // events. Clicking a chip jumps to that event's report. The correlation
     // score badge appears when the correlator established (or confirmed) the
     // link — absent when the link is purely a scenario-scripted secondEvent.
-    const linkedIds = Array.isArray(e.linkedEventIds) ? e.linkedEventIds : [];
+    // Tenant scoping: operators only see linked events within their own
+    // tenant's siteIds. Cross-tenant data sharing (operator A seeing
+    // operator B's linked events) requires legal basis we don't assume
+    // in demo. Receivers + admin see the full chain — receivers because
+    // they're the response layer escalated to per event, admin because
+    // ISR internal. See _tenantScopedLinkedIds helper at module top.
+    const _rawLinkedIds = Array.isArray(e.linkedEventIds) ? e.linkedEventIds : [];
+    const linkedIds = _tenantScopedLinkedIds(_rawLinkedIds, e.siteId, getActiveRole());
     const linkedEvents = linkedIds.length ? `
       <div class="dp-section dp-linked">
         <div class="dp-section-title">Linked Events · ${linkedIds.length}${e.correlationScore ? ` · <span class="dp-corr-score">${(e.correlationScore * 100).toFixed(0)}% signature match</span>` : ''}</div>
@@ -15872,6 +15943,19 @@ async function main() {
           ${dispatchCount ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Counter-dispatches · ${dispatchCount}</div>${dispatchRows}</div>` : ''}
           ${chainCount ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Ground handoff chain · ${chainCount}</div>${chainRows}</div>` : ''}
           ${ackCount ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Acknowledgments · ${ackCount}</div>${ackRows}</div>` : ''}
+          ${(report.linkedAfterClose?.length) ? `
+            <div style="margin-bottom:var(--space-3);">
+              <div class="c-section-eyebrow" style="color:#ffb84d;">Continued after close · ${report.linkedAfterClose.length}</div>
+              ${report.linkedAfterClose.map(link => `
+                <div style="display:flex;gap:var(--space-3);padding:6px 0;border-top:1px solid var(--border);font-size:var(--fs-2xs);align-items:baseline;">
+                  <span style="color:var(--text);flex:1 1 auto;">${link.droneType} at <b>${link.siteName}</b></span>
+                  ${link.correlationScore != null ? `<span style="color:#4dd2ff;font-family:var(--font-mono);">${Math.round(link.correlationScore * 100)}%</span>` : ''}
+                  <span style="color:var(--text-dim);font-family:var(--font-mono);">${(link.linkedAt || '').slice(11,19)}Z</span>
+                </div>
+              `).join('')}
+              <div class="c-label" style="margin-top:6px;color:var(--text-dim);">Same-tenant continuations only. Cross-tenant matches surface only to receivers.</div>
+            </div>
+          ` : ''}
 
           <div style="display:flex;justify-content:flex-end;gap:var(--space-2);margin-top:var(--space-3);">
             <button class="c-btn compact" data-rcv="pir-download" data-id="${event.id}" title="Download report as JSON">Download JSON</button>

@@ -3087,37 +3087,15 @@ body.replay-dragging * {
 }
 .dp-brief-cta.doc:hover { border-color: var(--text-dim); }
 
-/* Signal Lost / Out of Range stripe. Minimal, factual, no alarm.
-   Signal loss during multi-site transit is EXPECTED product behavior
-   (drone left one coverage bubble, waiting for the next), not a
-   warning. The old amber-warn styling + View Detection Summary CTA
-   miscalibrated it as an urgent state and duplicated data that lives
-   elsewhere (Linked Events, Escalation Log, header). Now: cool-grey
-   informational stripe with one status line + two fact lines. */
-.dp-oor {
-  background: rgba(255, 255, 255, 0.02);
-  border-left: 2px solid var(--text-dim);
-  padding: 10px 12px !important;
-}
-.dp-oor-title {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.16em;
-  color: var(--text-dim);
-  text-transform: uppercase;
-  margin-bottom: 6px;
-}
-.dp-oor-fact {
-  font-size: 11px;
-  color: var(--text-dim);
-  line-height: 1.55;
-}
-.dp-oor-fact.mono {
-  font-family: var(--font-mono);
-}
+/* Signal Lost stripe (dp-oor) deleted 2026-09-07. No "signal lost
+   but still active" state exists in the real product — coverage loss
+   triggers the multi-site auto-close in onDroneTick within 12 s and
+   the event closes. The Post-Incident Report generated at close is
+   the Detection Summary. */
+
 /* Pre-ingress state — event tracked internally but no sensor confirmed yet.
    Kept as a slightly-different chip since it's a distinct product state
-   (never seen yet) vs signal lost (seen, then lost). Same restraint. */
+   (never seen yet) vs a closed event. Same restraint. */
 .dp-pre-ingress {
   background: rgba(120, 100, 200, 0.04);
   border-left: 2px solid rgba(120, 100, 200, 0.5);
