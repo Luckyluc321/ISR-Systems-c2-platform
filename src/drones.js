@@ -228,38 +228,41 @@ export const TEMPLATES = {
       // sensor spine (N17, N16, N15, N18) → NW bend through AMK
       // cluster (cross-site link) → N over Copenhagen to Amalienborg
       // (55.6844, 12.5931) → terminal dive over last 2 km.
-      { lat: 55.6180, lon: 12.7900, alt: 1000, heading: 270, tSec: 0   },  // Ingress far east over Øresund (well outside coverage)
-      { lat: 55.6180, lon: 12.7810, alt: 1000, heading: 270, tSec: 12  },
-      { lat: 55.6180, lon: 12.7715, alt: 1000, heading: 270, tSec: 24  },
-      { lat: 55.6180, lon: 12.7620, alt: 1000, heading: 270, tSec: 36  },
-      { lat: 55.6180, lon: 12.7255, alt: 1000, heading: 270, tSec: 48  },  // Still outside CPH sensor coverage
-      { lat: 55.6180, lon: 12.7060, alt: 1000, heading: 270, tSec: 60  },  // Approach N17 detection edge (~1.1 km)
-      { lat: 55.6180, lon: 12.6870, alt: 1000, heading: 270, tSec: 72  },  // FIRST DETECTION, enters N17 coverage (350 m from N17)
-      { lat: 55.6180, lon: 12.6775, alt: 1000, heading: 270, tSec: 84  },
-      { lat: 55.6180, lon: 12.6680, alt: 1000, heading: 270, tSec: 96  },  // Over CPH central airside, N16
-      { lat: 55.6180, lon: 12.6585, alt: 1000, heading: 270, tSec: 108 },
-      { lat: 55.6180, lon: 12.6490, alt: 1000, heading: 270, tSec: 120 },  // Runway 04R, N15
-      { lat: 55.6180, lon: 12.6395, alt: 1000, heading: 270, tSec: 132 },
-      { lat: 55.6207, lon: 12.6312, alt: 1000, heading: 300, tSec: 144 },  // NW bend, N18
-      { lat: 55.6234, lon: 12.6229, alt: 1000, heading: 315, tSec: 156 },
-      { lat: 55.6272, lon: 12.6162, alt: 1000, heading: 330, tSec: 168 },  // Approaching AMK
-      { lat: 55.6320, lon: 12.6115, alt: 1000, heading: 340, tSec: 180 },
-      { lat: 55.6370, lon: 12.6095, alt: 1000, heading: 345, tSec: 192 },  // AMK cluster centre (330m from AMK-N01)
-      { lat: 55.6422, lon: 12.6090, alt: 1000, heading: 355, tSec: 204 },
+      // Same Øresund ingress point as the recon-swarm scenario so
+      // Shahed detection timing matches operator expectations. At real
+      // 50 m/s cruise (~180 km/h) the drone crosses ~3.6 km of open
+      // water before hitting the first CPH sensor bubble at t=72 s.
+      { lat: 55.6050, lon: 12.7600, alt: 1000, heading: 275, tSec: 0   },  // Swarm-shared ingress point over Øresund
+      { lat: 55.6080, lon: 12.7460, alt: 1000, heading: 280, tSec: 12  },
+      { lat: 55.6110, lon: 12.7320, alt: 1000, heading: 285, tSec: 24  },
+      { lat: 55.6140, lon: 12.7180, alt: 1000, heading: 285, tSec: 36  },
+      { lat: 55.6160, lon: 12.7040, alt: 1000, heading: 285, tSec: 48  },
+      { lat: 55.6175, lon: 12.6900, alt: 1000, heading: 275, tSec: 60  },  // Approach N17 detection edge
+      { lat: 55.6180, lon: 12.6775, alt: 1000, heading: 270, tSec: 72  },  // FIRST DETECTION, N17 coverage
+      { lat: 55.6180, lon: 12.6680, alt: 1000, heading: 270, tSec: 84  },  // Over CPH central airside, N16
+      { lat: 55.6180, lon: 12.6585, alt: 1000, heading: 270, tSec: 96  },
+      { lat: 55.6180, lon: 12.6490, alt: 1000, heading: 270, tSec: 108 },  // Runway 04R, N15
+      { lat: 55.6180, lon: 12.6395, alt: 1000, heading: 270, tSec: 120 },
+      { lat: 55.6207, lon: 12.6312, alt: 1000, heading: 300, tSec: 132 },  // NW bend, N18
+      { lat: 55.6234, lon: 12.6229, alt: 1000, heading: 315, tSec: 144 },
+      { lat: 55.6272, lon: 12.6162, alt: 1000, heading: 330, tSec: 156 },  // Approaching AMK
+      { lat: 55.6320, lon: 12.6115, alt: 1000, heading: 340, tSec: 168 },
+      { lat: 55.6370, lon: 12.6095, alt: 1000, heading: 345, tSec: 180 },  // AMK cluster centre (330 m from AMK-N01)
+      { lat: 55.6422, lon: 12.6090, alt: 1000, heading: 355, tSec: 192 },
       // Past AMK, transiting Copenhagen with no sensor coverage
-      { lat: 55.6476, lon: 12.6070, alt: 1000, heading: 355, tSec: 216 },
-      { lat: 55.6530, lon: 12.6045, alt: 1000, heading: 355, tSec: 228 },
-      { lat: 55.6585, lon: 12.6025, alt: 1000, heading: 355, tSec: 240 },
-      { lat: 55.6640, lon: 12.6005, alt: 950,  heading: 355, tSec: 252 },
-      { lat: 55.6695, lon: 12.5985, alt: 850,  heading: 350, tSec: 264 },  // Terminal descent begins ~1.7km out
-      // Terminal dive 90 m/s (~360m per 4s tick)
-      { lat: 55.6727, lon: 12.5972, alt: 700, heading: 348, tSec: 268 },
-      { lat: 55.6759, lon: 12.5959, alt: 550, heading: 348, tSec: 272 },
-      { lat: 55.6791, lon: 12.5946, alt: 400, heading: 348, tSec: 276 },
-      { lat: 55.6820, lon: 12.5936, alt: 200, heading: 348, tSec: 280 },
-      { lat: 55.6844, lon: 12.5931, alt: 50,  heading: 348, tSec: 284 },  // Impact at Amalienborg
+      { lat: 55.6476, lon: 12.6070, alt: 1000, heading: 355, tSec: 204 },
+      { lat: 55.6530, lon: 12.6045, alt: 1000, heading: 355, tSec: 216 },
+      { lat: 55.6585, lon: 12.6025, alt: 1000, heading: 355, tSec: 228 },
+      { lat: 55.6640, lon: 12.6005, alt: 950,  heading: 355, tSec: 240 },
+      { lat: 55.6695, lon: 12.5985, alt: 850,  heading: 350, tSec: 252 },  // Terminal descent begins ~1.7 km out
+      // Terminal dive 90 m/s (~360 m per 4 s tick)
+      { lat: 55.6727, lon: 12.5972, alt: 700, heading: 348, tSec: 256 },
+      { lat: 55.6759, lon: 12.5959, alt: 550, heading: 348, tSec: 260 },
+      { lat: 55.6791, lon: 12.5946, alt: 400, heading: 348, tSec: 264 },
+      { lat: 55.6820, lon: 12.5936, alt: 200, heading: 348, tSec: 268 },
+      { lat: 55.6844, lon: 12.5931, alt: 50,  heading: 348, tSec: 272 },  // Impact at Amalienborg
     ],
-    durationSec: 284,
+    durationSec: 272,
   },
 
   // ── Recon quadcopter, sustained loiter over CPH cargo apron ──
