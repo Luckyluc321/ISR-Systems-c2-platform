@@ -10152,23 +10152,49 @@ async function main() {
     // — matches AMRAAM smoothness. The tick loop writes `state.headingRad`
     // continuously; the billboard reads it here.
     //
-    // alignedAxis is set to the LOCAL UP vector at the drone's current
-    // position (normalised position from Earth centre). Without this,
-    // the billboard is screen-aligned — from a POV camera looking at
-    // the drone from the side, the icon's canvas top would align with
-    // the screen's up direction (i.e., point toward the sky) instead
-    // of the drone's actual compass heading. With alignedAxis on
-    // local up, the billboard rotates around the vertical axis like a
-    // proper compass icon and the nose always reads horizontally in
-    // world space regardless of viewing angle.
+    // alignedAxis is set to the drone's horizontal FORWARD direction in
+    // ECEF world space (the compass-heading vector projected onto the
+    // local tangent plane). Cesium then forces the billboard's image UP
+    // to align with that vector, so the icon's nose (canvas top) always
+    // points in the direction of travel in world space, regardless of
+    // camera angle.
+    //
+    // From top-down map view: nose points to the drone's compass bearing.
+    // From horizontal POV of another aircraft: nose points along the
+    // heading vector projected onto the screen — still horizontal, still
+    // in the right direction. Not vertical, not backwards.
+    //
+    // Why not alignedAxis = local up? That aligns image_up with the
+    // vertical axis, which is degenerate from horizontal POV (rotation
+    // around a vertical axis doesn't change a vertical vector). Result
+    // was the icon appearing vertical and non-directional.
     const stateHolder = { headingRad: 0 };
     let _billboardRef;
-    const _localUp = () => {
+    // Compute the horizontal forward direction at the drone's current
+    // ECEF position. Returns a unit vector in ECEF pointing in the
+    // compass heading direction, lying in the local tangent plane.
+    const _forwardVec = () => {
       const cart = _billboardRef?.position?.getValue?.(Cesium.JulianDate.now());
-      if (!cart) return Cesium.Cartesian3.UNIT_Z;
-      const up = new Cesium.Cartesian3();
-      Cesium.Cartesian3.normalize(cart, up);
-      return up;
+      if (!cart) return Cesium.Cartesian3.UNIT_Y;
+      // Local up = normalised position vector (surface normal at drone)
+      const up = Cesium.Cartesian3.normalize(cart, new Cesium.Cartesian3());
+      // Local north tangent: derived from ENU frame at this position.
+      // Cesium.Transforms.eastNorthUpToFixedFrame returns the 4x4
+      // matrix whose columns are (east, north, up, position) in ECEF.
+      const enuMat = Cesium.Transforms.eastNorthUpToFixedFrame(cart);
+      const east  = new Cesium.Cartesian3(enuMat[0], enuMat[1], enuMat[2]);
+      const north = new Cesium.Cartesian3(enuMat[4], enuMat[5], enuMat[6]);
+      // Heading angle: our tick loop writes -atan2(dLon, dLat) which is
+      // the compass bearing negated. Invert to get standard compass
+      // bearing (CW from north, radians).
+      const bearing = -stateHolder.headingRad;
+      // Forward = north * cos(bearing) + east * sin(bearing)
+      const fwd = new Cesium.Cartesian3();
+      Cesium.Cartesian3.multiplyByScalar(north, Math.cos(bearing), fwd);
+      const eastComp = Cesium.Cartesian3.multiplyByScalar(east, Math.sin(bearing), new Cesium.Cartesian3());
+      Cesium.Cartesian3.add(fwd, eastComp, fwd);
+      Cesium.Cartesian3.normalize(fwd, fwd);
+      return fwd;
     };
     const billboard = viewer.entities.add({
       id: `drone-${event.id}`,
@@ -10176,8 +10202,11 @@ async function main() {
       billboard: {
         image: platformIcon(platform, color),
         width: 32, height: 32,
-        rotation: new Cesium.CallbackProperty(() => stateHolder.headingRad, false),
-        alignedAxis: new Cesium.CallbackProperty(() => _localUp(), false),
+        // Rotation kept at 0 — direction is fully encoded in alignedAxis
+        // (image_up aligns with the heading vector). Rotation would just
+        // spin the image around image_up, producing roll not heading.
+        rotation: 0,
+        alignedAxis: new Cesium.CallbackProperty(() => _forwardVec(), false),
         color: event.classification === 'hostile'
           ? new Cesium.CallbackProperty(() => {
               const pulse = 0.65 + 0.35 * Math.sin(performance.now() / 200);
@@ -10213,12 +10242,21 @@ async function main() {
       for (let i = 1; i < template.swarm.formation.length; i++) {
         const slot = template.swarm.formation[i];
         let _swBbRef;
-        const _swLocalUp = () => {
+        // Horizontal forward vector at this swarm member's position —
+        // same technique as the lead billboard (see _forwardVec above).
+        const _swForwardVec = () => {
           const cart = _swBbRef?.position?.getValue?.(Cesium.JulianDate.now());
-          if (!cart) return Cesium.Cartesian3.UNIT_Z;
-          const up = new Cesium.Cartesian3();
-          Cesium.Cartesian3.normalize(cart, up);
-          return up;
+          if (!cart) return Cesium.Cartesian3.UNIT_Y;
+          const enuMat = Cesium.Transforms.eastNorthUpToFixedFrame(cart);
+          const east  = new Cesium.Cartesian3(enuMat[0], enuMat[1], enuMat[2]);
+          const north = new Cesium.Cartesian3(enuMat[4], enuMat[5], enuMat[6]);
+          const bearing = -stateHolder.headingRad;
+          const fwd = new Cesium.Cartesian3();
+          Cesium.Cartesian3.multiplyByScalar(north, Math.cos(bearing), fwd);
+          const eastComp = Cesium.Cartesian3.multiplyByScalar(east, Math.sin(bearing), new Cesium.Cartesian3());
+          Cesium.Cartesian3.add(fwd, eastComp, fwd);
+          Cesium.Cartesian3.normalize(fwd, fwd);
+          return fwd;
         };
         const swarmBb = viewer.entities.add({
           id: `drone-${event.id}-swarm-${i}`,
@@ -10226,8 +10264,8 @@ async function main() {
           billboard: {
             image: platformIcon(platform, color),
             width: 26, height: 26,   // slightly smaller than lead for visual hierarchy
-            rotation: new Cesium.CallbackProperty(() => stateHolder.headingRad, false),
-            alignedAxis: new Cesium.CallbackProperty(() => _swLocalUp(), false),
+            rotation: 0,
+            alignedAxis: new Cesium.CallbackProperty(() => _swForwardVec(), false),
             color: event.classification === 'hostile'
               ? new Cesium.CallbackProperty(() => {
                   const pulse = 0.65 + 0.35 * Math.sin(performance.now() / 200);
