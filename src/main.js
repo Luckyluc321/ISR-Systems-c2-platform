@@ -13062,25 +13062,21 @@ async function main() {
           <div class="dp-pre-sub">Track inferred from cross-cue but not yet inside sensor coverage. Live telemetry populates once the first sensor confirms detection.</div>
         </div>`;
     } else if (outOfRange && e.lastKnownPosition) {
+      // Cool-grey factual stripe. No amber, no pulsing dot, no CTA.
+      // Signal loss during multi-site transit is EXPECTED product
+      // behaviour, not a warning — the amber styling and Detection
+      // Summary button were miscalibrated for that. Sensor path lives
+      // in the Linked Events section below; response state lives in
+      // the Escalation Log; header carries track identity. This just
+      // states what the last confirmed fix was, factually.
       const lk = e.lastKnownPosition;
-      const siteName = SITES[lk.siteId]?.name || lk.siteId || 'Unknown site';
-      const stamp = lk.timestamp ? lk.timestamp.slice(11,19) + 'Z' : '';
+      const lkSiteName = SITES[lk.siteId]?.name || lk.siteId || 'unknown site';
+      const stamp = lk.timestamp ? lk.timestamp.slice(11,19) + 'Z' : '—';
       telemetry = `
         <div class="dp-section dp-oor">
-          <div class="dp-oor-hdr">
-            <span class="dp-oor-pulse"></span>
-            <span class="dp-oor-title">SIGNAL LOST · TRACK OUT OF SENSOR RANGE</span>
-          </div>
-          <div class="dp-oor-sub">Last confirmed contact at ${siteName} · ${stamp}. Live coordinates suppressed. Waiting for downstream cross cue.</div>
-          <div class="dp-oor-grid">
-            <div class="dp-oor-kv"><span class="dp-oor-k">LAST SITE</span><span class="dp-oor-v">${siteName}</span></div>
-            <div class="dp-oor-kv"><span class="dp-oor-k">LAST FIX</span><span class="dp-oor-v mono">${lk.lat.toFixed(4)}°N ${lk.lon.toFixed(4)}°E</span></div>
-            <div class="dp-oor-kv"><span class="dp-oor-k">LAST HEADING</span><span class="dp-oor-v mono">${lk.heading}°</span></div>
-            <div class="dp-oor-kv"><span class="dp-oor-k">LAST SPEED</span><span class="dp-oor-v mono">${lk.speed} m/s</span></div>
-            <div class="dp-oor-kv"><span class="dp-oor-k">LAST ALT</span><span class="dp-oor-v mono">${lk.alt} m AGL</span></div>
-            <div class="dp-oor-kv"><span class="dp-oor-k">TIMESTAMP</span><span class="dp-oor-v mono">${stamp}</span></div>
-          </div>
-          <button class="dp-oor-cta" data-action="view-summary" data-id="${e.id}">View Detection Summary</button>
+          <div class="dp-oor-title">No sensor contact</div>
+          <div class="dp-oor-fact mono">Last fix ${stamp} · ${lkSiteName} · ${lk.lat.toFixed(4)}°N ${lk.lon.toFixed(4)}°E</div>
+          <div class="dp-oor-fact mono">${lk.speed} m/s · heading ${lk.heading}° · ${lk.alt} m AGL</div>
         </div>`;
     } else if (e.lastPosition) {
       // Swarm focused-drone override: only kicks in when override + stats
@@ -13734,7 +13730,13 @@ async function main() {
           toast('Advisory dismissed. Classification unchanged.', 'info');
           renderDetailPanel();
         }
-        if (btn.dataset.action === 'view-summary') openDetectionSummary(btn.dataset.id || e.id);
+        // view-summary handler removed 2026-09-07: the Detection Summary
+        // modal was fully redundant with the Detail Panel header (track
+        // info), Linked Events section (sensor path), signal-lost stripe
+        // (last confirmed fix), and Escalation Log (response state).
+        // Every data point already lives in a live surface. Post-close
+        // audit belongs in the Post-Incident Report, not a mid-flight
+        // modal snapshot.
         if (btn.dataset.action === 'download-evidence') {
           // P5A evidence pack: full recorded time-series JSON for this event.
           // Includes per-drone position, kinematics, RF, acoustic, visual,
@@ -14305,76 +14307,6 @@ async function main() {
     renderModal();
     modalBackdrop.addEventListener('click', (ev) => { if (ev.target === modalBackdrop) closeEscalateModal(); }, { once: true });
     modalBackdrop.style.display = 'flex';
-  }
-
-  // ── Detection Summary modal ──
-  // Shown when operator clicks "View Detection Summary" on the SIGNAL LOST
-  // panel. Consolidates every confirmed sensor detection this event has
-  // produced (Kassø → Bjæverskov → CPH), so the operator sees a full
-  // audit trail of the track's confirmed observations without any
-  // fabricated live coordinates.
-  function openDetectionSummary(eventId) {
-    const e = getEvent(eventId);
-    if (!e) return;
-    const backdrop = document.createElement('div');
-    backdrop.className = 'det-summary-backdrop';
-    const close = () => backdrop.remove();
-    backdrop.addEventListener('click', (ev) => { if (ev.target === backdrop) close(); });
-
-    const lk = e.lastKnownPosition;
-    // Initial site = origin (where first detection happened, always Kassø
-    // for the cruise missile scenario). Last site = most recent detection
-    // (updates automatically as Bjæverskov and CPH re-acquire the track).
-    const lkSite = lk ? (SITES[lk.siteId]?.name || lk.siteId) : (SITES[e.siteId]?.name || e.siteId);
-    const entrySite = SITES[e.siteId]?.name || e.siteId || 'Origin site';
-    const reacquired = e.multiSiteTrack && e._reacquiredSites
-      ? Array.from(e._reacquiredSites).map(sid => SITES[sid]?.name || sid).join(' · ')
-      : 'None';
-    const escalationCount = (e.escalations || []).length;
-    const dispatched = e.awaitingNeutralization || e.outcome === 'neutralized' ? 'Yes · Flyvevåbnet QRA' : 'No';
-    const evasion = e.projectionSnapshot && lk && Math.abs(lk.heading - e.projectionSnapshot.heading) > 8
-      ? `Detected · ${Math.round(Math.abs(lk.heading - e.projectionSnapshot.heading))}° course change`
-      : 'None recorded';
-
-    backdrop.innerHTML = `
-      <div class="det-summary-modal" role="dialog" aria-modal="true">
-        <div class="det-summary-hdr">
-          <div class="det-summary-title">Detection Summary · ${e.id}</div>
-          <button class="det-summary-close" data-close>Close</button>
-        </div>
-        <div class="det-summary-section">
-          <div class="det-summary-h">Track</div>
-          <div class="det-summary-row"><span class="lbl">Type</span><span class="val">${e.droneType}</span></div>
-          <div class="det-summary-row"><span class="lbl">Class</span><span class="val">${(e.classification || '').toUpperCase()}</span></div>
-          <div class="det-summary-row"><span class="lbl">First seen</span><span class="val mono">${e.startTime.slice(11,19)}Z</span></div>
-          <div class="det-summary-row"><span class="lbl">Duration</span><span class="val mono">${formatDuration(e.duration)}</span></div>
-          <div class="det-summary-row"><span class="lbl">Confidence</span><span class="val mono">${e.confidence.toFixed(2)}</span></div>
-        </div>
-        <div class="det-summary-section">
-          <div class="det-summary-h">Sensor Path</div>
-          <div class="det-summary-row"><span class="lbl">Initial site</span><span class="val">${entrySite}</span></div>
-          <div class="det-summary-row"><span class="lbl">Reacquired</span><span class="val">${reacquired}</span></div>
-          <div class="det-summary-row"><span class="lbl">Last site</span><span class="val">${lkSite}</span></div>
-        </div>
-        ${lk ? `
-        <div class="det-summary-section">
-          <div class="det-summary-h">Last Confirmed Fix</div>
-          <div class="det-summary-row"><span class="lbl">Position</span><span class="val mono">${lk.lat.toFixed(4)}°N ${lk.lon.toFixed(4)}°E</span></div>
-          <div class="det-summary-row"><span class="lbl">Altitude</span><span class="val mono">${lk.alt} m AGL</span></div>
-          <div class="det-summary-row"><span class="lbl">Speed</span><span class="val mono">${lk.speed} m/s</span></div>
-          <div class="det-summary-row"><span class="lbl">Heading</span><span class="val mono">${lk.heading}°</span></div>
-          <div class="det-summary-row"><span class="lbl">Timestamp</span><span class="val mono">${lk.timestamp ? lk.timestamp.slice(11,19) + 'Z' : '—'}</span></div>
-        </div>` : ''}
-        <div class="det-summary-section">
-          <div class="det-summary-h">Response</div>
-          <div class="det-summary-row"><span class="lbl">Escalations</span><span class="val">${escalationCount}</span></div>
-          <div class="det-summary-row"><span class="lbl">Fighter dispatched</span><span class="val">${dispatched}</span></div>
-          <div class="det-summary-row"><span class="lbl">Evasion</span><span class="val">${evasion}</span></div>
-          <div class="det-summary-row"><span class="lbl">Outcome</span><span class="val">${e.outcome === 'neutralized' ? 'Neutralised · ' + (e.neutralizedAt ? e.neutralizedAt.slice(11,19) + 'Z' : '') : 'Active — awaiting cross cue'}</span></div>
-        </div>
-      </div>`;
-    document.body.appendChild(backdrop);
-    backdrop.querySelector('[data-close]').addEventListener('click', close);
   }
 
   // ── Aircraft info popup ──────────────────────────────────────────
