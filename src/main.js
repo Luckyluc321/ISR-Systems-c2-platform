@@ -135,6 +135,84 @@ function _tenantScopedLinkedIds(linkedIds, currentSiteId, activeRole) {
   });
 }
 
+// Temporary detection loss vs fled classifier.
+// Distinguishes two ways a track can drop off sensor: HIDING inside
+// the site perimeter (occlusion, altitude ceiling, RF silence — track
+// probably still there, keep operators alert) vs FLED (crossed the
+// perimeter and is gone).
+//
+// Gate:
+//   - fled if last known position is outside the site boundary
+//   - fled if within the perimeter buffer of the edge (default 200m)
+//     AND projected position (last + heading * speed * grace) exits
+//     the boundary
+//   - hiding otherwise
+//
+// Grace formula: clamp(15, 60, 900 / speed_ms) seconds. Slow hover
+// gets the 60s ceiling; fast Shahed / missile gets the 15s floor.
+// Rationale: physics of "how long could this platform reasonably
+// stay inside the site without being re-acquired." Real ops
+// customers tune per-site via site_context.temporary_loss_buffer_m
+// once real data is in.
+function _classifyDetectionLoss(event) {
+  const site = SITES[event.siteId];
+  const boundary = site?.siteBoundary;
+  const lk = event.lastKnownPosition || event.lastPosition;
+  if (!boundary?.length || !lk?.lat || !lk?.lon) {
+    return { classification: 'fled', graceMs: 12000, reason: 'no boundary or last-known position on record' };
+  }
+  const speed = Math.max(1, lk.speed || 0);
+  const graceSeconds = Math.max(15, Math.min(60, 900 / speed));
+  const graceMs = graceSeconds * 1000;
+  const bufferM = contextForSite(event.siteId)?.temporary_loss_buffer_m || 200;
+
+  const insidePerimeter = pointInPolygon(lk.lat, lk.lon, boundary);
+  if (!insidePerimeter) {
+    return {
+      classification: 'fled',
+      graceMs: 12000,
+      reason: 'last confirmed position is outside site perimeter',
+      insidePerimeter: false,
+    };
+  }
+
+  const distanceM = distanceToPerimeter(lk.lat, lk.lon, boundary);
+  // Project forward using last heading + speed for grace duration.
+  // If the projected point exits the boundary AND the last point is
+  // within the buffer distance from the edge, treat as fled. Handles
+  // the case where the drone was already leaving as we lost signal.
+  const headingRad = ((lk.heading || 0) * Math.PI) / 180;
+  const dyM = Math.cos(headingRad) * speed * graceSeconds;
+  const dxM = Math.sin(headingRad) * speed * graceSeconds;
+  const cosLat = Math.cos((lk.lat * Math.PI) / 180);
+  const projectedLat = lk.lat + dyM / 111000;
+  const projectedLon = lk.lon + dxM / (111000 * cosLat);
+  const projectedInside = pointInPolygon(projectedLat, projectedLon, boundary);
+
+  if (distanceM < bufferM && !projectedInside) {
+    return {
+      classification: 'fled',
+      graceMs: 12000,
+      reason: `last confirmed position ${distanceM} m from perimeter and projected path exits site`,
+      insidePerimeter: true,
+      distanceM,
+      projectedInside: false,
+    };
+  }
+
+  return {
+    classification: 'hiding',
+    graceMs,
+    reason: `last confirmed position ${distanceM} m inside perimeter, no sensor re-acquisition`,
+    insidePerimeter: true,
+    distanceM,
+    projectedInside,
+    graceSeconds: Math.round(graceSeconds),
+    lastSpeed: speed,
+    lastHeading: lk.heading || 0,
+  };
+}
+
 // Live-updating PIR: when a new event gets linked to an already-closed
 // event AND both belong to the same operator tenant, append the new
 // link to the closed event's Post-Incident Report so the operator sees
@@ -9545,16 +9623,15 @@ async function main() {
         //   5. no linked shadow event still active elsewhere
         //   6. GRACE_MS of continuous out-of-coverage (short blips
         //      between sites during handoff shouldn't kill the track)
-        const MULTISITE_AUTOCLOSE_GRACE_MS = 12000;
         const f35Chasing = _f35.airborne && _f35.targetEventId === event.id;
         const missileChasing = _friendlyMissile.active && _friendlyMissile.targetEventId === event.id;
         // Weapons close on coverage loss like everything else. The prior
         // "keep weapon tracks alive through terminal dive" exemption was
         // wrong per product model: the platform only knows what its
         // sensors see. A drone that flies past our last sensor is
-        // invisible to us — the scripted trajectory is a sim artifact,
-        // not reality. Honest ISR product behavior: threat leaves all
-        // coverage → 12s grace for brief handoff blips → close → PIR.
+        // invisible to us. Threat leaves all coverage → grace for
+        // brief handoff blips (or longer if inside perimeter possibly
+        // hiding) → close → PIR.
         if (!state.closedAt
             && event.detected === true
             && !event.awaitingNeutralization
@@ -9568,9 +9645,26 @@ async function main() {
               return le && le.status === 'active';
             });
           if (inAnyCoverage === false && noChase && !linkedActive) {
+            // Classify the loss the first tick coverage drops. Result
+            // stored on event.temporaryLoss so the detail panel can
+            // render the countdown section, and the same graceMs is
+            // reused every subsequent tick so the countdown is stable.
             if (!state._outOfAllCoverageSinceMs) {
               state._outOfAllCoverageSinceMs = performance.now();
-            } else if (performance.now() - state._outOfAllCoverageSinceMs >= MULTISITE_AUTOCLOSE_GRACE_MS) {
+              const loss = _classifyDetectionLoss(event);
+              event.temporaryLoss = {
+                firstAt: new Date().toISOString(),
+                classification: loss.classification,
+                graceMs: loss.graceMs,
+                reason: loss.reason,
+                distanceM: loss.distanceM ?? null,
+                lastSpeed: loss.lastSpeed ?? null,
+                lastHeading: loss.lastHeading ?? null,
+                graceSeconds: loss.graceSeconds ?? Math.round(loss.graceMs / 1000),
+              };
+            }
+            const activeGraceMs = event.temporaryLoss?.graceMs || 12000;
+            if (performance.now() - state._outOfAllCoverageSinceMs >= activeGraceMs) {
               state.closedAt = performance.now();
               const exitPoint = event.lastKnownPosition
                 ? { lat: event.lastKnownPosition.lat, lon: event.lastKnownPosition.lon,
@@ -9587,9 +9681,12 @@ async function main() {
             }
           } else {
             // Re-acquired coverage OR chase started OR linked event
-            // spawned — reset the timer so the countdown restarts if
-            // the object flees again.
+            // spawned. Reset the timer + clear the temporary-loss
+            // classification so the countdown starts fresh if the
+            // object flees again. Panel will drop the Temporary
+            // detection loss section on next render.
             state._outOfAllCoverageSinceMs = null;
+            if (event.temporaryLoss) event.temporaryLoss = null;
           }
         }
       }
@@ -13117,21 +13214,26 @@ async function main() {
       }
     }
 
-    // Signal Lost stripe was deleted 2026-09-07. Per product model:
-    // no "signal lost but still active" limbo state exists. If a track
-    // leaves all sensor coverage with nothing chasing, the multi-site
-    // auto-close in onDroneTick fires within 12s and the event closes.
-    // The PIR (Post-Incident Report) generated at close IS the
-    // Detection Summary. During the brief 12s grace window the panel
-    // simply shows stale live telemetry — acceptable given how short
-    // the window is, and honest about what the platform actually
-    // knows (last confirmed sensor reading).
+    // Two "not currently seeing it" product states are DIFFERENT:
     //
-    // PRE-INGRESS is a DIFFERENT product state: event tracked but no
-    // sensor has confirmed detection YET (inbound cruise missile
-    // before first radar contact). Kept — it's the legitimate "we
-    // know about this but haven't seen it" state.
+    //   PRE-INGRESS: track inferred from cross-cue, no sensor has ever
+    //     confirmed detection. Live telemetry populates on first
+    //     sensor contact.
+    //
+    //   TEMPORARY DETECTION LOSS: track was in coverage, lost signal
+    //     while last known position was inside a site's perimeter (not
+    //     fled). Countdown to closure runs at a physics-derived grace
+    //     period (15-60s based on last speed). Re-acquisition clears
+    //     the state; countdown expiry closes the event via the
+    //     multi-site auto-close in onDroneTick.
+    //
+    // Both states render as sections instead of the live-telemetry
+    // block. The panel below (lastPosition telemetry) is skipped when
+    // either fires so the operator isn't looking at stale fields.
     const preIngress = e.multiSiteTrack && !e.detected && isActive;
+    const temporaryLoss = isActive
+      && e.temporaryLoss
+      && e.temporaryLoss.classification === 'hiding';
     let telemetry = '';
     if (preIngress) {
       telemetry = `
@@ -13141,6 +13243,25 @@ async function main() {
             <span class="dp-pre-title">PRE-INGRESS · AWAITING SENSOR CONTACT</span>
           </div>
           <div class="dp-pre-sub">Track inferred from cross-cue but not yet inside sensor coverage. Live telemetry populates once the first sensor confirms detection.</div>
+        </div>`;
+    } else if (temporaryLoss) {
+      const tl = e.temporaryLoss;
+      const lk = e.lastKnownPosition || e.lastPosition;
+      const lkTs = lk?.timestamp ? lk.timestamp.slice(11, 19) + 'Z' : (tl.firstAt || '').slice(11, 19) + 'Z';
+      const lkSite = SITES[lk?.siteId || e.siteId]?.name || (lk?.siteId || e.siteId);
+      const lkCoords = (lk?.lat != null && lk?.lon != null)
+        ? `${lk.lat.toFixed(4)}°N ${lk.lon.toFixed(4)}°E`
+        : 'coordinates unavailable';
+      const distText = tl.distanceM != null
+        ? ` at ${tl.distanceM} m inside perimeter`
+        : '';
+      telemetry = `
+        <div class="dp-section dp-temp-loss" data-temp-loss-event="${e.id}">
+          <div class="dp-section-title">Temporary detection loss</div>
+          <div class="dp-temp-loss-body">
+            <div>Last confirmed contact ${lkTs} at ${lkSite}${distText}. Position ${lkCoords}. Track has not been re-acquired by any sensor at this site.</div>
+            <div style="margin-top: var(--space-2);"><span data-temp-loss-countdown="${e.id}">Closing in ${tl.graceSeconds || Math.round(tl.graceMs / 1000)} seconds</span> if no sensor regains contact.</div>
+          </div>
         </div>`;
     } else if (e.lastPosition) {
       // Swarm focused-drone override: only kicks in when override + stats
@@ -14814,6 +14935,38 @@ async function main() {
   }
   tickClocks();
   setInterval(tickClocks, 1000);
+
+  // Temporary detection loss countdown patcher. Runs every 1s and
+  // updates every rendered [data-temp-loss-countdown] element in place
+  // with the remaining seconds. Reads event.temporaryLoss + the tick
+  // state ledger for coverage-loss start time so the countdown stays
+  // consistent with the auto-close firing point.
+  function _tickTemporaryLossCountdowns() {
+    const nodes = document.querySelectorAll('[data-temp-loss-countdown]');
+    if (!nodes.length) return;
+    nodes.forEach((node) => {
+      const evId = node.dataset.tempLossCountdown;
+      const ev = getEvent(evId);
+      if (!ev?.temporaryLoss || ev.status !== 'active') {
+        node.textContent = 'Closing shortly';
+        return;
+      }
+      const st = droneState.get(evId);
+      const startedMs = st?._outOfAllCoverageSinceMs;
+      const graceMs = ev.temporaryLoss.graceMs || 30000;
+      if (!startedMs) {
+        node.textContent = `Closing in ${Math.round(graceMs / 1000)} seconds`;
+        return;
+      }
+      const elapsedMs = performance.now() - startedMs;
+      const remainMs = Math.max(0, graceMs - elapsedMs);
+      const remainS = Math.max(0, Math.ceil(remainMs / 1000));
+      node.textContent = remainS > 0
+        ? `Closing in ${remainS} second${remainS === 1 ? '' : 's'}`
+        : 'Closing now';
+    });
+  }
+  setInterval(_tickTemporaryLossCountdowns, 1000);
 
   // ══════════════════════════════════════════
   // TOP BAR VIEW SWITCHER (Live Ops / History / Fleet)

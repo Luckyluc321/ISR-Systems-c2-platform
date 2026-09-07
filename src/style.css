@@ -3089,9 +3089,30 @@ body.replay-dragging * {
 
 /* Signal Lost stripe (dp-oor) deleted 2026-09-07. No "signal lost
    but still active" state exists in the real product — coverage loss
-   triggers the multi-site auto-close in onDroneTick within 12 s and
-   the event closes. The Post-Incident Report generated at close is
-   the Detection Summary. */
+   triggers the multi-site auto-close in onDroneTick within a
+   physics-derived grace period and the event closes. The Post-Incident
+   Report generated at close is the Detection Summary. */
+
+/* Temporary detection loss section. Fires when the track drops signal
+   while its last confirmed position is inside a site's perimeter
+   (possible occlusion, altitude ceiling, RF silence). Countdown to
+   closure runs at 15-60 seconds based on last speed. Matches the
+   .dp-section visual language — muted grey border-left, no alarm
+   colors. */
+.dp-temp-loss {
+  background: rgba(255, 255, 255, 0.02);
+  border-left: 2px solid var(--text-dim);
+}
+.dp-temp-loss-body {
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.55;
+}
+.dp-temp-loss-body [data-temp-loss-countdown] {
+  font-family: var(--font-mono);
+  color: var(--text);
+  font-weight: 600;
+}
 
 /* Pre-ingress state — event tracked internally but no sensor confirmed yet.
    Kept as a slightly-different chip since it's a distinct product state
