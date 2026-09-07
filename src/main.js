@@ -2644,69 +2644,76 @@ async function main() {
     return quadcopterIcon(hex); // default = quadcopter
   }
 
-  // Shahed-136 / Geran-2 planform. Sharp nose at top of canvas (=
-  // direction of travel), thin fuselage running the full length, wide
-  // delta wing planform swept back to trailing edge, twin canted
-  // V-tail fins at the rear. Convention matches fixedWingIcon so it
-  // rotates the right way when billboard.rotation applies bearing.
+  // Shahed-136 / Geran-2 planform. Same nose-at-canvas-top convention
+  // as fixedWingIcon and jetIcon so it rotates the right way when
+  // billboard.rotation applies bearing (verified consistent with
+  // rotation formula target = -atan2(dLon, dLat) at the tick loop).
+  //
+  // Shape modelled on jetIcon (which is known to read as directional
+  // at map zoom) rather than a bare delta triangle: fuselage tapers
+  // back-to-narrow, wing sweeps back FROM the nose to visible
+  // wingtips at the trailing edge, twin V-tails jut out at the very
+  // back, small pusher-prop disc anchors the tail.
   function loiteringMunitionIcon(hex) {
     const c = document.createElement('canvas');
     c.width = 56; c.height = 56;
     const ctx = c.getContext('2d');
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
-    // 1) Delta wing (clean 3-point triangle, no self intersection).
-    //    Apex at nose, base spans the trailing edge across the back.
+    // Fuselage — pointed nose at the top (forward), rounded tail
+    // at the bottom (aft). Narrower than jetIcon to leave room for
+    // the delta wing sweep to read.
     ctx.fillStyle = hex;
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(28, 4);       // nose apex (forward)
-    ctx.lineTo(50, 42);      // right wingtip trailing edge
-    ctx.lineTo(6,  42);      // left  wingtip trailing edge
+    ctx.moveTo(28, 5);       // sharp nose
+    ctx.lineTo(31, 14);
+    ctx.lineTo(31, 44);
+    ctx.lineTo(29, 50);
+    ctx.lineTo(27, 50);
+    ctx.lineTo(25, 44);
+    ctx.lineTo(25, 14);
     ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-    // 2) Fuselage stripe — thin white line running nose to tail so
-    //    the eye reads the direction of travel even at small zoom.
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 2.2;
+    ctx.fill(); ctx.stroke();
+    // Delta wing — swept back from the FRONT of the fuselage so the
+    // arrowhead direction reads unambiguously as "flying nose-first".
+    // Wingtips are pulled to the trailing edge, matching Shahed-136
+    // silhouette in top-down photography.
     ctx.beginPath();
-    ctx.moveTo(28, 5);
-    ctx.lineTo(28, 46);
-    ctx.stroke();
-    // 3) Nose triangle in a lighter tint so the front reads as
-    //    "pointed", not just an equilateral triangle.
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.moveTo(28, 4);
-    ctx.lineTo(33, 16);
-    ctx.lineTo(23, 16);
+    ctx.moveTo(28, 12);      // wing root at nose
+    ctx.lineTo(52, 40);      // right wingtip at back
+    ctx.lineTo(48, 44);      // right trailing edge
+    ctx.lineTo(28, 34);      // rejoin fuselage mid
+    ctx.lineTo(8,  44);      // left trailing edge
+    ctx.lineTo(4,  40);      // left wingtip at back
     ctx.closePath();
-    ctx.fill();
-    // 4) Twin canted V-tail fins at the rear (two small triangles).
-    ctx.fillStyle = hex;
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.2;
+    ctx.fill(); ctx.stroke();
+    // Twin canted V-tail fins at the very back, angled outward. Read
+    // as "this is the tail" so the pointed end at top is obviously
+    // the nose.
     ctx.beginPath();
-    ctx.moveTo(28, 42);
-    ctx.lineTo(21, 51);
-    ctx.lineTo(26, 48);
+    ctx.moveTo(28, 46);
+    ctx.lineTo(20, 53);
+    ctx.lineTo(22, 54);
+    ctx.lineTo(27, 48);
     ctx.closePath();
     ctx.fill(); ctx.stroke();
     ctx.beginPath();
-    ctx.moveTo(28, 42);
-    ctx.lineTo(35, 51);
-    ctx.lineTo(30, 48);
+    ctx.moveTo(28, 46);
+    ctx.lineTo(36, 53);
+    ctx.lineTo(34, 54);
+    ctx.lineTo(29, 48);
     ctx.closePath();
     ctx.fill(); ctx.stroke();
-    // 5) Rear-mounted pusher propeller disc.
+    // Rear-mounted pusher propeller disc (small white circle) —
+    // classic Shahed-136 fingerprint.
     ctx.beginPath();
-    ctx.arc(28, 50, 2.6, 0, Math.PI * 2);
+    ctx.arc(28, 52, 2.8, 0, Math.PI * 2);
     ctx.fillStyle = '#fff';
     ctx.fill();
     ctx.strokeStyle = hex;
-    ctx.lineWidth = 1.2;
+    ctx.lineWidth = 1;
     ctx.stroke();
     return c;
   }
@@ -4316,6 +4323,7 @@ async function main() {
         const remaining = _allDownableHostiles(d.eventId);
         if (remaining.length > 0) {
           d._firedAtLeastOnce = false;
+          d._roundsFired = 0;
           _resolveEngagement(d);
           return;
         }
@@ -4718,102 +4726,130 @@ async function main() {
                 lon: killLon,
                 at: new Date().toISOString(),
               };
-              // Kill visuals: staggered fire + smoke sequence simulating
-              // the drone catching fire, tumbling, hitting ground, then
-              // a persistent DOWNED marker + smoke plume. Small realistic
-              // scale (not a big explosion — a small-arms takedown of a
-              // 50 kg warhead-carrying loitering munition would ignite
-              // fuel and produce fire + smoke, not a movie fireball).
-              try {
-                const stTargetForFall = droneState.get(d.eventId);
-                const startAlt = stTargetForFall?.billboard?.position
-                  ? (() => {
-                      try {
-                        const cart = stTargetForFall.billboard.position.getValue?.(Cesium.JulianDate.now());
-                        if (cart) return Cesium.Cartographic.fromCartesian(cart).height;
-                      } catch (_) { /* fall through */ }
-                      return killLive?.alt || 500;
-                    })()
-                  : (killLive?.alt || 500);
-                // Bright hit flash at kill altitude — the moment of impact.
-                // Sizes are pixel-space so they read at any map zoom.
-                _spawnFlashEntity(killLon, killLat, 380, '#ffe680', 24, 52, startAlt);
-                _spawnFlashEntity(killLon, killLat, 500, '#ff8f2a', 36, 68, startAlt);
-                // Descending fire pulses over 1.2 s — drone tumbles down.
-                const fallStages = [
-                  { delayMs: 180, altFrac: 0.78, color: '#ff8a3d', size: [30, 46] },
-                  { delayMs: 420, altFrac: 0.52, color: '#ff5a3d', size: [26, 42] },
-                  { delayMs: 720, altFrac: 0.26, color: '#c04525', size: [24, 38] },
-                  // Trailing smoke wisps behind the fire pulses.
-                  { delayMs: 260, altFrac: 0.90, color: 'rgba(90,80,72,0.85)', size: [22, 44] },
-                  { delayMs: 520, altFrac: 0.68, color: 'rgba(72,64,58,0.80)', size: [24, 46] },
-                  { delayMs: 820, altFrac: 0.40, color: 'rgba(58,50,44,0.78)', size: [26, 48] },
-                ];
-                fallStages.forEach(s => {
-                  setTimeout(() => {
-                    const alt = startAlt * s.altFrac;
-                    _spawnFlashEntity(killLon, killLat, 900, s.color, s.size[0], s.size[1], alt);
-                  }, s.delayMs);
-                });
-                // Ground impact — bright fireball + persistent smoke plume
-                // rising from the wreckage. Plume lingers ~6 s so the
-                // operator can see where the drone came down even after
-                // panning away and back.
-                setTimeout(() => {
-                  _spawnFlashEntity(killLon, killLat, 700, '#ffb040', 40, 90, 4);
-                  _spawnFlashEntity(killLon, killLat, 900, '#ff5a1a', 36, 78, 6);
-                  _spawnFlashEntity(killLon, killLat, 6000, 'rgba(60,52,48,0.75)', 44, 90, 8);
-                  _spawnFlashEntity(killLon, killLat, 5200, 'rgba(90,82,76,0.55)', 30, 70, 22);
-                  _spawnFlashEntity(killLon, killLat, 4600, 'rgba(120,110,102,0.35)', 20, 55, 42);
-                }, 1200);
-                const killEnt = viewer.entities.add({
-                  position: Cesium.Cartesian3.fromDegrees(killLon, killLat, 0),
-                  properties: { markerEventId: targetEv.id, markerKind: 'kill' },
-                  point: {
-                    pixelSize: 6,
-                    color: Cesium.Color.fromCssColorString('#8b0e0e'),
-                    outlineColor: Cesium.Color.fromCssColorString('#ff5a5a'),
-                    outlineWidth: 1,
-                    heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-                    disableDepthTestDistance: Number.POSITIVE_INFINITY,
-                  },
-                  label: {
-                    text: '× DOWNED',
-                    font: '9px system-ui',
-                    fillColor: Cesium.Color.fromCssColorString('#ff8a8a'),
-                    outlineColor: Cesium.Color.BLACK,
-                    outlineWidth: 2,
-                    style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                    pixelOffset: new Cesium.Cartesian2(0, -14),
-                    showBackground: true,
-                    backgroundColor: Cesium.Color.fromCssColorString('rgba(8, 11, 16, 0.85)'),
-                    backgroundPadding: new Cesium.Cartesian2(5, 2),
-                    heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-                    disableDepthTestDistance: Number.POSITIVE_INFINITY,
-                  },
-                });
-                // Route the kill marker into per-event visibility so
-                // it participates in selection-driven show/hide.
-                const arr = _perEventMarkers.get(targetEv.id) || [];
-                arr.push(killEnt);
-                _perEventMarkers.set(targetEv.id, arr);
-              } catch (err) { console.warn('[kill visuals] failed:', err.message); }
+              // Route the kill through the neutralisation policy so
+              // heavy damage explodes in air and light damage falls
+              // ballistically to the ground. Both paths converge on
+              // wreckage push + cordon + patrol rebalance so patrol
+              // cars route to the impact site.
               const stTarget = droneState.get(d.eventId);
-              if (stTarget) {
-                stTarget.closedAt = performance.now();
-                // Keep the drone billboard visible for 1.2 s so the
-                // staged fire + smoke fall sequence reads as the drone
-                // itself burning down, not as random flashes on an
-                // already-vanished target. Hide at ground impact.
-                setTimeout(() => {
-                  if (stTarget.billboard) stTarget.billboard.show = false;
-                  if (stTarget.trail) stTarget.trail.show = false;
-                  if (stTarget.shadow) stTarget.shadow.show = false;
-                }, 1200);
-              }
+              const startAlt = stTarget?.billboard?.position
+                ? (() => {
+                    try {
+                      const cart = stTarget.billboard.position.getValue?.(Cesium.JulianDate.now());
+                      if (cart) return Cesium.Cartographic.fromCartesian(cart).height;
+                    } catch (_) { /* fall through */ }
+                    return killLive?.alt || 400;
+                  })()
+                : (killLive?.alt || 400);
+              const mode = _resolveNeutralisationMode(d);
+              const lastPos = targetEv.lastPosition || {};
+              const targetSpeedMs = lastPos.speed || targetEv?.subject?.kinematics?.speed_ms || 30;
+              const targetHeadingDeg = (typeof lastPos.heading === 'number') ? lastPos.heading : 0;
+              const targetHeadingRad = (targetHeadingDeg * Math.PI) / 180;
+
+              let wreckLat = killLat;
+              let wreckLon = killLon;
+              let wreckDelayMs = 200;
+
+              try {
+                if (mode === 'explosion') {
+                  _playExplosionSequence(killLon, killLat, startAlt);
+                  wreckDelayMs = 900;
+                  // Explosion — hide drone billboard promptly since the
+                  // airframe is gone (fireball is what the eye tracks).
+                  if (stTarget) {
+                    stTarget.closedAt = performance.now();
+                    setTimeout(() => {
+                      if (stTarget.billboard) stTarget.billboard.show = false;
+                      if (stTarget.trail) stTarget.trail.show = false;
+                      if (stTarget.shadow) stTarget.shadow.show = false;
+                    }, 300);
+                  }
+                } else {
+                  // physics-fall: hijack billboard to descend, land
+                  // downrange. Wreckage sits at the ballistic impact
+                  // point, NOT at the kill point.
+                  const impact = _playPhysicsFallSequence(stTarget, killLat, killLon, startAlt, targetSpeedMs, targetHeadingRad);
+                  if (impact) {
+                    wreckLat = impact.impactLat;
+                    wreckLon = impact.impactLon;
+                    wreckDelayMs = impact.fallMs + 200;
+                  }
+                  if (stTarget) stTarget.closedAt = performance.now();
+                }
+              } catch (err) { console.warn('[kill visuals] failed:', err.message); }
+
+              // Wreckage entry + cordon + patrol rebalance. Deferred to
+              // impact time for physics-fall so the DOWNED marker lands
+              // where the drone actually hits ground (not where it was
+              // hit in mid-air). Same code path swarm scenario uses.
+              setTimeout(() => {
+                if (!Array.isArray(targetEv.wreckages)) targetEv.wreckages = [];
+                const wreckId = `wr-${targetEv.id}-${targetEv.wreckages.length + 1}`;
+                const wreck = {
+                  id: wreckId,
+                  lat: wreckLat,
+                  lon: wreckLon,
+                  at: new Date().toISOString(),
+                  downedBy: d.id,
+                  mode,
+                };
+                targetEv.wreckages.push(wreck);
+                targetEv.wreckageLocation = { lat: wreckLat, lon: wreckLon, at: wreck.at };
+                targetEv.lastSpottedLocation = { lat: wreckLat, lon: wreckLon, at: wreck.at };
+                // DOWNED marker at the wreckage location — labelled by
+                // mode so the operator can tell "exploded in air" from
+                // "fell to ground" from the map alone.
+                try {
+                  const label = mode === 'explosion' ? '× DESTROYED' : '× DOWNED';
+                  const killEnt = viewer.entities.add({
+                    position: Cesium.Cartesian3.fromDegrees(wreckLon, wreckLat, 0),
+                    properties: { markerEventId: targetEv.id, markerKind: 'kill' },
+                    point: {
+                      pixelSize: 6,
+                      color: Cesium.Color.fromCssColorString('#8b0e0e'),
+                      outlineColor: Cesium.Color.fromCssColorString('#ff5a5a'),
+                      outlineWidth: 1,
+                      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+                      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                    },
+                    label: {
+                      text: label,
+                      font: '9px system-ui',
+                      fillColor: Cesium.Color.fromCssColorString('#ff8a8a'),
+                      outlineColor: Cesium.Color.BLACK,
+                      outlineWidth: 2,
+                      style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                      pixelOffset: new Cesium.Cartesian2(0, -14),
+                      showBackground: true,
+                      backgroundColor: Cesium.Color.fromCssColorString('rgba(8, 11, 16, 0.85)'),
+                      backgroundPadding: new Cesium.Cartesian2(5, 2),
+                      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+                      disableDepthTestDistance: Number.POSITIVE_INFINITY,
+                    },
+                  });
+                  const arr = _perEventMarkers.get(targetEv.id) || [];
+                  arr.push(killEnt);
+                  _perEventMarkers.set(targetEv.id, arr);
+                } catch (err) { console.warn('[downed marker] failed:', err.message); }
+                // Build cordon polygon + reroute already-dispatched
+                // patrol cars to the wreckage. Same buildCordon +
+                // _rebalancePatrolsToWreckages sequence the swarm
+                // scenario uses. Generalises the pattern to every
+                // single-target kill: any dispatched police unit
+                // auto-reroutes to establish perimeter.
+                buildCordon(wreck).then(cordon => {
+                  _renderWreckagePerimeter(wreck, cordon);
+                  _rebalancePatrolsToWreckages(targetEv);
+                }).catch(err => console.warn('[cordon build] failed:', err.message));
+              }, wreckDelayMs);
+
               markTrackClosed(d.eventId);
               closeEvent(d.eventId, targetEv.exit || null);
-              toast(`${d.assetName} kill confirmed on ${targetEv.droneType || 'target'}. Track neutralised at ${killLat.toFixed(4)} ${killLon.toFixed(4)}.`, 'ok');
+              const outcomeMsg = mode === 'explosion'
+                ? `${d.assetName} destroyed ${targetEv.droneType || 'target'} in air. Warhead cook-off at ${killLat.toFixed(4)} ${killLon.toFixed(4)}.`
+                : `${d.assetName} disabled ${targetEv.droneType || 'target'}. Ballistic descent under way.`;
+              toast(outcomeMsg, 'ok');
             }
             d.state = 'complete';
             _resolveEngagement(d);
@@ -5013,6 +5049,12 @@ async function main() {
     d._firedAtLeastOnce = true;   // gates the kill decision below
     const roundCount = 4;
     const roundGap = 70;
+    // Accumulated round count drives the neutralisation policy: many
+    // rounds → explosion (warhead cook-off), few rounds → physics-fall
+    // (control disabled, airframe intact). Reset only when the
+    // interceptor re-targets, so the counter reflects damage-on-this-
+    // target only.
+    d._roundsFired = (d._roundsFired || 0) + roundCount;
     for (let r = 0; r < roundCount; r++) {
       setTimeout(() => _fireSingleTracerRound(d, target), r * roundGap);
     }
@@ -5186,6 +5228,161 @@ async function main() {
     setTimeout(() => { if (flashEntity) viewer.entities.remove(flashEntity); }, durMs + 30);
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // Neutralisation visualisation policy
+  // ───────────────────────────────────────────────────────────────────
+  // When a hostile drone is neutralised, we need to visualise HOW it
+  // was neutralised. Two modes:
+  //
+  //   'explosion'    Warhead cook-off or catastrophic airframe kill.
+  //                  Bright fireball ~1.5 s at kill altitude, then an
+  //                  expanding smoke plume that lingers ~10 s while
+  //                  drifting/expanding. Wreckage sits at kill lat/lon.
+  //
+  //   'physics-fall' Control disabled or engine killed, airframe still
+  //                  intact. Billboard descends ballistically from kill
+  //                  altitude using target velocity + gravity. On ground
+  //                  impact, small dust puff + wreckage at IMPACT coord
+  //                  (downrange of kill point).
+  //
+  // Mode selection:
+  //   - Missile intercept                       → explosion (always)
+  //   - Kinetic gun fire, roundsFired ≥ 12      → explosion (heavy damage)
+  //   - Kinetic gun fire, roundsFired < 12      → physics-fall (light hit)
+  //   - RF jamming / signal loss                → physics-fall (default)
+  //
+  // Scalable production: policy table + damage counter mean new killer
+  // types plug in via one map entry. Real-world (non-simulation) kills
+  // supply the mode explicitly via the adapter and skip the policy.
+  // ═══════════════════════════════════════════════════════════════════
+
+  // Thresholds are TARGET-realistic: gun-based intercepts rarely
+  // detonate a warhead. Most hits punch holes in wings or kill the
+  // engine — the airframe falls intact. Only sustained heavy fire
+  // that walks rounds into the warhead compartment cooks it off.
+  // Set above the typical single-interceptor round count so a
+  // solo gun kill uses physics-fall; multi-interceptor sustained
+  // fire crosses the threshold and detonates.
+  const _NEUTRALISATION_POLICY = {
+    'sam-battery':          { mode: 'explosion' },
+    'friendly-missile':     { mode: 'explosion' },
+    'counter-missile':      { mode: 'explosion' },
+    'helicopter-intercept': { mode: 'dynamic', explosionRoundsThreshold: 45 },
+    'counter-drone-swarm':  { mode: 'dynamic', explosionRoundsThreshold: 20 },
+    'police-c-uas':         { mode: 'dynamic', explosionRoundsThreshold: 40 },
+    'army-c-uas':           { mode: 'dynamic', explosionRoundsThreshold: 32 },
+    'jamming-truck':        { mode: 'physics-fall' },
+    'signal-loss':          { mode: 'physics-fall' },
+  };
+  function _resolveNeutralisationMode(dispatch) {
+    const spec = _NEUTRALISATION_POLICY[dispatch?.kind] || { mode: 'physics-fall' };
+    if (spec.mode !== 'dynamic') return spec.mode;
+    const rounds = dispatch._roundsFired || 0;
+    return rounds >= (spec.explosionRoundsThreshold || 10) ? 'explosion' : 'physics-fall';
+  }
+
+  // Explosion sequence — warhead cook-off in mid-air. Bright fireball
+  // for ~1.5 s at kill altitude, radiating debris pieces, then an
+  // expanding smoke plume that grows and fades over ~10 s. Wreckage
+  // sits at (lon, lat) on the ground.
+  function _playExplosionSequence(lon, lat, alt) {
+    // Fireball — layered pulses that peak then decay over 1.5 s
+    _spawnFlashEntity(lon, lat, 400, '#ffe680', 32, 78,  alt);
+    _spawnFlashEntity(lon, lat, 700, '#ff8f2a', 48, 100, alt);
+    _spawnFlashEntity(lon, lat, 1100, '#ff5a1a', 60, 118, alt);
+    _spawnFlashEntity(lon, lat, 1500, '#c04525', 44, 92,  alt);
+    // Radiating debris pieces — small orange sparks flung outward
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2;
+      const drift = 45 + (i % 3) * 25;
+      const dLat = lat + (drift / 111320) * Math.cos(angle);
+      const dLon = lon + (drift / (111320 * Math.cos(lat * Math.PI / 180))) * Math.sin(angle);
+      setTimeout(() => {
+        _spawnFlashEntity(dLon, dLat, 1000, '#ff8a3d', 8, 3, alt * 0.75);
+      }, 60 + i * 25);
+    }
+    // Expanding smoke plume — starts dense at explosion centre, expands
+    // and drifts upward, fades over 10 s. Three stacked billboards at
+    // rising altitudes give it depth.
+    setTimeout(() => {
+      _spawnFlashEntity(lon, lat, 10000, 'rgba(50,44,40,0.85)', 32, 130, alt);
+      _spawnFlashEntity(lon, lat, 9500,  'rgba(80,72,66,0.65)', 42, 140, alt + 25);
+      _spawnFlashEntity(lon, lat, 9000,  'rgba(120,110,100,0.45)', 32, 130, alt + 60);
+      _spawnFlashEntity(lon, lat, 8500,  'rgba(160,150,138,0.28)', 22, 110, alt + 110);
+    }, 400);
+  }
+
+  // Physics-fall sequence — target's control/engine killed but the
+  // airframe is intact. Hijacks the drone's billboard position with a
+  // CallbackProperty that animates a ballistic descent using target's
+  // velocity at kill + gravity (9.81 m/s²). Returns the projected
+  // ground-impact coordinate so the caller can drop the wreckage +
+  // cordon THERE, not at the kill point.
+  //
+  // Also draws a thin dashed trail behind the falling drone so the
+  // ballistic trajectory reads visually — Lucas asked for a "cool"
+  // fall animation.
+  function _playPhysicsFallSequence(state, killLat, killLon, killAlt, velocityMs, headingRad) {
+    const G = 9.81;
+    // Ballistic drop time from starting altitude (assumes v_y0 = 0 at
+    // kill — control lost from level flight). Real IRL descent would
+    // include drag but that's second-order for a 30-45 s fall from
+    // 400 m and would make the animation feel sluggish.
+    const fallSec = Math.max(2, Math.sqrt(2 * killAlt / G));
+    // Horizontal drift — velocity kept from cruise. Drag ignored (same
+    // reason). Shahed at 50 m/s with 400 m fall → ~450 m drift.
+    const driftM = Math.max(0, velocityMs) * fallSec;
+    const impactLat = killLat + (driftM / 111320) * Math.cos(headingRad);
+    const impactLon = killLon + (driftM / (111320 * Math.cos(killLat * Math.PI / 180))) * Math.sin(headingRad);
+
+    const startTs = Date.now();
+    const fallMs = fallSec * 1000;
+
+    // Dashed white trail behind the fall — updated via CallbackProperty.
+    const trailPositions = [Cesium.Cartesian3.fromDegrees(killLon, killLat, killAlt)];
+    let lastSampleT = 0;
+    const trailEntity = viewer.entities.add({
+      polyline: {
+        positions: new Cesium.CallbackProperty(() => trailPositions.slice(), false),
+        width: 1.6,
+        material: new Cesium.PolylineDashMaterialProperty({
+          color: Cesium.Color.fromCssColorString('#ffb040').withAlpha(0.75),
+          dashLength: 8,
+        }),
+      },
+    });
+
+    if (state?.billboard) {
+      state.billboard.position = new Cesium.CallbackProperty(() => {
+        const t = Math.min(1, (Date.now() - startTs) / fallMs);
+        const curLat = killLat + (impactLat - killLat) * t;
+        const curLon = killLon + (impactLon - killLon) * t;
+        const elapsedSec = t * fallSec;
+        const curAlt = Math.max(0, killAlt - 0.5 * G * elapsedSec * elapsedSec);
+        const cart = Cesium.Cartesian3.fromDegrees(curLon, curLat, curAlt);
+        // Sample trail every ~3% of fall (~30 dashes total)
+        if (t - lastSampleT > 0.03) {
+          trailPositions.push(cart);
+          lastSampleT = t;
+        }
+        return cart;
+      }, false);
+    }
+
+    // On ground impact: dust puff + hide the falling drone.
+    setTimeout(() => {
+      _spawnFlashEntity(impactLon, impactLat, 900,  'rgba(190,170,140,0.80)', 22, 60, 4);
+      _spawnFlashEntity(impactLon, impactLat, 1800, 'rgba(160,145,120,0.55)', 28, 78, 10);
+      _spawnFlashEntity(impactLon, impactLat, 4500, 'rgba(130,115,100,0.32)', 20, 65, 24);
+      if (state?.billboard) state.billboard.show = false;
+      if (state?.trail) state.trail.show = false;
+      if (state?.shadow) state.shadow.show = false;
+      setTimeout(() => { if (trailEntity) viewer.entities.remove(trailEntity); }, 4500);
+    }, fallMs + 100);
+
+    return { impactLat, impactLon, fallMs };
+  }
+
   function _resolveEngagement(d) {
     const event = getEvent(d.eventId);
 
@@ -5301,7 +5498,8 @@ async function main() {
         d.engageStartTs = null;
         d._engageLastFrameTs = null;
         d._nextTracerTs = null;
-        d._firedAtLeastOnce = false;   // reset kill-gate for new target
+        d._firedAtLeastOnce = false;
+        d._roundsFired = 0;   // reset kill-gate for new target
         d.lastFrameTs = Date.now();
         const newCart = nearest.billboard?.position?.getValue?.(Cesium.JulianDate.now());
         if (newCart) {
