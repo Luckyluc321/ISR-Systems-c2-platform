@@ -2644,76 +2644,73 @@ async function main() {
     return quadcopterIcon(hex); // default = quadcopter
   }
 
-  // Shahed-136 / Geran-2 planform. Same nose-at-canvas-top convention
-  // as fixedWingIcon and jetIcon so it rotates the right way when
-  // billboard.rotation applies bearing (verified consistent with
-  // rotation formula target = -atan2(dLon, dLat) at the tick loop).
+  // Shahed-136 / Geran-2 top-down silhouette from reference photo.
+  // Pure delta wing airframe (no separate fuselage tube — the fuselage
+  // is integrated INTO the wing surface). Nose at canvas top =
+  // direction of travel, matching fixedWingIcon/jetIcon rotation
+  // convention (target = -atan2(dLon, dLat) at tick loop).
   //
-  // Shape modelled on jetIcon (which is known to read as directional
-  // at map zoom) rather than a bare delta triangle: fuselage tapers
-  // back-to-narrow, wing sweeps back FROM the nose to visible
-  // wingtips at the trailing edge, twin V-tails jut out at the very
-  // back, small pusher-prop disc anchors the tail.
+  // Silhouette elements from the reference:
+  //   - Pure isoceles delta wing (nose apex to wingtip trailing edge)
+  //   - Central fuselage stripe visible on the wing surface
+  //   - Twin vertical tail fins sticking straight up from the trailing
+  //     edge (short thick rectangles just inboard of wingtips)
+  //   - Small wingtip fins (fences) at the outer trailing edge corners
+  //   - Rear-centre pusher propeller disc
   function loiteringMunitionIcon(hex) {
     const c = document.createElement('canvas');
     c.width = 56; c.height = 56;
     const ctx = c.getContext('2d');
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
-    // Fuselage — pointed nose at the top (forward), rounded tail
-    // at the bottom (aft). Narrower than jetIcon to leave room for
-    // the delta wing sweep to read.
+    // Pure delta wing planform — single 3-point triangle.
     ctx.fillStyle = hex;
-    ctx.strokeStyle = '#fff';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.moveTo(28, 4);       // nose apex (forward)
+    ctx.lineTo(52, 46);      // right wingtip trailing edge
+    ctx.lineTo(4,  46);      // left  wingtip trailing edge
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // Fuselage stripe integrated into wing — thin brighter band
+    // running full length of the wing centreline. Makes the front
+    // vs back read unmistakably at map zoom.
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.lineWidth = 2.4;
+    ctx.beginPath();
+    ctx.moveTo(28, 6);
+    ctx.lineTo(28, 46);
+    ctx.stroke();
+    // Twin vertical tail fins — short rectangles sticking up from the
+    // trailing edge just inboard of the wingtips. In top-down these
+    // read as small dark rectangles behind the wing.
+    ctx.fillStyle = 'rgba(20,24,28,0.85)';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.rect(20, 43, 3, 6);
+    ctx.fill(); ctx.stroke();
+    ctx.beginPath();
+    ctx.rect(33, 43, 3, 6);
+    ctx.fill(); ctx.stroke();
+    // Small wingtip fins (fences) — tiny perpendicular ticks at the
+    // outer trailing edge corners.
+    ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(28, 5);       // sharp nose
-    ctx.lineTo(31, 14);
-    ctx.lineTo(31, 44);
-    ctx.lineTo(29, 50);
-    ctx.lineTo(27, 50);
-    ctx.lineTo(25, 44);
-    ctx.lineTo(25, 14);
-    ctx.closePath();
-    ctx.fill(); ctx.stroke();
-    // Delta wing — swept back from the FRONT of the fuselage so the
-    // arrowhead direction reads unambiguously as "flying nose-first".
-    // Wingtips are pulled to the trailing edge, matching Shahed-136
-    // silhouette in top-down photography.
+    ctx.moveTo(52, 46); ctx.lineTo(52, 42);
+    ctx.moveTo(4,  46); ctx.lineTo(4,  42);
+    ctx.stroke();
+    // Rear-centre pusher propeller disc — classic Shahed-136
+    // fingerprint at the tail.
     ctx.beginPath();
-    ctx.moveTo(28, 12);      // wing root at nose
-    ctx.lineTo(52, 40);      // right wingtip at back
-    ctx.lineTo(48, 44);      // right trailing edge
-    ctx.lineTo(28, 34);      // rejoin fuselage mid
-    ctx.lineTo(8,  44);      // left trailing edge
-    ctx.lineTo(4,  40);      // left wingtip at back
-    ctx.closePath();
-    ctx.fill(); ctx.stroke();
-    // Twin canted V-tail fins at the very back, angled outward. Read
-    // as "this is the tail" so the pointed end at top is obviously
-    // the nose.
-    ctx.beginPath();
-    ctx.moveTo(28, 46);
-    ctx.lineTo(20, 53);
-    ctx.lineTo(22, 54);
-    ctx.lineTo(27, 48);
-    ctx.closePath();
-    ctx.fill(); ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(28, 46);
-    ctx.lineTo(36, 53);
-    ctx.lineTo(34, 54);
-    ctx.lineTo(29, 48);
-    ctx.closePath();
-    ctx.fill(); ctx.stroke();
-    // Rear-mounted pusher propeller disc (small white circle) —
-    // classic Shahed-136 fingerprint.
-    ctx.beginPath();
-    ctx.arc(28, 52, 2.8, 0, Math.PI * 2);
-    ctx.fillStyle = '#fff';
+    ctx.arc(28, 50, 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
     ctx.fill();
     ctx.strokeStyle = hex;
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1.2;
     ctx.stroke();
     return c;
   }
@@ -4045,12 +4042,18 @@ async function main() {
   }
 
   function _createRadiationEntity(d) {
-    // Green jamming ellipse at the counter-response position.
+    // Subtle cyan jamming footprint at the counter-response position.
+    // No bouncing lightning bolts, no comedy pulsing — a single
+    // outlined ring with a slow-breathing fill (2.4 s cycle) so the
+    // operator sees "here is the jamming envelope" without the map
+    // getting hijacked by a busy animation. Cyan reads as electronic-
+    // warfare / signals-domain across defence UI conventions.
+    //
     // Radius is STATIC (constant number, no callback) — Cesium has a
     // strict semiMajor >= semiMinor invariant, and any tiny drift
     // between two independent CallbackProperty reads killed the whole
     // viewer with "semiMajorAxis must be greater than or equal to the
-    // semiMinorAxis". Only the FILL alpha pulses now, via one shared
+    // semiMinorAxis". Only the FILL alpha breathes, via one shared
     // per-frame closure. Radius cannot drift because it never changes.
     const RAD_RADIUS_M = 800;
     d.radiationEntity = viewer.entities.add({
@@ -4061,15 +4064,15 @@ async function main() {
         semiMajorAxis: RAD_RADIUS_M,
         semiMinorAxis: RAD_RADIUS_M,
         material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
-          const t = ((Date.now() - d.engageStartTs) / 1500) % 1;
-          return Cesium.Color.fromCssColorString('#4dff9c').withAlpha(0.22 * (1 - t));
+          const phase = (Math.sin(((Date.now() - (d.engageStartTs || Date.now())) / 2400) * Math.PI * 2) + 1) / 2;
+          return Cesium.Color.fromCssColorString('#4dd2ff').withAlpha(0.06 + 0.08 * phase);
         }, false)),
         outline: true,
         outlineColor: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
-          const t = ((Date.now() - d.engageStartTs) / 1500) % 1;
-          return Cesium.Color.fromCssColorString('#4dff9c').withAlpha(0.55 * (1 - t));
+          const phase = (Math.sin(((Date.now() - (d.engageStartTs || Date.now())) / 2400) * Math.PI * 2) + 1) / 2;
+          return Cesium.Color.fromCssColorString('#4dd2ff').withAlpha(0.30 + 0.20 * phase);
         }, false)),
-        outlineWidth: 2,
+        outlineWidth: 1.4,
         height: 0,
       },
     });
@@ -4560,7 +4563,6 @@ async function main() {
           d.engageStartTs = now;
           if (d.profile.radiationCone) {
             _createRadiationEntity(d);
-            _createJammingPip(d);
             _initiateJamFall(d);
           }
           if (getActiveRole().kind === 'receiver') renderReceiverView();
@@ -4593,7 +4595,6 @@ async function main() {
           }
           if (d.profile.radiationCone) {
             _createRadiationEntity(d);
-            _createJammingPip(d);
             _initiateJamFall(d);
           }
           if (d.profile.firesTracer) _fireMachineGunBurst(d);
@@ -4846,6 +4847,11 @@ async function main() {
 
               markTrackClosed(d.eventId);
               closeEvent(d.eventId, targetEv.exit || null);
+              // Clear any lingering jamming visuals on other counter-
+              // dispatches for this event. If a jammer had already
+              // engaged, its radiation ellipse should drop the instant
+              // the target is down instead of pulsing over empty air.
+              try { _clearJammingVisualsForEvent(d.eventId); } catch (_) {}
               const outcomeMsg = mode === 'explosion'
                 ? `${d.assetName} destroyed ${targetEv.droneType || 'target'} in air. Warhead cook-off at ${killLat.toFixed(4)} ${killLon.toFixed(4)}.`
                 : `${d.assetName} disabled ${targetEv.droneType || 'target'}. Ballistic descent under way.`;
@@ -5281,6 +5287,26 @@ async function main() {
     return rounds >= (spec.explosionRoundsThreshold || 10) ? 'explosion' : 'physics-fall';
   }
 
+  // Clear jamming visuals for every counter-dispatch tied to an event.
+  // Called on any neutralisation so the jamming ellipses don't linger
+  // over a target that is already down. Generic — works for ground
+  // jammers, airborne interceptors with radiation cones, anything
+  // that owns a radiationEntity.
+  function _clearJammingVisualsForEvent(eventId) {
+    if (!_counterDispatches) return;
+    for (const [, cd] of _counterDispatches) {
+      if (cd.eventId !== eventId) continue;
+      if (cd.radiationEntity) {
+        try { viewer.entities.remove(cd.radiationEntity); } catch (_) {}
+        cd.radiationEntity = null;
+      }
+      if (cd.jammingPipEntity) {
+        try { viewer.entities.remove(cd.jammingPipEntity); } catch (_) {}
+        cd.jammingPipEntity = null;
+      }
+    }
+  }
+
   // Explosion sequence — warhead cook-off in mid-air. Bright fireball
   // for ~1.5 s at kill altitude, radiating debris pieces, then an
   // expanding smoke plume that grows and fades over ~10 s. Wreckage
@@ -5369,7 +5395,10 @@ async function main() {
       }, false);
     }
 
-    // On ground impact: dust puff + hide the falling drone.
+    // On ground impact: dust puff + hide the falling drone. If the
+    // operator is in POV of this drone at impact, kick the TV-static
+    // signal-loss overlay so they experience the loss-of-signal beat
+    // before being pushed back to overhead view.
     setTimeout(() => {
       _spawnFlashEntity(impactLon, impactLat, 900,  'rgba(190,170,140,0.80)', 22, 60, 4);
       _spawnFlashEntity(impactLon, impactLat, 1800, 'rgba(160,145,120,0.55)', 28, 78, 10);
@@ -5378,9 +5407,26 @@ async function main() {
       if (state?.trail) state.trail.show = false;
       if (state?.shadow) state.shadow.show = false;
       setTimeout(() => { if (trailEntity) viewer.entities.remove(trailEntity); }, 4500);
+      try { _triggerDronePovSignalLossIfActive(state); } catch (_) {}
     }, fallMs + 100);
 
     return { impactLat, impactLon, fallMs };
+  }
+
+  // Fires the POV TV-static signal-loss overlay if the operator is
+  // currently POV'd inside this drone. Used for physics-fall impacts
+  // where the swarm/state's leadSwarmMember (or the state itself) is
+  // the POV target. If POV isn't active on this drone, no-op.
+  function _triggerDronePovSignalLossIfActive(state) {
+    if (typeof _dronePov === 'undefined' || !_dronePov.active) return;
+    if (!state) return;
+    const povTarget = _dronePov.swRef;
+    if (!povTarget) return;
+    // Match either the lead swarm member (multi-drone events) or the
+    // state's own primary billboard reference (single-drone events).
+    if (povTarget === state.leadSwarmMember || povTarget === state.billboard || povTarget === state) {
+      _triggerDroneStatic();
+    }
   }
 
   function _resolveEngagement(d) {
@@ -5462,6 +5508,10 @@ async function main() {
         }
         sw.neutralised = true;
         sw._neutralisedAt = new Date().toISOString();
+        // Clear any lingering jamming visuals from other counter-
+        // dispatches now that this hostile is down. Ellipses on empty
+        // air look wrong.
+        try { _clearJammingVisualsForEvent(d.eventId); } catch (_) {}
       }
       // RE-TARGET: any remaining non-neutralised non-overwatch hostile
       // drones? INCLUDES THE LEAD DRONE (previously invisible to the
