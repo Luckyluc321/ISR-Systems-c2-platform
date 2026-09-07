@@ -2637,12 +2637,65 @@ async function main() {
     if (platform === 'fixed-wing') return fixedWingIcon(hex);
     if (platform === 'jet') return jetIcon(hex);
     if (platform === 'missile') return missileIcon(hex);
-    // Shahed-136 and similar loitering munitions have a delta-wing
-    // planform, not rotors. Render as fixed-wing rather than the
-    // default quadcopter icon.
-    if (platform === 'loitering-munition' || platform === 'loitering_munition') return fixedWingIcon(hex);
+    // Shahed-136 and similar loitering munitions get their own
+    // delta-wing silhouette distinct from generic fixed-wing UAS.
+    if (platform === 'loitering-munition' || platform === 'loitering_munition') return loiteringMunitionIcon(hex);
     if (platform === 'non-identifiable') return nonIdentifiableIcon(hex);
     return quadcopterIcon(hex); // default = quadcopter
+  }
+
+  // Shahed-136 / Geran-2 planform. Delta wing, sharp nose, small
+  // V-tail at the back, rear-mounted pusher propeller circle. Reads
+  // as distinct from generic fixed-wing at map zoom while staying
+  // silhouette-clear (no gradient shading or texture that would
+  // muddy at small render size).
+  function loiteringMunitionIcon(hex) {
+    const c = document.createElement('canvas');
+    c.width = 56; c.height = 56;
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = hex;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.lineJoin = 'round';
+    // Delta wing (triangular planform). Sharp nose at top, wide
+    // trailing edge at bottom, wingtips pulled slightly forward of
+    // the actual trailing edge for the classic Shahed silhouette.
+    ctx.beginPath();
+    ctx.moveTo(28, 4);       // nose
+    ctx.lineTo(52, 42);      // right wingtip
+    ctx.lineTo(46, 46);      // right trailing edge
+    ctx.lineTo(31, 44);      // right fuselage back
+    ctx.lineTo(31, 48);      // right rear fuselage
+    ctx.lineTo(25, 48);      // left rear fuselage
+    ctx.lineTo(25, 44);      // left fuselage back
+    ctx.lineTo(10, 46);      // left trailing edge
+    ctx.lineTo(4, 42);       // left wingtip
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    // Twin V-tail fins at the rear, angled outward
+    ctx.beginPath();
+    ctx.moveTo(28, 46);
+    ctx.lineTo(23, 52);
+    ctx.lineTo(21, 51);
+    ctx.lineTo(26, 45);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(28, 46);
+    ctx.lineTo(33, 52);
+    ctx.lineTo(35, 51);
+    ctx.lineTo(30, 45);
+    ctx.closePath();
+    ctx.fill(); ctx.stroke();
+    // Rear-mounted pusher propeller ring (small circle)
+    ctx.beginPath();
+    ctx.arc(28, 51, 2.2, 0, Math.PI * 2);
+    ctx.fillStyle = '#fff';
+    ctx.fill();
+    ctx.strokeStyle = hex;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    return c;
   }
 
   function ringIcon() {
@@ -4652,12 +4705,42 @@ async function main() {
                 lon: killLon,
                 at: new Date().toISOString(),
               };
-              // Kill visuals: flash entity + DOWNED marker anchored to
-              // the event so it appears/disappears per event selection
-              // filter. Same pattern _resolveEngagement uses for swarm
-              // kills so both scenarios read identical on the map.
+              // Kill visuals: staggered fire + smoke sequence simulating
+              // the drone catching fire, tumbling, hitting ground, then
+              // a persistent DOWNED marker + smoke plume. Small realistic
+              // scale (not a big explosion — a small-arms takedown of a
+              // 50 kg warhead-carrying loitering munition would ignite
+              // fuel and produce fire + smoke, not a movie fireball).
               try {
-                _spawnFlashEntity(killLon, killLat, 500, '#ff5a5a', 6, 22);
+                const stTargetForFall = droneState.get(d.eventId);
+                const startAlt = stTargetForFall?.billboard?.position
+                  ? (() => {
+                      try {
+                        const cart = stTargetForFall.billboard.position.getValue?.(Cesium.JulianDate.now());
+                        if (cart) return Cesium.Cartographic.fromCartesian(cart).height;
+                      } catch (_) { /* fall through */ }
+                      return killLive?.alt || 500;
+                    })()
+                  : (killLive?.alt || 500);
+                // Bright hit flash at kill altitude — the moment of impact
+                _spawnFlashEntity(killLon, killLat, 350, '#ffdb4d', 4, 12, startAlt);
+                // Descending fire pulses over 1.2 s — drone tumbles down
+                const fallStages = [
+                  { delayMs: 200, altFrac: 0.75, color: '#ff8a3d', size: [4, 10] },
+                  { delayMs: 500, altFrac: 0.45, color: '#ff5a3d', size: [3, 9] },
+                  { delayMs: 850, altFrac: 0.18, color: '#a04030', size: [3, 8] },
+                ];
+                fallStages.forEach(s => {
+                  setTimeout(() => {
+                    const alt = startAlt * s.altFrac;
+                    _spawnFlashEntity(killLon, killLat, 400, s.color, s.size[0], s.size[1], alt);
+                  }, s.delayMs);
+                });
+                // Ground impact — smaller flash + dark smoke ring on the ground
+                setTimeout(() => {
+                  _spawnFlashEntity(killLon, killLat, 500, '#ff5a5a', 5, 14, 2);
+                  _spawnFlashEntity(killLon, killLat, 900, '#4a3830', 8, 20, 4);
+                }, 1200);
                 const killEnt = viewer.entities.add({
                   position: Cesium.Cartesian3.fromDegrees(killLon, killLat, 0),
                   properties: { markerEventId: targetEv.id, markerKind: 'kill' },
@@ -4693,9 +4776,15 @@ async function main() {
               const stTarget = droneState.get(d.eventId);
               if (stTarget) {
                 stTarget.closedAt = performance.now();
-                if (stTarget.billboard) stTarget.billboard.show = false;
-                if (stTarget.trail) stTarget.trail.show = false;
-                if (stTarget.shadow) stTarget.shadow.show = false;
+                // Keep the drone billboard visible for 1.2 s so the
+                // staged fire + smoke fall sequence reads as the drone
+                // itself burning down, not as random flashes on an
+                // already-vanished target. Hide at ground impact.
+                setTimeout(() => {
+                  if (stTarget.billboard) stTarget.billboard.show = false;
+                  if (stTarget.trail) stTarget.trail.show = false;
+                  if (stTarget.shadow) stTarget.shadow.show = false;
+                }, 1200);
               }
               markTrackClosed(d.eventId);
               closeEvent(d.eventId, targetEv.exit || null);
