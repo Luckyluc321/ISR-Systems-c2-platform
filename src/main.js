@@ -13721,14 +13721,27 @@ async function main() {
       </div>`;
     })() : '';
 
-    // Same missile banner for continuous multi site tracks. Shown when the
-    // missile has been re-detected at a new site after a sensor gap.
-    const reacquired = (e._reacquiredSites && e._reacquiredSites.size > 0 && e.outcome !== 'neutralized') ? `
+    // Same missile banner for continuous multi site tracks. Shown when
+    // the missile has been re-detected at a new site after a sensor gap.
+    //
+    // Tenant scoping: operators only see reacquired sites within their
+    // own tenant. Cross-tenant reacquisitions (Shahed originating at
+    // CPH airport reacquired at Energinet Amager Koblingsstation) would
+    // leak op-energinet's data into op-cph-airports' operator view.
+    // Receivers + admin see the full chain — they're the response
+    // layer with full-picture legitimacy.
+    const _reacqRawSites = e._reacquiredSites ? Array.from(e._reacquiredSites) : [];
+    const _reacqScopedSites = (() => {
+      const activeRole = getActiveRole();
+      if (!activeRole || activeRole.kind !== 'operator') return _reacqRawSites;
+      return _reacqRawSites.filter(sid => _sameTenant(e.siteId, sid));
+    })();
+    const reacquired = (_reacqScopedSites.length > 0 && e.outcome !== 'neutralized') ? `
       <div class="dp-section dp-reacq">
         <div class="dp-section-title" style="color:#4dff9c;">Track Continuous · Same Missile</div>
         <div class="dp-reacq-body">
           This is the same track first detected at ${siteName(e.siteId)}.
-          Signal reacquired by ${Array.from(e._reacquiredSites).map(sid => SITES[sid]?.name || sid).join(', ')} sensors.
+          Signal reacquired by ${_reacqScopedSites.map(sid => SITES[sid]?.name || sid).join(', ')} sensors.
           ${_f35.airborne ? 'Fighter aircraft already airborne from earlier scramble. No new dispatch required.' : ''}
         </div>
       </div>` : '';
@@ -17110,24 +17123,24 @@ async function main() {
       // Only regional Politi (not HQ, not specialty) requests AKS backup — AND site must declare aks capability
       if (role.parentId === 'politi' && !roleId.startsWith('politi-special') && _siteAllowsAction(event, 'request-aks')) {
         ctas.push({
-          label: 'Request AKS backup', sub: 'Aktionsstyrken', icon: '⚡', tone: 'neutral',
+          label: 'Request tactical backup', sub: 'AKS (Aktionsstyrken, national police tactical unit)', icon: '⚡', tone: 'neutral',
           action: 'request-aks',
-          tooltip: 'Requests AKS tactical intervention unit for armed or hostage-taking incidents.',
+          tooltip: 'Requests AKS (Aktionsstyrken) — the Danish national police special tactical unit — for armed or hostage-taking incidents.',
         });
       }
     }
 
-    // BRS actors
+    // BRS actors (Beredskabsstyrelsen — Danish Emergency Management Agency)
     if (isActive && isBrsBranch) {
       if (_siteAllowsAction(event, 'brs-standby')) ctas.push({
-        label: 'Standby response', sub: 'Teams on alert', icon: '⏳', tone: 'accent',
+        label: 'Standby response', sub: 'BRS (Beredskabsstyrelsen) teams on alert', icon: '⏳', tone: 'accent',
         action: 'brs-standby',
-        tooltip: 'Places BRS response teams on active standby without deploying yet.',
+        tooltip: 'Places Beredskabsstyrelsen (Danish Emergency Management Agency) response teams on active standby without deploying yet.',
       });
       if (_siteAllowsAction(event, 'brs-deploy')) ctas.push({
-        label: 'Full deployment', sub: 'CBRN + rescue + medical', icon: '🚨', tone: 'accent',
+        label: 'Full deployment', sub: 'BRS · CBRN, rescue, medical', icon: '🚨', tone: 'accent',
         action: 'brs-deploy',
-        tooltip: 'Full BRS deployment. Hazmat, rescue, and medical teams en route.',
+        tooltip: 'Full Beredskabsstyrelsen deployment. CBRN (chemical, biological, radiological, nuclear), rescue, and medical teams en route.',
       });
     }
 
@@ -17205,12 +17218,12 @@ async function main() {
       }
     }
 
-    // Hjemmeværnet actors
+    // Hjemmeværnet (HJV — Danish Home Guard) actors
     if (isActive && isHjvBranch) {
       if (_siteAllowsAction(event, 'hjv-reinforce')) ctas.push({
-        label: 'Reinforce guard', sub: 'Volunteer callout', icon: '🛡', tone: 'neutral',
+        label: 'Reinforce guard', sub: 'HJV (Hjemmeværnet) volunteer callout', icon: '🛡', tone: 'neutral',
         action: 'hjv-reinforce',
-        tooltip: 'Calls out Hjemmeværn volunteer patrols to reinforce perimeter or hold cordon.',
+        tooltip: 'Calls out Hjemmeværnet (HJV, Danish Home Guard) volunteer patrols to reinforce perimeter or hold cordon.',
       });
     }
 
@@ -17233,16 +17246,16 @@ async function main() {
     // Universal actor CTAs (cascade, handoff, respond, note, loop-in)
     if (isActive && !isPolitiBranch) {
       ctas.push({
-        label: 'Cascade to local Politi', sub: 'Politikreds coordination', icon: '⚑', tone: 'neutral',
+        label: 'Cascade to local police', sub: 'Politikreds (local police district) coordination', icon: '⚑', tone: 'neutral',
         action: 'cascade-politi',
-        tooltip: 'Cascades this event to the local Politikreds responsible for this site.',
+        tooltip: 'Cascades this event to the local Politikreds (Danish police district) responsible for this site.',
       });
     }
     if (isActive && !isIntel && roleId !== 'fe' && roleId !== 'pet') {
       ctas.push({
-        label: 'Cascade to FE / PET', sub: 'Strategic intelligence', icon: '⇧', tone: 'neutral',
+        label: 'Cascade to intelligence services', sub: 'FE (defence intel) + PET (police intel)', icon: '⇧', tone: 'neutral',
         action: 'cascade-fe-pet',
-        tooltip: 'Cascades this event to Forsvarets Efterretningstjeneste and Politiets Efterretningstjeneste.',
+        tooltip: 'Cascades this event to FE (Forsvarets Efterretningstjeneste, Danish Defence Intelligence Service) and PET (Politiets Efterretningstjeneste, Danish Security and Intelligence Service).',
       });
     }
     ctas.push({
