@@ -10151,7 +10151,25 @@ async function main() {
     // Rotation is a CallbackProperty so it re-evaluates every render frame
     // — matches AMRAAM smoothness. The tick loop writes `state.headingRad`
     // continuously; the billboard reads it here.
+    //
+    // alignedAxis is set to the LOCAL UP vector at the drone's current
+    // position (normalised position from Earth centre). Without this,
+    // the billboard is screen-aligned — from a POV camera looking at
+    // the drone from the side, the icon's canvas top would align with
+    // the screen's up direction (i.e., point toward the sky) instead
+    // of the drone's actual compass heading. With alignedAxis on
+    // local up, the billboard rotates around the vertical axis like a
+    // proper compass icon and the nose always reads horizontally in
+    // world space regardless of viewing angle.
     const stateHolder = { headingRad: 0 };
+    let _billboardRef;
+    const _localUp = () => {
+      const cart = _billboardRef?.position?.getValue?.(Cesium.JulianDate.now());
+      if (!cart) return Cesium.Cartesian3.UNIT_Z;
+      const up = new Cesium.Cartesian3();
+      Cesium.Cartesian3.normalize(cart, up);
+      return up;
+    };
     const billboard = viewer.entities.add({
       id: `drone-${event.id}`,
       position: Cesium.Cartesian3.fromDegrees(...startPos),
@@ -10159,6 +10177,7 @@ async function main() {
         image: platformIcon(platform, color),
         width: 32, height: 32,
         rotation: new Cesium.CallbackProperty(() => stateHolder.headingRad, false),
+        alignedAxis: new Cesium.CallbackProperty(() => _localUp(), false),
         color: event.classification === 'hostile'
           ? new Cesium.CallbackProperty(() => {
               const pulse = 0.65 + 0.35 * Math.sin(performance.now() / 200);
@@ -10182,6 +10201,7 @@ async function main() {
       },
       properties: { type: 'drone', eventId: event.id },
     });
+    _billboardRef = billboard;
 
     // Swarm formation — if the template declares template.swarm.formation
     // with size > 1, spawn additional billboards for the non-lead slots.
@@ -10192,6 +10212,14 @@ async function main() {
     if (template?.swarm?.formation && template.swarm.formation.length > 1) {
       for (let i = 1; i < template.swarm.formation.length; i++) {
         const slot = template.swarm.formation[i];
+        let _swBbRef;
+        const _swLocalUp = () => {
+          const cart = _swBbRef?.position?.getValue?.(Cesium.JulianDate.now());
+          if (!cart) return Cesium.Cartesian3.UNIT_Z;
+          const up = new Cesium.Cartesian3();
+          Cesium.Cartesian3.normalize(cart, up);
+          return up;
+        };
         const swarmBb = viewer.entities.add({
           id: `drone-${event.id}-swarm-${i}`,
           position: Cesium.Cartesian3.fromDegrees(...startPos),
@@ -10199,6 +10227,7 @@ async function main() {
             image: platformIcon(platform, color),
             width: 26, height: 26,   // slightly smaller than lead for visual hierarchy
             rotation: new Cesium.CallbackProperty(() => stateHolder.headingRad, false),
+            alignedAxis: new Cesium.CallbackProperty(() => _swLocalUp(), false),
             color: event.classification === 'hostile'
               ? new Cesium.CallbackProperty(() => {
                   const pulse = 0.65 + 0.35 * Math.sin(performance.now() / 200);
@@ -10209,6 +10238,7 @@ async function main() {
           },
           properties: { type: 'drone', eventId: event.id, swarmIndex: i, swarmRole: slot.role },
         });
+        _swBbRef = swarmBb;
         // Per-drone TRAIL (red dashed, past track) — grows behind the drone
         // while inside sensor coverage, freezes when out.
         const trailPositions = [];
