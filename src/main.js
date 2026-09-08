@@ -13133,8 +13133,20 @@ async function main() {
       event.siteId ? `at ${event.siteId.toUpperCase()}` : '',
     ].filter(Boolean).join(' · ');
 
+    // Humanise policy codes for the modal + audit display. Codes live
+    // as machine-friendly hyphenated tokens internally, but the
+    // operator UI never shows those raw. Never "tactical-urgency" in
+    // the panel; always "Tactical urgency".
+    const _reasonLabel = ({
+      'tactical-urgency': 'Tactical urgency',
+      'attribution':      'Attribution',
+      'forensic-handoff': 'Forensic handoff',
+      'coordination':     'Coordination',
+      'observer-loop':    'Observer loop',
+    })[cascadeReason] || 'Coordination';
+
     const priorityBtn = (val, label, hint) => `
-      <button class="cascade-priority-option" data-val="${val}" style="
+      <button class="cascade-priority-option" data-val="${val}" type="button" style="
         display: flex; flex-direction: column; align-items: flex-start;
         text-align: left; padding: 10px 12px; border-radius: 3px;
         background: rgba(255, 255, 255, 0.02);
@@ -13151,13 +13163,13 @@ async function main() {
       <div style="width: min(560px, 94vw); background: var(--panel-solid, #0a0d11); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);">
         <div style="padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);">
           <div class="c-section-eyebrow" style="margin-bottom: 4px;">${verb} to ${targetName}</div>
-          <div style="font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.5;">${hintText || `Attaches your assessment + agent snapshot + response history so the recipient sees why you called them.`}</div>
+          <div style="font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.5;">${hintText || `Your assessment, agent snapshot, and response history ship with the escalation so the recipient sees the full context.`}</div>
           <div style="margin-top: 10px; padding: 8px 10px; background: rgba(255,90,90,0.06); border-left: 2px solid rgba(255,90,90,0.5); font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text); letter-spacing: 0.02em;">${_threatSummary}</div>
         </div>
         <div style="padding: var(--space-3) var(--space-4);">
           <div class="c-section-eyebrow" style="margin-bottom: 6px;">Your assessment</div>
-          <div style="font-size: var(--fs-2xs); color: var(--text-dim); margin-bottom: 8px; line-height: 1.4;">Freeform. Why are you calling them? What do you need them to do?</div>
-          <textarea id="cascade-assessment" rows="4" placeholder="e.g. Track is dwelling at 400m over CPH T1 approach. Patrol response cannot reach in time. Request tactical intervention."
+          <div style="font-size: var(--fs-2xs); color: var(--text-dim); margin-bottom: 8px; line-height: 1.4;">Why are you calling them? What do you need them to do?</div>
+          <textarea id="cascade-assessment" rows="4" placeholder="Track dwelling at 400m over Copenhagen approach. Patrol response cannot reach in time. Requesting immediate intervention."
             style="width: 100%; padding: 10px 12px; background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border); border-radius: 2px; color: var(--text); font-family: var(--font-body); font-size: var(--fs-sm); box-sizing: border-box; resize: vertical; min-height: 90px;"></textarea>
         </div>
         <div style="padding: 0 var(--space-4) var(--space-3);">
@@ -13165,20 +13177,20 @@ async function main() {
           <div style="display: flex; gap: 6px;">
             ${priorityBtn('critical', 'Critical', 'Immediate action required')}
             ${priorityBtn('urgent',   'Urgent',   'Response within minutes')}
-            ${priorityBtn('standard', 'Standard', 'Standard SLA window')}
+            ${priorityBtn('standard', 'Standard', 'Standard response window')}
           </div>
         </div>
         <div style="padding: 0 var(--space-4) var(--space-3);">
-          <div class="c-section-eyebrow" style="margin-bottom: 6px;">Auto-attached</div>
-          <div style="font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-dim); line-height: 1.5;">
+          <div class="c-section-eyebrow" style="margin-bottom: 6px;">Included automatically</div>
+          <div style="font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-dim); line-height: 1.6;">
             <div>› Agent snapshot: ${_agenticSnapshot ? 'yes' : 'none yet'}</div>
             <div>› Response history: ${_dispatchSnapshot.length} dispatch${_dispatchSnapshot.length === 1 ? '' : 'es'}</div>
-            <div>› Cascade reason: ${cascadeReason}</div>
+            <div>› Reason: ${_reasonLabel}</div>
           </div>
         </div>
         <div style="padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px;">
-          <button id="cascade-cancel" class="c-btn compact">Cancel</button>
-          <button id="cascade-submit" class="c-btn compact primary" disabled style="opacity: 0.55; cursor: not-allowed;">${verb}</button>
+          <button id="cascade-cancel" type="button" class="c-btn compact">Cancel</button>
+          <button id="cascade-submit" type="button" class="c-btn compact primary">${verb}</button>
         </div>
       </div>
     `;
@@ -13186,6 +13198,7 @@ async function main() {
 
     let selectedPriority = defaultPriority;
     const submitBtn = backdrop.querySelector('#cascade-submit');
+    const cancelBtn = backdrop.querySelector('#cascade-cancel');
     const assessInput = backdrop.querySelector('#cascade-assessment');
 
     const highlightPriority = () => {
@@ -13202,26 +13215,31 @@ async function main() {
     highlightPriority();
 
     backdrop.querySelectorAll('.cascade-priority-option').forEach(btn => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
         selectedPriority = btn.dataset.val;
         highlightPriority();
       });
     });
 
-    const enableSubmitIfReady = () => {
-      const hasText = (assessInput.value || '').trim().length >= 5;
-      submitBtn.disabled = !hasText;
-      submitBtn.style.opacity = hasText ? '1' : '0.55';
-      submitBtn.style.cursor = hasText ? 'pointer' : 'not-allowed';
-    };
-    assessInput.addEventListener('input', enableSubmitIfReady);
+    // No disabled-attribute gating on the submit button — it always
+    // stays clickable. Validation happens on click. This avoids a
+    // whole class of "button appears disabled and nothing fires"
+    // failure modes (browsers block click events entirely on disabled
+    // buttons, so if the ready-check ever mis-fires, the button is
+    // dead). The validation toast tells the operator what's missing.
     setTimeout(() => assessInput.focus(), 30);
 
-    backdrop.querySelector('#cascade-cancel').addEventListener('click', close);
-    submitBtn.addEventListener('click', () => {
+    cancelBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      close();
+    });
+
+    const doSubmit = () => {
       const assessment = (assessInput.value || '').trim();
       if (assessment.length < 5) {
-        toast('Please add a short assessment before sending.', 'err');
+        toast('Add a short assessment before sending.', 'err');
+        assessInput.focus();
         return;
       }
       const pkg = {
@@ -13234,7 +13252,15 @@ async function main() {
       };
       close();
       try { onSubmit && onSubmit(pkg); }
-      catch (err) { console.warn('[cascade capture] onSubmit failed:', err.message); }
+      catch (err) {
+        console.warn('[cascade capture] onSubmit failed:', err.message);
+        toast('Cascade failed. Check console.', 'err');
+      }
+    };
+
+    submitBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      doSubmit();
     });
   }
 
@@ -19637,7 +19663,7 @@ async function main() {
             });
             if (records.length === 0) toast('Intelligence services already notified for this event', 'info');
             else toast(`Cascaded to ${records.length} intel destination${records.length === 1 ? '' : 's'} with your assessment.`, 'ok');
-            renderReceiverView();
+            renderReceiverView({ immediate: true });
           },
         });
       }
@@ -19671,7 +19697,7 @@ async function main() {
             });
             if (records.length === 0) toast('Local Politi already coordinated for this event', 'info');
             else toast(`Cascaded to ${targetPolitiName} with your assessment.`, 'ok');
-            renderReceiverView();
+            renderReceiverView({ immediate: true });
           },
         });
       }
@@ -19825,6 +19851,42 @@ async function main() {
           hintText: spec.expectedResponse ? `Expected response: ${spec.expectedResponse}` : null,
           onSubmit: (assessmentPackage) => {
             requestReceiverAsset(eventId, role.id, requestId, { assessmentPackage });
+            renderReceiverView({ immediate: true });
+          },
+        });
+      }
+      else if (action === 'request-aks') {
+        // Cross-agency request to Aktionsstyrken. Same capture-modal
+        // flow as the other request-out actions so the operator
+        // assessment + priority + agent snapshot ships with the
+        // escalation. Routes to politi-aks destinations via the same
+        // escalateEvent path all cascades use.
+        const eventId = id || _selectedReceiverEventId || _workspaceEventId;
+        const ev = getEvent(eventId);
+        if (!ev) { toast('Event not found', 'err'); return; }
+        const targetRole = RECEIVERS.find(r => r.id === 'politi-aks');
+        const targetName = targetRole?.org || targetRole?.label || 'Aktionsstyrken';
+        const targetDestIds = (Array.isArray(targetRole?.destinationIds) && targetRole.destinationIds.length)
+          ? targetRole.destinationIds
+          : ['politi-aks'];
+        const role = getActiveRole();
+        _openCascadeCaptureModal({
+          eventId,
+          targetName,
+          cascadeReason: 'tactical-urgency',
+          verb: 'Request',
+          defaultPriority: 'critical',
+          hintText: 'Aktionsstyrken tactical van or strike team from Ejby. Your assessment + priority ships with the request.',
+          onSubmit: (assessmentPackage) => {
+            const records = escalateEvent(eventId, {
+              destinationIds: targetDestIds,
+              payload: 'summary',
+              message: `Tactical intervention request from ${role.name || 'Receiver'}: ${assessmentPackage.operatorAssessment}`,
+              operator: `Receiver · ${role.name || role.org || role.person || 'Unknown'}`,
+              assessmentPackage,
+            });
+            if (records.length === 0) toast('Aktionsstyrken already notified for this event', 'info');
+            else toast(`Request sent to ${targetName} with your assessment.`, 'ok');
             renderReceiverView({ immediate: true });
           },
         });
@@ -20063,8 +20125,9 @@ async function main() {
         _lastReceiverWorkspaceId = null;
         _lastReceiverWorkspaceMode = null;
         _lastConsoleSig = null;
+        _lastReceiverViewSig = null;
         _exitMapMode();
-        renderReceiverView();
+        renderReceiverView({ immediate: true });
       }
       else if (action === 'reports-filter-change') {
         const key = el.dataset.filterKey;
@@ -20097,7 +20160,9 @@ async function main() {
           _selectedReceiverEventId = null;
           _workspaceEventId = null;
           _lastReceiverViewSig = null;
+          _lastConsoleSig = null;
           setActiveRole(cur.parentId);
+          renderReceiverView({ immediate: true });
         }
       }
       else if (action === 'workspace-mode') {
