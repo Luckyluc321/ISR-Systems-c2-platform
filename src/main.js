@@ -13288,6 +13288,185 @@ async function main() {
     });
   }
 
+  // Branded text prompt modal. Replaces window.prompt() which had
+  // three problems: (a) can't be styled to match the platform, (b)
+  // reads exactly like an untrusted browser dialog for security
+  // warnings, (c) some Chromium builds render "Cancel" and "OK"
+  // buttons that refuse to dismiss when the parent tab is under
+  // heavy render load. Uses the same bulletproof close pattern as
+  // _openCascadeCaptureModal (backdrop purge, idempotent close,
+  // paint-tick before onSubmit).
+  function _openTextPromptModal({
+    title,             // required — modal header
+    hint = null,       // optional one-line explanation under the header
+    placeholder = '',  // textarea placeholder
+    submitLabel = 'Submit',
+    initialValue = '',
+    minChars = 1,      // block submit until this many chars entered
+    onSubmit,          // (text) => void
+  }) {
+    document.querySelectorAll('.text-prompt-backdrop').forEach(b => {
+      try { b.remove(); } catch (_) {}
+    });
+    const backdrop = document.createElement('div');
+    backdrop.className = 'text-prompt-backdrop';
+    backdrop.style.cssText = `
+      position: fixed; inset: 0; background: rgba(6, 8, 11, 0.82);
+      backdrop-filter: blur(4px); z-index: 10000;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-body);
+    `;
+    let _closed = false;
+    let escHandler;
+    const close = () => {
+      if (_closed) return;
+      _closed = true;
+      try {
+        backdrop.style.display = 'none';
+        if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+      } catch (err) { console.warn('[text prompt] backdrop remove failed:', err); }
+      try { document.removeEventListener('keydown', escHandler); } catch (_) {}
+    };
+    escHandler = (ev) => { if (ev.key === 'Escape') close(); };
+    document.addEventListener('keydown', escHandler);
+    backdrop.addEventListener('click', (ev) => { if (ev.target === backdrop) close(); });
+
+    backdrop.innerHTML = `
+      <div style="width: min(500px, 92vw); background: var(--panel-solid, #0a0d11); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);">
+        <div style="padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);">
+          <div class="c-section-eyebrow" style="margin-bottom: 4px;">${title}</div>
+          ${hint ? `<div style="font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.5;">${hint}</div>` : ''}
+        </div>
+        <div style="padding: var(--space-3) var(--space-4);">
+          <textarea id="text-prompt-input" rows="4" placeholder="${placeholder}"
+            style="width: 100%; padding: 10px 12px; background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border); border-radius: 2px; color: var(--text); font-family: var(--font-body); font-size: var(--fs-sm); box-sizing: border-box; resize: vertical; min-height: 90px;">${initialValue}</textarea>
+        </div>
+        <div style="padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px;">
+          <button id="text-prompt-cancel" type="button" class="c-btn compact">Cancel</button>
+          <button id="text-prompt-submit" type="button" class="c-btn compact primary">${submitLabel}</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+
+    const submitBtn = backdrop.querySelector('#text-prompt-submit');
+    const cancelBtn = backdrop.querySelector('#text-prompt-cancel');
+    const input = backdrop.querySelector('#text-prompt-input');
+    setTimeout(() => { input?.focus(); input?.select?.(); }, 30);
+
+    const doSubmit = () => {
+      const text = (input?.value || '').trim();
+      if (text.length < minChars) {
+        toast(`Enter at least ${minChars} character${minChars === 1 ? '' : 's'}.`, 'err');
+        input?.focus();
+        return;
+      }
+      close();
+      setTimeout(() => {
+        try { onSubmit && onSubmit(text); }
+        catch (err) {
+          console.warn('[text prompt] onSubmit failed:', err);
+          toast('Action failed. Check console.', 'err');
+        }
+      }, 0);
+    };
+    cancelBtn.addEventListener('click', (ev) => { ev.stopPropagation(); ev.preventDefault(); close(); });
+    submitBtn.addEventListener('click', (ev) => { ev.stopPropagation(); ev.preventDefault(); doSubmit(); });
+    // Cmd+Enter / Ctrl+Enter submits from textarea for keyboard operators
+    input.addEventListener('keydown', (ev) => {
+      if ((ev.metaKey || ev.ctrlKey) && ev.key === 'Enter') {
+        ev.preventDefault();
+        doSubmit();
+      }
+    });
+  }
+
+  // Branded pick-one-from-list modal. Replaces window.prompt("enter number")
+  // for handoff / route-to-destination flows.
+  function _openPickerModal({
+    title,
+    hint = null,
+    options,            // [{ id, label, sublabel? }]
+    submitLabel = 'Select',
+    onSelect,           // (option) => void
+  }) {
+    document.querySelectorAll('.picker-modal-backdrop').forEach(b => {
+      try { b.remove(); } catch (_) {}
+    });
+    const backdrop = document.createElement('div');
+    backdrop.className = 'picker-modal-backdrop';
+    backdrop.style.cssText = `
+      position: fixed; inset: 0; background: rgba(6, 8, 11, 0.82);
+      backdrop-filter: blur(4px); z-index: 10000;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-body);
+    `;
+    let _closed = false;
+    let escHandler;
+    const close = () => {
+      if (_closed) return;
+      _closed = true;
+      try {
+        backdrop.style.display = 'none';
+        if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+      } catch (_) {}
+      try { document.removeEventListener('keydown', escHandler); } catch (_) {}
+    };
+    escHandler = (ev) => { if (ev.key === 'Escape') close(); };
+    document.addEventListener('keydown', escHandler);
+    backdrop.addEventListener('click', (ev) => { if (ev.target === backdrop) close(); });
+
+    const optionsHtml = options.map(opt => `
+      <button class="picker-modal-option" data-opt-id="${opt.id}" type="button" style="
+        display: flex; flex-direction: column; align-items: flex-start;
+        text-align: left; padding: 12px 14px; border-radius: 3px;
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid var(--border);
+        cursor: pointer; transition: border-color 120ms, background 120ms;
+        font-family: var(--font-body); color: var(--text);
+        width: 100%; gap: 4px;
+      ">
+        <span style="font-size: var(--fs-sm); font-weight: 600;">${opt.label}</span>
+        ${opt.sublabel ? `<span style="font-size: var(--fs-2xs); color: var(--text-dim); line-height: 1.4;">${opt.sublabel}</span>` : ''}
+      </button>`).join('');
+
+    backdrop.innerHTML = `
+      <div style="width: min(520px, 92vw); background: var(--panel-solid, #0a0d11); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6); max-height: 80vh; display: flex; flex-direction: column;">
+        <div style="padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);">
+          <div class="c-section-eyebrow" style="margin-bottom: 4px;">${title}</div>
+          ${hint ? `<div style="font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.5;">${hint}</div>` : ''}
+        </div>
+        <div style="padding: var(--space-3) var(--space-4); display: flex; flex-direction: column; gap: 8px; overflow-y: auto; flex: 1;">
+          ${optionsHtml}
+        </div>
+        <div style="padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px;">
+          <button id="picker-modal-cancel" type="button" class="c-btn compact">Cancel</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+    backdrop.querySelector('#picker-modal-cancel').addEventListener('click', (ev) => {
+      ev.stopPropagation(); ev.preventDefault(); close();
+    });
+    backdrop.querySelectorAll('.picker-modal-option').forEach(btn => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+        const optId = btn.dataset.optId;
+        const opt = options.find(o => o.id === optId);
+        if (!opt) return;
+        close();
+        setTimeout(() => {
+          try { onSelect && onSelect(opt); }
+          catch (err) {
+            console.warn('[picker modal] onSelect failed:', err);
+            toast('Action failed. Check console.', 'err');
+          }
+        }, 0);
+      });
+    });
+  }
+
   function _openObserverPicker(eventId) {
     if (_observerPickerOpen) return;
     _observerPickerOpen = true;
@@ -19965,12 +20144,19 @@ async function main() {
         const eventId = id || _selectedReceiverEventId || _workspaceEventId;
         const ev = getEvent(eventId);
         if (!ev) { toast('Event not found', 'err'); return; }
-        const text = window.prompt('Add note to event audit trail:');
-        if (!text || !text.trim()) return;
-        addNote(eventId, text.trim(), `${getActiveRole()?.person || getActiveRole()?.org || 'Receiver'}`);
-        toast('Note added to audit trail', 'ok');
-        _lastConsoleSig = null;
-        renderReceiverView({ immediate: true });
+        _openTextPromptModal({
+          title: 'Add note to audit trail',
+          hint: 'Freeform note. Visible to every participant on this case.',
+          placeholder: 'e.g. Verified visual on target from north tower. Confirming quadcopter class.',
+          submitLabel: 'Add note',
+          minChars: 1,
+          onSubmit: (text) => {
+            addNote(eventId, text, `${getActiveRole()?.person || getActiveRole()?.org || 'Receiver'}`);
+            toast('Note added to audit trail', 'ok');
+            _lastConsoleSig = null;
+            renderReceiverView({ immediate: true });
+          },
+        });
       }
       else if (action === 'observer-add') {
         const eventId = id || _selectedReceiverEventId || _workspaceEventId;
@@ -20060,16 +20246,19 @@ async function main() {
         const inChain = new Set((ev.postIncidentChain || []).map(c => c.destId));
         const eligible = responders.filter(r => !inChain.has(r.id));
         if (!eligible.length) { toast('No fresh handoff targets remaining.', 'warn'); return; }
-        const listStr = eligible.map((r, i) => `${i + 1}. ${r.name}`).join('\n');
-        const raw = window.prompt(`Hand off to (enter number):\n${listStr}`);
-        if (!raw) return;
-        const idx = parseInt(raw.trim(), 10) - 1;
-        const target = eligible[idx];
-        if (!target) { toast('Invalid selection.', 'err'); return; }
-        const entry = handoffPostIncidentChain(eventId, chainId, target.id, getActiveRole()?.id || 'operator');
-        if (!entry) { toast('Handoff failed.', 'err'); return; }
-        toast(`Handed off to ${target.name}.`, 'ok');
-        renderReceiverView({ immediate: true });
+        _openPickerModal({
+          title: 'Hand off post-incident chain',
+          hint: 'Select the next responder in the chain. Only destinations not already engaged appear.',
+          options: eligible.map(r => ({ id: r.id, label: r.name, sublabel: r.sublabel || null })),
+          onSelect: (opt) => {
+            const target = eligible.find(r => r.id === opt.id);
+            if (!target) { toast('Invalid selection.', 'err'); return; }
+            const entry = handoffPostIncidentChain(eventId, chainId, target.id, getActiveRole()?.id || 'operator');
+            if (!entry) { toast('Handoff failed.', 'err'); return; }
+            toast(`Handed off to ${target.name}.`, 'ok');
+            renderReceiverView({ immediate: true });
+          },
+        });
       }
       else if (action === 'chain-resolve') {
         const eventId = id;
