@@ -13076,6 +13076,13 @@ async function main() {
   }) {
     const event = getEvent(eventId);
     if (!event) { toast('Event not found', 'err'); return; }
+    // Defensive: purge any lingering backdrops from previous invocations
+    // so we never end up with stacked modals where closing the top one
+    // leaves an invisible layer intercepting all page clicks (the
+    // "can't get back, stays on popup" symptom).
+    document.querySelectorAll('.cascade-capture-backdrop').forEach(b => {
+      try { b.remove(); } catch (_) {}
+    });
     const backdrop = document.createElement('div');
     backdrop.className = 'cascade-capture-backdrop';
     backdrop.style.cssText = `
@@ -13084,11 +13091,18 @@ async function main() {
       display: flex; align-items: center; justify-content: center;
       font-family: var(--font-body);
     `;
+    let _closed = false;
+    let escHandler; // forward decl for close() closure
     const close = () => {
-      backdrop.remove();
-      document.removeEventListener('keydown', escHandler);
+      if (_closed) return;
+      _closed = true;
+      try {
+        backdrop.style.display = 'none';
+        if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+      } catch (err) { console.warn('[cascade capture] backdrop remove failed:', err); }
+      try { document.removeEventListener('keydown', escHandler); } catch (_) {}
     };
-    const escHandler = (ev) => { if (ev.key === 'Escape') close(); };
+    escHandler = (ev) => { if (ev.key === 'Escape') close(); };
     document.addEventListener('keydown', escHandler);
     backdrop.addEventListener('click', (ev) => { if (ev.target === backdrop) close(); });
 
@@ -13232,6 +13246,7 @@ async function main() {
 
     cancelBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
+      ev.preventDefault();
       close();
     });
 
@@ -13250,16 +13265,25 @@ async function main() {
         priority:                 selectedPriority,
         requesterRoleId:          getActiveRole()?.id || null,
       };
+      // Close FIRST, then defer onSubmit to the next task so the DOM
+      // paint has committed the backdrop removal before any downstream
+      // render happens. Prevents any scenario where a synchronous
+      // renderReceiverView() inside onSubmit blocks the paint of the
+      // close, leaving the operator staring at the modal even though
+      // the escalation record was created.
       close();
-      try { onSubmit && onSubmit(pkg); }
-      catch (err) {
-        console.warn('[cascade capture] onSubmit failed:', err.message);
-        toast('Cascade failed. Check console.', 'err');
-      }
+      setTimeout(() => {
+        try { onSubmit && onSubmit(pkg); }
+        catch (err) {
+          console.warn('[cascade capture] onSubmit failed:', err);
+          toast('Cascade send failed. Check console.', 'err');
+        }
+      }, 0);
     };
 
     submitBtn.addEventListener('click', (ev) => {
       ev.stopPropagation();
+      ev.preventDefault();
       doSubmit();
     });
   }
