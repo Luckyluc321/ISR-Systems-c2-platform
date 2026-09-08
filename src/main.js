@@ -17706,20 +17706,54 @@ async function main() {
     // they themselves added.
     const _participantsStrip = _renderParticipantsStrip(event, role.id, rec);
 
+    // Group CTAs into four semantically distinct sections so the operator
+    // reads the rail as "dispatch / request / case / audit" not as one
+    // flat grab-bag of unrelated buttons. Empty groups are skipped so a
+    // role that owns no dispatch capability (e.g. Esbjerg Kommune has no
+    // patrol or K9 units) never renders an empty Dispatch section — it
+    // simply shows what it CAN do.
+    const _CAT_META = {
+      dispatch: { title: 'Dispatch own assets',        hint: 'Units this profile controls directly.' },
+      request:  { title: 'Request from another agency', hint: 'Routes to a partner profile’s inbox.' },
+      case:     { title: 'Case management',              hint: 'Acknowledge, update status, reply.' },
+      audit:    { title: 'Audit + participants',         hint: 'Notes and loop-ins.' },
+    };
+    const _CAT_ORDER = ['dispatch', 'request', 'case', 'audit'];
+    const _grouped = { dispatch: [], request: [], case: [], audit: [] };
+    ctas.forEach(c => {
+      const cat = c.category && _grouped[c.category] ? c.category : 'audit';
+      _grouped[cat].push(c);
+    });
+    const _renderCta = c => `
+      <button class="rer-cta ${c.tone}" data-rcv="${c.action}" data-id="${event.id}" ${c.esc ? `data-esc="${c.esc}"` : ''} ${c.assetKey ? `data-asset-key="${c.assetKey}"` : ''} ${c.requestId ? `data-request-id="${c.requestId}"` : ''} title="${c.tooltip}" ${c.disabled ? 'disabled' : ''}>
+        <span class="rer-cta-icon">${c.icon}</span>
+        <span class="rer-cta-body">
+          <span class="rer-cta-label">${c.label}</span>
+          <span class="rer-cta-sub">${c.sub}</span>
+        </span>
+      </button>`;
+    const _renderCatBlock = cat => {
+      const items = _grouped[cat];
+      if (!items.length) return '';
+      const meta = _CAT_META[cat];
+      return `
+        <div class="rer-cta-group" data-cat="${cat}">
+          <div class="rer-cta-group-hdr">
+            <span class="rer-cta-group-title">${meta.title}</span>
+            <span class="rer-cta-group-hint">${meta.hint}</span>
+          </div>
+          <div class="rer-cta-rail">
+            ${items.map(_renderCta).join('')}
+          </div>
+        </div>`;
+    };
+    const _groupedRail = _CAT_ORDER.map(_renderCatBlock).join('');
+
     const actions = `
       <section class="rer-section rer-actions">
         <div class="c-section-eyebrow" style="display: flex; align-items: center;">Your Response · ${role.name || 'Receiver'}${observerChip}</div>
         ${_participantsStrip}
-        <div class="rer-cta-rail">
-          ${ctas.map(c => `
-            <button class="rer-cta ${c.tone}" data-rcv="${c.action}" data-id="${event.id}" ${c.esc ? `data-esc="${c.esc}"` : ''} ${c.assetKey ? `data-asset-key="${c.assetKey}"` : ''} ${c.requestId ? `data-request-id="${c.requestId}"` : ''} title="${c.tooltip}" ${c.disabled ? 'disabled' : ''}>
-              <span class="rer-cta-icon">${c.icon}</span>
-              <span class="rer-cta-body">
-                <span class="rer-cta-label">${c.label}</span>
-                <span class="rer-cta-sub">${c.sub}</span>
-              </span>
-            </button>`).join('')}
-        </div>
+        ${_groupedRail}
         ${composerHtml}
         ${sentHtml}
       </section>`;
@@ -18225,11 +18259,13 @@ async function main() {
       ctas.push({
         label: 'Promote to actor', sub: 'Take response ownership', icon: '⇧', tone: 'primary',
         action: 'observer-promote',
+        category: 'case',
         tooltip: 'Requests actor status on this event. Any current actor can approve.',
       });
       ctas.push({
         label: 'Add note', sub: 'Append to audit trail', icon: '✎', tone: 'neutral',
         action: 'add-note',
+        category: 'audit',
         tooltip: 'Appends a note to the event audit trail. Visible to all participants.',
       });
       return ctas;
@@ -18240,6 +18276,7 @@ async function main() {
       ctas.push({
         label: 'Acknowledge receipt', sub: 'Confirm you have the case', icon: '✓', tone: 'primary',
         action: 'ack', esc: rec.id,
+        category: 'case',
         tooltip: 'Sends acknowledgement to the operator. Records the acknowledgement in the audit trail.',
       });
     }
@@ -18284,6 +18321,7 @@ async function main() {
           tone: 'accent',
           action: 'receiver-dispatch',
           assetKey: a.assetKey,
+          category: 'dispatch',
           tooltip: `${a.name}${countStr}.${useCasesStr}${deployStr}${limitStr}`,
         });
       });
@@ -18301,6 +18339,7 @@ async function main() {
           tone: 'neutral',
           action: 'receiver-request',
           requestId: r.requestKey,
+          category: 'request',
           tooltip: `Request ${r.name} from ${r.from}. They see the request in their inbox and dispatch their own asset.${useCasesStr}${expectedStr}`,
         });
       });
@@ -18314,11 +18353,13 @@ async function main() {
       if (_siteAllowsAction(event, 'deploy-patrol')) ctas.push({
         label: 'Deploy patrol', sub: 'Local district cars', icon: '🚔', tone: 'accent',
         action: 'deploy-patrol',
+        category: 'dispatch',
         tooltip: 'Dispatches district patrol cars to the incident site. Confirms via radio when on scene.',
       });
       if (_siteAllowsAction(event, 'set-cordon')) ctas.push({
         label: 'Set up perimeter cordon', sub: 'Afspær området', icon: '⚑', tone: 'accent',
         action: 'set-cordon',
+        category: 'dispatch',
         tooltip: 'Establishes a physical perimeter cordon around the affected area. Coordinates with local fire and medical.',
       });
       // Only regional Politi (not HQ, not specialty) requests AKS backup — AND site must declare aks capability
@@ -18326,6 +18367,7 @@ async function main() {
         ctas.push({
           label: 'Request tactical intervention', sub: 'Aktionsstyrken, national police tactical unit', icon: '⚡', tone: 'neutral',
           action: 'request-aks',
+          category: 'request',
           tooltip: 'Requests Aktionsstyrken, the Danish national police tactical unit, for armed or hostage-taking incidents.',
         });
       }
@@ -18336,11 +18378,13 @@ async function main() {
       if (_siteAllowsAction(event, 'brs-standby')) ctas.push({
         label: 'Standby response', sub: 'Beredskabsstyrelsen teams on alert', icon: '⏳', tone: 'accent',
         action: 'brs-standby',
+        category: 'dispatch',
         tooltip: 'Places Beredskabsstyrelsen, the Danish Emergency Management Agency, response teams on active standby without deploying yet.',
       });
       if (_siteAllowsAction(event, 'brs-deploy')) ctas.push({
         label: 'Full deployment', sub: 'Beredskabsstyrelsen: hazmat, rescue, medical', icon: '🚨', tone: 'accent',
         action: 'brs-deploy',
+        category: 'dispatch',
         tooltip: 'Full Beredskabsstyrelsen deployment. Chemical, biological, radiological, nuclear, rescue, and medical teams en route.',
       });
     }
@@ -18351,6 +18395,7 @@ async function main() {
       ctas.push({
         label: 'Scramble Air Force fighter', sub: 'On-call squadron', icon: '✈', tone: 'accent',
         action: 'qra-dispatch',
+        category: 'dispatch',
         tooltip: 'Requests fighter intercept from the on-call squadron. Only available while the event is active.',
       });
     }
@@ -18361,11 +18406,13 @@ async function main() {
       if (_siteAllowsAction(event, 'army-c-uas')) ctas.push({
         label: 'Deploy army counter drone unit', sub: 'Radio frequency and electronic warfare', icon: '⚡', tone: 'neutral',
         action: 'army-c-uas',
+        category: 'dispatch',
         tooltip: 'Requests army counter drone unit deployment. Radio frequency jamming and electronic warfare capability.',
       });
       if (_siteAllowsAction(event, 'army-ground')) ctas.push({
         label: 'Deploy ground force', sub: 'Rapid reinforcement', icon: '🪖', tone: 'neutral',
         action: 'army-ground',
+        category: 'dispatch',
         tooltip: 'Requests army ground reinforcement to hold cordon or protect infrastructure.',
       });
     }
@@ -18376,6 +18423,7 @@ async function main() {
       ctas.push({
         label: 'Log to intel picture', sub: 'Pattern-of-life analysis', icon: '📊', tone: 'neutral',
         action: 'intel-log',
+        category: 'dispatch',
         tooltip: 'Adds this event to the intelligence picture for pattern-of-life analysis. No active response.',
       });
     }
@@ -18385,11 +18433,13 @@ async function main() {
       if (_siteAllowsAction(event, 'issue-notam')) ctas.push({
         label: 'Issue airspace advisory', sub: 'NOTAM push', icon: '📡', tone: 'accent',
         action: 'issue-notam',
+        category: 'dispatch',
         tooltip: 'Issues NOTAM airspace advisory for the affected zone. Distributed to Eurocontrol.',
       });
       if (_siteAllowsAction(event, 'restrict-airspace')) ctas.push({
         label: 'Restrict airspace', sub: 'Full closure order', icon: '⛔', tone: 'danger',
         action: 'restrict-airspace',
+        category: 'dispatch',
         tooltip: 'Full airspace closure order for the affected zone. Requires ministerial sign-off in production.',
       });
     }
@@ -18399,6 +18449,7 @@ async function main() {
       if (_siteAllowsAction(event, 'issue-maritime-advisory')) ctas.push({
         label: 'Issue maritime advisory', sub: 'Coast guard notice', icon: '📡', tone: 'accent',
         action: 'issue-maritime-advisory',
+        category: 'dispatch',
         tooltip: 'Issues advisory to coast guard and maritime traffic in affected zone.',
       });
     }
@@ -18408,12 +18459,14 @@ async function main() {
       if (_siteAllowsAction(event, 'kom-crisis')) ctas.push({
         label: 'Alert kommune crisis staff', sub: 'Municipal war-room', icon: '🏛', tone: 'accent',
         action: 'kom-crisis',
+        category: 'dispatch',
         tooltip: 'Alerts the municipal crisis staff. Activates local emergency plan.',
       });
       if (event.classification === 'hostile' && event.threat === 'high' && _siteAllowsAction(event, 'kom-shelter')) {
         ctas.push({
           label: 'Shelter-in-place notification', sub: 'Public alert', icon: '🏘', tone: 'danger',
           action: 'kom-shelter',
+          category: 'dispatch',
           tooltip: 'Broadcasts shelter-in-place notification to residents in affected zone via SMS + siren.',
         });
       }
@@ -18424,6 +18477,7 @@ async function main() {
       if (_siteAllowsAction(event, 'hjv-reinforce')) ctas.push({
         label: 'Reinforce guard', sub: 'Hjemmeværnet volunteer callout', icon: '🛡', tone: 'neutral',
         action: 'hjv-reinforce',
+        category: 'dispatch',
         tooltip: 'Calls out Hjemmeværnet, the Danish Home Guard, volunteer patrols to reinforce perimeter or hold cordon.',
       });
     }
@@ -18433,12 +18487,14 @@ async function main() {
       if (_siteAllowsAction(event, 'region-ambulance-standby')) ctas.push({
         label: 'Ambulance standby', sub: 'Regional 112 alerted', icon: '🚑', tone: 'accent',
         action: 'region-ambulance-standby',
+        category: 'dispatch',
         tooltip: 'Puts regional ambulance service on active standby for casualty response.',
       });
       if (event.classification === 'hostile' && event.threat === 'high' && _siteAllowsAction(event, 'region-triage-prep')) {
         ctas.push({
           label: 'Casualty triage prep', sub: 'Regional hospitals', icon: '🏥', tone: 'danger',
           action: 'region-triage-prep',
+          category: 'dispatch',
           tooltip: 'Alerts regional hospitals to prepare mass-casualty triage.',
         });
       }
@@ -18449,6 +18505,7 @@ async function main() {
       ctas.push({
         label: 'Cascade to local police', sub: 'Politikreds (local police district) coordination', icon: '⚑', tone: 'neutral',
         action: 'cascade-politi',
+        category: 'request',
         tooltip: 'Cascades this event to the local Politikreds (Danish police district) responsible for this site.',
       });
     }
@@ -18456,18 +18513,21 @@ async function main() {
       ctas.push({
         label: 'Cascade to intelligence services', sub: 'Forsvarets Efterretningstjeneste and Politiets Efterretningstjeneste', icon: '⇧', tone: 'neutral',
         action: 'cascade-fe-pet',
+        category: 'request',
         tooltip: 'Cascades this event to Forsvarets Efterretningstjeneste, the Danish Defence Intelligence Service, and Politiets Efterretningstjeneste, the Danish Security and Intelligence Service.',
       });
     }
     ctas.push({
       label: 'Loop in observer', sub: 'Add role to case', icon: '👥', tone: 'neutral',
       action: 'observer-add',
+      category: 'audit',
       tooltip: 'Adds another role to this event as an observer. They receive notifications but no CTAs unless promoted.',
     });
     if (rec) {
       ctas.push({
         label: 'Respond to operator', sub: 'Send back to source', icon: '↩', tone: 'neutral',
         action: 'respond-open', esc: rec.id,
+        category: 'case',
         tooltip: 'Opens the response composer. Reply is delivered to the operator inbox.',
       });
       // Explicit status update — freeform advancement of progressStatus
@@ -18477,12 +18537,14 @@ async function main() {
       ctas.push({
         label: 'Update status', sub: 'In progress · Resolved · Blocked', icon: '⇄', tone: 'neutral',
         action: 'update-status', esc: rec.id,
+        category: 'case',
         tooltip: 'Sets the progress state on this case. Blocked requires a reason. Visible in the operator log.',
       });
     }
     ctas.push({
       label: 'Add note', sub: 'Append to audit trail', icon: '✎', tone: 'neutral',
       action: 'add-note',
+      category: 'audit',
       tooltip: 'Appends a note to the event audit trail. Visible to all participants.',
     });
 

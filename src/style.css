@@ -7380,6 +7380,39 @@ body.view-fleet #fleet-view { display: block; }
 
 /* ── 3. Recommended actions rail ──────────────────────────────── */
 .rer-actions .c-section-eyebrow { margin-bottom: var(--space-3); }
+/* Grouped CTA sections — one block per category (dispatch, request,
+   case, audit). Header shows the category title + a one-line hint so
+   the operator knows what class of action they are about to take.
+   Empty groups do not render, so a receiver with no own assets
+   simply never sees the Dispatch section. */
+.rer-cta-group {
+  margin-bottom: var(--space-4);
+}
+.rer-cta-group:last-child {
+  margin-bottom: 0;
+}
+.rer-cta-group-hdr {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  padding-bottom: var(--space-1);
+  border-bottom: 1px solid var(--border);
+}
+.rer-cta-group-title {
+  font-size: var(--fs-2xs);
+  font-family: var(--font-mono);
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text);
+  font-weight: 600;
+}
+.rer-cta-group-hint {
+  font-size: var(--fs-2xs);
+  color: var(--text-dim);
+  font-style: italic;
+  letter-spacing: 0.02em;
+}
 .rer-cta-rail {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
