@@ -5094,47 +5094,36 @@ async function main() {
     // bullet in perceptual terms and gives the streak time to render.
     const travelMs = 220;
 
-    // Live-target lookup reads the target's billboard position
-    // DIRECTLY each frame — same source Cesium uses to draw the drone
-    // icon, so tracer endpoint and drone icon are always pixel-aligned
-    // even as the target moves during the tracer's ~220 ms flight time.
-    //
-    // Fallback chain (same as _liveTargetPositionFor):
-    //   1. Assigned swarm member billboard (swarm scenarios)
-    //   2. Event's own droneState billboard (single-drone events like
-    //      Shahed — this was missing, causing tracers to freeze at the
-    //      fire-time snapshot of the target position while the Shahed
-    //      moved 50 m/s ahead. From POV of the Shahed the shots
-    //      appeared to land 10-50 m behind the camera.)
-    //   3. assignedTargetCoord snapshot (last-known)
-    //   4. Original target arg (fire-time snapshot)
+    // Live-target lookup. Priority:
+    //   1. If operator is POV'd inside this target's drone, aim at the
+    //      live CAMERA position — guarantees the tracer terminates AT
+    //      the operator's eye no matter what interpolation drift
+    //      creeps in between billboard writes and camera reads. This
+    //      is why Lucas saw shots land 10-50 m behind POV: the tracer
+    //      read state.billboard.position while the camera followed a
+    //      slightly different snapshot on a different render pass,
+    //      producing a small horizontal offset amplified by the
+    //      Shahed's 50 m/s cruise.
+    //   2. Delegate to _liveTargetPositionFor(d) — the same helper the
+    //      engaging tick uses. Handles assignedSwarmMember, single-
+    //      drone state fallback, and event.lastPosition in that order.
+    //   3. Fall back to fire-time snapshot if all live sources fail.
     const _liveTarget = () => {
-      if (d.assignedSwarmMember?.billboard?.position) {
-        const cart = d.assignedSwarmMember.billboard.position.getValue?.(Cesium.JulianDate.now());
-        if (cart) {
-          const c = Cesium.Cartographic.fromCartesian(cart);
-          return {
-            lat: Cesium.Math.toDegrees(c.latitude),
-            lon: Cesium.Math.toDegrees(c.longitude),
-            alt: c.height || 8,
-          };
-        }
+      if (typeof _dronePov !== 'undefined' && _dronePov.active && _dronePov.eventId === d.eventId) {
+        try {
+          const camCart = viewer.scene.camera.positionWC;
+          if (camCart) {
+            const c = Cesium.Cartographic.fromCartesian(camCart);
+            return {
+              lat: Cesium.Math.toDegrees(c.latitude),
+              lon: Cesium.Math.toDegrees(c.longitude),
+              alt: c.height || 8,
+            };
+          }
+        } catch (_) { /* fall through */ }
       }
-      // Single-drone event fallback — read the target event's own
-      // billboard live position so tracers follow the Shahed as it
-      // flies through the tracer's flight time.
-      const st = droneState.get(d.eventId);
-      if (st?.billboard?.position) {
-        const cart = st.billboard.position.getValue?.(Cesium.JulianDate.now());
-        if (cart) {
-          const c = Cesium.Cartographic.fromCartesian(cart);
-          return {
-            lat: Cesium.Math.toDegrees(c.latitude),
-            lon: Cesium.Math.toDegrees(c.longitude),
-            alt: c.height || 8,
-          };
-        }
-      }
+      const live = _liveTargetPositionFor(d);
+      if (live) return { lat: live.lat, lon: live.lon, alt: live.alt || 8 };
       const fallback = d.assignedTargetCoord || target;
       return { lat: fallback.lat, lon: fallback.lon, alt: fallback.alt || 8 };
     };
