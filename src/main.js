@@ -3670,7 +3670,7 @@ async function main() {
   // inbox, can dispatch their own direct asset from THEIR home base.
   // Requester sees status updates flow back via the escalation
   // record's statusHistory.
-  function requestReceiverAsset(eventId, roleId, requestId) {
+  function requestReceiverAsset(eventId, roleId, requestId, { assessmentPackage = null } = {}) {
     const event = getEvent(eventId);
     if (!event) { toast('Event not found', 'err'); return null; }
     const spec = getReceiverRequestAsset(roleId, requestId);
@@ -3690,11 +3690,15 @@ async function main() {
     const requesterRole = getActiveRole();
     const requesterName = requesterRole?.org || requesterRole?.label || roleId;
     const targetName = targetRole.org || targetRole.label || targetRoleId;
+    const msgTail = assessmentPackage?.operatorAssessment
+      ? `: ${assessmentPackage.operatorAssessment}`
+      : `: ${spec.label}. ${spec.sub || ''}`;
     const records = escalateEvent(event.id, {
       destinationIds: targetDestIds,
       payload: 'summary',
-      message: `Assistance request from ${requesterName}: ${spec.label}. ${spec.sub || ''}`,
+      message: `Assistance request from ${requesterName}${msgTail}`,
       operator: `${requesterName} (assistance request)`,
+      assessmentPackage,
     });
     if (records.length === 0) {
       toast(`${targetName} already notified for this event.`, 'info');
@@ -13034,6 +13038,206 @@ async function main() {
     });
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // Cascade capture modal
+  // ───────────────────────────────────────────────────────────────────
+  // Opens when the operator initiates any cross-agency escalation (cascade
+  // to intel, request tactical intervention, request another agency's
+  // asset, etc). Captures the "why we called you" record that ships
+  // alongside the escalation as an assessmentPackage so the recipient
+  // profile always sees the original context, even after downstream event
+  // state drifts.
+  //
+  // Fields captured:
+  //   - operatorAssessment  freeform text (required, but small placeholder
+  //                         seeded from event summary so the operator can
+  //                         edit rather than write from scratch)
+  //   - priority            critical | urgent | standard
+  //   - cascadeReason       tactical-urgency | attribution | forensic-handoff |
+  //                         coordination | observer-loop (set by caller)
+  //
+  // Auto-captured (snapshot):
+  //   - agenticAssessment        latest Mistral synthesis at cascade time
+  //   - responseHistoryAtCascade dispatches fired so far
+  //   - requesterRoleId          who cascaded
+  //   - cascadedAt               timestamp
+  //
+  // onSubmit callback receives the full assessmentPackage; caller decides
+  // which escalateEvent path to invoke with it.
+  // ═══════════════════════════════════════════════════════════════════
+  function _openCascadeCaptureModal({
+    eventId,
+    targetName,           // human label of the recipient ("Aktionsstyrken", "FE + PET")
+    cascadeReason,        // policy code
+    verb = 'Cascade',     // "Request" | "Cascade" | "Handoff" — shown in title + button
+    defaultPriority = 'urgent',
+    hintText = null,      // one-line hint under the title
+    onSubmit,             // (assessmentPackage) => void
+  }) {
+    const event = getEvent(eventId);
+    if (!event) { toast('Event not found', 'err'); return; }
+    const backdrop = document.createElement('div');
+    backdrop.className = 'cascade-capture-backdrop';
+    backdrop.style.cssText = `
+      position: fixed; inset: 0; background: rgba(6, 8, 11, 0.82);
+      backdrop-filter: blur(4px); z-index: 10000;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-body);
+    `;
+    const close = () => {
+      backdrop.remove();
+      document.removeEventListener('keydown', escHandler);
+    };
+    const escHandler = (ev) => { if (ev.key === 'Escape') close(); };
+    document.addEventListener('keydown', escHandler);
+    backdrop.addEventListener('click', (ev) => { if (ev.target === backdrop) close(); });
+
+    // Snapshot of the current agentic assessment. Best-effort — reads
+    // from the event if the receiver panel has already generated one,
+    // otherwise leaves null. Recipient sees null-as-empty rather than
+    // stale content.
+    const _agenticSnapshot = event._lastAgenticSynthesis
+      ? {
+          narrative:      event._lastAgenticSynthesis.narrative || null,
+          recommendation: event._lastAgenticSynthesis.recommendation || null,
+          model:          event._lastAgenticSynthesis.model || null,
+          generatedAt:    event._lastAgenticSynthesis.generatedAt || null,
+        }
+      : null;
+
+    // Snapshot of dispatches fired so far. Each entry is a compact
+    // record — asset name, kind, state, timestamp — enough for the
+    // recipient to see "who else is already responding".
+    const _dispatchSnapshot = [];
+    try {
+      if (_counterDispatches) {
+        for (const [, cd] of _counterDispatches) {
+          if (cd.eventId !== eventId) continue;
+          _dispatchSnapshot.push({
+            assetId:   cd.id,
+            assetName: cd.assetName || cd.profile?.label || cd.kind || 'unknown',
+            kind:      cd.kind,
+            state:     cd.state,
+            dispatchedAt: cd.dispatchedAt || null,
+          });
+        }
+      }
+    } catch (_) { /* best-effort snapshot; carry on */ }
+
+    // Threat summary for the modal header — one line so the operator
+    // sees what they are escalating without having to look elsewhere.
+    const _threatSummary = [
+      event.classification === 'hostile' ? 'HOSTILE' : (event.classification || '').toUpperCase(),
+      event.threat ? `${event.threat} threat` : '',
+      event.droneType || event.platform || 'unknown platform',
+      event.siteId ? `at ${event.siteId.toUpperCase()}` : '',
+    ].filter(Boolean).join(' · ');
+
+    const priorityBtn = (val, label, hint) => `
+      <button class="cascade-priority-option" data-val="${val}" style="
+        display: flex; flex-direction: column; align-items: flex-start;
+        text-align: left; padding: 10px 12px; border-radius: 3px;
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid var(--border);
+        cursor: pointer; transition: border-color 120ms, background 120ms;
+        font-family: var(--font-body); color: var(--text);
+        flex: 1; gap: 3px;
+      ">
+        <span style="font-size: var(--fs-xs); font-weight: 600;">${label}</span>
+        <span style="font-size: var(--fs-2xs); color: var(--text-dim); line-height: 1.35;">${hint}</span>
+      </button>`;
+
+    backdrop.innerHTML = `
+      <div style="width: min(560px, 94vw); background: var(--panel-solid, #0a0d11); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);">
+        <div style="padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);">
+          <div class="c-section-eyebrow" style="margin-bottom: 4px;">${verb} to ${targetName}</div>
+          <div style="font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.5;">${hintText || `Attaches your assessment + agent snapshot + response history so the recipient sees why you called them.`}</div>
+          <div style="margin-top: 10px; padding: 8px 10px; background: rgba(255,90,90,0.06); border-left: 2px solid rgba(255,90,90,0.5); font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text); letter-spacing: 0.02em;">${_threatSummary}</div>
+        </div>
+        <div style="padding: var(--space-3) var(--space-4);">
+          <div class="c-section-eyebrow" style="margin-bottom: 6px;">Your assessment</div>
+          <div style="font-size: var(--fs-2xs); color: var(--text-dim); margin-bottom: 8px; line-height: 1.4;">Freeform. Why are you calling them? What do you need them to do?</div>
+          <textarea id="cascade-assessment" rows="4" placeholder="e.g. Track is dwelling at 400m over CPH T1 approach. Patrol response cannot reach in time. Request tactical intervention."
+            style="width: 100%; padding: 10px 12px; background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border); border-radius: 2px; color: var(--text); font-family: var(--font-body); font-size: var(--fs-sm); box-sizing: border-box; resize: vertical; min-height: 90px;"></textarea>
+        </div>
+        <div style="padding: 0 var(--space-4) var(--space-3);">
+          <div class="c-section-eyebrow" style="margin-bottom: 6px;">Priority</div>
+          <div style="display: flex; gap: 6px;">
+            ${priorityBtn('critical', 'Critical', 'Immediate action required')}
+            ${priorityBtn('urgent',   'Urgent',   'Response within minutes')}
+            ${priorityBtn('standard', 'Standard', 'Standard SLA window')}
+          </div>
+        </div>
+        <div style="padding: 0 var(--space-4) var(--space-3);">
+          <div class="c-section-eyebrow" style="margin-bottom: 6px;">Auto-attached</div>
+          <div style="font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-dim); line-height: 1.5;">
+            <div>› Agent snapshot: ${_agenticSnapshot ? 'yes' : 'none yet'}</div>
+            <div>› Response history: ${_dispatchSnapshot.length} dispatch${_dispatchSnapshot.length === 1 ? '' : 'es'}</div>
+            <div>› Cascade reason: ${cascadeReason}</div>
+          </div>
+        </div>
+        <div style="padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px;">
+          <button id="cascade-cancel" class="c-btn compact">Cancel</button>
+          <button id="cascade-submit" class="c-btn compact primary" disabled style="opacity: 0.55; cursor: not-allowed;">${verb}</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+
+    let selectedPriority = defaultPriority;
+    const submitBtn = backdrop.querySelector('#cascade-submit');
+    const assessInput = backdrop.querySelector('#cascade-assessment');
+
+    const highlightPriority = () => {
+      backdrop.querySelectorAll('.cascade-priority-option').forEach(b => {
+        if (b.dataset.val === selectedPriority) {
+          b.style.borderColor = 'var(--accent)';
+          b.style.background = 'rgba(77, 210, 255, 0.06)';
+        } else {
+          b.style.borderColor = 'var(--border)';
+          b.style.background = 'rgba(255, 255, 255, 0.02)';
+        }
+      });
+    };
+    highlightPriority();
+
+    backdrop.querySelectorAll('.cascade-priority-option').forEach(btn => {
+      btn.addEventListener('click', () => {
+        selectedPriority = btn.dataset.val;
+        highlightPriority();
+      });
+    });
+
+    const enableSubmitIfReady = () => {
+      const hasText = (assessInput.value || '').trim().length >= 5;
+      submitBtn.disabled = !hasText;
+      submitBtn.style.opacity = hasText ? '1' : '0.55';
+      submitBtn.style.cursor = hasText ? 'pointer' : 'not-allowed';
+    };
+    assessInput.addEventListener('input', enableSubmitIfReady);
+    setTimeout(() => assessInput.focus(), 30);
+
+    backdrop.querySelector('#cascade-cancel').addEventListener('click', close);
+    submitBtn.addEventListener('click', () => {
+      const assessment = (assessInput.value || '').trim();
+      if (assessment.length < 5) {
+        toast('Please add a short assessment before sending.', 'err');
+        return;
+      }
+      const pkg = {
+        operatorAssessment:       assessment,
+        agenticAssessment:        _agenticSnapshot,
+        responseHistoryAtCascade: _dispatchSnapshot,
+        cascadeReason,
+        priority:                 selectedPriority,
+        requesterRoleId:          getActiveRole()?.id || null,
+      };
+      close();
+      try { onSubmit && onSubmit(pkg); }
+      catch (err) { console.warn('[cascade capture] onSubmit failed:', err.message); }
+    });
+  }
+
   function _openObserverPicker(eventId) {
     if (_observerPickerOpen) return;
     _observerPickerOpen = true;
@@ -17815,9 +18019,72 @@ async function main() {
         <div class="rer-audit-foot">Append-only record. Retained for compliance.</div>
       </section>`;
 
+    // Assessment package — "why we called you" record attached when this
+    // escalation is a cross-agency cascade / request. Renders as the
+    // FIRST panel after the header so the recipient sees the context
+    // before any other detail. Nothing renders when the escalation
+    // was auto-generated by an operator dispatch (no cascade package
+    // attached).
+    const _pkg = rec?.assessmentPackage;
+    let assessmentSection = '';
+    if (_pkg) {
+      const _priorityTone = _pkg.priority === 'critical' ? '#ff5a5a'
+        : _pkg.priority === 'urgent' ? '#ffb84d'
+        : 'var(--accent)';
+      const _reasonLabel = ({
+        'tactical-urgency': 'Tactical urgency',
+        'attribution':      'Attribution',
+        'forensic-handoff': 'Forensic handoff',
+        'coordination':     'Coordination',
+        'observer-loop':    'Observer loop',
+      })[_pkg.cascadeReason] || _pkg.cascadeReason;
+      const _requesterLabel = _pkg.requesterRoleId
+        ? (RECEIVERS.find(r => r.id === _pkg.requesterRoleId)?.org
+           || RECEIVERS.find(r => r.id === _pkg.requesterRoleId)?.label
+           || _pkg.requesterRoleId)
+        : (rec.initiatedBy || 'Requester');
+      const _cascadedAt = _pkg.cascadedAt ? _pkg.cascadedAt.slice(11,19) + 'Z' : '';
+      const _agenticBlock = _pkg.agenticAssessment?.narrative
+        ? `<div class="rer-pkg-block">
+            <div class="rer-pkg-block-hdr">Agent snapshot at cascade time</div>
+            <div class="rer-pkg-block-body">${_pkg.agenticAssessment.narrative}</div>
+            ${_pkg.agenticAssessment.recommendation ? `<div class="rer-pkg-block-reco"><b>Recommendation:</b> ${_pkg.agenticAssessment.recommendation}</div>` : ''}
+          </div>`
+        : '';
+      const _historyBlock = _pkg.responseHistoryAtCascade?.length
+        ? `<div class="rer-pkg-block">
+            <div class="rer-pkg-block-hdr">Response history at cascade time</div>
+            <div class="rer-pkg-block-body">
+              <ul class="rer-pkg-history">
+                ${_pkg.responseHistoryAtCascade.map(d => `<li><b>${d.assetName}</b> · ${d.state}</li>`).join('')}
+              </ul>
+            </div>
+          </div>`
+        : '';
+      assessmentSection = `
+        <section class="rer-section rer-assessment" style="border-left: 3px solid ${_priorityTone};">
+          <div class="rer-section-hdr" style="margin-bottom: var(--space-2);">
+            <div class="c-section-eyebrow" style="color: ${_priorityTone};">Why you were called · ${_reasonLabel}</div>
+            <div class="rer-pkg-meta" style="font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-dim); letter-spacing: 0.06em;">
+              <span style="color: ${_priorityTone}; text-transform: uppercase; font-weight: 600;">${_pkg.priority}</span>
+              <span> · ${_requesterLabel}</span>
+              ${_cascadedAt ? `<span> · ${_cascadedAt}</span>` : ''}
+            </div>
+          </div>
+          ${_pkg.operatorAssessment ? `
+            <div class="rer-pkg-block rer-pkg-assessment">
+              <div class="rer-pkg-block-hdr">Requester's assessment</div>
+              <div class="rer-pkg-block-body">${_pkg.operatorAssessment}</div>
+            </div>` : ''}
+          ${_agenticBlock}
+          ${_historyBlock}
+        </section>`;
+    }
+
     return `
       <article class="rer-report">
         ${header}
+        ${assessmentSection}
         ${ai}
         ${actions}
         ${brief}
@@ -19339,31 +19606,46 @@ async function main() {
         } catch (err) { console.warn('[feedback_log] counter-dispatch log failed:', err.message); }
       }
       else if (action === 'cascade-fe-pet') {
-        // Receiver-initiated cascade to FE + PET tier-3 destinations.
-        // Uses the same escalateEvent path the operator uses; dedupe in
-        // events.js prevents adding records for destinations already
-        // escalated. Provenance is stamped in `operator` field so the
-        // operator's audit trail shows WHO initiated the cascade.
+        // Cascade to intelligence services. Now routes through the
+        // capture modal so the operator's assessment + agent snapshot +
+        // response history ship with the escalation as an
+        // assessmentPackage. See scratchpad/receiver-data-flows.html for
+        // rationale. cascadeReason = 'observer-loop' because intel
+        // receives as observer by default (they log, they don't
+        // dispatch).
         const eventId = _selectedReceiverEventId || _workspaceEventId;
         const ev = getEvent(eventId);
         if (!ev) { toast('Event not found', 'err'); return; }
         const dests = destinationsForEvent(ev);
         const targetIds = dests.filter(d => d.tier === 3 && (destinationParent(d) === 'FE' || destinationParent(d) === 'PET')).map(d => d.id);
-        if (!targetIds.length) { toast('No FE/PET destinations configured for this site', 'err'); return; }
+        if (!targetIds.length) { toast('No Forsvarets or Politiets Efterretningstjeneste destinations configured for this site', 'err'); return; }
         const role = getActiveRole();
-        const records = escalateEvent(eventId, {
-          destinationIds: targetIds,
-          payload: 'summary',
-          message: `Strategic cascade requested from ${role.name || 'Receiver'} — event ${eventId}`,
-          operator: `Receiver · ${role.name || role.org || role.person || 'Unknown'}`,
+        _openCascadeCaptureModal({
+          eventId,
+          targetName: 'Forsvarets + Politiets Efterretningstjeneste',
+          cascadeReason: 'observer-loop',
+          verb: 'Cascade',
+          defaultPriority: 'standard',
+          hintText: 'Intel services receive as observer. Attribution + pattern data + your reasoning ship with the cascade.',
+          onSubmit: (assessmentPackage) => {
+            const records = escalateEvent(eventId, {
+              destinationIds: targetIds,
+              payload: 'summary',
+              message: `Strategic cascade from ${role.name || 'Receiver'}: ${assessmentPackage.operatorAssessment}`,
+              operator: `Receiver · ${role.name || role.org || role.person || 'Unknown'}`,
+              assessmentPackage,
+            });
+            if (records.length === 0) toast('Intelligence services already notified for this event', 'info');
+            else toast(`Cascaded to ${records.length} intel destination${records.length === 1 ? '' : 's'} with your assessment.`, 'ok');
+            renderReceiverView();
+          },
         });
-        if (records.length === 0) toast('Intelligence services already notified for this event', 'info');
-        else toast(`Cascaded to ${records.length} strategic intel destination${records.length === 1 ? '' : 's'}`, 'ok');
-        renderReceiverView();
       }
       else if (action === 'cascade-politi') {
-        // Cascades to the LOCAL politikreds for this event's site.
-        // Uses destinationParent === 'Politi' to find the tier-2 entry.
+        // Cascades to the LOCAL politikreds for this event's site. Now
+        // routes through the capture modal — same as above.
+        // cascadeReason = 'coordination' because it's cross-branch
+        // coordination, not attribution or tactical urgency.
         const eventId = _selectedReceiverEventId || _workspaceEventId;
         const ev = getEvent(eventId);
         if (!ev) { toast('Event not found', 'err'); return; }
@@ -19371,15 +19653,27 @@ async function main() {
         const politiIds = dests.filter(d => d.tier === 2 && destinationParent(d) === 'Politi').map(d => d.id);
         if (!politiIds.length) { toast('No local Politi destination configured', 'err'); return; }
         const role = getActiveRole();
-        const records = escalateEvent(eventId, {
-          destinationIds: politiIds,
-          payload: 'summary',
-          message: `Politi coordination requested from ${role.name || 'Receiver'} — event ${eventId}`,
-          operator: `Receiver · ${role.name || role.org || role.person || 'Unknown'}`,
+        const targetPolitiName = dests.find(d => d.id === politiIds[0])?.name || 'local Politikreds';
+        _openCascadeCaptureModal({
+          eventId,
+          targetName: targetPolitiName,
+          cascadeReason: 'coordination',
+          verb: 'Cascade',
+          defaultPriority: 'urgent',
+          hintText: 'Politikreds receives as actor. Your assessment + response history so far ship with the cascade.',
+          onSubmit: (assessmentPackage) => {
+            const records = escalateEvent(eventId, {
+              destinationIds: politiIds,
+              payload: 'summary',
+              message: `Politi coordination from ${role.name || 'Receiver'}: ${assessmentPackage.operatorAssessment}`,
+              operator: `Receiver · ${role.name || role.org || role.person || 'Unknown'}`,
+              assessmentPackage,
+            });
+            if (records.length === 0) toast('Local Politi already coordinated for this event', 'info');
+            else toast(`Cascaded to ${targetPolitiName} with your assessment.`, 'ok');
+            renderReceiverView();
+          },
         });
-        if (records.length === 0) toast('Local Politi already coordinated for this event', 'info');
-        else toast(`Cascaded to local Politikreds (${dests.find(d => d.id === politiIds[0])?.name || 'Politi'})`, 'ok');
-        renderReceiverView();
       }
       // Phase 2 role-scoped CTA stubs. Routing changed 2026-09-06:
       // the audit-log push moved into the dispatch adapter layer
@@ -19453,18 +19747,33 @@ async function main() {
         const activeRole = getActiveRole();
         const requesterName = activeRole?.org || activeRole?.label || 'Receiver';
         const targetName = targetRole.org || targetRole.label || targetRole.id;
-        const records = escalateEvent(eventId, {
-          destinationIds: targetDestIds,
-          payload: 'summary',
-          message: `Assistance request from ${requesterName}. Requesting dispatch from ${targetName}.`,
-          operator: `${requesterName} (assistance request)`,
+        // Route through the capture modal so the operator's assessment
+        // ships with the request. cascadeReason = 'tactical-urgency'
+        // because Other Agencies requests are for live tactical need
+        // (cross-agency asset pull).
+        _openCascadeCaptureModal({
+          eventId,
+          targetName,
+          cascadeReason: 'tactical-urgency',
+          verb: 'Request',
+          defaultPriority: 'urgent',
+          hintText: `Routes to ${targetName}. They see the request in their inbox and dispatch their own asset.`,
+          onSubmit: (assessmentPackage) => {
+            const records = escalateEvent(eventId, {
+              destinationIds: targetDestIds,
+              payload: 'summary',
+              message: `Assistance request from ${requesterName}: ${assessmentPackage.operatorAssessment}`,
+              operator: `${requesterName} (assistance request)`,
+              assessmentPackage,
+            });
+            if (records.length === 0) {
+              toast(`${targetName} already notified.`, 'info');
+            } else {
+              toast(`Request sent to ${targetName} with your assessment.`, 'ok');
+            }
+            renderReceiverView({ immediate: true });
+          },
         });
-        if (records.length === 0) {
-          toast(`${targetName} already notified.`, 'info');
-        } else {
-          toast(`Request sent to ${targetName}. Awaiting their dispatch.`, 'ok');
-        }
-        renderReceiverView({ immediate: true });
       }
       else if (action === 'receiver-dispatch') {
         // Real receiver-side dispatch. Spawns the asset from the
@@ -19492,17 +19801,33 @@ async function main() {
         renderReceiverView({ immediate: true });
       }
       else if (action === 'receiver-request') {
-        // Request-routing. Creates an escalation record targeting the
-        // profile that owns the requested capability. Target profile
-        // sees it in their inbox and can dispatch their own asset.
+        // Request-routing. Now routes through the capture modal so the
+        // operator's assessment ships with the escalation. cascadeReason
+        // = 'tactical-urgency' because request-out from receiver-assets
+        // is almost always for a live tactical need (Aktionsstyrken
+        // request, cross-agency dispatch pull).
         const eventId = id || _selectedReceiverEventId || _workspaceEventId;
         const ev = getEvent(eventId);
         if (!ev) { toast('Event not found', 'err'); return; }
         const role = getActiveRole();
         const requestId = el.dataset.requestId;
         if (!role?.id || !requestId) { toast('Missing role or request context.', 'err'); return; }
-        requestReceiverAsset(eventId, role.id, requestId);
-        renderReceiverView({ immediate: true });
+        const spec = getReceiverRequestAsset(role.id, requestId);
+        if (!spec) { toast('No request spec for that action.', 'err'); return; }
+        const targetRole = RECEIVERS.find(r => r.id === spec.from);
+        const targetName = targetRole?.org || targetRole?.label || spec.from || 'target profile';
+        _openCascadeCaptureModal({
+          eventId,
+          targetName,
+          cascadeReason: 'tactical-urgency',
+          verb: 'Request',
+          defaultPriority: spec.priority === 'critical' ? 'critical' : 'urgent',
+          hintText: spec.expectedResponse ? `Expected response: ${spec.expectedResponse}` : null,
+          onSubmit: (assessmentPackage) => {
+            requestReceiverAsset(eventId, role.id, requestId, { assessmentPackage });
+            renderReceiverView({ immediate: true });
+          },
+        });
       }
       else if (STUB_DISPATCH_ACTIONS.has(action)) {
         const eventId = id || _selectedReceiverEventId || _workspaceEventId;

@@ -329,7 +329,7 @@ EVENTS.forEach(e => {
 
 // ── Escalation (mock UX, real dispatchers replace later) ──
 let _escalationCounter = 0;
-export function escalateEvent(id, { destinationIds, payload, message, operator = 'L. Flindt' }) {
+export function escalateEvent(id, { destinationIds, payload, message, operator = 'L. Flindt', assessmentPackage = null }) {
   const e = EVENTS.find(x => x.id === id);
   if (!e || !destinationIds || !destinationIds.length) return [];
   const now = new Date();
@@ -368,6 +368,30 @@ export function escalateEvent(id, { destinationIds, payload, message, operator =
       // never triggers an auto-cascade — surfaces a visual badge + operator toast.
       overdue: false,
       overdueAt: null,
+      // Assessment package. Optional, attached when the escalation is a
+      // cross-agency cascade or request-out. Frozen at cascade time and
+      // preserved even if downstream event state changes, so recipient
+      // profiles always see the exact "why we called you" record. See
+      // scratchpad/receiver-data-flows.html for the shape rationale.
+      //   operatorAssessment       freeform text from requester
+      //   agenticAssessment        Mistral narrative + recommendation snapshot
+      //   responseHistoryAtCascade snapshot of dispatches at cascade time
+      //   cascadeReason            'tactical-urgency'|'attribution'|
+      //                            'forensic-handoff'|'coordination'|'observer-loop'
+      //   priority                 'critical' | 'urgent' | 'standard'
+      //   requesterRoleId          the role id that initiated the cascade
+      //   cascadedAt               ISO timestamp when the package was frozen
+      assessmentPackage: assessmentPackage
+        ? {
+            operatorAssessment:       (assessmentPackage.operatorAssessment || '').trim(),
+            agenticAssessment:        assessmentPackage.agenticAssessment || null,
+            responseHistoryAtCascade: assessmentPackage.responseHistoryAtCascade || [],
+            cascadeReason:            assessmentPackage.cascadeReason || 'coordination',
+            priority:                 assessmentPackage.priority || 'standard',
+            requesterRoleId:          assessmentPackage.requesterRoleId || null,
+            cascadedAt:               now.toISOString(),
+          }
+        : null,
     };
     return rec;
   });
