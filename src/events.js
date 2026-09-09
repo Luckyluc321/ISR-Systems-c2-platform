@@ -418,6 +418,70 @@ export function updateEscalationStatus(eventId, escalationId, status) {
   _listeners.forEach(fn => fn(eventId));
 }
 
+// Withdraw a cascade after the fact. Situation changed (drone shot
+// down before recipient acknowledged, requester decided assistance
+// no longer needed). Sets status='withdrawn' and appends to
+// statusHistory with a reason. Recipient's case-file renders the
+// escalation with a WITHDRAWN chip so they know not to act on it.
+// Detection-only stance preserved: original escalation record + all
+// prior state is retained for the audit trail; withdrawal is an
+// append, not a delete.
+export function withdrawEscalation(eventId, escalationId, { by = 'unknown', reason = null } = {}) {
+  const e = EVENTS.find(x => x.id === eventId);
+  if (!e || !e.escalations) return null;
+  const rec = e.escalations.find(r => r.id === escalationId);
+  if (!rec) return null;
+  if (rec.status === 'withdrawn') return rec;   // idempotent
+  const now = new Date().toISOString();
+  rec.status = 'withdrawn';
+  rec.statusHistory.push({ timestamp: now, status: 'withdrawn', by, reason: reason || null });
+  rec.withdrawnAt = now;
+  rec.withdrawnBy = by;
+  rec.withdrawReason = (reason || '').trim() || null;
+  e.notes = e.notes || [];
+  e.notes.push({
+    timestamp: now,
+    author: by,
+    text: `Withdrew escalation to ${rec.destinationId}${reason ? '. Reason: "' + reason.trim() + '"' : '.'}`,
+    type: 'escalation-withdraw',
+  });
+  _listeners.forEach(fn => fn(eventId));
+  return rec;
+}
+
+// Post an update to an existing cascade. Situation evolved (new
+// intel, new dispatch, priority changed) and the requester wants
+// the recipient to see the update without creating a fresh
+// escalation record. Appends to assessmentPackage.updates[] so the
+// recipient's case-file can render the update below the original
+// assessment. Timeline of updates is preserved append-only.
+export function updateEscalationAssessment(eventId, escalationId, { text, by = 'unknown', priority = null } = {}) {
+  const e = EVENTS.find(x => x.id === eventId);
+  if (!e || !e.escalations) return null;
+  const rec = e.escalations.find(r => r.id === escalationId);
+  if (!rec) return null;
+  const trimmed = (text || '').trim();
+  if (!trimmed) return null;
+  if (!rec.assessmentPackage) rec.assessmentPackage = {};
+  if (!Array.isArray(rec.assessmentPackage.updates)) rec.assessmentPackage.updates = [];
+  const now = new Date().toISOString();
+  rec.assessmentPackage.updates.push({
+    text: trimmed,
+    priority: priority || rec.assessmentPackage.priority || null,
+    by,
+    at: now,
+  });
+  e.notes = e.notes || [];
+  e.notes.push({
+    timestamp: now,
+    author: by,
+    text: `Updated escalation to ${rec.destinationId}: "${trimmed}"`,
+    type: 'escalation-update',
+  });
+  _listeners.forEach(fn => fn(eventId));
+  return rec;
+}
+
 // Structured status extension (post-ack progress axis).
 // Values: 'in-progress' | 'resolved' | 'blocked'. blockedReason required when
 // progressStatus is 'blocked' (freeform string). Auto-advanced when a receiver

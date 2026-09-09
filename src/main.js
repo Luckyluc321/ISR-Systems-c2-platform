@@ -99,6 +99,7 @@ import {
   resolvePostIncidentChainEntry, postIncidentChainAllLeavesResolved,
   postIncidentChainLeaves, unionLinkedEventDomains,
   registerPostIncidentReportGenerator,
+  withdrawEscalation, updateEscalationAssessment,
 } from './events.js';
 import { buildPostIncidentReport, emphasisForBranch } from './post_incident_report.js';
 import { evaluateClassificationPipeline, evaluateAttackProfileDetector } from './classification_pipeline.js';
@@ -18324,13 +18325,39 @@ async function main() {
             </div>
           </div>`
         : '';
+      // Withdrawn banner takes over the whole assessment section when
+      // the sender pulled the escalation back. Recipient sees the
+      // original context greyed out with a prominent WITHDRAWN chip so
+      // they know not to act on it, but the record stays for audit.
+      const _isWithdrawn = rec.status === 'withdrawn';
+      const _withdrawnTs = rec.withdrawnAt ? rec.withdrawnAt.slice(11,19) + 'Z' : '';
+      const _withdrawBanner = _isWithdrawn ? `
+        <div class="rer-pkg-withdrawn">
+          <div class="rer-pkg-withdrawn-hdr">Withdrawn by ${_requesterLabel} · ${_withdrawnTs}</div>
+          ${rec.withdrawReason ? `<div class="rer-pkg-withdrawn-reason">Reason: ${rec.withdrawReason}</div>` : ''}
+        </div>` : '';
+      // Update history — sender posted follow-up updates after the
+      // original cascade. Rendered as a stack of yellow-bordered blocks
+      // below the original assessment, newest last, so recipient sees
+      // the timeline of "what changed since the sender first called".
+      const _updates = Array.isArray(_pkg.updates) ? _pkg.updates : [];
+      const _updatesBlock = _updates.length ? `
+        <div class="rer-pkg-updates">
+          <div class="rer-pkg-updates-hdr">Updates from ${_requesterLabel} · ${_updates.length}</div>
+          ${_updates.map(u => `
+            <div class="rer-pkg-update">
+              <div class="rer-pkg-update-ts">${u.at ? u.at.slice(11,19) + 'Z' : ''}</div>
+              <div class="rer-pkg-update-body">${u.text}</div>
+            </div>`).join('')}
+        </div>` : '';
       // Prominent "who called you" headline. This is the FIRST thing
       // the recipient sees when they open the case-file, so the
       // sender + timestamp are the biggest text on the section.
       // Reason + priority sit as small chips underneath. The requester's
       // actual assessment prose lives in the block below.
       assessmentSection = `
-        <section class="rer-section rer-assessment" style="border-left: 3px solid ${_priorityTone};">
+        <section class="rer-section rer-assessment ${_isWithdrawn ? 'is-withdrawn' : ''}" style="border-left: 3px solid ${_isWithdrawn ? 'var(--text-mute)' : _priorityTone};">
+          ${_withdrawBanner}
           <div class="rer-pkg-called-hdr">
             <div class="rer-pkg-called-line">
               <span class="rer-pkg-called-who">${_requesterLabel}</span>
@@ -18347,6 +18374,7 @@ async function main() {
               <div class="rer-pkg-block-hdr">Their assessment</div>
               <div class="rer-pkg-block-body">${_pkg.operatorAssessment}</div>
             </div>` : ''}
+          ${_updatesBlock}
           ${_agenticBlock}
           ${_historyBlock}
         </section>`;
@@ -18368,16 +18396,21 @@ async function main() {
       const _sentEscRow = (esc) => {
         const dest = getDestination(esc.destinationId);
         const destName = dest ? dest.name : esc.destinationId;
-        const statusColor = esc.status === 'acknowledged' ? 'var(--ok)'
+        const isWithdrawn = esc.status === 'withdrawn';
+        const statusColor = isWithdrawn ? 'var(--text-mute)'
+          : esc.status === 'acknowledged' ? 'var(--ok)'
           : esc.status === 'read' ? 'var(--accent)'
           : esc.status === 'delivered' ? '#ffb84d'
           : 'var(--text-dim)';
         const ackEntry = esc.statusHistory?.find(h => h.status === 'acknowledged');
         const readEntry = esc.statusHistory?.find(h => h.status === 'read');
         const deliveredEntry = esc.statusHistory?.find(h => h.status === 'delivered');
-        const currentTs = ackEntry?.timestamp || readEntry?.timestamp || deliveredEntry?.timestamp || esc.initiatedAt;
+        const wdEntry = esc.statusHistory?.find(h => h.status === 'withdrawn');
+        const currentTs = isWithdrawn ? wdEntry?.timestamp
+          : (ackEntry?.timestamp || readEntry?.timestamp || deliveredEntry?.timestamp || esc.initiatedAt);
         const currentTsShort = currentTs ? currentTs.slice(11,19) + 'Z' : '';
-        const statusLabel = esc.status === 'acknowledged' ? `acknowledged ${currentTsShort}`
+        const statusLabel = isWithdrawn ? `withdrawn ${currentTsShort}`
+          : esc.status === 'acknowledged' ? `acknowledged ${currentTsShort}`
           : esc.status === 'read' ? `read ${currentTsShort}`
           : esc.status === 'delivered' ? `delivered ${currentTsShort}`
           : `sent ${esc.initiatedAt.slice(11,19)}Z`;
@@ -18386,13 +18419,29 @@ async function main() {
             <div class="rer-sent-response-hdr">Reply from ${destName}${esc.response.receivedAt ? ` · ${esc.response.receivedAt.slice(11,19)}Z` : ''}</div>
             <div class="rer-sent-response-body">${esc.response.text}</div>
           </div>` : '';
+        // Update history — updates the sender posted after the
+        // original cascade. Shows count only; full text is visible
+        // on recipient's case-file.
+        const updateCount = esc.assessmentPackage?.updates?.length || 0;
+        const updateBadge = updateCount
+          ? `<span class="rer-sent-updates" title="Updates you posted after the original cascade">${updateCount} update${updateCount === 1 ? '' : 's'} sent</span>`
+          : '';
+        // Actions — withdraw + update. Hidden if already withdrawn.
+        const actionsBlock = isWithdrawn
+          ? `<div class="rer-sent-actions"><span class="rer-sent-withdrawn-note">${esc.withdrawReason ? esc.withdrawReason : 'Withdrawn by sender.'}</span></div>`
+          : `<div class="rer-sent-actions">
+              <button class="c-btn compact" data-rcv="cascade-update" data-esc="${esc.id}" title="Post an update to this cascade">Update</button>
+              <button class="c-btn compact" data-rcv="cascade-withdraw" data-esc="${esc.id}" title="Withdraw this cascade">Withdraw</button>
+            </div>`;
         return `
-          <div class="rer-sent-row">
+          <div class="rer-sent-row ${isWithdrawn ? 'is-withdrawn' : ''}">
             <div class="rer-sent-hdr">
               <span class="rer-sent-dest">${destName}</span>
               <span class="rer-sent-status" style="color: ${statusColor};">${statusLabel}</span>
+              ${updateBadge}
             </div>
             ${respondBlock}
+            ${actionsBlock}
           </div>`;
       };
       sentCascadesSection = `
@@ -20481,6 +20530,56 @@ async function main() {
         _respondingEscId = null;
         _lastReceiverViewSig = null;
         renderReceiverView({ immediate: true });
+      }
+      else if (action === 'cascade-withdraw') {
+        // Sender withdraws a live cascade. Opens the branded text prompt
+        // so the operator can supply a short reason (visible to recipient
+        // as WITHDRAWN · Reason: X). Withdraws are append-only per
+        // events.js — original escalation record + statusHistory retained
+        // for audit.
+        const evtId = _workspaceEventId || _selectedReceiverEventId;
+        if (!evtId || !escId) { toast('No cascade context', 'err'); return; }
+        _openTextPromptModal({
+          title: 'Withdraw cascade',
+          hint: 'Situation changed. The recipient sees this cascade as withdrawn with your reason.',
+          placeholder: 'Threat neutralised. Assistance no longer needed.',
+          submitLabel: 'Withdraw',
+          minChars: 3,
+          onSubmit: (reason) => {
+            const rec = withdrawEscalation(evtId, escId, {
+              by: getActiveRole()?.id || 'sender',
+              reason,
+            });
+            if (!rec) { toast('Withdraw failed.', 'err'); return; }
+            toast('Cascade withdrawn.', 'ok');
+            _lastConsoleSig = null;
+            renderReceiverView({ immediate: true });
+          },
+        });
+      }
+      else if (action === 'cascade-update') {
+        // Sender posts an update to a live cascade. Appends to
+        // assessmentPackage.updates[] on the escalation record; recipient
+        // sees the update stacked below the original assessment.
+        const evtId = _workspaceEventId || _selectedReceiverEventId;
+        if (!evtId || !escId) { toast('No cascade context', 'err'); return; }
+        _openTextPromptModal({
+          title: 'Post cascade update',
+          hint: 'Add a short update. Appears on the recipient case-file below your original note.',
+          placeholder: 'Aktionsstyrken now inbound from Ejby, will handle terminal intercept.',
+          submitLabel: 'Post update',
+          minChars: 3,
+          onSubmit: (text) => {
+            const rec = updateEscalationAssessment(evtId, escId, {
+              text,
+              by: getActiveRole()?.id || 'sender',
+            });
+            if (!rec) { toast('Update failed.', 'err'); return; }
+            toast('Update posted to recipient.', 'ok');
+            _lastConsoleSig = null;
+            renderReceiverView({ immediate: true });
+          },
+        });
       }
       else if (action === 'respond-send') {
         const txt = document.getElementById('rcv-response-text').value;
