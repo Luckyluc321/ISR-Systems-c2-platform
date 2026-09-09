@@ -17611,13 +17611,156 @@ async function main() {
       ${_renderStep6CloseEvent(event, activeRole)}
       ${_renderPostIncidentReportPanel(event, activeRole)}
 
+      ${_renderAgenciesOnCasePanel(event, activeRole)}
+
       ${otherList.length ? `
         <div class="c-panel">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Other agencies on case</div>
-          <div class="c-label" style="margin-bottom: var(--space-2); text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">Response products available from other agencies. Ranked by real distance to the threat coordinate. Click Send request to route it to that agency for their acceptance.</div>
+          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Request from other agencies</div>
+          <div class="c-label" style="margin-bottom: var(--space-2); text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">Response products available to pull in. Ranked by real distance to the threat. Click Send request to route it to that agency for their acceptance.</div>
           ${otherAgenciesHtml}
         </div>` : ''}
     `;
+  }
+
+  // Renders the "Other agencies on case" panel — a list of agencies
+  // ACTUALLY on the case (they received an escalation or fired a
+  // dispatch), each expandable to their responses. Distinct from the
+  // "Request from other agencies" panel below it which lists the pool
+  // of assets you could pull in. Lucas's Sept 9 spec: don't list
+  // asset kinds — list agencies actually looking into it, with their
+  // responses in a dropdown per agency.
+  function _renderAgenciesOnCasePanel(event, activeRole) {
+    if (!event) return '';
+    const activeRoleId = activeRole?.id || null;
+    // Build agencies map: roleId → { role, escalations: [], dispatches: [] }
+    const agencies = new Map();
+    const _ensure = (roleId) => {
+      if (!agencies.has(roleId)) {
+        const roleDef = RECEIVERS.find(r => r.id === roleId);
+        agencies.set(roleId, {
+          roleId,
+          label: roleDef?.org || roleDef?.label || roleId,
+          escalations: [],
+          dispatches: [],
+        });
+      }
+      return agencies.get(roleId);
+    };
+    // Map destinationId → owning role by intersecting with each role's
+    // destinationIds. A destination can belong to multiple roles (some
+    // sibling profiles share a destination); attribute the escalation
+    // to the FIRST role that lists it, which mirrors the render-side
+    // role lookup used elsewhere.
+    const _roleForDest = (destId) => {
+      for (const r of RECEIVERS) {
+        if ((r.destinationIds || []).includes(destId)) return r.id;
+      }
+      return null;
+    };
+    // Attribute escalations to their owning receiver role. Skip the
+    // active role — the operator sees their own escalation state on
+    // the case-file, not in this cross-agency panel.
+    for (const esc of (event.escalations || [])) {
+      const roleId = _roleForDest(esc.destinationId);
+      if (!roleId) continue;
+      if (roleId === activeRoleId) continue;
+      _ensure(roleId).escalations.push(esc);
+    }
+    // Attribute counter-dispatches to their ownerRoleId. Same active-
+    // role skip so a Politi Kbh operator doesn't see their own patrol
+    // cars listed under this panel.
+    if (typeof _counterDispatches !== 'undefined' && _counterDispatches) {
+      for (const [, cd] of _counterDispatches) {
+        if (cd.eventId !== event.id) continue;
+        const roleId = cd.ownerRoleId;
+        if (!roleId) continue;
+        if (roleId === activeRoleId) continue;
+        _ensure(roleId).dispatches.push(cd);
+      }
+    }
+    if (!agencies.size) return '';
+    const agencyRows = [];
+    for (const [roleId, ag] of agencies) {
+      const expandKey = `agency-on-case::${event.id}::${roleId}`;
+      const isExpanded = _otherAgenciesExpanded.has(expandKey);
+      const chevron = isExpanded ? '▾' : '▸';
+      // One-line status summary for the collapsed row.
+      const ackedEscs = ag.escalations.filter(e => e.status === 'acknowledged');
+      const activeDispatches = ag.dispatches.filter(d => d.state !== 'complete' && !d.rtbCompleted);
+      const summaryBits = [];
+      if (ag.escalations.length) {
+        summaryBits.push(`${ag.escalations.length} escalation${ag.escalations.length === 1 ? '' : 's'}${ackedEscs.length ? ` · ${ackedEscs.length} acked` : ''}`);
+      }
+      if (ag.dispatches.length) {
+        summaryBits.push(`${ag.dispatches.length} dispatch${ag.dispatches.length === 1 ? '' : 'es'}${activeDispatches.length ? ` · ${activeDispatches.length} active` : ''}`);
+      }
+      const summaryLine = summaryBits.join(' · ') || 'On case';
+      // Expanded body: escalations table + dispatches table.
+      let bodyHtml = '';
+      if (isExpanded) {
+        const escHtml = ag.escalations.length ? `
+          <div class="agency-oc-block">
+            <div class="agency-oc-block-hdr">Escalations received</div>
+            ${ag.escalations.map(esc => {
+              const statusColor = esc.status === 'acknowledged' ? 'var(--ok)'
+                : esc.status === 'read' ? 'var(--accent)'
+                : esc.status === 'delivered' ? '#ffb84d'
+                : esc.status === 'withdrawn' ? 'var(--text-mute)'
+                : 'var(--text-dim)';
+              const latestEntry = esc.statusHistory?.[esc.statusHistory.length - 1];
+              const latestTs = latestEntry ? ` ${latestEntry.timestamp.slice(11,19)}Z` : '';
+              const cascadeFrom = esc.assessmentPackage?.requesterRoleId
+                ? ` · via ${(RECEIVERS.find(r => r.id === esc.assessmentPackage.requesterRoleId)?.org || esc.assessmentPackage.requesterRoleId)}`
+                : '';
+              const replyBlock = esc.response?.text
+                ? `<div class="agency-oc-reply"><b>Reply:</b> ${esc.response.text}</div>`
+                : '';
+              return `
+                <div class="agency-oc-row">
+                  <span class="agency-oc-row-label">Case delivered${cascadeFrom}</span>
+                  <span class="agency-oc-row-state" style="color: ${statusColor};">${esc.status}${latestTs}</span>
+                  ${replyBlock}
+                </div>`;
+            }).join('')}
+          </div>` : '';
+        const dispHtml = ag.dispatches.length ? `
+          <div class="agency-oc-block">
+            <div class="agency-oc-block-hdr">Dispatches fired</div>
+            ${ag.dispatches.map(cd => {
+              const stateColor = cd.state === 'complete' ? 'var(--ok)'
+                : cd.state === 'engaging' ? 'var(--accent)'
+                : cd.state === 'en_route' ? '#ffb84d'
+                : 'var(--text-dim)';
+              const viaTag = cd.viaRequestFromRoleId === activeRoleId
+                ? ` · <span style="color:var(--ok);">via your request</span>`
+                : '';
+              return `
+                <div class="agency-oc-row">
+                  <span class="agency-oc-row-label">${cd.assetName}${viaTag}</span>
+                  <span class="agency-oc-row-state" style="color: ${stateColor};">${(cd.state || 'unknown').replace(/_/g, ' ')}</span>
+                </div>`;
+            }).join('')}
+          </div>` : '';
+        bodyHtml = `<div class="agency-oc-body">${escHtml}${dispHtml}</div>`;
+      }
+      agencyRows.push(`
+        <div class="agency-oc-item">
+          <div class="agency-oc-hdr" data-rcv="other-agency-toggle" data-kind-key="${expandKey}">
+            <span class="agency-oc-chevron">${chevron}</span>
+            <div class="agency-oc-title-block">
+              <div class="agency-oc-title">${ag.label}</div>
+              <div class="agency-oc-summary">${summaryLine}</div>
+            </div>
+          </div>
+          ${bodyHtml}
+        </div>`);
+    }
+    return `
+      <div class="c-panel">
+        <div class="c-panel-title" style="margin-bottom: var(--space-2);">Other agencies on case</div>
+        <div class="c-label" style="margin-bottom: var(--space-2); text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">Agencies that received the case or fired a response. Expand to see their escalation status, dispatches, and any reply back to the sender.</div>
+        ${agencyRows.join('')}
+      </div>`;
   }
 
   // ══════════════════════════════════════════════════════════════════
