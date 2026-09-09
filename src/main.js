@@ -19554,10 +19554,6 @@ async function main() {
       : role.scope;
     const standbyHero = `
       <div class="rcv-standby-hero">
-        <div class="rcv-standby-status">
-          <div class="rcv-standby-dot"></div>
-          <div class="rcv-standby-label">Nominal</div>
-        </div>
         <div class="rcv-standby-subtitle">No cases open. Monitoring ${_scopeCopy}.</div>
         ${advisories.length ? `
           <div class="rcv-standby-adv-hdr">Cross-cued advisories · ${advisories.length}</div>
