@@ -3659,7 +3659,11 @@ async function main() {
       lat: base.lat,
       lon: base.lon,
     };
-    dispatchCounterResponse(eventId, asset, opts);
+    // Stamp the dispatching role as owner + carry any via-request
+    // provenance so the cross-tenant echo panel can tag "Aktionsstyrken
+    // deployed X · via your request" on the requester's case-file. See
+    // Chunk B #3 in the comms-flow gaps.
+    dispatchCounterResponse(eventId, asset, { ...opts, ownerRoleId: roleId });
     toast(`${spec.label} dispatched from ${base.name}.`, 'ok');
     return asset;
   }
@@ -3857,6 +3861,8 @@ async function main() {
         groupId, memberIndex: i, memberCount: swarmSize, variantId,
         originOffset: offsets[i],
         threatLat, threatLon,
+        ownerRoleId: opts.ownerRoleId || null,
+        viaRequestFromRoleId: opts.viaRequestFromRoleId || null,
       });
     }
 
@@ -3889,7 +3895,7 @@ async function main() {
   // Spawn a single dispatch instance. Called once per member for
   // single-drone dispatches, N times for swarm dispatches.
   function _spawnDispatchInstance(event, asset, profile, memberOpts) {
-    const { groupId, memberIndex, memberCount, variantId, originOffset, threatLat, threatLon } = memberOpts;
+    const { groupId, memberIndex, memberCount, variantId, originOffset, threatLat, threatLon, ownerRoleId, viaRequestFromRoleId } = memberOpts;
     const dispatchId = `cd-${event.id}-${asset.id}-${memberIndex}-${Date.now()}`;
     const isStatic = profile.cruiseKmh === 0;
 
@@ -3931,6 +3937,14 @@ async function main() {
       // endurance (fuel not battery) — cap at 120 min for the demo.
       batteryPct: 100,
       enduranceMin: profile.airborne ? 30 : 120,
+      // Provenance — who owns the dispatch and, if it was dispatched
+      // in response to a cross-agency request, who asked. Populated by
+      // dispatchReceiverAsset and the receiver-dispatch handler. Read
+      // by the cross-tenant dispatch echo panel on the receiver case-file
+      // to render "Aktionsstyrken deployed tactical van · via your
+      // request" on the requester's own case-file.
+      ownerRoleId: ownerRoleId || null,
+      viaRequestFromRoleId: viaRequestFromRoleId || null,
     };
     _counterDispatches.set(dispatchId, d);
     _createCounterDispatchEntities(d);
@@ -18112,20 +18126,28 @@ async function main() {
     // on this escalation. Previously only rendered in inbox split view,
     // making the workspace "Respond" button appear to do nothing.
     const isResponding = rec && _respondingEscId === rec.id;
+    // Sender label — same resolution as the Reply CTA subline. Cascade
+    // recipients see the actual requester name; direct-escalation
+    // recipients see "operator".
+    const _composerSender = rec?.assessmentPackage?.requesterRoleId
+      ? (RECEIVERS.find(r => r.id === rec.assessmentPackage.requesterRoleId)?.org
+         || RECEIVERS.find(r => r.id === rec.assessmentPackage.requesterRoleId)?.label
+         || 'sender')
+      : 'operator';
     const composerHtml = isResponding ? `
       <div class="rer-composer" style="margin-top: var(--space-3); padding: var(--space-3); background: rgba(77, 210, 255, 0.05); border-left: 2px solid var(--accent); border-radius: 2px;">
-        <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent); font-size: var(--fs-2xs); margin-bottom: var(--space-2);">Response to operator</div>
-        <textarea id="rcv-response-text" rows="3" placeholder="Type your response here. Delivered to the operator inbox with your role and timestamp." style="width: 100%; padding: var(--space-2); background: rgba(0,0,0,0.25); border: 1px solid var(--border); border-radius: 2px; color: var(--text); font-family: var(--font-body); font-size: var(--fs-sm); line-height: 1.5; resize: vertical; box-sizing: border-box;"></textarea>
+        <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent); font-size: var(--fs-2xs); margin-bottom: var(--space-2);">Reply to ${_composerSender}</div>
+        <textarea id="rcv-response-text" rows="3" placeholder="Your reply lands in ${_composerSender}'s case-file as a threaded response." style="width: 100%; padding: var(--space-2); background: rgba(0,0,0,0.25); border: 1px solid var(--border); border-radius: 2px; color: var(--text); font-family: var(--font-body); font-size: var(--fs-sm); line-height: 1.5; resize: vertical; box-sizing: border-box;"></textarea>
         <div style="margin-top: var(--space-2); display: flex; gap: var(--space-2); justify-content: flex-end;">
           <button class="c-btn" data-rcv="respond-cancel">Cancel</button>
-          <button class="c-btn primary" data-rcv="respond-send" data-esc="${rec.id}">Send response</button>
+          <button class="c-btn primary" data-rcv="respond-send" data-esc="${rec.id}">Send reply</button>
         </div>
       </div>` : '';
-    // Sent-response display: if the operator has already responded to
-    // this receiver's message, show the reply thread inline.
+    // Sent-reply display: if this profile has already replied on this
+    // escalation, show the sent-message inline as confirmation.
     const sentHtml = rec?.response ? `
       <div style="margin-top: var(--space-3); padding: var(--space-3); background: rgba(77, 255, 156, 0.05); border-left: 2px solid var(--ok); border-radius: 2px;">
-        <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: var(--ok); font-size: var(--fs-2xs); margin-bottom: var(--space-1);">Your response sent ${rec.response.receivedAt ? rec.response.receivedAt.slice(11,19) + 'Z' : ''}</div>
+        <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: var(--ok); font-size: var(--fs-2xs); margin-bottom: var(--space-1);">Your reply sent to ${_composerSender} ${rec.response.receivedAt ? rec.response.receivedAt.slice(11,19) + 'Z' : ''}</div>
         <div style="font-size: var(--fs-sm); color: var(--text); line-height: 1.5;">${rec.response.text}</div>
       </div>` : '';
     // Phase 2 Step 2 · Observer chip. Shows when the active role is
@@ -18382,11 +18404,73 @@ async function main() {
         </section>`;
     }
 
+    // Live response on this event — every counter-dispatch on the
+    // event, grouped by owning profile. Cross-tenant identity is
+    // public (that Aktionsstyrken responded); internal dispatch
+    // state (their internal ROE, their route selection) is not
+    // exposed. Just: who dispatched what, current state, and if
+    // they dispatched in response to a request from THIS role,
+    // a "via your request" tag so the requester sees the loop
+    // closed. See Chunk B #3 in the comms-flow gaps.
+    let liveResponseSection = '';
+    const _liveDispatches = [];
+    if (_counterDispatches) {
+      for (const [, cd] of _counterDispatches) {
+        if (cd.eventId !== event.id) continue;
+        _liveDispatches.push(cd);
+      }
+    }
+    if (_liveDispatches.length) {
+      // Group by owner role. Non-receiver dispatches (operator direct)
+      // fall into a synthetic 'operator' bucket.
+      const _byOwner = new Map();
+      for (const cd of _liveDispatches) {
+        const key = cd.ownerRoleId || 'operator';
+        if (!_byOwner.has(key)) _byOwner.set(key, []);
+        _byOwner.get(key).push(cd);
+      }
+      const _ownerBlocks = [];
+      for (const [ownerKey, cds] of _byOwner) {
+        const ownerLabel = ownerKey === 'operator'
+          ? 'Operator'
+          : (RECEIVERS.find(r => r.id === ownerKey)?.org
+             || RECEIVERS.find(r => r.id === ownerKey)?.label
+             || ownerKey);
+        const rows = cds.map(cd => {
+          const stateTone = cd.state === 'complete' ? 'var(--ok)'
+            : cd.state === 'engaging' ? 'var(--accent)'
+            : cd.state === 'en_route' ? '#ffb84d'
+            : 'var(--text-dim)';
+          const stateLabel = (cd.state || 'unknown').replace(/_/g, ' ');
+          const viaTag = cd.viaRequestFromRoleId === role.id
+            ? `<span class="rer-live-via" style="margin-left:6px;padding:1px 6px;background:rgba(77,255,156,0.10);border:1px solid rgba(77,255,156,0.4);border-radius:10px;font-size:var(--fs-2xs);color:var(--ok);font-family:var(--font-mono);letter-spacing:0.08em;">via your request</span>`
+            : '';
+          return `
+            <div class="rer-live-row">
+              <span class="rer-live-name">${cd.assetName}</span>
+              <span class="rer-live-state" style="color: ${stateTone};">${stateLabel}</span>
+              ${viaTag}
+            </div>`;
+        }).join('');
+        _ownerBlocks.push(`
+          <div class="rer-live-owner">
+            <div class="rer-live-owner-hdr">${ownerLabel}${ownerKey === role.id ? ' <span style="color: var(--text-dim); font-weight: 400; letter-spacing: 0;">(you)</span>' : ''}</div>
+            ${rows}
+          </div>`);
+      }
+      liveResponseSection = `
+        <section class="rer-section rer-live-response">
+          <div class="c-section-eyebrow">Live response · ${_liveDispatches.length} dispatch${_liveDispatches.length === 1 ? '' : 'es'}</div>
+          <div class="rer-live-list">${_ownerBlocks.join('')}</div>
+        </section>`;
+    }
+
     return `
       <article class="rer-report">
         ${header}
         ${assessmentSection}
         ${sentCascadesSection}
+        ${liveResponseSection}
         ${ai}
         ${actions}
         ${brief}
@@ -19093,11 +19177,22 @@ async function main() {
       tooltip: 'Adds another role to this event as an observer. They receive notifications but no CTAs unless promoted.',
     });
     if (rec) {
+      // Sender label: cascade recipients see "Reply to Rigspolitiet",
+      // direct-escalation recipients see "Reply to operator". Keeps the
+      // action generic while making the target clear in the CTA subline.
+      const _senderLabel = rec.assessmentPackage?.requesterRoleId
+        ? (RECEIVERS.find(r => r.id === rec.assessmentPackage.requesterRoleId)?.org
+           || RECEIVERS.find(r => r.id === rec.assessmentPackage.requesterRoleId)?.label
+           || 'sender')
+        : 'operator';
       ctas.push({
-        label: 'Respond to operator', sub: 'Send back to source', icon: '↩', tone: 'neutral',
+        label: 'Reply',
+        sub: `Send back to ${_senderLabel}`,
+        icon: '↩',
+        tone: 'neutral',
         action: 'respond-open', esc: rec.id,
         category: 'case',
-        tooltip: 'Opens the response composer. Reply is delivered to the operator inbox.',
+        tooltip: `Opens the reply composer. Reply lands in ${_senderLabel}'s case-file as a threaded response.`,
       });
       // Explicit status update — freeform advancement of progressStatus
       // + optional blocked-reason. Auto-advance from physical-response
@@ -20087,17 +20182,25 @@ async function main() {
         if (!role?.id || !assetKey) { toast('Missing role or asset context.', 'err'); return; }
         // Also flip the receiver's escalation record to in-progress
         // so the operator sees status advancing on the escalation log.
+        // If this receiver was cascaded to via a cross-agency request
+        // (assessmentPackage on their escalation record), capture the
+        // requesterRoleId so the dispatch echoes to the requester's
+        // case-file with a "via your request" tag.
+        let viaRequestFromRoleId = null;
         try {
           const roleDestSet = new Set(role.destinationIds || []);
           const myRec = (ev.escalations || []).find(r => roleDestSet.has(r.destinationId));
-          if (myRec && myRec.progressStatus !== 'resolved') {
-            updateEscalationProgress(eventId, myRec.id, 'in-progress', {
-              reason: null,
-              by: role.id,
-            });
+          if (myRec) {
+            viaRequestFromRoleId = myRec.assessmentPackage?.requesterRoleId || null;
+            if (myRec.progressStatus !== 'resolved') {
+              updateEscalationProgress(eventId, myRec.id, 'in-progress', {
+                reason: null,
+                by: role.id,
+              });
+            }
           }
         } catch (err) { console.warn('[progress] auto-advance failed:', err.message); }
-        dispatchReceiverAsset(eventId, role.id, assetKey, {});
+        dispatchReceiverAsset(eventId, role.id, assetKey, { viaRequestFromRoleId });
         renderReceiverView({ immediate: true });
       }
       else if (action === 'receiver-request') {
