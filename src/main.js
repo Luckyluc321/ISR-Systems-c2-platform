@@ -285,6 +285,13 @@ import './adapters/feedback_log_localstorage.js';
 // docs/agentic-dispatch-adapter-architecture.md.
 import { getDispatchAdapter, DEFAULT_DISPATCH_ADAPTER_KEY } from './dispatch_source.js';
 import './adapters/dispatch_mock.js';
+// Escalation adapter seam — cross-agency cascade / withdraw / update /
+// reply / acknowledge lifecycle. Mock adapter is default; real
+// customer inbox systems register per-role later. See
+// src/escalation_source.js for the contract and Item 6 of the
+// post-audit checklist for the rationale.
+import { fireEscalationAdapter } from './escalation_source.js';
+import './adapters/escalation_mock.js';
 
 // Phase 2 role-scoped CTA action names. Every entry here MUST route
 // through the dispatch adapter seam (currently the mock, tomorrow
@@ -3690,6 +3697,24 @@ async function main() {
     });
   }
 
+  // Fan out freshly-created escalation records to the escalation
+  // adapter (mock today; per-role real adapters land per customer).
+  // Fire-and-forget so the UI stays snappy. Adapter is responsible
+  // for forwarding intent to the recipient's real inbox system;
+  // events.js has already mutated the local source of truth.
+  function _fireEscalationAdapterSend(event, records) {
+    if (!event || !Array.isArray(records) || !records.length) return;
+    const actorRole = getActiveRole();
+    records.forEach(rec => {
+      fireEscalationAdapter('sendEscalation', {
+        eventId: event.id,
+        event,
+        escalationRecord: rec,
+        actorRole,
+      });
+    });
+  }
+
   // Receiver-side request-routing. Politi requesting Aktionsstyrken
   // creates a new escalation record targeting the AKS role with
   // flow='assistance-request'. The AKS profile sees it in their
@@ -3727,6 +3752,7 @@ async function main() {
       assessmentPackage,
     });
     _simulateEscalationDelivery(event.id, records);
+    _fireEscalationAdapterSend(event, records);
     if (records.length === 0) {
       toast(`${targetName} already notified for this event.`, 'info');
     } else {
@@ -20410,6 +20436,12 @@ async function main() {
         const evtId = id || _workspaceEventId || _selectedReceiverEventId;
         if (!evtId) { toast('No event context for acknowledgement', 'err'); return; }
         updateEscalationStatus(evtId, escId, 'acknowledged');
+        fireEscalationAdapter('acknowledgeEscalation', {
+          eventId: evtId,
+          event: getEvent(evtId),
+          escalationId: escId,
+          actorRole: getActiveRole(),
+        });
         toast('Acknowledgment sent to operator', 'ok');
         _lastConsoleSig = null;   // console-only re-render so Step 1 unlocks
         renderReceiverView({ immediate: true });
@@ -20553,6 +20585,7 @@ async function main() {
               assessmentPackage,
             });
             _simulateEscalationDelivery(eventId, records);
+            _fireEscalationAdapterSend(ev, records);
             const selectedLabels = (selectedAgencyIds || [])
               .map(aid => _agencyCandidates.find(a => a.id === aid)?.label || aid)
               .join(', ');
@@ -20591,6 +20624,7 @@ async function main() {
               assessmentPackage,
             });
             _simulateEscalationDelivery(eventId, records);
+            _fireEscalationAdapterSend(ev, records);
             if (records.length === 0) toast('Local Politi already coordinated for this event', 'info');
             else toast(`Cascaded to ${targetPolitiName} with your assessment.`, 'ok');
             renderReceiverView({ immediate: true });
@@ -20689,6 +20723,7 @@ async function main() {
               assessmentPackage,
             });
             _simulateEscalationDelivery(eventId, records);
+            _fireEscalationAdapterSend(ev, records);
             if (records.length === 0) {
               toast(`${targetName} already notified.`, 'info');
             } else {
@@ -20802,6 +20837,7 @@ async function main() {
               assessmentPackage,
             });
             _simulateEscalationDelivery(eventId, records);
+            _fireEscalationAdapterSend(ev, records);
             if (records.length === 0) toast('Aktionsstyrken already notified for this event', 'info');
             else toast(`Request sent to ${targetName} with your assessment.`, 'ok');
             renderReceiverView({ immediate: true });
@@ -21042,6 +21078,15 @@ async function main() {
               reason,
             });
             if (!rec) { toast('Withdraw failed.', 'err'); return; }
+            // Fire adapter (mock no-ops the transport; real customer
+            // inbox systems forward the withdraw over their API).
+            fireEscalationAdapter('withdrawEscalation', {
+              eventId: evtId,
+              event: getEvent(evtId),
+              escalationId: escId,
+              reason,
+              actorRole: getActiveRole(),
+            });
             toast('Cascade withdrawn.', 'ok');
             _lastConsoleSig = null;
             renderReceiverView({ immediate: true });
@@ -21066,6 +21111,14 @@ async function main() {
               by: getActiveRole()?.id || 'sender',
             });
             if (!rec) { toast('Update failed.', 'err'); return; }
+            fireEscalationAdapter('updateAssessment', {
+              eventId: evtId,
+              event: getEvent(evtId),
+              escalationId: escId,
+              updateText: text,
+              priority: rec.assessmentPackage?.priority || null,
+              actorRole: getActiveRole(),
+            });
             toast('Update posted to recipient.', 'ok');
             _lastConsoleSig = null;
             renderReceiverView({ immediate: true });
@@ -21083,6 +21136,13 @@ async function main() {
         const evtId = _workspaceEventId || _selectedReceiverEventId;
         if (!evtId) { toast('No event context for response', 'err'); return; }
         respondToEscalation(evtId, escId, txt, `${getActiveRole().person} (${getActiveRole().org})`);
+        fireEscalationAdapter('replyToEscalation', {
+          eventId: evtId,
+          event: getEvent(evtId),
+          escalationId: escId,
+          replyText: txt,
+          actorRole: getActiveRole(),
+        });
         _respondingEscId = null;
         toast('Response sent to operator', 'ok');
         _lastReceiverViewSig = null;
