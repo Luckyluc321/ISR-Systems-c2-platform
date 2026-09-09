@@ -15332,39 +15332,98 @@ async function main() {
           </div>`).join('')}
       </div>` : '';
 
-    const escStatusLabel = (s) => ({ sent: 'SENT', delivered: 'DELIVERED', read: 'READ', acknowledged: 'ACKNOWLEDGED', failed: 'FAILED' }[s] || s.toUpperCase());
-    const escalationLog = (e.escalations && e.escalations.length) ? `
-      <div class="dp-section">
-        <div class="dp-section-title">Escalation Log · ${e.escalations.length}</div>
-        ${e.escalations.map(esc => {
-          const dest = getDestination(esc.destinationId);
-          const destName = dest ? dest.name : esc.destinationId;
-          const destType = dest ? destinationTypeLabel(dest.type) : '';
-          const statusChain = esc.statusHistory.map(h => `${escStatusLabel(h.status)} ${h.timestamp.slice(11,19)}Z`).join(' → ');
-          const overdueBadge = esc.overdue
-            ? `<span class="esc-overdue-badge" style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:rgba(255,120,120,0.12);border:1px solid rgba(255,120,120,0.5);border-radius:12px;font-size:var(--fs-2xs);letter-spacing:0.14em;color:#ff7878;font-family:var(--font-mono);margin-left:6px;">OVERDUE</span>`
-            : '';
-          const progressBadge = _renderProgressBadge(esc);
-          const response = esc.response ? `
-            <div class="esc-response">
-              <div class="esc-response-hdr">Response · ${esc.response.respondedBy} · ${esc.response.receivedAt.slice(11,19)}Z</div>
-              <div class="esc-response-text">${esc.response.text}</div>
-            </div>` : '';
-          return `
-            <div class="esc-row esc-status-${esc.status}${esc.overdue ? ' esc-overdue' : ''}">
+    const escStatusLabel = (s) => ({ sent: 'SENT', delivered: 'DELIVERED', read: 'READ', acknowledged: 'ACKNOWLEDGED', failed: 'FAILED', withdrawn: 'WITHDRAWN' }[s] || s.toUpperCase());
+
+    // Build the cascade tree: escalations without assessmentPackage
+    // are ROOTS (direct operator-initiated). Escalations WITH
+    // assessmentPackage.requesterRoleId are CHILDREN of the escalation
+    // record that landed in the requester's inbox — i.e. their parent
+    // is the escalation with destinationId ∈ requesterRole.destinationIds.
+    // This turns the flat log into "who cascaded what to whom".
+    const _buildCascadeTree = (escalations) => {
+      const roots = [];
+      const childrenByParentId = new Map();
+      // Index escalations by id for quick lookup
+      const byId = new Map(escalations.map(esc => [esc.id, esc]));
+      // For each cascade escalation, find its parent
+      for (const esc of escalations) {
+        const requesterRoleId = esc.assessmentPackage?.requesterRoleId;
+        if (!requesterRoleId) {
+          roots.push(esc);
+          continue;
+        }
+        // Requester's destinationIds. Find the escalation on this event
+        // whose destinationId is in that set — that's the parent.
+        const requesterRole = RECEIVERS.find(r => r.id === requesterRoleId);
+        const requesterDestIds = new Set(requesterRole?.destinationIds || []);
+        const parentEsc = escalations.find(p => requesterDestIds.has(p.destinationId));
+        if (!parentEsc) {
+          // Requester's own escalation not on this event (edge case) —
+          // orphan the cascade at the root so it doesn't vanish.
+          roots.push(esc);
+          continue;
+        }
+        if (!childrenByParentId.has(parentEsc.id)) childrenByParentId.set(parentEsc.id, []);
+        childrenByParentId.get(parentEsc.id).push(esc);
+      }
+      return { roots, childrenByParentId, byId };
+    };
+    const _cascadeTree = _buildCascadeTree(e.escalations || []);
+
+    const _renderEscNode = (esc, depth) => {
+      const dest = getDestination(esc.destinationId);
+      const destName = dest ? dest.name : esc.destinationId;
+      const destType = dest ? destinationTypeLabel(dest.type) : '';
+      const statusChain = esc.statusHistory.map(h => `${escStatusLabel(h.status)} ${h.timestamp.slice(11,19)}Z`).join(' → ');
+      const overdueBadge = esc.overdue
+        ? `<span class="esc-overdue-badge" style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:rgba(255,120,120,0.12);border:1px solid rgba(255,120,120,0.5);border-radius:12px;font-size:var(--fs-2xs);letter-spacing:0.14em;color:#ff7878;font-family:var(--font-mono);margin-left:6px;">OVERDUE</span>`
+        : '';
+      const progressBadge = _renderProgressBadge(esc);
+      const response = esc.response ? `
+        <div class="esc-response">
+          <div class="esc-response-hdr">Response · ${esc.response.respondedBy} · ${esc.response.receivedAt.slice(11,19)}Z</div>
+          <div class="esc-response-text">${esc.response.text}</div>
+        </div>` : '';
+      // Cascade attribution — show WHO cascaded when depth > 0
+      const cascadedByLabel = esc.assessmentPackage?.requesterRoleId
+        ? (RECEIVERS.find(r => r.id === esc.assessmentPackage.requesterRoleId)?.org
+           || RECEIVERS.find(r => r.id === esc.assessmentPackage.requesterRoleId)?.label
+           || esc.assessmentPackage.requesterRoleId)
+        : null;
+      const cascadeChip = cascadedByLabel
+        ? `<span class="esc-cascade-chip" title="Cascaded from ${cascadedByLabel}">via ${cascadedByLabel}</span>`
+        : '';
+      const withdrawnChip = esc.status === 'withdrawn'
+        ? `<span class="esc-withdrawn-chip">WITHDRAWN</span>`
+        : '';
+      const kids = _cascadeTree.childrenByParentId.get(esc.id) || [];
+      return `
+        <div class="esc-tree-node" data-depth="${depth}" style="margin-left: ${depth * 20}px;">
+          <div class="esc-row esc-status-${esc.status}${esc.overdue ? ' esc-overdue' : ''}${esc.status === 'withdrawn' ? ' esc-withdrawn-row' : ''}">
+            ${depth > 0 ? `<div class="esc-tree-branch" aria-hidden="true">└─</div>` : ''}
+            <div class="esc-tree-body">
               <div class="esc-hdr">
                 <span class="esc-dest">${destName}</span>
                 <span class="esc-type">${destType}</span>
                 <span class="esc-status">${escStatusLabel(esc.status)}</span>
-                ${overdueBadge}
+                ${cascadeChip}
                 ${progressBadge}
               </div>
               <div class="esc-meta">${esc.payload.toUpperCase()} · by ${esc.initiatedBy}</div>
               ${esc.message ? `<div class="esc-msg">"${esc.message}"</div>` : ''}
               <div class="esc-chain">${statusChain}</div>
               ${response}
-            </div>`;
-        }).join('')}
+            </div>
+          </div>
+          ${kids.map(k => _renderEscNode(k, depth + 1)).join('')}
+        </div>`;
+    };
+    const escalationLog = (e.escalations && e.escalations.length) ? `
+      <div class="dp-section">
+        <div class="dp-section-title">Escalation Log · ${e.escalations.length}</div>
+        <div class="esc-tree">
+          ${_cascadeTree.roots.map(r => _renderEscNode(r, 0)).join('')}
+        </div>
       </div>` : '';
 
     const actionsBlock = isActive ? `

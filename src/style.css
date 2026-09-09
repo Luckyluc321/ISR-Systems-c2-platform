@@ -3404,12 +3404,52 @@ body.replay-dragging * {
   margin-top: 8px;
   background: rgba(180, 200, 220, 0.03);
   border-left: 2px solid var(--text-dimmer);
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
 }
 .esc-row.esc-status-sent { border-left-color: var(--hi); }
 .esc-row.esc-status-delivered { border-left-color: var(--warn); }
 .esc-row.esc-status-read { border-left-color: var(--accent); }
 .esc-row.esc-status-acknowledged { border-left-color: var(--ok); }
 .esc-row.esc-status-failed { border-left-color: #ff3838; }
+.esc-row.esc-status-withdrawn { border-left-color: var(--text-mute); opacity: 0.7; }
+.esc-row.esc-withdrawn-row .esc-dest { text-decoration: line-through; text-decoration-color: var(--text-mute); }
+
+/* Cascade tree — indented tree of escalations grouped by parent. */
+.esc-tree { display: flex; flex-direction: column; }
+.esc-tree-node { position: relative; }
+.esc-tree-branch {
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  font-size: 12px;
+  padding-top: 8px;
+  flex-shrink: 0;
+}
+.esc-tree-body { flex: 1; min-width: 0; }
+.esc-cascade-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  background: rgba(77, 210, 255, 0.10);
+  border: 1px solid rgba(77, 210, 255, 0.4);
+  border-radius: 10px;
+  font-size: 10px;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: lowercase;
+}
+.esc-withdrawn-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  background: rgba(120, 130, 140, 0.14);
+  border: 1px solid var(--text-mute);
+  border-radius: 10px;
+  font-size: 10px;
+  color: var(--text-mute);
+  font-family: var(--font-mono);
+  letter-spacing: 0.10em;
+}
 
 .esc-hdr {
   display: flex; align-items: center; gap: 8px;
