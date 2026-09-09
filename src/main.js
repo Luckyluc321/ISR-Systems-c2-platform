@@ -13159,47 +13159,49 @@ async function main() {
       'observer-loop':    'Observer loop',
     })[cascadeReason] || 'Coordination';
 
-    const priorityBtn = (val, label, hint) => `
+    const priorityBtn = (val, label) => `
       <button class="cascade-priority-option" data-val="${val}" type="button" style="
-        display: flex; flex-direction: column; align-items: flex-start;
-        text-align: left; padding: 10px 12px; border-radius: 3px;
+        display: flex; align-items: center; justify-content: center;
+        padding: 10px 12px; border-radius: 3px;
         background: rgba(255, 255, 255, 0.02);
         border: 1px solid var(--border);
         cursor: pointer; transition: border-color 120ms, background 120ms;
         font-family: var(--font-body); color: var(--text);
-        flex: 1; gap: 3px;
+        flex: 1;
       ">
         <span style="font-size: var(--fs-xs); font-weight: 600;">${label}</span>
-        <span style="font-size: var(--fs-2xs); color: var(--text-dim); line-height: 1.35;">${hint}</span>
       </button>`;
 
+    // Info panel content — revealed on click of the (?) icon. Everything
+    // that used to bulk up the modal now lives here on demand.
+    const _infoPanelHtml = `
+      <div id="cascade-info-panel" style="display: none; margin-top: 10px; padding: 10px 12px; background: rgba(77,210,255,0.04); border-left: 2px solid var(--accent); font-size: var(--fs-2xs); color: var(--text-dim); line-height: 1.5;">
+        ${hintText ? `<div style="color: var(--text); margin-bottom: 6px;">${hintText}</div>` : ''}
+        <div>Recipient sees your note, the latest agent take, and what you've dispatched so far.</div>
+        <div style="margin-top: 6px;">Attached automatically: ${_agenticSnapshot ? 'agent take, ' : ''}${_dispatchSnapshot.length} dispatch${_dispatchSnapshot.length === 1 ? '' : 'es'}.</div>
+      </div>`;
+
     backdrop.innerHTML = `
-      <div style="width: min(560px, 94vw); background: var(--panel-solid, #0a0d11); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);">
+      <div style="width: min(520px, 94vw); background: var(--panel-solid, #0a0d11); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);">
         <div style="padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);">
-          <div class="c-section-eyebrow" style="margin-bottom: 4px;">${verb} to ${targetName}</div>
-          <div style="font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.5;">${hintText || `Your assessment, agent snapshot, and response history ship with the escalation so the recipient sees the full context.`}</div>
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);">
+            <div class="c-section-eyebrow">${verb} to ${targetName}</div>
+            <button id="cascade-info-toggle" type="button" title="What gets sent" aria-label="What gets sent" style="background: transparent; border: 1px solid var(--border); color: var(--text-dim); border-radius: 50%; width: 22px; height: 22px; padding: 0; cursor: pointer; font-size: 12px; line-height: 1; font-family: var(--font-mono); flex-shrink: 0;">?</button>
+          </div>
           <div style="margin-top: 10px; padding: 8px 10px; background: rgba(255,90,90,0.06); border-left: 2px solid rgba(255,90,90,0.5); font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text); letter-spacing: 0.02em;">${_threatSummary}</div>
+          ${_infoPanelHtml}
         </div>
         <div style="padding: var(--space-3) var(--space-4);">
-          <div class="c-section-eyebrow" style="margin-bottom: 6px;">Your assessment</div>
-          <div style="font-size: var(--fs-2xs); color: var(--text-dim); margin-bottom: 8px; line-height: 1.4;">Why are you calling them? What do you need them to do?</div>
-          <textarea id="cascade-assessment" rows="4" placeholder="Track dwelling at 400m over Copenhagen approach. Patrol response cannot reach in time. Requesting immediate intervention."
+          <div class="c-section-eyebrow" style="margin-bottom: 8px;">Your note</div>
+          <textarea id="cascade-assessment" rows="4" placeholder="What's happening and what do you need from them"
             style="width: 100%; padding: 10px 12px; background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border); border-radius: 2px; color: var(--text); font-family: var(--font-body); font-size: var(--fs-sm); box-sizing: border-box; resize: vertical; min-height: 90px;"></textarea>
         </div>
         <div style="padding: 0 var(--space-4) var(--space-3);">
-          <div class="c-section-eyebrow" style="margin-bottom: 6px;">Priority</div>
+          <div class="c-section-eyebrow" style="margin-bottom: 8px;">Priority</div>
           <div style="display: flex; gap: 6px;">
-            ${priorityBtn('critical', 'Critical', 'Immediate action required')}
-            ${priorityBtn('urgent',   'Urgent',   'Response within minutes')}
-            ${priorityBtn('standard', 'Standard', 'Standard response window')}
-          </div>
-        </div>
-        <div style="padding: 0 var(--space-4) var(--space-3);">
-          <div class="c-section-eyebrow" style="margin-bottom: 6px;">Included automatically</div>
-          <div style="font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-dim); line-height: 1.6;">
-            <div>› Agent snapshot: ${_agenticSnapshot ? 'yes' : 'none yet'}</div>
-            <div>› Response history: ${_dispatchSnapshot.length} dispatch${_dispatchSnapshot.length === 1 ? '' : 'es'}</div>
-            <div>› Reason: ${_reasonLabel}</div>
+            ${priorityBtn('critical', 'Critical')}
+            ${priorityBtn('urgent',   'Urgent')}
+            ${priorityBtn('standard', 'Standard')}
           </div>
         </div>
         <div style="padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px;">
@@ -13214,6 +13216,16 @@ async function main() {
     const submitBtn = backdrop.querySelector('#cascade-submit');
     const cancelBtn = backdrop.querySelector('#cascade-cancel');
     const assessInput = backdrop.querySelector('#cascade-assessment');
+    const infoToggle = backdrop.querySelector('#cascade-info-toggle');
+    const infoPanel  = backdrop.querySelector('#cascade-info-panel');
+
+    infoToggle?.addEventListener('click', (ev) => {
+      ev.stopPropagation(); ev.preventDefault();
+      const visible = infoPanel.style.display !== 'none';
+      infoPanel.style.display = visible ? 'none' : 'block';
+      infoToggle.style.borderColor = visible ? 'var(--border)' : 'var(--accent)';
+      infoToggle.style.color       = visible ? 'var(--text-dim)' : 'var(--accent)';
+    });
 
     const highlightPriority = () => {
       backdrop.querySelectorAll('.cascade-priority-option').forEach(b => {
@@ -19855,7 +19867,7 @@ async function main() {
           cascadeReason: 'observer-loop',
           verb: 'Cascade',
           defaultPriority: 'standard',
-          hintText: 'Intel services receive as observer. Attribution + pattern data + your reasoning ship with the cascade.',
+          hintText: 'They log it for pattern-of-life. They do not dispatch.',
           onSubmit: (assessmentPackage) => {
             const records = escalateEvent(eventId, {
               destinationIds: targetIds,
@@ -19889,7 +19901,7 @@ async function main() {
           cascadeReason: 'coordination',
           verb: 'Cascade',
           defaultPriority: 'urgent',
-          hintText: 'Politikreds receives as actor. Your assessment + response history so far ship with the cascade.',
+          hintText: 'Local Politikreds picks up the case and can dispatch their own units.',
           onSubmit: (assessmentPackage) => {
             const records = escalateEvent(eventId, {
               destinationIds: politiIds,
@@ -19986,7 +19998,7 @@ async function main() {
           cascadeReason: 'tactical-urgency',
           verb: 'Request',
           defaultPriority: 'urgent',
-          hintText: `Routes to ${targetName}. They see the request in their inbox and dispatch their own asset.`,
+          hintText: `${targetName} handles the dispatch. Your note lands in their inbox.`,
           onSubmit: (assessmentPackage) => {
             const records = escalateEvent(eventId, {
               destinationIds: targetDestIds,
@@ -20051,7 +20063,7 @@ async function main() {
           cascadeReason: 'tactical-urgency',
           verb: 'Request',
           defaultPriority: spec.priority === 'critical' ? 'critical' : 'urgent',
-          hintText: spec.expectedResponse ? `Expected response: ${spec.expectedResponse}` : null,
+          hintText: spec.expectedResponse ? `${targetName} sends: ${spec.expectedResponse}` : `${targetName} handles the dispatch.`,
           onSubmit: (assessmentPackage) => {
             requestReceiverAsset(eventId, role.id, requestId, { assessmentPackage });
             renderReceiverView({ immediate: true });
@@ -20079,7 +20091,7 @@ async function main() {
           cascadeReason: 'tactical-urgency',
           verb: 'Request',
           defaultPriority: 'critical',
-          hintText: 'Aktionsstyrken tactical van or strike team from Ejby. Your assessment + priority ships with the request.',
+          hintText: 'Aktionsstyrken sends a tactical van or strike team from Ejby.',
           onSubmit: (assessmentPackage) => {
             const records = escalateEvent(eventId, {
               destinationIds: targetDestIds,
