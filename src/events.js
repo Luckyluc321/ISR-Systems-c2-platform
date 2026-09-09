@@ -336,10 +336,19 @@ export function escalateEvent(id, { destinationIds, payload, message, operator =
   // Dedupe destinations: skip any destinationId that already has a record
   // on this event (auto-rules + manual escalation could otherwise both
   // fire for the same agency). Also dedupe within the incoming batch.
+  //
+  // EXCEPTION: cross-agency cascades (assessmentPackage present) are
+  // always allowed to create a fresh record even when the destination
+  // is already targeted by a prior operator escalation. Reason: the
+  // cascade carries its own "why we called you" context; folding it
+  // into an existing operator record would drop that provenance and
+  // the recipient would never see the sender's assessment. Each cascade
+  // is a distinct comms event.
   const existingDestIds = new Set((e.escalations || []).map(r => r.destinationId));
   const seen = new Set();
   const uniqueDests = destinationIds.filter(d => {
-    if (existingDestIds.has(d) || seen.has(d)) return false;
+    if (seen.has(d)) return false;
+    if (existingDestIds.has(d) && !assessmentPackage) return false;
     seen.add(d);
     return true;
   });

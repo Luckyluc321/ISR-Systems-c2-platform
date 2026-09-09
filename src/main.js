@@ -17477,8 +17477,20 @@ async function main() {
     // Acknowledgment gate — options unlock only after this role has
     // acked. Mirrors real command-room doctrine: read, ack, deliberate,
     // then commit. Uses the same rec lookup as renderEventReport.
+    //
+    // rec priority: when the role has multiple escalations on the same
+    // event (e.g. operator escalated to PET tier-2 earlier, then
+    // Rigspoliti cascaded to PET tier-2 with an assessmentPackage), we
+    // want the CASCADE to surface — it carries the newest "why we
+    // called you" context and is the record demanding attention. Rule:
+    // prefer records with assessmentPackage; among those, most recent
+    // first; fall back to any matching record.
     const roleDestSet = new Set(activeRole?.destinationIds || []);
-    const rec = (event.escalations || []).find(r => roleDestSet.has(r.destinationId));
+    const _matchingRecs = (event.escalations || []).filter(r => roleDestSet.has(r.destinationId));
+    const _cascadeRecs = _matchingRecs.filter(r => r.assessmentPackage).sort((a, b) =>
+      (b.initiatedAt || '').localeCompare(a.initiatedAt || '')
+    );
+    const rec = _cascadeRecs[0] || _matchingRecs[0] || null;
     const ackTs = rec?.statusHistory?.find(h => h.status === 'acknowledged')?.timestamp;
     const isAcked = !!ackTs;
 
@@ -18126,7 +18138,15 @@ async function main() {
   function renderEventReport(event) {
     const role = getActiveRole();
     const roleDestSet = new Set(role.destinationIds || []);
-    const rec = event.escalations.find(r => roleDestSet.has(r.destinationId));
+    // See rec selection rationale in renderMissionConsole above: cascade
+    // records (with assessmentPackage) surface over prior operator
+    // escalations so the "why we called you" section renders and the
+    // ACK badge reflects the correct escalation state.
+    const _matching = (event.escalations || []).filter(r => roleDestSet.has(r.destinationId));
+    const _cascades = _matching.filter(r => r.assessmentPackage).sort((a, b) =>
+      (b.initiatedAt || '').localeCompare(a.initiatedAt || '')
+    );
+    const rec = _cascades[0] || _matching[0] || null;
     const site = SITES[event.siteId];
     const isActive = event.status === 'active';
     const dispatchTs = rec?.statusHistory?.[0]?.timestamp;
@@ -20119,8 +20139,22 @@ async function main() {
         const eventId = _selectedReceiverEventId || _workspaceEventId;
         const ev = getEvent(eventId);
         if (!ev) { toast('Event not found', 'err'); return; }
-        const dests = destinationsForEvent(ev);
-        const targetIds = dests.filter(d => d.tier === 3 && (destinationParent(d) === 'FE' || destinationParent(d) === 'PET')).map(d => d.id);
+        // Route to destinations the recipient ROLES actually watch,
+        // not to tier-filtered destination IDs. PET's role definition
+        // listens on tier-2 destinations; the prior tier-3 filter meant
+        // PET never saw the cascade (the record landed on cph-t3-pet
+        // but PET's roleDestSet didn't include it). Use each recipient
+        // role's own destinationIds, intersected with this event's
+        // configured destination pool.
+        const _currentSiteDestIds = new Set(destinationsForEvent(ev).map(d => d.id));
+        const _pickTargetsFor = (roleId) => {
+          const roleDef = RECEIVERS.find(r => r.id === roleId);
+          return (roleDef?.destinationIds || []).filter(d => _currentSiteDestIds.has(d));
+        };
+        const targetIds = [
+          ..._pickTargetsFor('fe'),
+          ..._pickTargetsFor('pet'),
+        ];
         if (!targetIds.length) { toast('No Forsvarets or Politiets Efterretningstjeneste destinations configured for this site', 'err'); return; }
         const role = getActiveRole();
         _openCascadeCaptureModal({
