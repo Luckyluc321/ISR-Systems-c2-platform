@@ -12,6 +12,15 @@
 import { syncEventSubject, applyNnTickToSubject } from './detection_subject.js';
 import { SITES } from './sites.js';
 
+// Schema version stamps. Every escalation record + assessment package
+// gets its version stamped at write time so future consumers can gate
+// rehydration / adapter transforms / migrations on shape drift. Bump
+// these when any field is added, removed, or renamed. Prior records
+// carry their original version; consumers must handle any historical
+// version they intend to read.
+export const ESCALATION_SCHEMA_VERSION = 1;
+export const ASSESSMENT_PACKAGE_SCHEMA_VERSION = 1;
+
 export const EVENTS = [
   // ── Recently closed hostile (was live, exited 10 min ago) ──
   {
@@ -356,6 +365,12 @@ export function escalateEvent(id, { destinationIds, payload, message, operator =
   const records = uniqueDests.map(destId => {
     _escalationCounter++;
     const rec = {
+      // Schema version stamp on every escalation record so future
+      // consumers (Azure blob rehydration, backend migrations, external
+      // adapters) can detect + branch on shape drift. Bump this when
+      // any field is added/removed/renamed on the record; leave prior
+      // records untouched — they carry their original version.
+      _schemaVersion: ESCALATION_SCHEMA_VERSION,
       id: `ESC-${now.getUTCFullYear()}${String(now.getUTCMonth()+1).padStart(2,'0')}${String(now.getUTCDate()).padStart(2,'0')}-${String(_escalationCounter).padStart(4,'0')}`,
       destinationId: destId,
       initiatedBy: operator,
@@ -392,6 +407,11 @@ export function escalateEvent(id, { destinationIds, payload, message, operator =
       //   cascadedAt               ISO timestamp when the package was frozen
       assessmentPackage: assessmentPackage
         ? {
+            // Schema version stamp on every frozen assessment package.
+            // A package written today under v1 must still render if a
+            // future v2 adds new fields; bump this when the shape
+            // changes and gate consumers on _schemaVersion.
+            _schemaVersion:           ASSESSMENT_PACKAGE_SCHEMA_VERSION,
             operatorAssessment:       (assessmentPackage.operatorAssessment || '').trim(),
             agenticAssessment:        assessmentPackage.agenticAssessment || null,
             responseHistoryAtCascade: assessmentPackage.responseHistoryAtCascade || [],

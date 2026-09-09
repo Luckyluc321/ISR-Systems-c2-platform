@@ -15424,12 +15424,27 @@ async function main() {
         }
         // Requester's destinationIds. Find the escalation on this event
         // whose destinationId is in that set — that's the parent.
+        //
+        // When the requester role has multiple escalations on the event
+        // (operator escalation + a cascade from someone else), prefer
+        // (a) the cascade that this child was actually cascaded from
+        // (best guess: earliest cascade record targeting the requester
+        // that predates this child), (b) the earliest operator escalation
+        // as a fallback. Same class of first-match bug the audit flagged
+        // in the receiver-dispatch handler above — applying the same
+        // deterministic sort here so a cascade tree renders under the
+        // correct root even when the requester has parallel escalations.
         const requesterRole = RECEIVERS.find(r => r.id === requesterRoleId);
         const requesterDestIds = new Set(requesterRole?.destinationIds || []);
-        const parentEsc = escalations.find(p => requesterDestIds.has(p.destinationId));
+        const parentCandidates = escalations
+          .filter(p => requesterDestIds.has(p.destinationId) && p.id !== esc.id)
+          .filter(p => (p.initiatedAt || '') <= (esc.initiatedAt || ''))
+          .sort((a, b) => (b.initiatedAt || '').localeCompare(a.initiatedAt || ''));
+        const parentEsc = parentCandidates[0] || null;
         if (!parentEsc) {
           // Requester's own escalation not on this event (edge case) —
           // orphan the cascade at the root so it doesn't vanish.
+          esc._isOrphanCascade = true;   // marker consumed by _renderEscNode
           roots.push(esc);
           continue;
         }
@@ -15466,6 +15481,14 @@ async function main() {
       const withdrawnChip = esc.status === 'withdrawn'
         ? `<span class="esc-withdrawn-chip">WITHDRAWN</span>`
         : '';
+      // Orphan cascade chip — cascade whose parent escalation isn't on
+      // this event (requester spontaneously cascaded from a case they
+      // weren't formally escalated to). Rendered at root but marked so
+      // it doesn't silently masquerade as an operator-initiated
+      // escalation.
+      const orphanChip = esc._isOrphanCascade
+        ? `<span class="esc-orphan-chip" title="Requester has no incoming escalation on this event — cascade rooted here as fallback">ORPHAN</span>`
+        : '';
       const kids = _cascadeTree.childrenByParentId.get(esc.id) || [];
       return `
         <div class="esc-tree-node" data-depth="${depth}" style="margin-left: ${depth * 20}px;">
@@ -15477,6 +15500,8 @@ async function main() {
                 <span class="esc-type">${destType}</span>
                 <span class="esc-status">${escStatusLabel(esc.status)}</span>
                 ${cascadeChip}
+                ${orphanChip}
+                ${withdrawnChip}
                 ${progressBadge}
               </div>
               <div class="esc-meta">${esc.payload.toUpperCase()} · by ${esc.initiatedBy}</div>
@@ -20559,10 +20584,21 @@ async function main() {
         // (assessmentPackage on their escalation record), capture the
         // requesterRoleId so the dispatch echoes to the requester's
         // case-file with a "via your request" tag.
+        //
+        // Cascade-first sort: if this role has BOTH an earlier operator
+        // escalation AND a newer cascade record, prefer the cascade —
+        // otherwise viaRequestFromRoleId resolves to null and the "via
+        // your request" pill never renders. Same rec-selection rule
+        // efc6183 applied to renderEventReport and renderMissionConsole;
+        // the audit flagged this handler as a missed site.
         let viaRequestFromRoleId = null;
         try {
           const roleDestSet = new Set(role.destinationIds || []);
-          const myRec = (ev.escalations || []).find(r => roleDestSet.has(r.destinationId));
+          const matching = (ev.escalations || []).filter(r => roleDestSet.has(r.destinationId));
+          const cascades = matching.filter(r => r.assessmentPackage).sort((a, b) =>
+            (b.initiatedAt || '').localeCompare(a.initiatedAt || '')
+          );
+          const myRec = cascades[0] || matching[0] || null;
           if (myRec) {
             viaRequestFromRoleId = myRec.assessmentPackage?.requesterRoleId || null;
             if (myRec.progressStatus !== 'resolved') {

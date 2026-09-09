@@ -3450,6 +3450,17 @@ body.replay-dragging * {
   font-family: var(--font-mono);
   letter-spacing: 0.10em;
 }
+.esc-orphan-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  background: rgba(255, 184, 77, 0.10);
+  border: 1px solid rgba(255, 184, 77, 0.5);
+  border-radius: 10px;
+  font-size: 10px;
+  color: #ffb84d;
+  font-family: var(--font-mono);
+  letter-spacing: 0.10em;
+}
 
 .esc-hdr {
   display: flex; align-items: center; gap: 8px;
