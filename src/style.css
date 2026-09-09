@@ -5453,49 +5453,50 @@ body.mode-receiver #receiver-view { display: flex; }
    awareness. Advisory cards get promoted from the compact strip to
    full-width blocks that own the viewport.
    ═══════════════════════════════════════════════════════════════════ */
+/* Empty-inbox standby state. Deliberately quiet — no hero billboard,
+   no pulsing animation, no oversized display type. An operator on a
+   nominal day should not have "STANDING BY" screamed at them. Reads
+   as an ambient line at the top of the inbox area. */
 .rcv-standby-hero {
   flex: 0 0 auto;
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  padding: var(--space-5);
-  gap: var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  gap: var(--space-2);
   min-height: 0;
-  background: var(--surface-panel);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin: var(--space-4) var(--space-4) var(--space-4);
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  margin: 0;
 }
 .rcv-standby-status {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-top: var(--space-4);
+  gap: 10px;
+  margin-top: 0;
 }
 .rcv-standby-dot {
-  width: 10px; height: 10px; border-radius: 50%;
-  background: var(--accent);
-  box-shadow: 0 0 12px rgba(77, 210, 255, 0.7);
-  animation: rcv-standby-pulse 2.4s ease-in-out infinite;
-}
-@keyframes rcv-standby-pulse {
-  0%, 100% { opacity: 0.55; transform: scale(1); }
-  50%      { opacity: 1;    transform: scale(1.25); }
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--text-dim);
+  box-shadow: none;
+  opacity: 0.7;
 }
 .rcv-standby-label {
   font-family: var(--font-mono);
-  font-size: 22px;
-  letter-spacing: 0.22em;
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--text);
-  font-weight: 600;
+  color: var(--text-dim);
+  font-weight: 500;
 }
 .rcv-standby-subtitle {
   font-family: var(--font-body);
-  font-size: 13px;
+  font-size: var(--fs-xs);
   color: var(--text-dim);
-  line-height: 1.55;
+  line-height: 1.5;
   max-width: 640px;
+  opacity: 0.85;
 }
 .rcv-standby-adv-hdr {
   font-family: var(--font-mono);
@@ -5514,21 +5515,19 @@ body.mode-receiver #receiver-view { display: flex; }
   gap: var(--space-3);
 }
 .rcv-standby-empty-adv {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.10em;
+  font-family: var(--font-body);
+  font-size: var(--fs-2xs);
   color: var(--text-dim);
-  padding: var(--space-3) var(--space-4);
-  border-top: 1px solid var(--border);
+  padding: 0;
+  border: none;
+  background: transparent;
   text-align: left;
   margin-top: var(--space-1);
-  background: rgba(0,0,0,0.15);
-  border-radius: 0 0 var(--radius) var(--radius);
+  opacity: 0.7;
 }
 .rcv-standby-empty-adv::before {
-  content: '○ ';
-  color: var(--text-dimmer);
-  margin-right: 4px;
+  content: '';
+  margin-right: 0;
 }
 .rcv-adv-hero-card {
   border: 1px solid rgba(255, 184, 77, 0.35);

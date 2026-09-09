@@ -19548,19 +19548,21 @@ async function main() {
         <div class="rcv-adv-hero-cta">Click to open cross-cued advisory →</div>
       </div>`).join('') : '';
 
+    const _scopeCopy = role.scope === 'all-sites' ? 'all sites nationally'
+      : role.scope === 'cph-only' ? 'Copenhagen Airport'
+      : role.scope === 'esbjerg-only' ? 'Esbjerg Harbour'
+      : role.scope;
     const standbyHero = `
       <div class="rcv-standby-hero">
         <div class="rcv-standby-status">
           <div class="rcv-standby-dot"></div>
-          <div class="rcv-standby-label">Standing by</div>
+          <div class="rcv-standby-label">Nominal</div>
         </div>
-        <div class="rcv-standby-subtitle">No incidents currently dispatched to ${role.label}. Your desk is monitoring ${role.scope === 'all-sites' ? 'all sites nationally' : role.scope === 'cph-only' ? 'CPH Airport' : role.scope === 'esbjerg-only' ? 'Esbjerg Harbour' : role.scope}.</div>
+        <div class="rcv-standby-subtitle">No cases open. Monitoring ${_scopeCopy}.</div>
         ${advisories.length ? `
           <div class="rcv-standby-adv-hdr">Cross-cued advisories · ${advisories.length}</div>
           <div class="rcv-standby-adv-list">${advisoryHeroCards}</div>
-        ` : `
-          <div class="rcv-standby-empty-adv">No projected-threat advisories at monitored sites.</div>
-        `}
+        ` : ''}
       </div>`;
 
     const list = receivedEvents.length ? receivedEvents.map(e => {
