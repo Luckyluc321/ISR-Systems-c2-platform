@@ -443,7 +443,81 @@ Default `mock` adapter (src/adapters/escalation_mock.js) stamps an interaction r
 
 ---
 
-## 7. What this document does NOT cover
+## 7. Receiver archetype taxonomy
+
+Foundation for recipient chapter shapes + cascade picker grouping. Every one of the 386 registered receivers maps to a primary action archetype + optional secondaries. Every action a receiver takes is classified by archetype; contributor chapters render one sub-section per archetype populated.
+
+### The 8 archetypes
+
+| Archetype | What it is | Kind | Role count |
+|---|---|---|---|
+| **Kinetic response** | Dispatches ground / air / maritime / specialist assets, engages, produces outcomes | thick | ~50 |
+| **Coordination & command** | Marshals cross-agency response, no direct kinetic action, situational reports + cascade decisions | thin | ~15 |
+| **Intelligence & attribution** | Pattern-of-life, attribution, national-security oversight; observer by default | thin | 4 |
+| **Forensic & cyber** | Post-incident digital forensics, evidence chain of custody, attribution on captured artifacts | thin | 4 |
+| **Medical & consequence** | Casualty response, ambulance dispatch, hospital coordination, mass-casualty triage | thick | ~30 |
+| **Regulatory & advisory** | Airspace / waterway control, NOTAMs, restrictions, evacuation authorities | thin | ~5 |
+| **Public safety & communication** | Shelter-in-place, evacuation orders, public alerts (SMS / siren / DR), civilian coordination | thick | ~102 |
+| **International liaison** | Cross-border cascade, allied information sharing, NATO handover, cross-Nordic coordination | thin | ~10 |
+
+### Thick vs thin branches
+
+- **Thick** — many similar-shape roles share one class + archetype mapping. Chapters differ only by actions taken on this specific event. Cascade picker collapses to category tile (e.g. "Kommuner (98)" expandable, filtered by site jurisdiction first).
+- **Thin** — bespoke singletons or small specialist sets. Chapter renderers are archetype-shared but role-specific asset library + destinations. Cascade picker surfaces individually inside their archetype.
+
+### Coverage rules (by role id prefix)
+
+Rules over prefix instead of hand-editing all 386 receivers. New roles inherit archetype via prefix match; hand-overrides supported when rule doesn't fit.
+
+| Role id pattern | Primary archetype | Secondary archetypes |
+|---|---|---|
+| `politi-{district}` (12) | Kinetic | Coordination, Public safety |
+| `politi-aks` | Kinetic | — |
+| `politi-nsk` | Intel | Kinetic (SOF) |
+| `rigspoliti` | Coordination | Intel (via NC3) |
+| `flv-*` (Air Force) | Kinetic (airborne intercept) | — |
+| `haer-*` (Army) | Kinetic (ground) | — |
+| `sov-*` (Navy) | Kinetic (maritime) | — |
+| `sok-*` | Kinetic (specialised) | Intel |
+| `hjv-*` (Home Guard) | Kinetic | Public safety |
+| `forsvarskmd` | Coordination | — |
+| `forsvar-cyber` | Forensic | Intel |
+| `pet`, `pet-cta`, `pet-livvagt` | Intel | — |
+| `fe`, `agency-cfcs` | Intel | Forensic |
+| `brs-{centre}` (5) | Kinetic (hazmat, rescue) | Public safety |
+| `brs-kemisk`, `brs-nukleart` | Kinetic (specialised) | Regulatory |
+| `beredskab` (HQ) | Coordination | — |
+| `region-*` (5) | Medical | Coordination |
+| `hospital-*` (23) | Medical | — |
+| `min-sund` | Medical | Regulatory |
+| `min-*` (others: just, fors, klim, erhverv) | Coordination | — |
+| `agency-traf` (Trafikstyrelsen) | Regulatory | — |
+| `agency-sof` (Søfartsstyrelsen) | Regulatory | Coordination |
+| `agency-ener` (Energistyrelsen) | Regulatory | — |
+| `kom-*` (98 kommunes) | Public safety | Coordination |
+| `nato-*`, `nordic-*`, `allied-*` | Liaison | varies (intel for CCDCOE, kinetic for MARCOM) |
+
+### Chapter composition rule
+
+Every contributor chapter has four canonical top blocks + 0-8 archetype sub-sections. Sub-section renders IFF the contributor actually populated that archetype on this event.
+
+- Aktionsstyrken chapter = 1 sub-section (Kinetic)
+- Politi Kbh chapter = 3 sub-sections (Kinetic + Coordination + Public safety)
+- Kommune Tårnby chapter = 2 sub-sections (Public safety + Coordination) — same shape as all 98 kommune chapters
+
+### Shared data catalog (13 types)
+
+Every catalog entry is append-only, ID-referenced, tagged by contributor. Chapters cite by ID; sub-sections read + write via IDs.
+
+`CAT-SUBJECT` / `CAT-RECORDING` / `CAT-RESP-HISTORY` / `CAT-ATTR` / `CAT-PATTERN` / `CAT-XLINK` / `CAT-ROE` / `CAT-EVIDENCE` / `CAT-COORD-DECISIONS` / `CAT-CASUALTIES` / `CAT-ADVISORY` / `CAT-PUBLIC-ALERT` / `CAT-LIAISON`
+
+### Cascade picker grouping
+
+Cascade recipient picker groups by archetype. Thick branches collapse to category tile with site-jurisdiction filter on expand. Thin branches surface individually. Recommend engine surfaces 3-6 defaults per event's classification / threat / platform / site. Type-ahead search across all 386. "On case already" is a separate section (not selectable — dedupe policy governs).
+
+---
+
+## 8. What this document does NOT cover
 
 Explicitly out of scope for v0.1 — track separately as they land.
 
@@ -461,3 +535,4 @@ Explicitly out of scope for v0.1 — track separately as they land.
 |---|---|---|
 | 2026-08-24 | v0.1 initial draft — scenarios A, B, C + collaboration patterns + decision trees | ISR C2 build |
 | 2026-09-09 | Section 6a data model, 6b escalation adapter, 6c render surfaces — reflects cascade lifecycle post-audit fixes | ISR C2 build |
+| 2026-09-09 | Section 7 archetype taxonomy — 8 action archetypes covering all 386 receivers, thick vs thin branches, chapter composition rule | ISR C2 build |
