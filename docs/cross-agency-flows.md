@@ -351,6 +351,98 @@ Next Esbjerg event auto-notifies Havnepolitiet. Every allowed peer interaction w
 
 ---
 
+## 6a. Cascade lifecycle data model (current state)
+
+Every cross-agency cascade / request / withdraw / update / reply lands on the shared event object as an append record. Rendering and reporting both read from these arrays; no separate mutable state.
+
+### Escalation record shape (`event.escalations[i]`)
+
+Written by `events.js escalateEvent`. Every record carries:
+
+| Field | Type | Purpose |
+|---|---|---|
+| `_schemaVersion` | int | Bumped when the shape changes; consumers gate migrations on this |
+| `id` | `ESC-YYYYMMDD-NNNN` | Monotonic per session (backend port must move to UUIDv7) |
+| `destinationId` | string | Which destination this record targets |
+| `initiatedBy` | string | Freeform display name ("Receiver · Rigspolitiet") |
+| `initiatedByRoleId` | string \| null | Structured role id for aggregation; reports filter on this |
+| `initiatedAt` | ISO | Send time |
+| `payload` | `'summary' \| 'full' \| 'live-link'` | Content class |
+| `message` | string | Freeform note from sender |
+| `status` | `'sent' \| 'delivered' \| 'read' \| 'acknowledged' \| 'withdrawn' \| 'failed'` | Latest delivery state |
+| `statusHistory` | array | Append-only `{timestamp, status, by?, reason?}` |
+| `response` | object \| null | Legacy alias to the LATEST entry in `responses[]` |
+| `responses` | array | Append-only `{receivedAt, respondedBy, respondedByRoleId, text}` |
+| `progressStatus` | `'in-progress' \| 'resolved' \| 'blocked' \| null` | Post-ack progress state |
+| `blockedReason` | string \| null | Required when progressStatus = blocked |
+| `progressHistory` | array | Append-only progress transitions |
+| `overdue` | bool | Flipped by SLA sweep |
+| `overdueAt` | ISO \| null | When overdue was set |
+| `withdrawnAt` / `withdrawnBy` / `withdrawReason` | | Set on `withdrawEscalation` |
+| `dispatchesTriggered` | array of `dispatchId` | Reverse pointer — dispatches the recipient fired in response to this request. Populated by `receiver-dispatch` handler when the caller was cascaded to |
+| `assessmentPackage` | object \| null | See below — attached only for cross-agency cascades |
+
+### Assessment package shape (`escalation.assessmentPackage`)
+
+Frozen at cascade time; preserved even if downstream state changes.
+
+| Field | Type | Purpose |
+|---|---|---|
+| `_schemaVersion` | int | Consumers gate rehydration on this |
+| `operatorAssessment` | string | Freeform "why we called you" from the requester |
+| `agenticAssessment` | object \| null | Snapshot of the AI take at cascade time |
+| `responseHistoryAtCascade` | array | Snapshot of dispatches already fired |
+| `cascadeReason` | enum | `'tactical-urgency' \| 'attribution' \| 'forensic-handoff' \| 'coordination' \| 'observer-loop'` |
+| `priority` | `'critical' \| 'urgent' \| 'standard'` | |
+| `requesterRoleId` | string | Sender's role id (client-authored today; backend port must re-stamp from auth) |
+| `cascadedAt` | ISO | Freeze time |
+| `updates` | array | Append-only `{text, priority, by, at}` from `updateEscalationAssessment` |
+
+### Counter-dispatch record shape (`event.counterDispatches[i]`)
+
+Materialised on the shared event by `_syncDispatchToEvent` (main.js) on every tick loop iteration. Consumers read from this array (not the browser-local `_counterDispatches` Map) so multi-tab and historical reports both work.
+
+| Field | Type | Purpose |
+|---|---|---|
+| `dispatchId` | string | Unique per dispatch |
+| `assetName` / `kind` / `groupName` | | Asset identity |
+| `ownerRoleId` | string \| null | Which role dispatched (`'operator'` for direct operator dispatches) |
+| `viaRequestFromRoleId` | string \| null | Set when dispatched in response to a cross-agency request; drives the "via your request" pill |
+| `state` | `'en_route' \| 'engaging' \| 'complete' \| 'rtb_home' \| 'rtb_via_last_known' \| 'holding-cordon'` | Latest state |
+| `stateHistory` | array | Append-only `{state, at}` on every transition |
+| `dispatchedAt` / `arrivedAt` / `engagingAt` / `completedAt` / `rtbStartedAt` / `rtbCompletedAt` | ISO \| null | Materialised timing fields for reports; stamped on first transition into each state |
+| `curLat` / `curLon` / `curAlt` | number | Live position, mirrored every tick |
+
+## 6b. Escalation adapter seam
+
+`src/escalation_source.js` defines a per-receiver-role adapter registry mirroring `src/dispatch_source.js`. Every cross-agency lifecycle event fires the adapter after the local source-of-truth mutation. Real customer inbox systems (Politi Kbh CAD, PET intake, Aktionsstyrken tactical intake, FE analytics) register per-role adapters that forward the intent over their internal APIs.
+
+Adapters implement any subset of five methods:
+
+```
+sendEscalation({eventId, event, escalationRecord, actorRole})
+withdrawEscalation?({eventId, escalationId, reason, actorRole})
+updateAssessment?({eventId, escalationId, updateText, priority, actorRole})
+replyToEscalation?({eventId, escalationId, replyText, actorRole})
+acknowledgeEscalation?({eventId, escalationId, actorRole})
+```
+
+All return `Promise<{status, external_id, timestamp, provider, notes}>`. Unimplemented methods no-op with a benign result envelope via `fireEscalationAdapter`.
+
+Adapters are transport-only — they do NOT mutate the escalation record. When the recipient's real system asynchronously reports acknowledgement or delivery transitions, the adapter is expected to call `events.js updateEscalationStatus` on our side to keep shared state in sync. That's the delivery-receipt loop that replaces the current `_simulateEscalationDelivery` setTimeout chain once real transport is wired.
+
+Default `mock` adapter (src/adapters/escalation_mock.js) stamps an interaction record on `event.interactions` for each action and returns a success envelope. Any receiver role without a specific adapter falls through to the mock.
+
+## 6c. Sender-side + recipient-side render surfaces
+
+- **Sender-side "Cascades you sent" panel** (receiver case-file): reads `event.escalations.filter(esc => esc.assessmentPackage?.requesterRoleId === role.id)`. Each row shows delivery status, reply thread, [Update] and [Withdraw] actions.
+- **Sender-side "Live response" panel** (receiver case-file): reads `event.counterDispatches` grouped by `ownerRoleId`. Own dispatches labelled "(you)"; recipient dispatches carry the "via your request" pill when `viaRequestFromRoleId` matches the active role.
+- **Recipient-side "Why you were called" section**: renders when `rec.assessmentPackage` is present. Shows requester name + priority chip + reason chip + assessment text + updates stack + WITHDRAWN banner when applicable.
+- **Operator LiveOps Escalation Log**: tree view via `_buildCascadeTree` — roots are direct escalations, children attach by `requesterRoleId → parent.destinationId` intersection. Orphaned cascades (requester has no incoming escalation on this event) render with an orange `ORPHAN` chip so they don't masquerade as operator-initiated roots.
+- **Mission Console "Other agencies on case" panel**: reads escalations (attributed via `_roleForDest`) and dispatches (grouped by `ownerRoleId`) to build a per-agency roll-up with expandable detail per agency.
+
+---
+
 ## 7. What this document does NOT cover
 
 Explicitly out of scope for v0.1 — track separately as they land.
@@ -368,3 +460,4 @@ Explicitly out of scope for v0.1 — track separately as they land.
 | Date | Change | Author |
 |---|---|---|
 | 2026-08-24 | v0.1 initial draft — scenarios A, B, C + collaboration patterns + decision trees | ISR C2 build |
+| 2026-09-09 | Section 6a data model, 6b escalation adapter, 6c render surfaces — reflects cascade lifecycle post-audit fixes | ISR C2 build |

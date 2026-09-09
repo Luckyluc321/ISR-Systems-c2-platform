@@ -3749,6 +3749,7 @@ async function main() {
       payload: 'summary',
       message: `Assistance request from ${requesterName}${msgTail}`,
       operator: `${requesterName} (assistance request)`,
+      operatorRoleId: requesterRole?.id || roleId || null,
       assessmentPackage,
     });
     _simulateEscalationDelivery(event.id, records);
@@ -4021,6 +4022,7 @@ async function main() {
     // browser-local _counterDispatches Map. Tick loop's
     // _syncDispatchToEvent keeps this fresh on every state change.
     if (!Array.isArray(event.counterDispatches)) event.counterDispatches = [];
+    const _spawnAt = new Date().toISOString();
     event.counterDispatches.push({
       dispatchId, groupId, memberIndex, memberCount, variantId,
       assetId: asset.id, assetName: d.assetName, groupName: asset.name,
@@ -4030,7 +4032,17 @@ async function main() {
       ownerRoleId: d.ownerRoleId || null,
       viaRequestFromRoleId: d.viaRequestFromRoleId || null,
       rtbCompleted: false,
-      stateHistory: [{ state: d.state, at: new Date().toISOString() }],
+      stateHistory: [{ state: d.state, at: _spawnAt }],
+      // Materialised timing fields — reports read these directly
+      // rather than walking stateHistory. dispatchedAt is stamped
+      // for any starting state; arrivedAt/engagingAt/completedAt/
+      // rtbStartedAt/rtbCompletedAt land on their first transition.
+      dispatchedAt: _spawnAt,
+      arrivedAt: d.state === 'engaging' || d.state === 'holding-cordon' ? _spawnAt : null,
+      engagingAt: d.state === 'engaging' ? _spawnAt : null,
+      completedAt: null,
+      rtbStartedAt: null,
+      rtbCompletedAt: null,
     });
   }
 
@@ -4358,10 +4370,29 @@ async function main() {
     if (!Array.isArray(entry.stateHistory)) entry.stateHistory = [];
     const lastState = entry.stateHistory[entry.stateHistory.length - 1]?.state;
     if (lastState !== d.state) {
-      entry.stateHistory.push({
-        state: d.state,
-        at: new Date().toISOString(),
-      });
+      const at = new Date().toISOString();
+      entry.stateHistory.push({ state: d.state, at });
+      // Materialised timing fields — canonical timestamps for the
+      // states reports care about most. Reports needing "dispatch
+      // duration" (completedAt - dispatchedAt) or "time to arrival"
+      // (arrivedAt - dispatchedAt) can read these directly instead
+      // of walking stateHistory[]. Set on FIRST transition into
+      // each state (a dispatch that re-enters engaging after RTB
+      // keeps the original arrivedAt / engagingAt).
+      if (d.state === 'en_route'         && !entry.dispatchedAt) entry.dispatchedAt = at;
+      if (d.state === 'engaging'         && !entry.arrivedAt)   entry.arrivedAt   = at;
+      if (d.state === 'engaging'         && !entry.engagingAt)  entry.engagingAt  = at;
+      if (d.state === 'holding-cordon'   && !entry.arrivedAt)   entry.arrivedAt   = at;
+      if (d.state === 'complete'         && !entry.completedAt) entry.completedAt = at;
+      if ((d.state === 'rtb_home' || d.state === 'rtb_via_last_known') && !entry.rtbStartedAt) {
+        entry.rtbStartedAt = at;
+      }
+      if (d.rtbCompleted && !entry.rtbCompletedAt) entry.rtbCompletedAt = at;
+    }
+    // rtbCompleted can flip TRUE outside a state transition (e.g. a
+    // rtb_home dispatch reaches origin). Stamp on that flip.
+    if (d.rtbCompleted && !entry.rtbCompletedAt) {
+      entry.rtbCompletedAt = new Date().toISOString();
     }
   }
 
@@ -6486,6 +6517,8 @@ async function main() {
         destinationIds: autoDests,
         payload: 'summary',
         message: `AUTO — track reacquired at ${site ? site.name : siteId} sensor coverage. Escalating to national tiers.`,
+        operator: 'System (auto reacquisition)',
+        operatorRoleId: 'system-auto',
       });
       records.forEach((r, idx) => {
         setTimeout(() => updateEscalationStatus(event.id, r.id, 'delivered'), 800 + idx * 200);
@@ -16373,7 +16406,7 @@ async function main() {
         if (!activeDests.length) { toast('Select at least one destination first', 'err'); return; }
         const payload = modalCard.querySelector('input[name="payload"]:checked').value;
         const message = document.getElementById('esc-message').value;
-        const records = escalateEvent(eventId, { destinationIds: activeDests, payload, message });
+        const records = escalateEvent(eventId, { destinationIds: activeDests, payload, message, operatorRoleId: getActiveRole()?.id || 'operator' });
         closeBriefPreview();
         closeEscalateModal();
         records.forEach((r, idx) => {
@@ -16389,7 +16422,7 @@ async function main() {
         if (!activeDests.length) { toast('Select at least one destination', 'err'); return; }
         const payload = modalCard.querySelector('input[name="payload"]:checked').value;
         const message = document.getElementById('esc-message').value;
-        const records = escalateEvent(eventId, { destinationIds: activeDests, payload, message });
+        const records = escalateEvent(eventId, { destinationIds: activeDests, payload, message, operatorRoleId: getActiveRole()?.id || 'operator' });
         closeEscalateModal();
         records.forEach((r, idx) => {
           setTimeout(() => updateEscalationStatus(eventId, r.id, 'delivered'), 1500 + idx * 300);
@@ -20582,6 +20615,7 @@ async function main() {
               payload: 'summary',
               message: `Strategic cascade from ${role.name || 'Receiver'}: ${assessmentPackage.operatorAssessment}`,
               operator: `Receiver · ${role.name || role.org || role.person || 'Unknown'}`,
+              operatorRoleId: role?.id || null,
               assessmentPackage,
             });
             _simulateEscalationDelivery(eventId, records);
@@ -20621,6 +20655,7 @@ async function main() {
               payload: 'summary',
               message: `Politi coordination from ${role.name || 'Receiver'}: ${assessmentPackage.operatorAssessment}`,
               operator: `Receiver · ${role.name || role.org || role.person || 'Unknown'}`,
+              operatorRoleId: role?.id || null,
               assessmentPackage,
             });
             _simulateEscalationDelivery(eventId, records);
@@ -20720,6 +20755,7 @@ async function main() {
               payload: 'summary',
               message: `Assistance request from ${requesterName}: ${assessmentPackage.operatorAssessment}`,
               operator: `${requesterName} (assistance request)`,
+              operatorRoleId: activeRole?.id || null,
               assessmentPackage,
             });
             _simulateEscalationDelivery(eventId, records);
@@ -20774,7 +20810,27 @@ async function main() {
             }
           }
         } catch (err) { console.warn('[progress] auto-advance failed:', err.message); }
-        dispatchReceiverAsset(eventId, role.id, assetKey, { viaRequestFromRoleId });
+        const _spawnedAsset = dispatchReceiverAsset(eventId, role.id, assetKey, { viaRequestFromRoleId });
+        // Denormalise dispatch id onto the requester's escalation
+        // record — reverse pointer for reports asking "requests I
+        // made that led to a dispatch." When the receiver was
+        // cascaded to (viaRequestFromRoleId set), find the requester's
+        // escalation for this event and append the freshly-spawned
+        // dispatch id to its dispatchesTriggered[] array. Append-only.
+        if (viaRequestFromRoleId && _spawnedAsset?.id) {
+          try {
+            const requesterRole = RECEIVERS.find(r => r.id === viaRequestFromRoleId);
+            const requesterDestSet = new Set(requesterRole?.destinationIds || []);
+            const requesterEsc = (ev.escalations || []).find(r =>
+              requesterDestSet.has(r.destinationId)
+              && r.assessmentPackage?.requesterRoleId === viaRequestFromRoleId
+            ) || (ev.escalations || []).find(r => requesterDestSet.has(r.destinationId));
+            if (requesterEsc) {
+              if (!Array.isArray(requesterEsc.dispatchesTriggered)) requesterEsc.dispatchesTriggered = [];
+              requesterEsc.dispatchesTriggered.push(_spawnedAsset.id);
+            }
+          } catch (err) { console.warn('[dispatchesTriggered] backfill failed:', err.message); }
+        }
         renderReceiverView({ immediate: true });
       }
       else if (action === 'receiver-request') {
@@ -20834,6 +20890,7 @@ async function main() {
               payload: 'summary',
               message: `Tactical intervention request from ${role.name || 'Receiver'}: ${assessmentPackage.operatorAssessment}`,
               operator: `Receiver · ${role.name || role.org || role.person || 'Unknown'}`,
+              operatorRoleId: role?.id || null,
               assessmentPackage,
             });
             _simulateEscalationDelivery(eventId, records);
@@ -21135,7 +21192,7 @@ async function main() {
         // path re-introduces _selectedReceiverEventId.
         const evtId = _workspaceEventId || _selectedReceiverEventId;
         if (!evtId) { toast('No event context for response', 'err'); return; }
-        respondToEscalation(evtId, escId, txt, `${getActiveRole().person} (${getActiveRole().org})`);
+        respondToEscalation(evtId, escId, txt, `${getActiveRole().person} (${getActiveRole().org})`, getActiveRole()?.id || null);
         fireEscalationAdapter('replyToEscalation', {
           eventId: evtId,
           event: getEvent(evtId),

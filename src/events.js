@@ -338,7 +338,7 @@ EVENTS.forEach(e => {
 
 // ── Escalation (mock UX, real dispatchers replace later) ──
 let _escalationCounter = 0;
-export function escalateEvent(id, { destinationIds, payload, message, operator = 'L. Flindt', assessmentPackage = null }) {
+export function escalateEvent(id, { destinationIds, payload, message, operator = 'L. Flindt', operatorRoleId = null, assessmentPackage = null }) {
   const e = EVENTS.find(x => x.id === id);
   if (!e || !destinationIds || !destinationIds.length) return [];
   const now = new Date();
@@ -374,6 +374,12 @@ export function escalateEvent(id, { destinationIds, payload, message, operator =
       id: `ESC-${now.getUTCFullYear()}${String(now.getUTCMonth()+1).padStart(2,'0')}${String(now.getUTCDate()).padStart(2,'0')}-${String(_escalationCounter).padStart(4,'0')}`,
       destinationId: destId,
       initiatedBy: operator,
+      // Structured role id alongside freeform display string. Reports
+      // needing per-agency aggregation (Politi Kbh cascaded N times,
+      // avg time-to-ack, etc) can filter/group by initiatedByRoleId
+      // without parsing a display string. Freeform initiatedBy kept
+      // for UI continuity.
+      initiatedByRoleId: operatorRoleId,
       initiatedAt: now.toISOString(),
       payload, // 'summary' | 'full' | 'live-link'
       message: (message || '').trim(),
@@ -392,6 +398,14 @@ export function escalateEvent(id, { destinationIds, payload, message, operator =
       // never triggers an auto-cascade — surfaces a visual badge + operator toast.
       overdue: false,
       overdueAt: null,
+      // Reverse pointer from a request escalation to the dispatches
+      // the recipient fired in response. Populated by the
+      // receiver-dispatch handler when a receiver dispatches an asset
+      // while their escalation carries an assessmentPackage.requesterRoleId
+      // (i.e. they were cascaded to by someone). Reports asking
+      // "requests I made that led to a dispatch" read this array
+      // instead of reverse-scanning every event's counterDispatches.
+      dispatchesTriggered: [],
       // Assessment package. Optional, attached when the escalation is a
       // cross-agency cascade or request-out. Frozen at cascade time and
       // preserved even if downstream event state changes, so recipient
@@ -658,7 +672,7 @@ export function postIncidentChainAllLeavesResolved(event) {
   return leaves.every(l => l.status === 'resolved');
 }
 
-export function respondToEscalation(eventId, escalationId, text, respondedBy) {
+export function respondToEscalation(eventId, escalationId, text, respondedBy, respondedByRoleId = null) {
   const e = EVENTS.find(x => x.id === eventId);
   if (!e || !e.escalations) return;
   const rec = e.escalations.find(r => r.id === escalationId);
@@ -670,8 +684,17 @@ export function respondToEscalation(eventId, escalationId, text, respondedBy) {
   // entry so pre-existing consumers keep rendering the newest reply
   // without a coordinated rewrite; new consumers should read
   // rec.responses[] for the full thread.
+  //
+  // respondedByRoleId is the structured role id alongside the freeform
+  // display string. Reports needing per-agency reply metrics filter
+  // on the structured field; UI keeps rendering the display string.
   if (!Array.isArray(rec.responses)) rec.responses = [];
-  const entry = { receivedAt: new Date().toISOString(), respondedBy, text: text.trim() };
+  const entry = {
+    receivedAt: new Date().toISOString(),
+    respondedBy,
+    respondedByRoleId,
+    text: text.trim(),
+  };
   rec.responses.push(entry);
   rec.response = entry;
   if (rec.status !== 'acknowledged') {
