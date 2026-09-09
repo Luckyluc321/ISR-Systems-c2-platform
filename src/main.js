@@ -3988,12 +3988,23 @@ async function main() {
         });
     }
 
-    // Track on event (one record per group member for audit + Step 3 UI)
+    // Track on event (one record per group member for audit + Step 3 UI).
+    // Also carries provenance (ownerRoleId, viaRequestFromRoleId) +
+    // live-state mirror so multi-tab renders and future report
+    // generators read the shared event object rather than the
+    // browser-local _counterDispatches Map. Tick loop's
+    // _syncDispatchToEvent keeps this fresh on every state change.
     if (!Array.isArray(event.counterDispatches)) event.counterDispatches = [];
     event.counterDispatches.push({
       dispatchId, groupId, memberIndex, memberCount, variantId,
       assetId: asset.id, assetName: d.assetName, groupName: asset.name,
       kind: asset.kind, dispatchedTs: d.dispatchedTs,
+      state: d.state,
+      curLat: d.curLat, curLon: d.curLon, curAlt: d.curAlt,
+      ownerRoleId: d.ownerRoleId || null,
+      viaRequestFromRoleId: d.viaRequestFromRoleId || null,
+      rtbCompleted: false,
+      stateHistory: [{ state: d.state, at: new Date().toISOString() }],
     });
   }
 
@@ -4251,6 +4262,14 @@ async function main() {
       const now = Date.now();
       for (const [, d] of _counterDispatches) {
         _tickCounterDispatch(d, now);
+        // Persist live dispatch state onto event.counterDispatches so
+        // consumers reading from the shared event object (multi-tab
+        // cross-tenant echo panel, "Other agencies on case", future
+        // report generators) see up-to-date state without needing
+        // access to the browser-local _counterDispatches Map.
+        // Same tick loop that drives the physics also mirrors state
+        // into the persisted snapshot — one place, always fresh.
+        _syncDispatchToEvent(d);
       }
       if (_counterDispatches.size > 0) {
         _cdRafId = requestAnimationFrame(tick);
@@ -4259,6 +4278,65 @@ async function main() {
       }
     };
     _cdRafId = requestAnimationFrame(tick);
+  }
+
+  // Sync live dispatch (from _counterDispatches Map) into its entry on
+  // event.counterDispatches[]. Called once per tick per dispatch so
+  // state transitions (en_route → engaging → complete → rtb) get
+  // persisted onto the shared event. Also stamps state transitions
+  // into stateHistory[] append-only for report reconstruction.
+  //
+  // Rationale: _counterDispatches is a browser-local Map (in-process
+  // only). Audit flagged this as the biggest wire-transport gap —
+  // opening the case in a second tab shows an empty "Live response"
+  // panel because the second tab's Map is empty. Mirroring into
+  // event.counterDispatches (which is on the shared event object)
+  // means every tab renders from the same data, and future report
+  // generators have historical dispatch state to work with.
+  function _syncDispatchToEvent(d) {
+    const event = getEvent(d.eventId);
+    if (!event) return;
+    if (!Array.isArray(event.counterDispatches)) event.counterDispatches = [];
+    let entry = event.counterDispatches.find(x => x.dispatchId === d.id);
+    if (!entry) {
+      // Spawn-time entry pushed by _spawnDispatchInstance is minimal;
+      // if a dispatch predates the persistence hook (upgrade path) or
+      // the spawn skipped the push, create a fresh entry lazily.
+      entry = {
+        dispatchId: d.id,
+        groupId: d.groupId,
+        memberIndex: d.memberIndex,
+        memberCount: d.memberCount,
+        variantId: d.variantId,
+        assetId: d.assetId,
+        assetName: d.assetName,
+        groupName: d.groupName,
+        kind: d.kind,
+        dispatchedTs: d.dispatchedTs,
+      };
+      event.counterDispatches.push(entry);
+    }
+    // Mirror mutable fields. Coord + alt let the render show live
+    // asset position without touching _counterDispatches from any
+    // consumer.
+    entry.state = d.state;
+    entry.curLat = d.curLat;
+    entry.curLon = d.curLon;
+    entry.curAlt = d.curAlt;
+    entry.ownerRoleId = d.ownerRoleId || null;
+    entry.viaRequestFromRoleId = d.viaRequestFromRoleId || null;
+    entry.rtbCompleted = !!d.rtbCompleted;
+    // Append-only state history for report reconstruction. Only push
+    // when the state actually changes so we don't spam the array
+    // with identical entries every tick (60 Hz would balloon this).
+    if (!Array.isArray(entry.stateHistory)) entry.stateHistory = [];
+    const lastState = entry.stateHistory[entry.stateHistory.length - 1]?.state;
+    if (lastState !== d.state) {
+      entry.stateHistory.push({
+        state: d.state,
+        at: new Date().toISOString(),
+      });
+    }
   }
 
   function _tickCounterDispatch(d, now) {
@@ -13164,17 +13242,20 @@ async function main() {
     // Snapshot of dispatches fired so far. Each entry is a compact
     // record — asset name, kind, state, timestamp — enough for the
     // recipient to see "who else is already responding".
+    // Reads from event.counterDispatches (persisted, multi-tab safe)
+    // so cascades sent from a second tab still capture the full
+    // response history. Includes completed dispatches that already
+    // drained from the browser-local Map — audit gap #13 fix.
     const _dispatchSnapshot = [];
     try {
-      if (_counterDispatches) {
-        for (const [, cd] of _counterDispatches) {
-          if (cd.eventId !== eventId) continue;
+      if (Array.isArray(event.counterDispatches)) {
+        for (const cd of event.counterDispatches) {
           _dispatchSnapshot.push({
-            assetId:   cd.id,
-            assetName: cd.assetName || cd.profile?.label || cd.kind || 'unknown',
-            kind:      cd.kind,
-            state:     cd.state,
-            dispatchedAt: cd.dispatchedAt || null,
+            assetId:      cd.dispatchId,
+            assetName:    cd.assetName || cd.groupName || cd.kind || 'unknown',
+            kind:         cd.kind,
+            state:        cd.state,
+            dispatchedAt: cd.dispatchedTs ? new Date(cd.dispatchedTs).toISOString() : null,
           });
         }
       }
@@ -17716,9 +17797,13 @@ async function main() {
     // Attribute counter-dispatches to their ownerRoleId. Same active-
     // role skip so a Politi Kbh operator doesn't see their own patrol
     // cars listed under this panel.
-    if (typeof _counterDispatches !== 'undefined' && _counterDispatches) {
-      for (const [, cd] of _counterDispatches) {
-        if (cd.eventId !== event.id) continue;
+    //
+    // Reads from event.counterDispatches (persisted) rather than the
+    // browser-local Map so multi-tab renders and historical event
+    // reports see the same data. Tick loop's _syncDispatchToEvent
+    // keeps entries fresh.
+    if (Array.isArray(event.counterDispatches)) {
+      for (const cd of event.counterDispatches) {
         const roleId = cd.ownerRoleId;
         if (!roleId) continue;
         if (roleId === activeRoleId) continue;
@@ -18820,13 +18905,14 @@ async function main() {
     // a "via your request" tag so the requester sees the loop
     // closed. See Chunk B #3 in the comms-flow gaps.
     let liveResponseSection = '';
-    const _liveDispatches = [];
-    if (_counterDispatches) {
-      for (const [, cd] of _counterDispatches) {
-        if (cd.eventId !== event.id) continue;
-        _liveDispatches.push(cd);
-      }
-    }
+    // Read from event.counterDispatches (persisted on the shared event
+    // object) rather than the browser-local _counterDispatches Map so
+    // this panel populates across tabs and against historical events.
+    // Tick loop's _syncDispatchToEvent keeps the persisted entries
+    // fresh — no local Map fallback needed.
+    const _liveDispatches = Array.isArray(event.counterDispatches)
+      ? event.counterDispatches.slice()
+      : [];
     if (_liveDispatches.length) {
       // Group by owner role. Non-receiver dispatches (operator direct)
       // fall into a synthetic 'operator' bucket.
