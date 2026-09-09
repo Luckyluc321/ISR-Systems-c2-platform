@@ -18302,19 +18302,27 @@ async function main() {
             </div>
           </div>`
         : '';
+      // Prominent "who called you" headline. This is the FIRST thing
+      // the recipient sees when they open the case-file, so the
+      // sender + timestamp are the biggest text on the section.
+      // Reason + priority sit as small chips underneath. The requester's
+      // actual assessment prose lives in the block below.
       assessmentSection = `
         <section class="rer-section rer-assessment" style="border-left: 3px solid ${_priorityTone};">
-          <div class="rer-section-hdr" style="margin-bottom: var(--space-2);">
-            <div class="c-section-eyebrow" style="color: ${_priorityTone};">Why you were called · ${_reasonLabel}</div>
-            <div class="rer-pkg-meta" style="font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text-dim); letter-spacing: 0.06em;">
-              <span style="color: ${_priorityTone}; text-transform: uppercase; font-weight: 600;">${_pkg.priority}</span>
-              <span> · ${_requesterLabel}</span>
-              ${_cascadedAt ? `<span> · ${_cascadedAt}</span>` : ''}
+          <div class="rer-pkg-called-hdr">
+            <div class="rer-pkg-called-line">
+              <span class="rer-pkg-called-who">${_requesterLabel}</span>
+              <span class="rer-pkg-called-verb"> called you</span>
+              ${_cascadedAt ? `<span class="rer-pkg-called-at"> · ${_cascadedAt}</span>` : ''}
+            </div>
+            <div class="rer-pkg-called-chips">
+              <span class="rer-pkg-chip" style="color: ${_priorityTone}; border-color: ${_priorityTone};">${_pkg.priority}</span>
+              <span class="rer-pkg-chip rer-pkg-chip-neutral">${_reasonLabel}</span>
             </div>
           </div>
           ${_pkg.operatorAssessment ? `
             <div class="rer-pkg-block rer-pkg-assessment">
-              <div class="rer-pkg-block-hdr">Requester's assessment</div>
+              <div class="rer-pkg-block-hdr">Their assessment</div>
               <div class="rer-pkg-block-body">${_pkg.operatorAssessment}</div>
             </div>` : ''}
           ${_agenticBlock}
@@ -18322,10 +18330,63 @@ async function main() {
         </section>`;
     }
 
+    // Cascades this role sent out on this event. Reads event.escalations
+    // and filters where assessmentPackage.requesterRoleId matches the
+    // active role — i.e. only cascades WE sent, not cascades others
+    // sent on the same event. Renders delivery status prominently
+    // (sent → delivered → read → acknowledged) so the operator sees
+    // "PET · acknowledged 09:14:47Z" as a clear line without having to
+    // scroll the audit trail. Recipient reply threads inline when they
+    // respond.
+    let sentCascadesSection = '';
+    const _myOutgoing = (event.escalations || []).filter(esc =>
+      esc.assessmentPackage?.requesterRoleId === role.id
+    );
+    if (_myOutgoing.length) {
+      const _sentEscRow = (esc) => {
+        const dest = getDestination(esc.destinationId);
+        const destName = dest ? dest.name : esc.destinationId;
+        const statusColor = esc.status === 'acknowledged' ? 'var(--ok)'
+          : esc.status === 'read' ? 'var(--accent)'
+          : esc.status === 'delivered' ? '#ffb84d'
+          : 'var(--text-dim)';
+        const ackEntry = esc.statusHistory?.find(h => h.status === 'acknowledged');
+        const readEntry = esc.statusHistory?.find(h => h.status === 'read');
+        const deliveredEntry = esc.statusHistory?.find(h => h.status === 'delivered');
+        const currentTs = ackEntry?.timestamp || readEntry?.timestamp || deliveredEntry?.timestamp || esc.initiatedAt;
+        const currentTsShort = currentTs ? currentTs.slice(11,19) + 'Z' : '';
+        const statusLabel = esc.status === 'acknowledged' ? `acknowledged ${currentTsShort}`
+          : esc.status === 'read' ? `read ${currentTsShort}`
+          : esc.status === 'delivered' ? `delivered ${currentTsShort}`
+          : `sent ${esc.initiatedAt.slice(11,19)}Z`;
+        const respondBlock = esc.response?.text ? `
+          <div class="rer-sent-response">
+            <div class="rer-sent-response-hdr">Reply from ${destName}${esc.response.receivedAt ? ` · ${esc.response.receivedAt.slice(11,19)}Z` : ''}</div>
+            <div class="rer-sent-response-body">${esc.response.text}</div>
+          </div>` : '';
+        return `
+          <div class="rer-sent-row">
+            <div class="rer-sent-hdr">
+              <span class="rer-sent-dest">${destName}</span>
+              <span class="rer-sent-status" style="color: ${statusColor};">${statusLabel}</span>
+            </div>
+            ${respondBlock}
+          </div>`;
+      };
+      sentCascadesSection = `
+        <section class="rer-section rer-sent-cascades">
+          <div class="c-section-eyebrow">Cascades you sent · ${_myOutgoing.length}</div>
+          <div class="rer-sent-list">
+            ${_myOutgoing.map(_sentEscRow).join('')}
+          </div>
+        </section>`;
+    }
+
     return `
       <article class="rer-report">
         ${header}
         ${assessmentSection}
+        ${sentCascadesSection}
         ${ai}
         ${actions}
         ${brief}
