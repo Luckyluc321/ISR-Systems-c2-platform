@@ -663,7 +663,17 @@ export function respondToEscalation(eventId, escalationId, text, respondedBy) {
   if (!e || !e.escalations) return;
   const rec = e.escalations.find(r => r.id === escalationId);
   if (!rec || !text || !text.trim()) return;
-  rec.response = { receivedAt: new Date().toISOString(), respondedBy, text: text.trim() };
+  // Append to responses[] as the canonical source of truth so multiple
+  // replies preserve the full thread. Audit flagged that the prior
+  // single-slot rec.response overwrote earlier replies destructively.
+  // rec.response is kept as a legacy alias pointing at the LATEST
+  // entry so pre-existing consumers keep rendering the newest reply
+  // without a coordinated rewrite; new consumers should read
+  // rec.responses[] for the full thread.
+  if (!Array.isArray(rec.responses)) rec.responses = [];
+  const entry = { receivedAt: new Date().toISOString(), respondedBy, text: text.trim() };
+  rec.responses.push(entry);
+  rec.response = entry;
   if (rec.status !== 'acknowledged') {
     rec.status = 'acknowledged';
     rec.statusHistory.push({ timestamp: new Date().toISOString(), status: 'acknowledged' });

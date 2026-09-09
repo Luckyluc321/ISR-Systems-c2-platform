@@ -3669,6 +3669,27 @@ async function main() {
     return asset;
   }
 
+  // Simulate the delivery lifecycle of freshly-created escalation
+  // records: sent → delivered (~1.5 s) → read (~4.5 s). ack fires
+  // only when a recipient actually clicks Acknowledge — that stays
+  // real. Every escalateEvent call should follow with this helper
+  // so the "Cascades you sent" panel, the operator Escalation Log,
+  // and the Escalation Log status chain all show interpolated states
+  // rather than jumping straight from sent → acknowledged.
+  //
+  // Same setTimeout cadence the operator escalate modal already
+  // uses (main.js around 16250). Extracted here so cascade + request
+  // handlers can call one function instead of copy-pasting the chain.
+  // Real production will replace this with adapter-driven delivery
+  // receipts from the recipient's actual inbox system.
+  function _simulateEscalationDelivery(eventId, records) {
+    if (!Array.isArray(records) || !records.length) return;
+    records.forEach((r, idx) => {
+      setTimeout(() => updateEscalationStatus(eventId, r.id, 'delivered'), 1500 + idx * 300);
+      setTimeout(() => updateEscalationStatus(eventId, r.id, 'read'), 4500 + idx * 500);
+    });
+  }
+
   // Receiver-side request-routing. Politi requesting Aktionsstyrken
   // creates a new escalation record targeting the AKS role with
   // flow='assistance-request'. The AKS profile sees it in their
@@ -3705,6 +3726,7 @@ async function main() {
       operator: `${requesterName} (assistance request)`,
       assessmentPackage,
     });
+    _simulateEscalationDelivery(event.id, records);
     if (records.length === 0) {
       toast(`${targetName} already notified for this event.`, 'info');
     } else {
@@ -17737,8 +17759,16 @@ async function main() {
               const cascadeFrom = esc.assessmentPackage?.requesterRoleId
                 ? ` · via ${(RECEIVERS.find(r => r.id === esc.assessmentPackage.requesterRoleId)?.org || esc.assessmentPackage.requesterRoleId)}`
                 : '';
-              const replyBlock = esc.response?.text
-                ? `<div class="agency-oc-reply"><b>Reply:</b> ${esc.response.text}</div>`
+              // Show every reply in the thread; latest first for
+              // scan-ability. responses[] is canonical; fall back to
+              // legacy scalar rec.response for older data.
+              const _thread = Array.isArray(esc.responses) && esc.responses.length
+                ? esc.responses
+                : (esc.response ? [esc.response] : []);
+              const replyBlock = _thread.length
+                ? _thread.slice().reverse().map(r =>
+                    `<div class="agency-oc-reply"><b>Reply${r.receivedAt ? ' ' + r.receivedAt.slice(11,19) + 'Z' : ''}:</b> ${r.text}</div>`
+                  ).join('')
                 : '';
               return `
                 <div class="agency-oc-row">
@@ -18731,10 +18761,21 @@ async function main() {
           : esc.status === 'read' ? `read ${currentTsShort}`
           : esc.status === 'delivered' ? `delivered ${currentTsShort}`
           : `sent ${esc.initiatedAt.slice(11,19)}Z`;
-        const respondBlock = esc.response?.text ? `
+        // Render every reply in the thread. Array-source-of-truth per
+        // audit item #3 — recipient can send N replies, each preserved
+        // with its own timestamp. Falls back to legacy scalar
+        // rec.response if responses[] is missing (older data).
+        const _replyList = Array.isArray(esc.responses) && esc.responses.length
+          ? esc.responses
+          : (esc.response ? [esc.response] : []);
+        const respondBlock = _replyList.length ? `
           <div class="rer-sent-response">
-            <div class="rer-sent-response-hdr">Reply from ${destName}${esc.response.receivedAt ? ` · ${esc.response.receivedAt.slice(11,19)}Z` : ''}</div>
-            <div class="rer-sent-response-body">${esc.response.text}</div>
+            <div class="rer-sent-response-hdr">${_replyList.length === 1 ? 'Reply' : `${_replyList.length} replies`} from ${destName}</div>
+            ${_replyList.map(r => `
+              <div class="rer-sent-response-entry">
+                <div class="rer-sent-response-ts">${r.receivedAt ? r.receivedAt.slice(11,19) + 'Z' : ''}</div>
+                <div class="rer-sent-response-body">${r.text}</div>
+              </div>`).join('')}
           </div>` : '';
         // Update history — updates the sender posted after the
         // original cascade. Shows count only; full text is visible
@@ -20425,6 +20466,7 @@ async function main() {
               operator: `Receiver · ${role.name || role.org || role.person || 'Unknown'}`,
               assessmentPackage,
             });
+            _simulateEscalationDelivery(eventId, records);
             const selectedLabels = (selectedAgencyIds || [])
               .map(aid => _agencyCandidates.find(a => a.id === aid)?.label || aid)
               .join(', ');
@@ -20462,6 +20504,7 @@ async function main() {
               operator: `Receiver · ${role.name || role.org || role.person || 'Unknown'}`,
               assessmentPackage,
             });
+            _simulateEscalationDelivery(eventId, records);
             if (records.length === 0) toast('Local Politi already coordinated for this event', 'info');
             else toast(`Cascaded to ${targetPolitiName} with your assessment.`, 'ok');
             renderReceiverView({ immediate: true });
@@ -20559,6 +20602,7 @@ async function main() {
               operator: `${requesterName} (assistance request)`,
               assessmentPackage,
             });
+            _simulateEscalationDelivery(eventId, records);
             if (records.length === 0) {
               toast(`${targetName} already notified.`, 'info');
             } else {
@@ -20671,6 +20715,7 @@ async function main() {
               operator: `Receiver · ${role.name || role.org || role.person || 'Unknown'}`,
               assessmentPackage,
             });
+            _simulateEscalationDelivery(eventId, records);
             if (records.length === 0) toast('Aktionsstyrken already notified for this event', 'info');
             else toast(`Request sent to ${targetName} with your assessment.`, 'ok');
             renderReceiverView({ immediate: true });
