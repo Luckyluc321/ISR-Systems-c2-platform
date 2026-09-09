@@ -13087,7 +13087,12 @@ async function main() {
     verb = 'Cascade',     // "Request" | "Cascade" | "Handoff" — shown in title + button
     defaultPriority = 'urgent',
     hintText = null,      // one-line hint under the title
-    onSubmit,             // (assessmentPackage) => void
+    onSubmit,             // (assessmentPackage, {selectedAgencyIds}?) => void
+    agencyOptions = null, // optional: [{id, label, preselected, alreadyOnCase}]. When
+                          //   set, renders a chip picker so the operator toggles which
+                          //   agencies receive the cascade. onSubmit receives the
+                          //   selected agency ids as a second arg. When null, uses
+                          //   targetName as a fixed single-recipient label (legacy).
   }) {
     const event = getEvent(eventId);
     if (!event) { toast('Event not found', 'err'); return; }
@@ -13196,6 +13201,40 @@ async function main() {
         <div style="margin-top: 6px;">Attached automatically: ${_agenticSnapshot ? 'agent take, ' : ''}${_dispatchSnapshot.length} dispatch${_dispatchSnapshot.length === 1 ? '' : 'es'}.</div>
       </div>`;
 
+    // Track selected agency ids (only used when agencyOptions is
+    // provided). Initialise from the preselected flags. Toggling a chip
+    // adds/removes the id from this set; submit reads it.
+    const _selectedAgencies = new Set(
+      (agencyOptions || []).filter(a => a.preselected).map(a => a.id)
+    );
+    const _agencyPickerHtml = (agencyOptions && agencyOptions.length) ? `
+      <div style="padding: 0 var(--space-4) var(--space-3);">
+        <div class="c-section-eyebrow" style="margin-bottom: 8px;">Cascade to</div>
+        <div id="cascade-agency-picker" style="display: flex; flex-wrap: wrap; gap: 6px;">
+          ${agencyOptions.map(a => `
+            <button class="cascade-agency-chip"
+                    type="button"
+                    data-agency-id="${a.id}"
+                    data-selected="${a.preselected ? 'true' : 'false'}"
+                    title="${a.alreadyOnCase ? 'Already on the case via a prior escalation' : 'Toggle to include in this cascade'}"
+                    style="
+                      display: inline-flex; align-items: center; gap: 6px;
+                      padding: 6px 12px; border-radius: 999px;
+                      background: ${a.preselected ? 'rgba(77,210,255,0.10)' : 'rgba(255,255,255,0.02)'};
+                      border: 1px solid ${a.preselected ? 'var(--accent)' : 'var(--border)'};
+                      color: ${a.preselected ? 'var(--accent)' : 'var(--text)'};
+                      cursor: pointer; font-family: var(--font-body);
+                      font-size: var(--fs-xs); font-weight: 500;
+                      transition: border-color 120ms, background 120ms, color 120ms;
+                    ">
+              <span class="cascade-agency-check" aria-hidden="true" style="width:10px; height:10px; border-radius:50%; background: ${a.preselected ? 'var(--accent)' : 'transparent'}; border: 1px solid ${a.preselected ? 'var(--accent)' : 'var(--text-dim)'};"></span>
+              <span>${a.label}</span>
+              ${a.alreadyOnCase ? `<span style="font-size:9px; padding:1px 6px; border-radius:8px; background:rgba(255,184,77,0.14); color:#ffb84d; font-family:var(--font-mono); letter-spacing:0.06em;">ON CASE</span>` : ''}
+            </button>
+          `).join('')}
+        </div>
+      </div>` : '';
+
     backdrop.innerHTML = `
       <div style="width: min(520px, 94vw); background: var(--panel-solid, #0a0d11); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);">
         <div style="padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);">
@@ -13206,6 +13245,7 @@ async function main() {
           <div style="margin-top: 10px; padding: 8px 10px; background: rgba(255,90,90,0.06); border-left: 2px solid rgba(255,90,90,0.5); font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text); letter-spacing: 0.02em;">${_threatSummary}</div>
           ${_infoPanelHtml}
         </div>
+        ${_agencyPickerHtml}
         <div style="padding: var(--space-3) var(--space-4);">
           <div class="c-section-eyebrow" style="margin-bottom: 8px;">Your note</div>
           <textarea id="cascade-assessment" rows="4" placeholder="What's happening and what do you need from them"
@@ -13240,6 +13280,28 @@ async function main() {
       infoPanel.style.display = visible ? 'none' : 'block';
       infoToggle.style.borderColor = visible ? 'var(--border)' : 'var(--accent)';
       infoToggle.style.color       = visible ? 'var(--text-dim)' : 'var(--accent)';
+    });
+
+    // Agency chip toggles (only rendered when agencyOptions is set).
+    // Clicking a chip flips selected state, updates the styling +
+    // internal _selectedAgencies set. Submit reads this set.
+    backdrop.querySelectorAll('.cascade-agency-chip').forEach(chip => {
+      chip.addEventListener('click', (ev) => {
+        ev.stopPropagation(); ev.preventDefault();
+        const aid = chip.dataset.agencyId;
+        const isNowOn = !_selectedAgencies.has(aid);
+        if (isNowOn) _selectedAgencies.add(aid);
+        else _selectedAgencies.delete(aid);
+        chip.dataset.selected = isNowOn ? 'true' : 'false';
+        chip.style.background = isNowOn ? 'rgba(77,210,255,0.10)' : 'rgba(255,255,255,0.02)';
+        chip.style.borderColor = isNowOn ? 'var(--accent)' : 'var(--border)';
+        chip.style.color = isNowOn ? 'var(--accent)' : 'var(--text)';
+        const dot = chip.querySelector('.cascade-agency-check');
+        if (dot) {
+          dot.style.background = isNowOn ? 'var(--accent)' : 'transparent';
+          dot.style.borderColor = isNowOn ? 'var(--accent)' : 'var(--text-dim)';
+        }
+      });
     });
 
     const highlightPriority = () => {
@@ -13284,6 +13346,11 @@ async function main() {
         assessInput.focus();
         return;
       }
+      // If a picker was rendered, at least one agency must be selected.
+      if (agencyOptions && agencyOptions.length && _selectedAgencies.size === 0) {
+        toast('Select at least one agency to cascade to.', 'err');
+        return;
+      }
       const pkg = {
         operatorAssessment:       assessment,
         agenticAssessment:        _agenticSnapshot,
@@ -13292,6 +13359,9 @@ async function main() {
         priority:                 selectedPriority,
         requesterRoleId:          getActiveRole()?.id || null,
       };
+      const selectionMeta = agencyOptions
+        ? { selectedAgencyIds: Array.from(_selectedAgencies) }
+        : {};
       // Close FIRST, then defer onSubmit to the next task so the DOM
       // paint has committed the backdrop removal before any downstream
       // render happens. Prevents any scenario where a synchronous
@@ -13300,7 +13370,7 @@ async function main() {
       // the escalation record was created.
       close();
       setTimeout(() => {
-        try { onSubmit && onSubmit(pkg); }
+        try { onSubmit && onSubmit(pkg, selectionMeta); }
         catch (err) {
           console.warn('[cascade capture] onSubmit failed:', err);
           toast('Cascade send failed. Check console.', 'err');
@@ -20139,32 +20209,47 @@ async function main() {
         const eventId = _selectedReceiverEventId || _workspaceEventId;
         const ev = getEvent(eventId);
         if (!ev) { toast('Event not found', 'err'); return; }
-        // Route to destinations the recipient ROLES actually watch,
-        // not to tier-filtered destination IDs. PET's role definition
-        // listens on tier-2 destinations; the prior tier-3 filter meant
-        // PET never saw the cascade (the record landed on cph-t3-pet
-        // but PET's roleDestSet didn't include it). Use each recipient
-        // role's own destinationIds, intersected with this event's
-        // configured destination pool.
+        // Build the picker options list: for each candidate intel
+        // agency, resolve the destinations it watches on this event's
+        // site and flag whether it's already on the case. FE + PET
+        // preselected by default. Operator can toggle either off or
+        // add other roles if we broaden the list later.
         const _currentSiteDestIds = new Set(destinationsForEvent(ev).map(d => d.id));
-        const _pickTargetsFor = (roleId) => {
+        const _destsForRole = (roleId) => {
           const roleDef = RECEIVERS.find(r => r.id === roleId);
           return (roleDef?.destinationIds || []).filter(d => _currentSiteDestIds.has(d));
         };
-        const targetIds = [
-          ..._pickTargetsFor('fe'),
-          ..._pickTargetsFor('pet'),
-        ];
-        if (!targetIds.length) { toast('No Forsvarets or Politiets Efterretningstjeneste destinations configured for this site', 'err'); return; }
+        const _existingDestIds = new Set((ev.escalations || []).map(x => x.destinationId));
+        const _agencyCandidates = [
+          { id: 'fe',  label: 'Forsvarets Efterretningstjeneste' },
+          { id: 'pet', label: 'Politiets Efterretningstjeneste'  },
+        ]
+          .map(a => {
+            const dests = _destsForRole(a.id);
+            return {
+              id: a.id,
+              label: a.label,
+              destIds: dests,
+              preselected: dests.length > 0,   // default select if reachable at this site
+              alreadyOnCase: dests.some(d => _existingDestIds.has(d)),
+              disabled: dests.length === 0,
+            };
+          })
+          .filter(a => a.destIds.length > 0);
+        if (!_agencyCandidates.length) { toast('No Forsvarets or Politiets Efterretningstjeneste destinations configured for this site', 'err'); return; }
         const role = getActiveRole();
         _openCascadeCaptureModal({
           eventId,
-          targetName: 'Forsvarets + Politiets Efterretningstjeneste',
+          targetName: 'intel services',
           cascadeReason: 'observer-loop',
           verb: 'Cascade',
           defaultPriority: 'standard',
           hintText: 'They log it for pattern-of-life. They do not dispatch.',
-          onSubmit: (assessmentPackage) => {
+          agencyOptions: _agencyCandidates,
+          onSubmit: (assessmentPackage, { selectedAgencyIds } = {}) => {
+            const targetIds = (selectedAgencyIds || [])
+              .flatMap(aid => _destsForRole(aid));
+            if (!targetIds.length) { toast('No selected agency has a configured destination', 'err'); return; }
             const records = escalateEvent(eventId, {
               destinationIds: targetIds,
               payload: 'summary',
@@ -20172,8 +20257,11 @@ async function main() {
               operator: `Receiver · ${role.name || role.org || role.person || 'Unknown'}`,
               assessmentPackage,
             });
-            if (records.length === 0) toast('Intelligence services already notified for this event', 'info');
-            else toast(`Cascaded to ${records.length} intel destination${records.length === 1 ? '' : 's'} with your assessment.`, 'ok');
+            const selectedLabels = (selectedAgencyIds || [])
+              .map(aid => _agencyCandidates.find(a => a.id === aid)?.label || aid)
+              .join(', ');
+            if (records.length === 0) toast(`${selectedLabels || 'Intelligence services'} already notified for this event`, 'info');
+            else toast(`Cascaded to ${selectedLabels} with your assessment.`, 'ok');
             renderReceiverView({ immediate: true });
           },
         });
