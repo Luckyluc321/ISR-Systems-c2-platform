@@ -145,6 +145,17 @@ import {
   contributorsForEvent,
   roleWasInvolved,
 } from './chapter_composer.js';
+// Phase 5 · archetype-grouped cascade picker. Pure view spec
+// builder + recommender + type-ahead filter. Consumed by the
+// _openCascadeCaptureModal when pickerMode is 'archetype-grouped'
+// so any of the 386 receivers can be selected as a cascade target.
+import {
+  buildPickerGroups,
+  recommendationsForEvent,
+  filterByQuery,
+  THICK_ARCHETYPES,
+  THIN_ARCHETYPES,
+} from './cascade_picker.js';
 const _archetypeTaggedCount = assignArchetypes(RECEIVERS);
 if (typeof window !== 'undefined') {
   // Console handle for spot-checking coverage during development.
@@ -172,6 +183,17 @@ if (typeof window !== 'undefined') {
     render:    renderSubsection,
     populated: subsectionsForContributor,
     all:       renderAllSubsections,
+  };
+  // Phase 5 dev handle for spot-checking cascade picker output.
+  // Usage: window.__isr_picker.groups(event, {alreadyOnCase, activeRoleId})
+  //        window.__isr_picker.recommend(event) → array of role objects
+  //        window.__isr_picker.filter(roles, 'query') → subset
+  window.__isr_picker = {
+    groups:    (event, ctx = {}) => buildPickerGroups(event, RECEIVERS, ctx),
+    recommend: (event) => recommendationsForEvent(event, RECEIVERS),
+    filter:    filterByQuery,
+    THICK_ARCHETYPES,
+    THIN_ARCHETYPES,
   };
   // Phase 3 dev handle for spot-checking chapter composer output.
   // Usage: window.__isr_chapters.compose(role, event)         → HTMLString
@@ -13633,6 +13655,423 @@ async function main() {
     });
   }
 
+  // ═══════════════════════════════════════════════════════════════════
+  // Phase 5 · Archetype-grouped cascade modal (universal front door)
+  // ───────────────────────────────────────────────────────────────────
+  // Sibling of _openCascadeCaptureModal that renders the FULL 386
+  // receiver universe as an archetype-grouped picker with recommend
+  // engine + type-ahead search. The two legacy shortcuts (Cascade to
+  // intel services / Cascade to local police) stay wired to
+  // _openCascadeCaptureModal with their hardcoded 2-role chip picker
+  // for one-click send. This modal is the "cascade to anyone" path.
+  //
+  // Same chrome: threat header, note textarea, priority buttons,
+  // cancel + submit. Different middle section: recommendation row,
+  // typeahead input, collapsible archetype groups, on-case block.
+  //
+  // onSubmit receives (assessmentPackage, { selectedRoleIds }). The
+  // caller resolves role ids → destination ids the same way
+  // cascade-fe-pet does today, then calls escalateEvent.
+  //
+  // Detection-only invariant preserved. Modal never writes to the
+  // event; caller's onSubmit invokes escalateEvent when the operator
+  // confirms.
+  // ═══════════════════════════════════════════════════════════════════
+  function _openArchetypeCascadeModal({
+    eventId,
+    verb = 'Cascade',
+    cascadeReason = 'coordination',
+    defaultPriority = 'urgent',
+    hintText = null,
+    onSubmit,
+  }) {
+    const event = getEvent(eventId);
+    if (!event) { toast('Event not found', 'err'); return; }
+    document.querySelectorAll('.cascade-capture-backdrop').forEach(b => {
+      try { b.remove(); } catch (_) {}
+    });
+    const backdrop = document.createElement('div');
+    backdrop.className = 'cascade-capture-backdrop';
+    backdrop.style.cssText = `
+      position: fixed; inset: 0; background: rgba(6, 8, 11, 0.82);
+      backdrop-filter: blur(4px); z-index: 10000;
+      display: flex; align-items: center; justify-content: center;
+      font-family: var(--font-body);
+    `;
+    let _closed = false;
+    let escHandler;
+    const close = () => {
+      if (_closed) return;
+      _closed = true;
+      try {
+        backdrop.style.display = 'none';
+        if (backdrop.parentNode) backdrop.parentNode.removeChild(backdrop);
+      } catch (err) { console.warn('[arch cascade] backdrop remove failed:', err); }
+      try { document.removeEventListener('keydown', escHandler); } catch (_) {}
+    };
+    escHandler = (ev) => { if (ev.key === 'Escape') close(); };
+    document.addEventListener('keydown', escHandler);
+    backdrop.addEventListener('click', (ev) => { if (ev.target === backdrop) close(); });
+
+    // Agent snapshot + dispatch history (same shape as legacy modal
+    // so recipients see identical assessmentPackage regardless of
+    // which modal composed it).
+    const _agenticSnapshot = event._lastAgenticSynthesis
+      ? {
+          narrative:      event._lastAgenticSynthesis.narrative || null,
+          recommendation: event._lastAgenticSynthesis.recommendation || null,
+          model:          event._lastAgenticSynthesis.model || null,
+          generatedAt:    event._lastAgenticSynthesis.generatedAt || null,
+        }
+      : null;
+    const _dispatchSnapshot = [];
+    try {
+      if (Array.isArray(event.counterDispatches)) {
+        for (const cd of event.counterDispatches) {
+          _dispatchSnapshot.push({
+            assetId:      cd.dispatchId,
+            assetName:    cd.assetName || cd.groupName || cd.kind || 'unknown',
+            kind:         cd.kind,
+            state:        cd.state,
+            dispatchedAt: cd.dispatchedTs ? new Date(cd.dispatchedTs).toISOString() : null,
+          });
+        }
+      }
+    } catch (_) {}
+
+    const _threatSummary = [
+      event.classification === 'hostile' ? 'HOSTILE' : (event.classification || '').toUpperCase(),
+      event.threat ? `${event.threat} threat` : '',
+      event.droneType || event.platform || 'unknown platform',
+      event.siteId ? `at ${event.siteId.toUpperCase()}` : '',
+    ].filter(Boolean).join(' · ');
+
+    // Roles already on the case via a prior escalation. Feeds the
+    // picker's on-case section and blocks selection so the operator
+    // can't duplicate an existing cascade. Cross-references
+    // escalations by destinationId to receiver role ids.
+    const _alreadyOnCaseRoleIds = new Set();
+    if (Array.isArray(event.escalations)) {
+      for (const r of event.escalations) {
+        const destId = r.destinationId;
+        if (!destId) continue;
+        for (const role of RECEIVERS) {
+          if (Array.isArray(role.destinationIds) && role.destinationIds.includes(destId)) {
+            _alreadyOnCaseRoleIds.add(role.id);
+          }
+        }
+      }
+    }
+    const activeRoleId = getActiveRole()?.id || null;
+    if (activeRoleId) _alreadyOnCaseRoleIds.delete(activeRoleId);
+
+    const _spec = buildPickerGroups(event, RECEIVERS, {
+      alreadyOnCaseRoleIds: _alreadyOnCaseRoleIds,
+      activeRoleId,
+    });
+    const _recommendations = recommendationsForEvent(event, RECEIVERS).filter(
+      r => !_alreadyOnCaseRoleIds.has(r.id) && r.id !== activeRoleId
+    );
+    const _selectedRoleIds = new Set();
+    // Track thick-group expanded state; thin groups always show.
+    const _expandedGroups = new Set();
+
+    const _escHtml = (s) => String(s || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+    const _renderChip = (role) => `
+      <button class="arch-picker-chip"
+              type="button"
+              data-role-id="${_escHtml(role.id)}"
+              data-selected="false"
+              title="${_escHtml(role.name || role.id)}">
+        <span class="arch-picker-chip-dot" aria-hidden="true"></span>
+        <span class="arch-picker-chip-name">${_escHtml(role.name || role.id)}</span>
+        ${role.tier ? `<span class="arch-picker-chip-tier">${_escHtml(String(role.tier).toUpperCase())}</span>` : ''}
+      </button>`;
+
+    const _renderRecommendationRow = () => {
+      if (!_recommendations.length) return '';
+      return `
+        <div class="arch-picker-recommend">
+          <div class="arch-picker-eyebrow">Recommended for this event</div>
+          <div class="arch-picker-recommend-row">
+            ${_recommendations.map(r => `
+              <button class="arch-picker-chip arch-picker-chip-recommend"
+                      type="button"
+                      data-role-id="${_escHtml(r.id)}"
+                      data-selected="false"
+                      title="${_escHtml(r.name || r.id)}">
+                <span class="arch-picker-chip-dot" aria-hidden="true"></span>
+                <span class="arch-picker-chip-name">${_escHtml(r.name || r.id)}</span>
+              </button>
+            `).join('')}
+          </div>
+        </div>`;
+    };
+
+    const _renderGroup = (group) => {
+      const count = group.roles.length;
+      const isThick = group.isThick;
+      const groupId = `arch-group-${group.archetype}`;
+      return `
+        <details class="arch-picker-group arch-picker-group-${_escHtml(group.archetype)}"
+                 data-group-key="${_escHtml(group.archetype)}"
+                 data-is-thick="${isThick ? 'true' : 'false'}"
+                 ${isThick ? '' : 'open'}>
+          <summary class="arch-picker-group-summary">
+            <span class="arch-picker-group-label">${_escHtml(group.label)}</span>
+            <span class="arch-picker-group-count">${count} role${count === 1 ? '' : 's'}${isThick ? ' · click to expand' : ''}</span>
+          </summary>
+          <div class="arch-picker-group-body" id="${groupId}">
+            ${group.roles.map(_renderChip).join('')}
+          </div>
+        </details>`;
+    };
+
+    const _renderOnCaseSection = () => {
+      if (!_spec.onCase.length) return '';
+      return `
+        <div class="arch-picker-on-case">
+          <div class="arch-picker-eyebrow">On case already · ${_spec.onCase.length}</div>
+          <div class="arch-picker-on-case-row">
+            ${_spec.onCase.map(r => `
+              <span class="arch-picker-on-case-chip" title="Already received a cascade on this event">
+                ${_escHtml(r.name || r.id)}
+              </span>
+            `).join('')}
+          </div>
+        </div>`;
+    };
+
+    const _infoPanelHtml = `
+      <div id="cascade-info-panel" style="display: none; margin-top: 10px; padding: 10px 12px; background: rgba(77,210,255,0.04); border-left: 2px solid var(--accent); font-size: var(--fs-2xs); color: var(--text-dim); line-height: 1.5;">
+        ${hintText ? `<div style="color: var(--text); margin-bottom: 6px;">${_escHtml(hintText)}</div>` : ''}
+        <div>Recipient sees your note, the latest agent take, and what you've dispatched so far.</div>
+        <div style="margin-top: 6px;">Attached automatically: ${_agenticSnapshot ? 'agent take, ' : ''}${_dispatchSnapshot.length} dispatch${_dispatchSnapshot.length === 1 ? '' : 'es'}.</div>
+      </div>`;
+
+    const priorityBtn = (val, label) => `
+      <button class="cascade-priority-option" data-val="${val}" type="button" style="
+        display: flex; align-items: center; justify-content: center;
+        padding: 10px 12px; border-radius: 3px;
+        background: rgba(255, 255, 255, 0.02);
+        border: 1px solid var(--border);
+        cursor: pointer; transition: border-color 120ms, background 120ms;
+        font-family: var(--font-body); color: var(--text);
+        flex: 1;
+      ">
+        <span style="font-size: var(--fs-xs); font-weight: 600;">${label}</span>
+      </button>`;
+
+    backdrop.innerHTML = `
+      <div style="width: min(720px, 96vw); max-height: 92vh; display: flex; flex-direction: column; background: var(--panel-solid, #0a0d11); border: 1px solid var(--border); border-radius: 4px; box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);">
+        <div style="padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--border);">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);">
+            <div class="c-section-eyebrow">${_escHtml(verb)} to any agency</div>
+            <button id="cascade-info-toggle" type="button" title="What gets sent" aria-label="What gets sent" style="background: transparent; border: 1px solid var(--border); color: var(--text-dim); border-radius: 50%; width: 22px; height: 22px; padding: 0; cursor: pointer; font-size: 12px; line-height: 1; font-family: var(--font-mono); flex-shrink: 0;">?</button>
+          </div>
+          <div style="margin-top: 10px; padding: 8px 10px; background: rgba(255,90,90,0.06); border-left: 2px solid rgba(255,90,90,0.5); font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--text); letter-spacing: 0.02em;">${_threatSummary}</div>
+          ${_infoPanelHtml}
+        </div>
+
+        <div class="arch-picker-scroll" style="overflow-y: auto; padding: var(--space-3) var(--space-4);">
+          ${_renderRecommendationRow()}
+
+          <div class="arch-picker-search">
+            <input id="arch-picker-search-input"
+                   type="text"
+                   placeholder="Search by name, agency, tier, or archetype"
+                   autocomplete="off" />
+            <div class="arch-picker-selected-row" id="arch-picker-selected-row"></div>
+          </div>
+
+          <div id="arch-picker-groups" class="arch-picker-groups">
+            ${_spec.groups.map(_renderGroup).join('')}
+            ${!_spec.groups.length ? '<div class="arch-picker-empty">No roles available to cascade to.</div>' : ''}
+          </div>
+
+          ${_renderOnCaseSection()}
+        </div>
+
+        <div style="padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border);">
+          <div class="c-section-eyebrow" style="margin-bottom: 8px;">Your note</div>
+          <textarea id="cascade-assessment" rows="3" placeholder="What's happening and what do you need from them"
+            style="width: 100%; padding: 10px 12px; background: rgba(0, 0, 0, 0.35); border: 1px solid var(--border); border-radius: 2px; color: var(--text); font-family: var(--font-body); font-size: var(--fs-sm); box-sizing: border-box; resize: vertical; min-height: 70px;"></textarea>
+        </div>
+        <div style="padding: 0 var(--space-4) var(--space-3);">
+          <div class="c-section-eyebrow" style="margin-bottom: 8px;">Priority</div>
+          <div style="display: flex; gap: 6px;">
+            ${priorityBtn('critical', 'Critical')}
+            ${priorityBtn('urgent',   'Urgent')}
+            ${priorityBtn('standard', 'Standard')}
+          </div>
+        </div>
+        <div style="padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px;">
+          <button id="cascade-cancel" type="button" class="c-btn compact">Cancel</button>
+          <button id="cascade-submit" type="button" class="c-btn compact primary">${_escHtml(verb)}</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(backdrop);
+
+    let selectedPriority = defaultPriority;
+    const submitBtn = backdrop.querySelector('#cascade-submit');
+    const cancelBtn = backdrop.querySelector('#cascade-cancel');
+    const assessInput = backdrop.querySelector('#cascade-assessment');
+    const infoToggle = backdrop.querySelector('#cascade-info-toggle');
+    const infoPanel  = backdrop.querySelector('#cascade-info-panel');
+    const searchInput = backdrop.querySelector('#arch-picker-search-input');
+    const selectedRow = backdrop.querySelector('#arch-picker-selected-row');
+    const groupsRoot = backdrop.querySelector('#arch-picker-groups');
+
+    infoToggle?.addEventListener('click', (ev) => {
+      ev.stopPropagation(); ev.preventDefault();
+      const visible = infoPanel.style.display !== 'none';
+      infoPanel.style.display = visible ? 'none' : 'block';
+      infoToggle.style.borderColor = visible ? 'var(--border)' : 'var(--accent)';
+      infoToggle.style.color       = visible ? 'var(--text-dim)' : 'var(--accent)';
+    });
+
+    // Selection state sync — updates every chip with matching
+    // role-id (chips can appear in both the recommendation row AND
+    // a group body, so we sync all instances).
+    const _syncChipState = () => {
+      backdrop.querySelectorAll('.arch-picker-chip').forEach(chip => {
+        const rid = chip.dataset.roleId;
+        const on = _selectedRoleIds.has(rid);
+        chip.dataset.selected = on ? 'true' : 'false';
+      });
+      // Selected pills row above search.
+      selectedRow.innerHTML = Array.from(_selectedRoleIds).map(rid => {
+        const role = RECEIVERS.find(r => r.id === rid);
+        const label = role ? (role.name || role.id) : rid;
+        return `<span class="arch-picker-selected-pill" data-role-id="${_escHtml(rid)}">
+          ${_escHtml(label)}
+          <span class="arch-picker-selected-x" aria-hidden="true">✕</span>
+        </span>`;
+      }).join('');
+      // Bind X-remove on each pill.
+      selectedRow.querySelectorAll('.arch-picker-selected-pill').forEach(pill => {
+        pill.addEventListener('click', (ev) => {
+          ev.stopPropagation();
+          _selectedRoleIds.delete(pill.dataset.roleId);
+          _syncChipState();
+        });
+      });
+    };
+
+    const _bindChipClicks = () => {
+      backdrop.querySelectorAll('.arch-picker-chip').forEach(chip => {
+        if (chip.dataset._bound === 'true') return;
+        chip.dataset._bound = 'true';
+        chip.addEventListener('click', (ev) => {
+          ev.stopPropagation(); ev.preventDefault();
+          const rid = chip.dataset.roleId;
+          if (_selectedRoleIds.has(rid)) _selectedRoleIds.delete(rid);
+          else _selectedRoleIds.add(rid);
+          _syncChipState();
+        });
+      });
+    };
+    _bindChipClicks();
+    _syncChipState();
+
+    // Type-ahead: filter the groups body to matching roles. When
+    // any query is active, expand every thick group so matches are
+    // visible; clear query restores collapse.
+    let _lastQuery = '';
+    const _applyQuery = (raw) => {
+      const q = String(raw || '').trim().toLowerCase();
+      _lastQuery = q;
+      _spec.groups.forEach(group => {
+        const details = groupsRoot.querySelector(`[data-group-key="${group.archetype}"]`);
+        if (!details) return;
+        const filtered = q ? filterByQuery(group.roles, q) : group.roles;
+        const body = details.querySelector('.arch-picker-group-body');
+        body.innerHTML = filtered.map(_renderChip).join('');
+        const countLabel = details.querySelector('.arch-picker-group-count');
+        if (countLabel) {
+          const isThick = group.isThick;
+          countLabel.textContent = `${filtered.length} role${filtered.length === 1 ? '' : 's'}${isThick && !q ? ' · click to expand' : ''}`;
+        }
+        // Auto-expand on any match during search; restore default on clear.
+        if (q) details.open = filtered.length > 0;
+        else   details.open = !group.isThick;
+        details.style.display = (q && filtered.length === 0) ? 'none' : '';
+      });
+      _bindChipClicks();
+      _syncChipState();
+    };
+    searchInput.addEventListener('input', (ev) => _applyQuery(ev.target.value));
+
+    // Priority buttons — same behavior as legacy modal.
+    const highlightPriority = () => {
+      backdrop.querySelectorAll('.cascade-priority-option').forEach(b => {
+        if (b.dataset.val === selectedPriority) {
+          b.style.borderColor = 'var(--accent)';
+          b.style.background = 'rgba(77, 210, 255, 0.06)';
+        } else {
+          b.style.borderColor = 'var(--border)';
+          b.style.background = 'rgba(255, 255, 255, 0.02)';
+        }
+      });
+    };
+    highlightPriority();
+    backdrop.querySelectorAll('.cascade-priority-option').forEach(btn => {
+      btn.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        selectedPriority = btn.dataset.val;
+        highlightPriority();
+      });
+    });
+
+    setTimeout(() => searchInput.focus(), 30);
+
+    cancelBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation(); ev.preventDefault();
+      close();
+    });
+
+    const doSubmit = () => {
+      const assessment = (assessInput.value || '').trim();
+      if (assessment.length < 5) {
+        toast('Add a short assessment before sending.', 'err');
+        assessInput.focus();
+        return;
+      }
+      if (_selectedRoleIds.size === 0) {
+        toast('Select at least one agency to cascade to.', 'err');
+        searchInput.focus();
+        return;
+      }
+      const pkg = {
+        operatorAssessment:       assessment,
+        agenticAssessment:        _agenticSnapshot,
+        responseHistoryAtCascade: _dispatchSnapshot,
+        cascadeReason,
+        priority:                 selectedPriority,
+        requesterRoleId:          getActiveRole()?.id || null,
+      };
+      close();
+      setTimeout(() => {
+        try { onSubmit && onSubmit(pkg, { selectedRoleIds: Array.from(_selectedRoleIds) }); }
+        catch (err) {
+          console.warn('[arch cascade] onSubmit failed:', err);
+          toast('Cascade send failed. Check console.', 'err');
+        }
+      }, 0);
+    };
+    submitBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation(); ev.preventDefault();
+      doSubmit();
+    });
+  }
+
   // Branded text prompt modal. Replaces window.prompt() which had
   // three problems: (a) can't be styled to match the platform, (b)
   // reads exactly like an untrusted browser dialog for security
@@ -19869,6 +20308,14 @@ async function main() {
         tooltip: 'Cascades this event to Forsvarets Efterretningstjeneste, the Danish Defence Intelligence Service, and Politiets Efterretningstjeneste, the Danish Security and Intelligence Service.',
       });
     }
+    if (isActive) {
+      ctas.push({
+        label: 'Cascade to any agency', sub: 'Full picker across all archetypes', icon: '🎯', tone: 'neutral',
+        action: 'cascade-any',
+        category: 'request',
+        tooltip: 'Opens the full archetype-grouped picker. Type-ahead search across every registered receiver plus recommended defaults tailored to this event.',
+      });
+    }
     ctas.push({
       label: 'Loop in observer', sub: 'Add role to case', icon: '👥', tone: 'neutral',
       action: 'observer-add',
@@ -20809,6 +21256,56 @@ async function main() {
             _fireEscalationAdapterSend(ev, records);
             if (records.length === 0) toast('Local Politi already coordinated for this event', 'info');
             else toast(`Cascaded to ${targetPolitiName} with your assessment.`, 'ok');
+            renderReceiverView({ immediate: true });
+          },
+        });
+      }
+      else if (action === 'cascade-any') {
+        // Phase 5 · Universal cascade to any of the 386 receivers.
+        // Opens the archetype-grouped picker modal. Legacy shortcut
+        // CTAs (cascade-fe-pet, cascade-politi) stay wired to their
+        // hardcoded flat pickers for one-click send. This handler
+        // is the "cascade to anyone" path.
+        const eventId = _selectedReceiverEventId || _workspaceEventId;
+        const ev = getEvent(eventId);
+        if (!ev) { toast('Event not found', 'err'); return; }
+        const role = getActiveRole();
+        // Site-scoped destination gate — only role destinations that
+        // are actually configured for this site's fan-out get sent.
+        // Roles picked outside this scope silently no-op with a toast.
+        const _currentSiteDestIds = new Set(destinationsForEvent(ev).map(d => d.id));
+        const _destsForRole = (roleId) => {
+          const roleDef = RECEIVERS.find(r => r.id === roleId);
+          return (roleDef?.destinationIds || []).filter(d => _currentSiteDestIds.has(d));
+        };
+        _openArchetypeCascadeModal({
+          eventId,
+          verb: 'Cascade',
+          cascadeReason: 'coordination',
+          defaultPriority: 'urgent',
+          hintText: 'Every registered receiver is here. Type to search or expand a group.',
+          onSubmit: (assessmentPackage, { selectedRoleIds } = {}) => {
+            const targetIds = (selectedRoleIds || []).flatMap(_destsForRole);
+            const uniqTargetIds = Array.from(new Set(targetIds));
+            if (!uniqTargetIds.length) {
+              toast('None of the selected agencies have a configured destination for this site', 'err');
+              return;
+            }
+            const records = escalateEvent(eventId, {
+              destinationIds: uniqTargetIds,
+              payload: 'summary',
+              message: `Cascade from ${role?.name || 'Receiver'}: ${assessmentPackage.operatorAssessment}`,
+              operator: `Receiver · ${role?.name || role?.org || role?.person || 'Unknown'}`,
+              operatorRoleId: role?.id || null,
+              assessmentPackage,
+            });
+            _simulateEscalationDelivery(eventId, records);
+            _fireEscalationAdapterSend(ev, records);
+            const selectedLabels = (selectedRoleIds || [])
+              .map(rid => RECEIVERS.find(r => r.id === rid)?.name || rid)
+              .join(', ');
+            if (records.length === 0) toast(`${selectedLabels || 'Selected agencies'} already on the case`, 'info');
+            else toast(`Cascaded to ${selectedLabels}.`, 'ok');
             renderReceiverView({ immediate: true });
           },
         });
