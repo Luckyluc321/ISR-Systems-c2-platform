@@ -119,6 +119,33 @@ import { responseBundle, responseBundleForSubject, RESPONSE_OPTION_DETAILS, outc
 import { AIRCRAFT, aircraftAtBase, aircraftForResponseAsset } from './aircraft.js';
 import { playbookFor } from './response_playbook.js';
 import { ADMIN, OPERATORS, RECEIVERS, ACCOUNTS, getActiveRole, setActiveRole, onRoleChange, getRoleChildren, getRoleDestinationIdsRolledUp, impactedRoles as _impactedRoles, canInitiate as _canInitiate, agencyBranchOf, FLOW_TYPES } from './roles.js';
+// Phase 1 · assign action-archetype tags to every RECEIVERS entry at
+// boot via prefix rules. Every role gets .archetype (primary) +
+// .secondaryArchetypes (array). Consumers include the future
+// contributor-chapter renderer, the archetype-grouped cascade picker,
+// and per-agency aggregate reports. See src/archetypes.js for the
+// rule table and docs/cross-agency-flows.md Section 7 for the taxonomy.
+import { assignArchetypes, ARCHETYPES, ARCHETYPE_LABELS, archetypeForDispatchKind, archetypeFor } from './archetypes.js';
+const _archetypeTaggedCount = assignArchetypes(RECEIVERS);
+if (typeof window !== 'undefined') {
+  // Console handle for spot-checking coverage during development.
+  // Example: window.__isr_archetypes.byArchetype('kinetic-response')
+  window.__isr_archetypes = {
+    ARCHETYPES,
+    ARCHETYPE_LABELS,
+    tagged: _archetypeTaggedCount,
+    total: RECEIVERS.length,
+    lookup:      (roleId) => archetypeFor(roleId),
+    lookupKind:  (kind)   => archetypeForDispatchKind(kind),
+    byArchetype: (archetype) => RECEIVERS.filter(r => r.archetype === archetype),
+    coverage:    () => {
+      const c = {};
+      for (const key of Object.keys(ARCHETYPES)) c[ARCHETYPES[key]] = 0;
+      for (const r of RECEIVERS) if (r.archetype && c[r.archetype] !== undefined) c[r.archetype]++;
+      return c;
+    },
+  };
+}
 
 // ── Tenant helpers ──
 // An "operator tenant" is one customer company (CPH Airports A/S,
@@ -3995,6 +4022,12 @@ async function main() {
       // request" on the requester's own case-file.
       ownerRoleId: ownerRoleId || null,
       viaRequestFromRoleId: viaRequestFromRoleId || null,
+      // Phase 1 archetype tag from DISPATCH_KIND_ARCHETYPES lookup.
+      // Contributor-chapter renderer routes each dispatch into the
+      // right archetype sub-section (kinetic for patrols / intercept /
+      // tactical, forensic for cyber team / forensic van, coordination
+      // for coord cell). See src/archetypes.js.
+      archetype: archetypeForDispatchKind(asset.kind),
     };
     _counterDispatches.set(dispatchId, d);
     _createCounterDispatchEntities(d);
@@ -4027,6 +4060,10 @@ async function main() {
       dispatchId, groupId, memberIndex, memberCount, variantId,
       assetId: asset.id, assetName: d.assetName, groupName: asset.name,
       kind: asset.kind, dispatchedTs: d.dispatchedTs,
+      // Phase 1 archetype tag mirrored from d — Post-Incident Report
+      // chapter renderer groups dispatches by ownerRoleId then routes
+      // each into the archetype sub-section for the owner's chapter.
+      archetype: d.archetype,
       state: d.state,
       curLat: d.curLat, curLon: d.curLon, curAlt: d.curAlt,
       ownerRoleId: d.ownerRoleId || null,
@@ -4363,6 +4400,7 @@ async function main() {
     entry.curAlt = d.curAlt;
     entry.ownerRoleId = d.ownerRoleId || null;
     entry.viaRequestFromRoleId = d.viaRequestFromRoleId || null;
+    entry.archetype = d.archetype || entry.archetype || null;
     entry.rtbCompleted = !!d.rtbCompleted;
     // Append-only state history for report reconstruction. Only push
     // when the state actually changes so we don't spam the array

@@ -412,6 +412,29 @@ Materialised on the shared event by `_syncDispatchToEvent` (main.js) on every ti
 | `stateHistory` | array | Append-only `{state, at}` on every transition |
 | `dispatchedAt` / `arrivedAt` / `engagingAt` / `completedAt` / `rtbStartedAt` / `rtbCompletedAt` | ISO \| null | Materialised timing fields for reports; stamped on first transition into each state |
 | `curLat` / `curLon` / `curAlt` | number | Live position, mirrored every tick |
+| `archetype` | string | Phase 1 action-archetype tag from `archetypeForDispatchKind(kind)`. Contributor-chapter renderer routes dispatch into the correct archetype sub-section for the owner's chapter |
+
+### Event catalog (`event.catalog`)
+
+Phase 1 shared data catalog. 13 typed sub-arrays hold single-copy facts overlapping across contributor chapters. Initialised on every event via `addEvent()`; backfill fills missing sub-arrays on rehydrated events from earlier schema versions.
+
+| Sub-array | Contents | Written by |
+|---|---|---|
+| `subject` (object) | CAT-SUBJECT — subject bundle | NN pipeline at detection |
+| `recording` (object) | CAT-RECORDING — detection recording | Tick loop |
+| `respHistory` (array) | CAT-RESP-HISTORY — dispatch entries mirrored from `event.counterDispatches` | Kinetic + medical contributors |
+| `attribution` (array) | CAT-ATTR — attribution notes | Intel + forensic |
+| `patterns` (array) | CAT-PATTERN — pattern additions | Intel |
+| `xlinks` (array) | CAT-XLINK — cross-event links (symmetric) | Any contributor |
+| `roe` (array) | CAT-ROE — rules-of-engagement notes | Kinetic |
+| `evidence` (array) | CAT-EVIDENCE — physical evidence chain of custody | Forensic + Politi |
+| `coordDecisions` (array) | CAT-COORD-DECISIONS — command decisions | Coordination |
+| `casualties` (array) | CAT-CASUALTIES — casualty records | Medical |
+| `advisories` (array) | CAT-ADVISORY — regulatory advisories issued | Regulatory |
+| `publicAlerts` (array) | CAT-PUBLIC-ALERT — public-safety broadcasts | Public safety |
+| `liaison` (array) | CAT-LIAISON — international information-sharing | Liaison |
+
+`CATALOG_SCHEMA_VERSION = 1` stamped on the catalog root. `_makeEmptyCatalog()` factory exported from `events.js` for rehydration paths.
 
 ## 6b. Escalation adapter seam
 
@@ -536,3 +559,4 @@ Explicitly out of scope for v0.1 — track separately as they land.
 | 2026-08-24 | v0.1 initial draft — scenarios A, B, C + collaboration patterns + decision trees | ISR C2 build |
 | 2026-09-09 | Section 6a data model, 6b escalation adapter, 6c render surfaces — reflects cascade lifecycle post-audit fixes | ISR C2 build |
 | 2026-09-09 | Section 7 archetype taxonomy — 8 action archetypes covering all 386 receivers, thick vs thin branches, chapter composition rule | ISR C2 build |
+| 2026-09-10 | Phase 1 code landed — src/archetypes.js prefix rules assigning archetype to every RECEIVERS entry at boot, event.catalog with 13 typed sub-arrays, dispatch archetype tag mirrored on d + event.counterDispatches | ISR C2 build |

@@ -21,6 +21,33 @@ import { SITES } from './sites.js';
 export const ESCALATION_SCHEMA_VERSION = 1;
 export const ASSESSMENT_PACKAGE_SCHEMA_VERSION = 1;
 
+// Shared data catalog schema version. Bumped when catalog sub-array
+// shape changes (new type added, entry shape changes). Consumers gate
+// migrations on this.
+export const CATALOG_SCHEMA_VERSION = 1;
+
+// Empty catalog factory. Exported so consumers can build a fresh one
+// for rehydration paths. All 13 sub-arrays initialised so downstream
+// code can push without checking existence.
+export function _makeEmptyCatalog() {
+  return {
+    _schemaVersion:   CATALOG_SCHEMA_VERSION,
+    subject:          null,   // CAT-SUBJECT: single object, one per event
+    recording:        null,   // CAT-RECORDING: single object, one per event
+    respHistory:      [],     // CAT-RESP-HISTORY: dispatch entries mirrored from event.counterDispatches
+    attribution:      [],     // CAT-ATTR: attribution notes (contributor-tagged)
+    patterns:         [],     // CAT-PATTERN: pattern additions from intel
+    xlinks:           [],     // CAT-XLINK: cross-event links (symmetric)
+    roe:              [],     // CAT-ROE: rules-of-engagement notes
+    evidence:         [],     // CAT-EVIDENCE: physical evidence chain of custody
+    coordDecisions:   [],     // CAT-COORD-DECISIONS: coordination command decisions
+    casualties:       [],     // CAT-CASUALTIES: medical casualty records
+    advisories:       [],     // CAT-ADVISORY: regulatory advisories issued
+    publicAlerts:     [],     // CAT-PUBLIC-ALERT: public-safety broadcasts
+    liaison:          [],     // CAT-LIAISON: international information-sharing records
+  };
+}
+
 export const EVENTS = [
   // ── Recently closed hostile (was live, exited 10 min ago) ──
   {
@@ -222,6 +249,24 @@ export function addEvent(event) {
   // "no narrative yet" from "field missing entirely."
   event.narrativeCache = event.narrativeCache || null;
   event._preprocessed = event._preprocessed || null;
+  // Phase 1 · Shared data catalog for the contributor-chapter model.
+  // 13 typed sub-arrays hold single-copy facts that overlap across
+  // chapters (subject bundle, detection recording, response history,
+  // attribution notes, patterns, cross-links, ROE, evidence chain,
+  // coordination decisions, casualties, advisories, public alerts,
+  // international liaison records). Chapters cite by ID; sub-sections
+  // read + write via IDs. Consumers land in Phases 2-4.
+  // See src/archetypes.js + docs/cross-agency-flows.md Section 7.
+  if (!event.catalog || typeof event.catalog !== 'object') {
+    event.catalog = _makeEmptyCatalog();
+  } else {
+    // Backfill any missing sub-arrays (rehydrated events from earlier
+    // schema versions might have a partial catalog).
+    const base = _makeEmptyCatalog();
+    for (const k of Object.keys(base)) {
+      if (event.catalog[k] === undefined) event.catalog[k] = base[k];
+    }
+  }
   // Geo-context enrichment (opt-in). Only populated if the sovereign geo
   // routing module has been primed. Coord resolution priority:
   //   1. event.entry.{lat,lon}         (from threat template spawn)
