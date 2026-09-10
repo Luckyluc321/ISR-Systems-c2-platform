@@ -126,6 +126,15 @@ import { ADMIN, OPERATORS, RECEIVERS, ACCOUNTS, getActiveRole, setActiveRole, on
 // and per-agency aggregate reports. See src/archetypes.js for the
 // rule table and docs/cross-agency-flows.md Section 7 for the taxonomy.
 import { assignArchetypes, ARCHETYPES, ARCHETYPE_LABELS, archetypeForDispatchKind, archetypeFor } from './archetypes.js';
+// Phase 2 · 8 sub-section renderers (kinetic / coord / intel /
+// forensic / medical / regulatory / public / liaison). Pure functions
+// (role, event) → HTMLString. Composed into contributor chapters in
+// Phase 3. Exported here for dev-console spot-checking too.
+import {
+  renderSubsection,
+  subsectionsForContributor,
+  renderAllSubsections,
+} from './report_subsections.js';
 const _archetypeTaggedCount = assignArchetypes(RECEIVERS);
 if (typeof window !== 'undefined') {
   // Console handle for spot-checking coverage during development.
@@ -144,6 +153,15 @@ if (typeof window !== 'undefined') {
       for (const r of RECEIVERS) if (r.archetype && c[r.archetype] !== undefined) c[r.archetype]++;
       return c;
     },
+  };
+  // Phase 2 dev handle for spot-checking sub-section renderers.
+  // Usage: window.__isr_subsections.render('kinetic-response', role, event)
+  //        window.__isr_subsections.populated(role, event) → array of archetypes
+  //        window.__isr_subsections.all(role, event) → concatenated HTML
+  window.__isr_subsections = {
+    render:    renderSubsection,
+    populated: subsectionsForContributor,
+    all:       renderAllSubsections,
   };
 }
 

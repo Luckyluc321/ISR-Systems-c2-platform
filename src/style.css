@@ -7714,6 +7714,107 @@ body.view-fleet #fleet-view { display: block; }
   text-transform: uppercase;
 }
 
+/* Phase 2 · Post-Incident Report chapter sub-sections. Every
+   contributor chapter is composed of 0-8 archetype sub-sections;
+   only populated sub-sections render. Canonical outer shape is a
+   labelled header row + a body with one or more note blocks.
+   Colour token per archetype so the master PIR reader can scan
+   which archetype dominates a chapter at a glance. */
+.chapter-subsec {
+  padding: var(--space-3) var(--space-4);
+  margin-top: var(--space-3);
+  background: rgba(180, 200, 220, 0.02);
+  border-left: 3px solid var(--border-strong);
+  border-radius: 0 3px 3px 0;
+}
+.chapter-subsec-hdr {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.chapter-subsec-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text);
+  font-weight: 600;
+}
+.chapter-subsec-summary {
+  font-family: var(--font-body);
+  font-size: var(--fs-2xs);
+  color: var(--text-dim);
+  letter-spacing: 0.02em;
+}
+.chapter-subsec-body { font-size: var(--fs-xs); color: var(--text); line-height: 1.55; }
+.chapter-subsec-note { margin-top: var(--space-2); }
+.chapter-subsec-note-hdr {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 4px;
+}
+.chapter-subsec-note-list { margin: 0; padding-left: 18px; }
+.chapter-subsec-note-list li { padding: 3px 0; }
+.ksub-cat-id {
+  display: inline-block;
+  padding: 1px 6px;
+  background: rgba(77, 210, 255, 0.10);
+  border: 1px solid var(--accent-dim);
+  border-radius: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+  margin-right: 4px;
+}
+.ksub-ts {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-dim);
+  margin-left: 6px;
+}
+.ksub-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-2xs);
+  margin: 6px 0;
+}
+.ksub-table th {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  text-align: left;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  font-weight: 500;
+}
+.ksub-table td { padding: 4px 6px; border-bottom: 1px solid rgba(255, 255, 255, 0.03); }
+.ksub-asset { color: var(--text); font-weight: 500; }
+.ksub-state { font-family: var(--font-mono); text-transform: lowercase; letter-spacing: 0.04em; color: var(--text-dim); }
+.ksub-state[data-state="complete"] { color: var(--ok); }
+.ksub-state[data-state="engaging"] { color: var(--accent); }
+.ksub-state[data-state="en_route"] { color: var(--warn); }
+.ksub-timing { color: var(--text-dim); font-size: var(--fs-2xs); }
+.ksub-duration { color: var(--text); font-family: var(--font-mono); font-size: var(--fs-2xs); }
+/* Per-archetype border-left tint */
+.chapter-subsec-kinetic-response          { border-left-color: var(--danger); }
+.chapter-subsec-coordination-command      { border-left-color: var(--warn); }
+.chapter-subsec-intelligence-attribution  { border-left-color: var(--accent); }
+.chapter-subsec-forensic-cyber            { border-left-color: #b593ff; }
+.chapter-subsec-medical-consequence       { border-left-color: #ff8ac7; }
+.chapter-subsec-regulatory-advisory       { border-left-color: #4dffd2; }
+.chapter-subsec-public-safety-communication { border-left-color: var(--ok); }
+.chapter-subsec-international-liaison     { border-left-color: var(--text-mute); }
+
 /* Other agencies on case — Mission Console panel showing agencies
    actually involved (received escalation OR fired dispatch), each
    expandable to their escalation status + dispatches + reply thread.
