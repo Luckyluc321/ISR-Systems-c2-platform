@@ -7914,6 +7914,56 @@ body.view-fleet #fleet-view { display: block; }
 
 .chapter-subsections { display: flex; flex-direction: column; gap: var(--space-3); }
 
+/* Phase 6 · Cross-tenant redaction placeholder + summary-state
+   card styling. SUMMARY chapters keep the nameplate + involvement
+   counts but replace situation, timeline, and sub-sections with a
+   short "Redacted" note explaining the compartment boundary and
+   pointing the viewer at the out-of-band access channel. HIDDEN
+   chapters render nothing (filtered before the card mount). */
+.chapter-redacted-summary { border-color: rgba(255, 184, 77, 0.35); }
+.chapter-redacted-summary[data-visibility="summary"] .chapter-canonical { gap: var(--space-2); }
+.chapter-block-redacted {
+  padding: 10px 12px;
+  background: rgba(255, 184, 77, 0.05);
+  border: 1px dashed rgba(255, 184, 77, 0.35);
+  border-radius: 3px;
+}
+.chapter-redacted-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 8px;
+  background: rgba(255, 184, 77, 0.10);
+  border: 1px solid rgba(255, 184, 77, 0.45);
+  color: #ffb84d;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.chapter-redacted-body {
+  font-size: var(--fs-2xs);
+  color: var(--text-dim);
+  line-height: 1.55;
+  font-style: italic;
+}
+.chapter-card-redacted { border-color: rgba(255, 184, 77, 0.35); }
+.chapter-card-redacted[open] { background: rgba(255, 184, 77, 0.03); }
+.chapter-card-redacted-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #ffb84d;
+  background: rgba(255, 184, 77, 0.10);
+  border: 1px solid rgba(255, 184, 77, 0.35);
+  border-radius: 8px;
+  vertical-align: middle;
+}
+
 /* Phase 5 · Archetype-grouped cascade picker (universal front door
    for cascading to any of 386 receivers). Consumed exclusively by
    _openArchetypeCascadeModal. Legacy _openCascadeCaptureModal's

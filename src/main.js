@@ -156,6 +156,16 @@ import {
   THICK_ARCHETYPES,
   THIN_ARCHETYPES,
 } from './cascade_picker.js';
+// Phase 6 · visibility scoping. Cross-tenant redaction policy for
+// contributor chapters. Pure function (viewer, chapterRole, event)
+// → FULL | SUMMARY | HIDDEN. Consumed by composeChapter and by
+// the PIR mount to shape per-chapter card styling.
+import {
+  chapterVisibilityFor,
+  VISIBILITY,
+  registerAdminBypass,
+  clearAdminBypass,
+} from './visibility.js';
 const _archetypeTaggedCount = assignArchetypes(RECEIVERS);
 if (typeof window !== 'undefined') {
   // Console handle for spot-checking coverage during development.
@@ -183,6 +193,16 @@ if (typeof window !== 'undefined') {
     render:    renderSubsection,
     populated: subsectionsForContributor,
     all:       renderAllSubsections,
+  };
+  // Phase 6 dev handle for spot-checking visibility policy output.
+  // Usage: window.__isr_visibility.level(viewerRole, chapterRole, event)
+  //        window.__isr_visibility.adminOn('some-role-id')  → registers bypass
+  //        window.__isr_visibility.adminOff('some-role-id') → clears bypass
+  window.__isr_visibility = {
+    level:    chapterVisibilityFor,
+    VISIBILITY,
+    adminOn:  registerAdminBypass,
+    adminOff: clearAdminBypass,
   };
   // Phase 5 dev handle for spot-checking cascade picker output.
   // Usage: window.__isr_picker.groups(event, {alreadyOnCase, activeRoleId})
@@ -18841,24 +18861,30 @@ async function main() {
       const primaryLabel = ARCHETYPE_LABELS[role.archetype] || role.archetype || '';
       const secondaryCount = Array.isArray(role.secondaryArchetypes) ? role.secondaryArchetypes.length : 0;
       const populatedCount = subsectionsForContributor(role, event).length;
-      const chapterHtml = composeChapter(role, event);
+      // Phase 6 · pass the active viewer to composeChapter so cross-
+      // tenant redaction rules apply. HIDDEN chapters returned as
+      // empty string — filtered out below so the card drops entirely.
+      const chapterHtml = composeChapter(role, event, activeRole);
+      if (!chapterHtml) return '';
+      const visibility = chapterVisibilityFor(activeRole, role, event);
+      const isRedacted = visibility === VISIBILITY.SUMMARY;
       // Escape role.name/tier defensively — RECEIVERS is internal
       // but a customer-supplied receiver could carry HTML chars.
       const safeName = String(role.name || role.id).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const safeTier = role.tier ? String(role.tier).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').toUpperCase() : '';
       return `
-        <details class="chapter-card${isViewer ? ' chapter-card-viewer' : ''}" ${isViewer ? 'open' : ''}>
+        <details class="chapter-card${isViewer ? ' chapter-card-viewer' : ''}${isRedacted ? ' chapter-card-redacted' : ''}" ${isViewer ? 'open' : ''}>
           <summary class="chapter-card-summary">
-            <span class="chapter-card-name">${safeName}${isViewer ? ' <span class="chapter-card-viewer-tag">your chapter</span>' : ''}</span>
+            <span class="chapter-card-name">${safeName}${isViewer ? ' <span class="chapter-card-viewer-tag">your chapter</span>' : ''}${isRedacted ? ' <span class="chapter-card-redacted-tag">redacted</span>' : ''}</span>
             ${safeTier ? `<span class="chapter-card-tier">${safeTier}</span>` : ''}
             <span class="chapter-card-primary">${primaryLabel}</span>
-            <span class="chapter-card-stats">${populatedCount} sub-section${populatedCount === 1 ? '' : 's'}${secondaryCount ? ` · ${secondaryCount} secondary archetype${secondaryCount === 1 ? '' : 's'}` : ''}</span>
+            <span class="chapter-card-stats">${isRedacted ? 'nameplate + counts only' : `${populatedCount} sub-section${populatedCount === 1 ? '' : 's'}${secondaryCount ? ` · ${secondaryCount} secondary archetype${secondaryCount === 1 ? '' : 's'}` : ''}`}</span>
           </summary>
           <div class="chapter-card-body">
             ${chapterHtml}
           </div>
         </details>`;
-    }).join('');
+    }).filter(Boolean).join('');
 
     return `
       <div class="chapter-section" style="margin-bottom:var(--space-3);">

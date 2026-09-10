@@ -18,6 +18,7 @@
 
 import { ARCHETYPE_LABELS } from './archetypes.js';
 import { subsectionsForContributor, renderAllSubsections } from './report_subsections.js';
+import { chapterVisibilityFor, VISIBILITY } from './visibility.js';
 
 // ── Formatting helpers ──────────────────────────────────────────
 
@@ -405,19 +406,53 @@ function _blockTimelineSlice(role, event) {
 // Compose the full chapter for a single contributor. Returns
 // empty string when the role is not involved on this event so the
 // Phase 4 master PIR composer can filter mechanically.
+//
+// Phase 6 · optional viewer arg. When set, chapterVisibilityFor()
+// filters what the reader is allowed to see:
+//   FULL    — every block + every sub-section as authored
+//   SUMMARY — nameplate + involvement counts only, blocks 2/4 + all
+//             sub-sections replaced with a "Redacted for tenant
+//             boundary" placeholder so the reader knows this role
+//             is on the case without exposing internal notes
+//   HIDDEN  — the composer returns empty string; the caller drops
+//             the chapter card entirely
+//
+// When viewer is null (dev handle, admin console, seed backfill),
+// every rule short-circuits to FULL — server-side auth is the real
+// gate; client-side visibility is defence in depth.
 
-export function composeChapter(role, event) {
+export function composeChapter(role, event, viewer = null) {
   if (!role || !event) return '';
   if (!roleWasInvolved(role, event)) return '';
 
+  const level = chapterVisibilityFor(viewer, role, event);
+  if (level === VISIBILITY.HIDDEN) return '';
+
   const identifier = _blockIdentifier(role);
+  const dataLevel = esc(level);
+
+  if (level === VISIBILITY.SUMMARY) {
+    // Nameplate + involvement stats stay so the viewer knows the
+    // role touched the case. Everything else redacted.
+    const involvement = _blockInvolvementSummary(role, event);
+    return `
+      <article class="chapter chapter-redacted-summary" data-chapter-role="${esc(role.id)}" data-visibility="${dataLevel}">
+        ${identifier}
+        <div class="chapter-canonical">
+          ${involvement}
+          ${_blockRedactionPlaceholder(role, 'situation and timeline')}
+        </div>
+        ${_blockRedactionPlaceholder(role, 'archetype sub-sections')}
+      </article>`;
+  }
+
   const situation = _blockSituationReceived(role, event);
   const involvement = _blockInvolvementSummary(role, event);
   const timeline = _blockTimelineSlice(role, event);
   const subsections = renderAllSubsections(role, event);
 
   return `
-    <article class="chapter" data-chapter-role="${esc(role.id)}">
+    <article class="chapter" data-chapter-role="${esc(role.id)}" data-visibility="${dataLevel}">
       ${identifier}
       <div class="chapter-canonical">
         ${situation}
@@ -429,10 +464,31 @@ export function composeChapter(role, event) {
 }
 
 // Compose all chapters for an event, in chronological first-touch
-// order. Feeds the Phase 4 master PIR upgrade. Not wired to any UI
-// surface yet.
+// order. Feeds the Phase 4 master PIR upgrade.
+//
+// Phase 6 · optional viewer arg. Passed straight through to
+// composeChapter so per-chapter redaction is applied uniformly.
+// HIDDEN chapters drop out via the empty-string return.
 
-export function composeAllChapters(event, receivers) {
+export function composeAllChapters(event, receivers, viewer = null) {
   const roles = contributorsForEvent(event, receivers);
-  return roles.map(role => composeChapter(role, event)).filter(Boolean).join('');
+  return roles.map(role => composeChapter(role, event, viewer)).filter(Boolean).join('');
+}
+
+// ── Phase 6 redaction placeholder ──────────────────────────────
+// Shown in place of situation / timeline / sub-sections when the
+// viewer's visibility level for this chapter is SUMMARY. Renders
+// a brief note explaining WHY the content is redacted so the
+// operator can request access through the appropriate compartment
+// channel out of band. Never leaks the redacted content itself.
+
+function _blockRedactionPlaceholder(role, whatWasRedacted) {
+  const branch = esc(role.parent || role.parentId || role.branch || 'the authoring branch');
+  return `
+    <section class="chapter-block chapter-block-redacted">
+      <div class="chapter-redacted-badge">Redacted</div>
+      <div class="chapter-redacted-body">
+        ${esc(whatWasRedacted)} not visible to viewers outside ${branch}. Contact the authoring branch through the appropriate compartment channel for access.
+      </div>
+    </section>`;
 }

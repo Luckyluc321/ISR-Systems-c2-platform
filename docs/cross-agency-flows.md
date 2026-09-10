@@ -593,6 +593,58 @@ Recommender rules (feed 3-6 chips):
 
 Dedupe policy: roles already on the case surface in the "On case already" panel but cannot be re-selected. Prevents duplicate escalation records for the same recipient on the same event.
 
+### Visibility scoping (Phase 6)
+
+Contributor chapters render with cross-tenant redaction applied by the pure `chapterVisibilityFor(viewer, chapterRole, event)` policy in `src/visibility.js`. Every chapter mount consults it; the outcome shapes both the composed HTML and the wrapper card class.
+
+```mermaid
+flowchart TD
+  V[Viewer<br/>activeRole]
+  C[Chapter role]
+  E[Event]
+  V --> P[chapterVisibilityFor]
+  C --> P
+  E --> P
+  P --> R1{viewer null?}
+  R1 -->|yes| FULL[FULL]
+  R1 -->|no| R2{admin bypass?}
+  R2 -->|yes| FULL
+  R2 -->|no| R3{viewer == chapter?}
+  R3 -->|yes| FULL
+  R3 -->|no| R4{same parent branch?}
+  R4 -->|yes| FULL
+  R4 -->|no| R5{chapter is INTEL or FORENSIC<br/>AND viewer is not cleared?}
+  R5 -->|yes| SUM[SUMMARY]
+  R5 -->|no| FULL
+  FULL --> RENDER1[Identifier + all 4 blocks + all sub-sections]
+  SUM --> RENDER2[Identifier + involvement stats + redacted placeholder]
+  style FULL fill:#0d2610,stroke:#4dff9c,color:#fff
+  style SUM fill:#2a1d0a,stroke:#ffb84d,color:#ffb84d
+```
+
+**Levels:**
+
+| Level | What renders |
+|---|---|
+| `FULL` | Every block + every sub-section as authored. |
+| `SUMMARY` | Nameplate + involvement stats. Situation, timeline, and sub-sections replaced with a "Redacted for tenant boundary" placeholder pointing the viewer at the out-of-band access channel. |
+| `HIDDEN` | Empty string; the caller drops the card entirely. |
+
+**Rules (first match wins):**
+
+1. Viewer is null (dev handle, admin console, seed backfill) → FULL. Server-side auth is the real gate.
+2. Admin bypass registered for the viewer → FULL.
+3. Viewer is the chapter author → FULL (own chapter).
+4. Viewer shares `parent` / `parentId` with the chapter role → FULL (siblings inside the same agency branch).
+5. Chapter archetype is INTEL or FORENSIC AND viewer archetype is NOT INTEL or FORENSIC → SUMMARY.
+6. Default → FULL. Cross-agency civil coordination benefits from transparent visibility; blanket redaction would defeat the coordination purpose of the platform.
+
+**What SUMMARY protects:** the situation-received block (WHO cascaded this role in, or WHO they cascaded out to), the per-contributor timeline slice, and every archetype sub-section body (kinetic asset table, intel attribution notes, forensic evidence chain, medical casualty entries, etc). The reader still sees the role was on the case + counts, so cross-tenant awareness is preserved without leaking authoring-branch internal notes.
+
+**HIDDEN is reserved** for future covert-role scenarios (PET-NSK on a civil event, allied liaison on a sensitive cross-border incident). No current rule returns HIDDEN — the policy defaults to SUMMARY over HIDDEN so the audit trail always shows a role was involved.
+
+**Server-side backstop:** client-side visibility is defence in depth. The real access gate lives at the API layer; visibility.js is the client-side rendering companion that prevents accidental cross-tenant leakage in the UI.
+
 ### Phase timeline
 
 Report shape work has landed in four sequential phases. Every phase preserves the empty-return contract (no synthetic content when a role didn't populate a surface) so downstream phases can iterate mechanically.
@@ -604,7 +656,7 @@ flowchart LR
   P3[Phase 3<br/>chapter_composer.js<br/>4 blocks + subsections]
   P4[Phase 4<br/>PIR panel mount<br/>collapsible contributor cards]
   P5[Phase 5<br/>cascade_picker.js<br/>archetype-grouped picker]
-  P6[Phase 6 planned<br/>visibility scoping<br/>cross-tenant redaction]
+  P6[Phase 6<br/>visibility.js<br/>cross-tenant redaction]
   P7[Phase 7 planned<br/>cross-event XLINK graph<br/>chain incidents]
   P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P7
   style P1 fill:#0d2610,stroke:#4dff9c,color:#fff
@@ -612,7 +664,7 @@ flowchart LR
   style P3 fill:#0d2610,stroke:#4dff9c,color:#fff
   style P4 fill:#0d2610,stroke:#4dff9c,color:#fff
   style P5 fill:#0d2610,stroke:#4dff9c,color:#fff
-  style P6 fill:#1a1a1a,stroke:#555,color:#888
+  style P6 fill:#0d2610,stroke:#4dff9c,color:#fff
   style P7 fill:#1a1a1a,stroke:#555,color:#888
 ```
 
@@ -668,3 +720,4 @@ Explicitly out of scope for v0.1 — track separately as they land.
 | 2026-09-10 | Phase 3 code landed. src/chapter_composer.js with composeChapter(role, event), composeAllChapters(event, receivers), contributorsForEvent(event, receivers), roleWasInvolved(role, event). Every contributor chapter = 4 canonical top blocks (identifier nameplate with archetype badges, situation received with cascade in and cascade out lines, involvement summary with 6 stats plus populated archetype chips, timeline slice filtered to this contributor's actions) followed by the Phase 2 archetype sub-sections. Contributor detection reads escalations.initiatedByRoleId, escalations.destinationId, counterDispatches.ownerRoleId, and every catalog sub-array's authorRoleId. Contributors returned in first-touch chronological order. window.__isr_chapters dev handle with preview() helper that mounts composed HTML into a target element for inspection. Chapter CSS with per-archetype badge tints added to src/style.css. Still no user-visible UI, master PIR wires it in Phase 4 | ISR C2 build |
 | 2026-09-10 | Phase 4 code landed. Contributor chapters now mount inside the Step 7 PIR panel via _renderPirContributorChapters(event, activeRole). One <details> per contributor. Cards ordered by first-touch chronology except the active viewer's own chapter, which pins to the top and opens by default so the reader lands on their own contribution. Every card is a native <details> element so collapse/expand is free (zero JS state to reconcile with the surrounding case-file render cycle). Card summary shows role name, tier, primary archetype label, and populated sub-section count. Section header shows total involved count. Cards distinguish the viewer's card via a chapter-card-viewer accent + "your chapter" tag. Mermaid diagrams added to Section 7 for chapter composition, phase timeline, and PIR panel data flow so the design reads on GitHub without reading source | ISR C2 build |
 | 2026-09-10 | Phase 5 code landed. New src/cascade_picker.js with buildPickerGroups(event, receivers, ctx), recommendationsForEvent(event, receivers), filterByQuery(roles, query). Groups all 386 receivers by archetype into THICK (kinetic, medical, public safety) collapsed-by-default tiles and THIN (coord, intel, forensic, regulatory, liaison) open-by-default tiles. Recommender applies classification, threat, platform, domain, outEnv rules to surface 3-6 defaults per event. Type-ahead searches name, id, branch, org, archetype label. New _openArchetypeCascadeModal function in main.js renders the grouped picker with recommended row, search input with selected pills, per-group collapse, and read-only "On case already" section (dedupe policy). New "Cascade to any agency" CTA in the Mission Console fires this modal. Legacy cascade-fe-pet and cascade-politi shortcuts stay wired to _openCascadeCaptureModal for one-click send. window.__isr_picker dev handle for spot-checking. Full CSS for the picker in src/style.css. Section 7 "Cascade picker grouping" doc updated with mermaid flowchart and recommender rules | ISR C2 build |
+| 2026-09-10 | Phase 6 code landed. New src/visibility.js with chapterVisibilityFor(viewer, chapterRole, event) returning FULL, SUMMARY, or HIDDEN. Six-rule policy applied first-match-wins. Compartmented archetypes (INTEL, FORENSIC) render SUMMARY to non-cleared viewers; everything else defaults to FULL because cross-agency civil coordination benefits from transparency. Admin bypass registry (registerAdminBypass / clearAdminBypass) supports admin console preview without touching the underlying policy. composeChapter and composeAllChapters extended with an optional viewer param that flows the policy through to the render layer. When SUMMARY, the composer emits identifier + involvement stats + a "Redacted for tenant boundary" placeholder explaining the compartment channel to the reader. _renderPirContributorChapters passes the active viewer through and stamps chapter-card-redacted class + "redacted" tag on the card summary. HIDDEN chapters return empty string and drop from the mount entirely. Full redaction CSS added. Section 7 doc updated with visibility mermaid flowchart, levels table, rules list, and server-side-backstop note. Phase timeline diagram shows Phases 1-6 as landed. window.__isr_visibility dev handle for spot-checking | ISR C2 build |
