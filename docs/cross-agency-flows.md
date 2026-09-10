@@ -524,6 +524,30 @@ Rules over prefix instead of hand-editing all 386 receivers. New roles inherit a
 
 Every contributor chapter has four canonical top blocks + 0-8 archetype sub-sections. Sub-section renders IFF the contributor actually populated that archetype on this event.
 
+```mermaid
+flowchart TD
+  E[event] --> C{contributor?}
+  C -->|no| SKIP[skipped, no chapter]
+  C -->|yes| CH[article.chapter]
+  CH --> B1[Block 1<br/>Identifier nameplate]
+  CH --> B2[Block 2<br/>Situation received]
+  CH --> B3[Block 3<br/>Involvement summary]
+  CH --> B4[Block 4<br/>Timeline slice]
+  CH --> SS[0..8 archetype sub-sections]
+  SS --> K[kinetic-response]
+  SS --> CO[coordination-command]
+  SS --> IN[intelligence-attribution]
+  SS --> FO[forensic-cyber]
+  SS --> ME[medical-consequence]
+  SS --> RE[regulatory-advisory]
+  SS --> PU[public-safety-communication]
+  SS --> LI[international-liaison]
+  style CH fill:#0d1a26,stroke:#4dd2ff,color:#fff
+  style SKIP fill:#1a1a1a,stroke:#555,color:#888
+```
+
+Worked examples (same event, different contributors):
+
 - Aktionsstyrken chapter = 1 sub-section (Kinetic)
 - Politi Kbh chapter = 3 sub-sections (Kinetic + Coordination + Public safety)
 - Kommune Tårnby chapter = 2 sub-sections (Public safety + Coordination) — same shape as all 98 kommune chapters
@@ -537,6 +561,55 @@ Every catalog entry is append-only, ID-referenced, tagged by contributor. Chapte
 ### Cascade picker grouping
 
 Cascade recipient picker groups by archetype. Thick branches collapse to category tile with site-jurisdiction filter on expand. Thin branches surface individually. Recommend engine surfaces 3-6 defaults per event's classification / threat / platform / site. Type-ahead search across all 386. "On case already" is a separate section (not selectable — dedupe policy governs).
+
+### Phase timeline
+
+Report shape work has landed in four sequential phases. Every phase preserves the empty-return contract (no synthetic content when a role didn't populate a surface) so downstream phases can iterate mechanically.
+
+```mermaid
+flowchart LR
+  P1[Phase 1<br/>archetypes.js<br/>+ event.catalog<br/>+ dispatch tags]
+  P2[Phase 2<br/>report_subsections.js<br/>8 archetype renderers]
+  P3[Phase 3<br/>chapter_composer.js<br/>4 blocks + subsections]
+  P4[Phase 4<br/>PIR panel mount<br/>collapsible contributor cards]
+  P5[Phase 5 planned<br/>cascade picker upgrade<br/>archetype-grouped]
+  P6[Phase 6 planned<br/>visibility scoping<br/>cross-tenant redaction]
+  P7[Phase 7 planned<br/>cross-event XLINK graph<br/>chain incidents]
+  P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P7
+  style P1 fill:#0d2610,stroke:#4dff9c,color:#fff
+  style P2 fill:#0d2610,stroke:#4dff9c,color:#fff
+  style P3 fill:#0d2610,stroke:#4dff9c,color:#fff
+  style P4 fill:#0d2610,stroke:#4dff9c,color:#fff
+  style P5 fill:#1a1a1a,stroke:#555,color:#888
+  style P6 fill:#1a1a1a,stroke:#555,color:#888
+  style P7 fill:#1a1a1a,stroke:#555,color:#888
+```
+
+### PIR panel data flow (post-Phase 4)
+
+```mermaid
+sequenceDiagram
+  participant U as Viewer (activeRole)
+  participant P as Step 7 PIR panel
+  participant C as contributorsForEvent()
+  participant K as composeChapter()
+  participant S as renderAllSubsections()
+  participant E as event
+  U->>P: opens closed event
+  P->>C: (event, RECEIVERS)
+  C->>E: read escalations / counterDispatches / catalog
+  C-->>P: contributors[] sorted by first-touch
+  P->>P: pin activeRole to top when contributor
+  loop for each contributor
+    P->>K: (role, event)
+    K->>K: 4 canonical blocks
+    K->>S: (role, event)
+    S->>E: filter by ownerRoleId / authorRoleId / archetype
+    S-->>K: 0..8 sub-section HTMLs
+    K-->>P: chapter HTML
+  end
+  P-->>U: collapsed cards, viewer's chapter open
+```
 
 ---
 
@@ -562,3 +635,4 @@ Explicitly out of scope for v0.1 — track separately as they land.
 | 2026-09-10 | Phase 1 code landed. src/archetypes.js prefix rules assigning archetype to every RECEIVERS entry at boot, event.catalog with 13 typed sub-arrays, dispatch archetype tag mirrored on d + event.counterDispatches | ISR C2 build |
 | 2026-09-10 | Phase 2 code landed. src/report_subsections.js with 8 pure archetype renderers (KINETIC, COORDINATION, INTEL, FORENSIC, MEDICAL, REGULATORY, PUBLIC, LIAISON) plus renderSubsection dispatcher, subsectionsForContributor filter, renderAllSubsections composer. Each renderer returns empty string when the role has no data so the Phase 3 composer only surfaces populated sub-sections. window.__isr_subsections dev handle for testing. Chapter-subsec CSS with per-archetype border-left tint added to src/style.css. No user-visible UI yet, composer wires into master PIR in Phase 3 | ISR C2 build |
 | 2026-09-10 | Phase 3 code landed. src/chapter_composer.js with composeChapter(role, event), composeAllChapters(event, receivers), contributorsForEvent(event, receivers), roleWasInvolved(role, event). Every contributor chapter = 4 canonical top blocks (identifier nameplate with archetype badges, situation received with cascade in and cascade out lines, involvement summary with 6 stats plus populated archetype chips, timeline slice filtered to this contributor's actions) followed by the Phase 2 archetype sub-sections. Contributor detection reads escalations.initiatedByRoleId, escalations.destinationId, counterDispatches.ownerRoleId, and every catalog sub-array's authorRoleId. Contributors returned in first-touch chronological order. window.__isr_chapters dev handle with preview() helper that mounts composed HTML into a target element for inspection. Chapter CSS with per-archetype badge tints added to src/style.css. Still no user-visible UI, master PIR wires it in Phase 4 | ISR C2 build |
+| 2026-09-10 | Phase 4 code landed. Contributor chapters now mount inside the Step 7 PIR panel via _renderPirContributorChapters(event, activeRole). One <details> per contributor. Cards ordered by first-touch chronology except the active viewer's own chapter, which pins to the top and opens by default so the reader lands on their own contribution. Every card is a native <details> element so collapse/expand is free (zero JS state to reconcile with the surrounding case-file render cycle). Card summary shows role name, tier, primary archetype label, and populated sub-section count. Section header shows total involved count. Cards distinguish the viewer's card via a chapter-card-viewer accent + "your chapter" tag. Mermaid diagrams added to Section 7 for chapter composition, phase timeline, and PIR panel data flow so the design reads on GitHub without reading source | ISR C2 build |

@@ -7914,6 +7914,108 @@ body.view-fleet #fleet-view { display: block; }
 
 .chapter-subsections { display: flex; flex-direction: column; gap: var(--space-3); }
 
+/* Phase 4 · Contributor chapters section inside the Step 7 PIR
+   panel. One <details> per contributor. Active viewer's card
+   auto-expands and pins to the top; the rest collapse for scan-
+   ability. Native <details> so no JS state to reconcile. */
+.chapter-section {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+}
+.chapter-section-note {
+  font-size: var(--fs-2xs);
+  color: var(--text-mute);
+  margin-top: 2px;
+  margin-bottom: var(--space-2);
+  line-height: 1.5;
+}
+.chapter-section-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.chapter-card {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.015);
+  overflow: hidden;
+}
+.chapter-card-viewer {
+  border-color: var(--accent-dim);
+  background: rgba(77, 210, 255, 0.03);
+}
+.chapter-card[open] { background: rgba(255, 255, 255, 0.02); }
+.chapter-card-viewer[open] { background: rgba(77, 210, 255, 0.04); }
+.chapter-card-summary {
+  display: grid;
+  grid-template-columns: 1fr auto auto auto;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+  font-size: var(--fs-xs);
+  user-select: none;
+}
+.chapter-card-summary::-webkit-details-marker { display: none; }
+.chapter-card-summary::before {
+  content: "▸";
+  font-family: var(--font-mono);
+  color: var(--text-mute);
+  font-size: 10px;
+  transition: transform 0.15s ease;
+  margin-right: -6px;
+}
+.chapter-card[open] > .chapter-card-summary::before { transform: rotate(90deg); }
+.chapter-card-summary:hover { background: rgba(255, 255, 255, 0.02); }
+.chapter-card-name { color: var(--text); font-weight: 500; }
+.chapter-card-viewer-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  background: rgba(77, 210, 255, 0.08);
+  border: 1px solid var(--accent-dim);
+  border-radius: 8px;
+  vertical-align: middle;
+}
+.chapter-card-tier {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.10em;
+  color: var(--text-dim);
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+.chapter-card-primary {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.chapter-card-stats {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-mute);
+}
+.chapter-card-body {
+  padding: 0 var(--space-3) var(--space-3) var(--space-3);
+  border-top: 1px solid var(--border);
+}
+.chapter-card-body .chapter {
+  border: none;
+  padding: var(--space-3) 0 0 0;
+  background: transparent;
+  margin: 0;
+}
+
 /* Phase 2 · Post-Incident Report chapter sub-sections. Every
    contributor chapter is composed of 0-8 archetype sub-sections;
    only populated sub-sections render. Canonical outer shape is a

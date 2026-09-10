@@ -18361,11 +18361,72 @@ async function main() {
             </div>
           ` : ''}
 
+          ${_renderPirContributorChapters(event, activeRole)}
+
           <div style="display:flex;justify-content:flex-end;gap:var(--space-2);margin-top:var(--space-3);">
             <button class="c-btn compact" data-rcv="pir-download" data-id="${event.id}" title="Download report as JSON">Download JSON</button>
           </div>
 
           <div class="c-label" style="margin-top: var(--space-2); text-align: right; color: var(--text-dim);">Generated ${(report.generatedAt || '').slice(0,19).replace('T', ' ')}Z · ${report.id}</div>
+        </div>
+      </div>`;
+  }
+
+  // ── Phase 4 · Contributor chapters section ──────────────────────
+  // Sits inside the Step 7 panel, below the classic summary rows
+  // and above the JSON download. Iterates every role that touched
+  // this event and renders their composed chapter inside a native
+  // <details> element so cards collapse cheaply and the active
+  // viewer's own chapter auto-expands on mount. Zero JS wiring by
+  // design — <details>/<summary> handles the toggle natively so
+  // there's no state to reconcile with the surrounding case-file
+  // render cycle.
+  //
+  // Detection-only invariant preserved. Every renderer is pure and
+  // never writes back into the event.
+  function _renderPirContributorChapters(event, activeRole) {
+    const contributors = contributorsForEvent(event, RECEIVERS);
+    if (!contributors.length) return '';
+    const activeId = activeRole?.id || null;
+    const activeIsContributor = activeId ? contributors.some(r => r.id === activeId) : false;
+
+    // Sort viewer to the top when they're a contributor so their
+    // own chapter is the first card in the section. Keeps the
+    // chronological order underneath.
+    const ordered = activeIsContributor
+      ? [contributors.find(r => r.id === activeId), ...contributors.filter(r => r.id !== activeId)]
+      : contributors;
+
+    const cards = ordered.map(role => {
+      const isViewer = role.id === activeId;
+      const primaryLabel = ARCHETYPE_LABELS[role.archetype] || role.archetype || '';
+      const secondaryCount = Array.isArray(role.secondaryArchetypes) ? role.secondaryArchetypes.length : 0;
+      const populatedCount = subsectionsForContributor(role, event).length;
+      const chapterHtml = composeChapter(role, event);
+      // Escape role.name/tier defensively — RECEIVERS is internal
+      // but a customer-supplied receiver could carry HTML chars.
+      const safeName = String(role.name || role.id).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const safeTier = role.tier ? String(role.tier).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').toUpperCase() : '';
+      return `
+        <details class="chapter-card${isViewer ? ' chapter-card-viewer' : ''}" ${isViewer ? 'open' : ''}>
+          <summary class="chapter-card-summary">
+            <span class="chapter-card-name">${safeName}${isViewer ? ' <span class="chapter-card-viewer-tag">your chapter</span>' : ''}</span>
+            ${safeTier ? `<span class="chapter-card-tier">${safeTier}</span>` : ''}
+            <span class="chapter-card-primary">${primaryLabel}</span>
+            <span class="chapter-card-stats">${populatedCount} sub-section${populatedCount === 1 ? '' : 's'}${secondaryCount ? ` · ${secondaryCount} secondary archetype${secondaryCount === 1 ? '' : 's'}` : ''}</span>
+          </summary>
+          <div class="chapter-card-body">
+            ${chapterHtml}
+          </div>
+        </details>`;
+    }).join('');
+
+    return `
+      <div class="chapter-section" style="margin-bottom:var(--space-3);">
+        <div class="c-section-eyebrow" style="color:#ffb84d;">Contributor chapters · ${contributors.length} involved${activeIsContributor ? ' · your chapter is expanded' : ''}</div>
+        <div class="chapter-section-note">One chapter per role that touched this event. Ordered chronologically by first-touch except your own, which is pinned to the top and expanded.</div>
+        <div class="chapter-section-cards">
+          ${cards}
         </div>
       </div>`;
   }
