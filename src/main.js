@@ -166,6 +166,17 @@ import {
   registerAdminBypass,
   clearAdminBypass,
 } from './visibility.js';
+// Phase 7 · cross-event XLINK graph. Unifies linkedEventIds +
+// postIncidentReport.linkedAfterClose + catalog.xlinks into one
+// undirected graph. Chain traversal drives the PIR chain view +
+// role cross-event presence summary.
+import {
+  buildXlinkGraph,
+  chainFor,
+  eventsInSameChainAs,
+  chainNarrative,
+  rolePresenceInChain,
+} from './xlink_graph.js';
 const _archetypeTaggedCount = assignArchetypes(RECEIVERS);
 if (typeof window !== 'undefined') {
   // Console handle for spot-checking coverage during development.
@@ -193,6 +204,19 @@ if (typeof window !== 'undefined') {
     render:    renderSubsection,
     populated: subsectionsForContributor,
     all:       renderAllSubsections,
+  };
+  // Phase 7 dev handle for spot-checking xlink graph + chain data.
+  // Usage: window.__isr_xlink.graph()               → full graph over EVENTS
+  //        window.__isr_xlink.chainFor(eventId)     → chain summary for one event
+  //        window.__isr_xlink.chainMates(eventId)   → chronological chain events
+  //        window.__isr_xlink.narrative(chainId?)   → one-line chain description
+  //        window.__isr_xlink.rolePresence(eventId, roleId)
+  window.__isr_xlink = {
+    graph:      () => buildXlinkGraph(EVENTS),
+    chainFor:   (id) => chainFor(id, EVENTS),
+    chainMates: (id) => eventsInSameChainAs(id, EVENTS),
+    narrative:  (id) => chainNarrative(chainFor(id, EVENTS)),
+    rolePresence: (id, roleId) => rolePresenceInChain(chainFor(id, EVENTS), roleId),
   };
   // Phase 6 dev handle for spot-checking visibility policy output.
   // Usage: window.__isr_visibility.level(viewerRole, chapterRole, event)
@@ -18820,6 +18844,8 @@ async function main() {
             </div>
           ` : ''}
 
+          ${_renderPirEventChain(event, activeRole)}
+
           ${_renderPirContributorChapters(event, activeRole)}
 
           <div style="display:flex;justify-content:flex-end;gap:var(--space-2);margin-top:var(--space-3);">
@@ -18828,6 +18854,62 @@ async function main() {
 
           <div class="c-label" style="margin-top: var(--space-2); text-align: right; color: var(--text-dim);">Generated ${(report.generatedAt || '').slice(0,19).replace('T', ' ')}Z · ${report.id}</div>
         </div>
+      </div>`;
+  }
+
+  // ── Phase 7 · Event chain view ──────────────────────────────────
+  // Renders a compact chain summary inside the Step 7 PIR panel when
+  // this event is part of a multi-event chain incident (drones moving
+  // between sites, coordinated attacks, temporal-adjacent probing).
+  // Emits a single-line chain narrative header + one clickable row
+  // per event in the chain, chronological ascending. Current event
+  // is highlighted so the reader sees where in the chain they are.
+  //
+  // Also surfaces "you're on N events in this chain" when the active
+  // viewer has touched multiple events in the same chain, so cross-
+  // event context is one click away.
+  //
+  // Detection-only invariant preserved. Chain view is read-only.
+  function _renderPirEventChain(event, activeRole) {
+    const chain = chainFor(event.id, EVENTS);
+    if (!chain || chain.size <= 1) return '';   // single-event → no chain view
+
+    const narrative = chainNarrative(chain);
+    const presence = activeRole ? rolePresenceInChain(chain, activeRole.id) : null;
+    const rows = chain.events.map(ev => {
+      const isCurrent = ev.id === event.id;
+      const site = String(ev.siteId || 'unknown').toUpperCase();
+      const cls  = String(ev.classification || 'unknown').toUpperCase();
+      const drone = ev.droneType || ev.platform || '';
+      const ts = ev.startTime ? ev.startTime.slice(11, 19) + 'Z' : '';
+      const status = ev.status === 'closed' ? 'CLOSED' : 'ACTIVE';
+      const isRolePresent = presence && presence.eventIds.includes(ev.id);
+      const _e = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return `
+        <li class="pir-chain-row${isCurrent ? ' pir-chain-row-current' : ''}${isRolePresent ? ' pir-chain-row-touched' : ''}"
+            data-chain-event-id="${_e(ev.id)}">
+          <span class="pir-chain-ts">${_e(ts)}</span>
+          <span class="pir-chain-site">${_e(site)}</span>
+          <span class="pir-chain-drone">${_e(drone)}</span>
+          <span class="pir-chain-class pir-chain-class-${_e(cls.toLowerCase())}">${_e(cls)}</span>
+          <span class="pir-chain-status">${_e(status)}</span>
+          ${isCurrent ? '<span class="pir-chain-current-tag">this event</span>' : ''}
+          ${isRolePresent && !isCurrent ? '<span class="pir-chain-touched-tag">you were on this</span>' : ''}
+        </li>`;
+    }).join('');
+
+    const presenceNote = presence && presence.eventIds.length > 1
+      ? `<div class="pir-chain-presence">You touched ${presence.eventIds.length} of ${chain.size} events in this chain.</div>`
+      : '';
+
+    return `
+      <div class="pir-chain-section" style="margin-bottom:var(--space-3);">
+        <div class="c-section-eyebrow" style="color:#ffb84d;">Event chain · ${chain.size} events</div>
+        <div class="pir-chain-narrative">${narrative}</div>
+        ${presenceNote}
+        <ol class="pir-chain-list">
+          ${rows}
+        </ol>
       </div>`;
   }
 

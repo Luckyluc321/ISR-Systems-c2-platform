@@ -645,6 +645,49 @@ flowchart TD
 
 **Server-side backstop:** client-side visibility is defence in depth. The real access gate lives at the API layer; visibility.js is the client-side rendering companion that prevents accidental cross-tenant leakage in the UI.
 
+### Cross-event chain graph (Phase 7)
+
+Chain incidents are the platform's audit unit for a multi-event campaign. A chain is one connected component of the undirected cross-event graph unified from three sources:
+
+```mermaid
+flowchart LR
+  E1[event.linkedEventIds<br/>auto-correlation]
+  E2[event.postIncidentReport<br/>.linkedAfterClose<br/>post-close continuation]
+  E3[event.catalog.xlinks<br/>operator-authored typed link]
+  E1 --> G[buildXlinkGraph<br/>undirected graph]
+  E2 --> G
+  E3 --> G
+  G --> CC[Connected component<br/>= chain]
+  CC --> N[chainNarrative<br/>one-line summary]
+  CC --> R[rolePresenceInChain<br/>which events did this role touch?]
+  CC --> V[PIR chain view section<br/>chronological row per event]
+  style G fill:#0d1a26,stroke:#4dd2ff,color:#fff
+  style CC fill:#0d1a26,stroke:#4dd2ff,color:#fff
+```
+
+**Chain shape:**
+
+```mermaid
+flowchart LR
+  A["evt-001<br/>BILLUND · quadcopter<br/>10:12"]
+  B["evt-002<br/>CPH · quadcopter<br/>10:41"]
+  C["evt-003<br/>AALBORG · quadcopter<br/>11:08"]
+  D["evt-004<br/>CPH · cruise-signature<br/>11:22"]
+  A ---|linkedEventIds<br/>score 0.82| B
+  B ---|linkedEventIds<br/>score 0.78| C
+  B ---|catalog.xlinks<br/>same-actor| D
+  style A fill:#0d1a26,stroke:#4dd2ff,color:#fff
+  style B fill:#2a1d0a,stroke:#ffb84d,color:#fff
+  style C fill:#0d1a26,stroke:#4dd2ff,color:#fff
+  style D fill:#0d1a26,stroke:#4dd2ff,color:#fff
+```
+
+**PIR chain view:** rendered at the top of the Step 7 panel when the current event's chain size is greater than 1. Emits a one-line chain narrative (e.g. "4-event chain across 3 sites over 70 minutes. BILLUND → CPH → AALBORG") followed by a chronological row per chain member. Current event is highlighted. Events the active viewer contributed to carry a "you were on this" tag so cross-event presence surfaces at a glance.
+
+**Role presence:** `rolePresenceInChain(chain, roleId)` returns which events in the chain this role touched, plus first-touch and last-touch timestamps. Feeds the chain-scope cross-reference on each contributor chapter (planned enhancement) and the receiver profile Reports tab's "linked incidents" pivot.
+
+**Chain identity:** stable chain id `chain-<earliestEventId>` so chain identity survives re-builds even when a new linked event lands mid-render. No mutation of event records; chain assignment is a rendering concern.
+
 ### Phase timeline
 
 Report shape work has landed in four sequential phases. Every phase preserves the empty-return contract (no synthetic content when a role didn't populate a surface) so downstream phases can iterate mechanically.
@@ -657,7 +700,7 @@ flowchart LR
   P4[Phase 4<br/>PIR panel mount<br/>collapsible contributor cards]
   P5[Phase 5<br/>cascade_picker.js<br/>archetype-grouped picker]
   P6[Phase 6<br/>visibility.js<br/>cross-tenant redaction]
-  P7[Phase 7 planned<br/>cross-event XLINK graph<br/>chain incidents]
+  P7[Phase 7<br/>xlink_graph.js<br/>chain incidents]
   P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P7
   style P1 fill:#0d2610,stroke:#4dff9c,color:#fff
   style P2 fill:#0d2610,stroke:#4dff9c,color:#fff
@@ -665,7 +708,7 @@ flowchart LR
   style P4 fill:#0d2610,stroke:#4dff9c,color:#fff
   style P5 fill:#0d2610,stroke:#4dff9c,color:#fff
   style P6 fill:#0d2610,stroke:#4dff9c,color:#fff
-  style P7 fill:#1a1a1a,stroke:#555,color:#888
+  style P7 fill:#0d2610,stroke:#4dff9c,color:#fff
 ```
 
 ### PIR panel data flow (post-Phase 4)
@@ -721,3 +764,4 @@ Explicitly out of scope for v0.1 — track separately as they land.
 | 2026-09-10 | Phase 4 code landed. Contributor chapters now mount inside the Step 7 PIR panel via _renderPirContributorChapters(event, activeRole). One <details> per contributor. Cards ordered by first-touch chronology except the active viewer's own chapter, which pins to the top and opens by default so the reader lands on their own contribution. Every card is a native <details> element so collapse/expand is free (zero JS state to reconcile with the surrounding case-file render cycle). Card summary shows role name, tier, primary archetype label, and populated sub-section count. Section header shows total involved count. Cards distinguish the viewer's card via a chapter-card-viewer accent + "your chapter" tag. Mermaid diagrams added to Section 7 for chapter composition, phase timeline, and PIR panel data flow so the design reads on GitHub without reading source | ISR C2 build |
 | 2026-09-10 | Phase 5 code landed. New src/cascade_picker.js with buildPickerGroups(event, receivers, ctx), recommendationsForEvent(event, receivers), filterByQuery(roles, query). Groups all 386 receivers by archetype into THICK (kinetic, medical, public safety) collapsed-by-default tiles and THIN (coord, intel, forensic, regulatory, liaison) open-by-default tiles. Recommender applies classification, threat, platform, domain, outEnv rules to surface 3-6 defaults per event. Type-ahead searches name, id, branch, org, archetype label. New _openArchetypeCascadeModal function in main.js renders the grouped picker with recommended row, search input with selected pills, per-group collapse, and read-only "On case already" section (dedupe policy). New "Cascade to any agency" CTA in the Mission Console fires this modal. Legacy cascade-fe-pet and cascade-politi shortcuts stay wired to _openCascadeCaptureModal for one-click send. window.__isr_picker dev handle for spot-checking. Full CSS for the picker in src/style.css. Section 7 "Cascade picker grouping" doc updated with mermaid flowchart and recommender rules | ISR C2 build |
 | 2026-09-10 | Phase 6 code landed. New src/visibility.js with chapterVisibilityFor(viewer, chapterRole, event) returning FULL, SUMMARY, or HIDDEN. Six-rule policy applied first-match-wins. Compartmented archetypes (INTEL, FORENSIC) render SUMMARY to non-cleared viewers; everything else defaults to FULL because cross-agency civil coordination benefits from transparency. Admin bypass registry (registerAdminBypass / clearAdminBypass) supports admin console preview without touching the underlying policy. composeChapter and composeAllChapters extended with an optional viewer param that flows the policy through to the render layer. When SUMMARY, the composer emits identifier + involvement stats + a "Redacted for tenant boundary" placeholder explaining the compartment channel to the reader. _renderPirContributorChapters passes the active viewer through and stamps chapter-card-redacted class + "redacted" tag on the card summary. HIDDEN chapters return empty string and drop from the mount entirely. Full redaction CSS added. Section 7 doc updated with visibility mermaid flowchart, levels table, rules list, and server-side-backstop note. Phase timeline diagram shows Phases 1-6 as landed. window.__isr_visibility dev handle for spot-checking | ISR C2 build |
+| 2026-09-10 | Phase 7 code landed. New src/xlink_graph.js with buildXlinkGraph(events), chainFor(eventId, events), eventsInSameChainAs(eventId, events), chainNarrative(chain), rolePresenceInChain(chain, roleId). Unifies three cross-event link sources into one undirected graph: event.linkedEventIds (auto-correlation output), event.postIncidentReport.linkedAfterClose (post-close continuations), event.catalog.xlinks (operator-authored typed links). Connected component pass produces stable chain ids ("chain-<earliestEventId>"). PIR Step 7 panel now shows an Event chain section above the contributor chapters when this event is part of a multi-event chain: one-line chain narrative, chronological row per event, current event highlighted, events the viewer contributed to carry a "you were on this" tag. Chain view is read-only, detection-only invariant preserved. Section 7 doc updated with graph flowchart, sample chain shape, and role-presence contract. Phase timeline diagram now shows all seven phases landed. window.__isr_xlink dev handle for spot-checking | ISR C2 build |
