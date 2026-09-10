@@ -7714,6 +7714,206 @@ body.view-fleet #fleet-view { display: block; }
   text-transform: uppercase;
 }
 
+/* Phase 3 · Post-Incident Report contributor chapters. One
+   article.chapter per contributor. Chapter = 4 canonical blocks
+   (identifier, situation received, involvement summary, timeline
+   slice) + 0-8 archetype sub-sections. Composed via
+   src/chapter_composer.js and mounted into the master PIR by
+   Phase 4 (not wired to a UI surface yet). */
+.chapter {
+  padding: var(--space-4);
+  margin: var(--space-4) 0;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.chapter-identifier {
+  padding-bottom: var(--space-3);
+  margin-bottom: var(--space-3);
+  border-bottom: 1px solid var(--border);
+}
+.chapter-identifier-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+}
+.chapter-identifier-name {
+  font-size: var(--fs-md);
+  color: var(--text);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.chapter-identifier-tier {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.12em;
+  color: var(--text-dim);
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+}
+.chapter-identifier-branch {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-dim);
+  margin-top: 4px;
+  letter-spacing: 0.04em;
+}
+.chapter-identifier-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--space-2);
+}
+.chapter-arch-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  background: rgba(255, 255, 255, 0.02);
+}
+.chapter-arch-badge-primary   { color: var(--text); border-color: var(--border-strong); background: rgba(180, 200, 220, 0.05); }
+.chapter-arch-badge-secondary { color: var(--text-mute); }
+.chapter-arch-badge-kinetic-response              { border-left: 2px solid var(--danger); }
+.chapter-arch-badge-coordination-command          { border-left: 2px solid var(--warn); }
+.chapter-arch-badge-intelligence-attribution      { border-left: 2px solid var(--accent); }
+.chapter-arch-badge-forensic-cyber                { border-left: 2px solid #b593ff; }
+.chapter-arch-badge-medical-consequence           { border-left: 2px solid #ff8ac7; }
+.chapter-arch-badge-regulatory-advisory           { border-left: 2px solid #4dffd2; }
+.chapter-arch-badge-public-safety-communication   { border-left: 2px solid var(--ok); }
+.chapter-arch-badge-international-liaison         { border-left: 2px solid var(--text-mute); }
+
+.chapter-canonical {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.chapter-block { padding: var(--space-3); background: rgba(255, 255, 255, 0.015); border-radius: 3px; }
+.chapter-block-hdr {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: var(--space-2);
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border);
+}
+.chapter-block-empty { font-size: var(--fs-2xs); color: var(--text-mute); font-style: italic; padding: 4px 0; }
+
+.chapter-situation-list { list-style: none; padding: 0; margin: 0; }
+.chapter-situation-line {
+  display: flex;
+  gap: var(--space-3);
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  font-size: var(--fs-xs);
+  color: var(--text);
+  line-height: 1.55;
+}
+.chapter-situation-line:last-child { border-bottom: none; }
+.chapter-situation-line-secondary { color: var(--text-dim); }
+.chapter-situation-line-empty     { color: var(--text-mute); font-style: italic; }
+.chapter-situation-ts {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  color: var(--text-dim);
+  flex: 0 0 70px;
+}
+
+.chapter-involvement-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: var(--space-2);
+}
+.chapter-involvement-stat {
+  padding: 6px 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 2px;
+}
+.chapter-involvement-stat-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+.chapter-involvement-stat-value {
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+.chapter-involvement-archetypes {
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.chapter-involvement-archetypes-hdr {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  margin-right: 4px;
+}
+.chapter-involvement-arch-chip {
+  display: inline-block;
+  padding: 2px 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  background: rgba(77, 210, 255, 0.06);
+  border: 1px solid var(--accent-dim);
+  border-radius: 8px;
+}
+.chapter-involvement-arch-empty {
+  font-size: var(--fs-2xs);
+  color: var(--text-mute);
+  font-style: italic;
+}
+
+.chapter-timeline { list-style: none; padding: 0; margin: 0; }
+.chapter-timeline-row {
+  display: grid;
+  grid-template-columns: 70px 130px 1fr;
+  gap: var(--space-2);
+  padding: 5px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.03);
+  font-size: var(--fs-2xs);
+}
+.chapter-timeline-row:first-child { border-top: none; }
+.chapter-timeline-ts { font-family: var(--font-mono); color: var(--text-dim); }
+.chapter-timeline-kind {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-mute);
+  text-transform: uppercase;
+}
+.chapter-timeline-detail                              { color: var(--text); line-height: 1.5; }
+.chapter-timeline-row-cascade-in  .chapter-timeline-kind { color: var(--warn); }
+.chapter-timeline-row-cascade-out .chapter-timeline-kind { color: var(--accent); }
+.chapter-timeline-row-dispatched  .chapter-timeline-kind { color: var(--danger); }
+.chapter-timeline-row-arrived     .chapter-timeline-kind { color: var(--accent); }
+.chapter-timeline-row-engaging    .chapter-timeline-kind { color: var(--danger); }
+.chapter-timeline-row-complete    .chapter-timeline-kind { color: var(--ok); }
+.chapter-timeline-row-reply-sent  .chapter-timeline-kind { color: var(--ok); }
+
+.chapter-subsections { display: flex; flex-direction: column; gap: var(--space-3); }
+
 /* Phase 2 · Post-Incident Report chapter sub-sections. Every
    contributor chapter is composed of 0-8 archetype sub-sections;
    only populated sub-sections render. Canonical outer shape is a

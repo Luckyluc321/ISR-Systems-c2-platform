@@ -135,6 +135,16 @@ import {
   subsectionsForContributor,
   renderAllSubsections,
 } from './report_subsections.js';
+// Phase 3 · contributor chapter composer. Pure functions
+// (role, event) → HTMLString. Composed into the master PIR by
+// Phase 4. Wired here only as a dev handle today so the shape can
+// be spot-checked from the browser console against real events.
+import {
+  composeChapter,
+  composeAllChapters,
+  contributorsForEvent,
+  roleWasInvolved,
+} from './chapter_composer.js';
 const _archetypeTaggedCount = assignArchetypes(RECEIVERS);
 if (typeof window !== 'undefined') {
   // Console handle for spot-checking coverage during development.
@@ -162,6 +172,26 @@ if (typeof window !== 'undefined') {
     render:    renderSubsection,
     populated: subsectionsForContributor,
     all:       renderAllSubsections,
+  };
+  // Phase 3 dev handle for spot-checking chapter composer output.
+  // Usage: window.__isr_chapters.compose(role, event)         → HTMLString
+  //        window.__isr_chapters.all(event)                   → HTMLString (every contributor)
+  //        window.__isr_chapters.contributors(event)          → array of role objects
+  //        window.__isr_chapters.involved(role, event)        → boolean
+  //        window.__isr_chapters.preview(event, elementId?)   → mounts HTML into element for inspection
+  window.__isr_chapters = {
+    compose:      composeChapter,
+    all:          (event) => composeAllChapters(event, RECEIVERS),
+    contributors: (event) => contributorsForEvent(event, RECEIVERS),
+    involved:     roleWasInvolved,
+    preview: (event, elementId) => {
+      const html = composeAllChapters(event, RECEIVERS);
+      if (!elementId) return html;
+      const el = document.getElementById(elementId);
+      if (!el) { console.warn('[chapters] preview target not found:', elementId); return html; }
+      el.innerHTML = html;
+      return html;
+    },
   };
 }
 
