@@ -1,393 +1,243 @@
-# Report shape · end-to-end overview
+# Report shape · how a drone detection becomes a report every agency can read
 
-Companion to `docs/cross-agency-flows.md`. That doc is the reference — every rule, every edge case, every table. This doc is the map. Read this to see how the pieces fit; open cross-agency-flows.md when you need the details of a specific piece.
-
-| Layer | Where it lives | What it does |
-|---|---|---|
-| Data foundation | `src/events.js` + `src/archetypes.js` | Event record shape + 386-receiver archetype tagging |
-| Sub-section render | `src/report_subsections.js` | One HTML renderer per archetype (kinetic, coord, intel, forensic, medical, regulatory, public, liaison) |
-| Chapter compose | `src/chapter_composer.js` | 4 canonical blocks + 0-8 archetype sub-sections per contributor |
-| PIR mount | `src/main.js` `_renderPirContributorChapters` | Chapters mount in the Step 7 Incident Report panel |
-| Cascade | `src/cascade_picker.js` + `src/main.js` `_openArchetypeCascadeModal` | Universal front door to cascade to any of the 386 |
-| Visibility | `src/visibility.js` | Per-viewer redaction of compartmented material |
-| Chain | `src/xlink_graph.js` + `src/main.js` `_renderPirEventChain` | Cross-event graph traversal + chain view in the PIR |
+Plain-language walkthrough for anyone (founder, investor, new team member) who wants to understand what the ISR C2 platform does end-to-end without reading source code. If you want function names and file paths, open `docs/cross-agency-flows.md` instead.
 
 ---
 
-## The one-diagram view
+## What the platform does in one paragraph
 
-The whole report shape in one flowchart. Follow the arrows from top-left (an event closes) to bottom-right (a specific viewer sees a specific version of the PIR).
+Sensors at critical infrastructure sites (airports, ports, energy grids) watch the sky for drones. When something worth acting on is detected, the platform decides who needs to know, notifies them, coordinates the response across dozens of agencies, and produces a shared incident record every party can read afterwards. The core promise is a single event that everyone sees the same version of, with each agency's slice of the work presented in their own language.
+
+---
+
+## The story of one event, from detection to closed report
 
 ```mermaid
 flowchart TD
-  subgraph SOURCE["Event lifecycle"]
-    DET[Detection<br/>ingested]
-    ESC[Escalations<br/>cascades in/out]
-    DIS[Counter-dispatches<br/>owned by roles]
-    CAT[Catalog entries<br/>authored by roles]
-    CLO[closeEvent]
-  end
-
-  subgraph P1["Phase 1 · Foundation"]
-    ARCH[archetypes.js<br/>assignArchetypes RECEIVERS]
-    CATT[event.catalog<br/>13 typed sub-arrays]
-    KIND[DISPATCH_KIND_ARCHETYPES<br/>dispatch tags mirrored]
-  end
-
-  subgraph P2["Phase 2 · Sub-sections"]
-    RS[report_subsections.js<br/>8 pure renderers]
-    RSD[renderSubsection dispatcher]
-    RSA[renderAllSubsections<br/>composer output]
-  end
-
-  subgraph P3["Phase 3 · Chapters"]
-    CC[chapter_composer.js<br/>composeChapter]
-    B1[Block 1 Identifier]
-    B2[Block 2 Situation received]
-    B3[Block 3 Involvement summary]
-    B4[Block 4 Timeline slice]
-    CH[contributorsForEvent<br/>first-touch order]
-  end
-
-  subgraph P4["Phase 4 · Mount"]
-    PIR[_renderPirContributorChapters]
-    CARD[Collapsible details card<br/>per contributor]
-    VP[Viewer's card pinned + open]
-  end
-
-  subgraph P5["Phase 5 · Cascade"]
-    CP[cascade_picker.js]
-    REC[recommendationsForEvent<br/>3-6 defaults]
-    GRP[Archetype-grouped tiles<br/>thick/thin]
-    ACM[_openArchetypeCascadeModal<br/>universal front door]
-  end
-
-  subgraph P6["Phase 6 · Visibility"]
-    VIS[visibility.js<br/>chapterVisibilityFor]
-    FL[FULL]
-    SM[SUMMARY<br/>+ redaction placeholder]
-    HD[HIDDEN<br/>card dropped]
-  end
-
-  subgraph P7["Phase 7 · Chain"]
-    XG[xlink_graph.js]
-    CHAIN[Connected component<br/>= chain]
-    CV[_renderPirEventChain<br/>chronological rows]
-  end
-
-  DET --> CLO
-  ESC --> CLO
-  DIS --> CLO
-  CAT --> CLO
-  ARCH --> CH
-  CATT --> RS
-  KIND --> RS
-  RS --> RSD --> RSA --> CC
-  CC --> B1 & B2 & B3 & B4
-  CH --> PIR
-  CC --> PIR
-  PIR --> CARD --> VP
-  PIR -.opens.-> ACM
-  ACM --> CP --> REC & GRP
-  ACM -->|escalateEvent| ESC
-  CC --> VIS
-  VIS --> FL & SM & HD
-  XG --> CV
-  CV --> PIR
-  CLO --> PIR
-
-  style DET fill:#0d1a26,stroke:#4dd2ff,color:#fff
-  style CLO fill:#0d1a26,stroke:#4dd2ff,color:#fff
-  style PIR fill:#2a1d0a,stroke:#ffb84d,color:#fff
-  style ACM fill:#0d2610,stroke:#4dff9c,color:#fff
+  D[Sensor detects a drone<br/>at Copenhagen Airport]
+  A[Operator on duty<br/>Copenhagen Airport control room]
+  Q[Operator asks<br/>who needs this?]
+  C1[Cascade to<br/>Local police]
+  C2[Cascade to<br/>Intelligence services]
+  C3[Cascade to<br/>Airspace regulator]
+  R1[Local police<br/>dispatch patrol]
+  R2[Intelligence services<br/>log the pattern]
+  R3[Airspace regulator<br/>issue flight restriction]
+  E[Drone leaves airspace<br/>Operator closes event]
+  REP[Incident Report<br/>one shared file, every agency's slice inside]
+  D --> A --> Q
+  Q --> C1 --> R1
+  Q --> C2 --> R2
+  Q --> C3 --> R3
+  R1 --> E
+  R2 --> E
+  R3 --> E
+  E --> REP
+  style D fill:#0d1a26,stroke:#4dd2ff,color:#fff
+  style REP fill:#2a1d0a,stroke:#ffb84d,color:#fff
 ```
+
+That is the whole system in one flowchart. Everything else is the fine print.
 
 ---
 
-## Phase-by-phase walkthrough
+## Three kinds of users
 
-### Phase 1 · Foundation (`src/archetypes.js` + `event.catalog`)
-
-Every one of the 386 receivers gets tagged with a primary archetype (and optional secondaries) at boot via prefix rules over the role id. Every event carries a `catalog` object with 13 typed append-only sub-arrays that later phases read from.
+The platform serves three tenant types. Each sees a different view of the same underlying events.
 
 ```mermaid
 flowchart LR
-  R["RECEIVERS[]<br/>386 role objects"]
-  RU[assignArchetypes<br/>prefix rules]
-  R --> RU
-  RU --> RT["role.archetype<br/>role.secondaryArchetypes"]
-  E["event.catalog"]
-  E --> S1[subjects]
-  E --> S2[recordings]
-  E --> S3[respHistory]
-  E --> S4[attribution]
-  E --> S5[patterns]
-  E --> S6[xlinks]
-  E --> S7[roe]
-  E --> S8[evidence]
-  E --> S9[coordDecisions]
-  E --> SA[casualties]
-  E --> SB[advisories]
-  E --> SC[publicAlerts]
-  E --> SD[liaison]
+  ADMIN[Admin<br/>ISR itself]
+  OP[Operator<br/>the customer that owns the site<br/>e.g. Copenhagen Airport, Esbjerg Port]
+  RCV[Receiver<br/>agencies notified about events<br/>e.g. Local police, Intelligence services, hospitals]
+  ADMIN -->|provisions| OP
+  ADMIN -->|provisions| RCV
+  OP -->|sends cascades| RCV
+  RCV -->|responds, dispatches, replies| OP
+  style ADMIN fill:#0d2610,stroke:#4dff9c,color:#fff
+  style OP fill:#0d1a26,stroke:#4dd2ff,color:#fff
+  style RCV fill:#2a1d0a,stroke:#ffb84d,color:#fff
 ```
 
-**Read this for details:** cross-agency-flows.md Section 6a (catalog shape) + Section 7 (archetype rules table).
+- **Admin (ISR)** sets up the accounts, runs the platform, sees everything.
+- **Operator** is the customer whose site is being watched. Their team sits in front of the platform live, deciding what to escalate and to whom.
+- **Receiver** is any agency the operator needs help from. Police, intelligence, hospitals, fire brigade, the airspace regulator, kommune crisis staff, NATO liaison. There are around 386 registered receivers today.
 
 ---
 
-### Phase 2 · Archetype sub-section renderers (`src/report_subsections.js`)
+## What an operator sees when a drone appears
 
-Eight pure renderers, one per archetype. Each function is `(role, event) → HTMLString`. Empty return when the role has no data for that archetype so the Phase 3 composer only surfaces sub-sections that earned their place.
+```mermaid
+flowchart TD
+  A[Drone appears on the map]
+  B[Alert panel opens]
+  C[Live camera / signal picture]
+  D[AI takes a first read<br/>threat level + suggested response]
+  E1[Button: Cascade to local police]
+  E2[Button: Cascade to intelligence]
+  E3[Button: Cascade to any agency]
+  E4[Button: Dispatch own patrol]
+  A --> B --> C
+  C --> D
+  D --> E1 & E2 & E3 & E4
+  style A fill:#0d1a26,stroke:#4dd2ff,color:#fff
+  style D fill:#2a1d0a,stroke:#ffb84d,color:#fff
+```
+
+The operator is not asked to memorize anything. The platform surfaces suggested actions based on what the drone is doing, and lets them cascade to anyone they need with one button.
+
+**Cascade to any agency** opens a searchable picker with all 386 receivers grouped by what they do (police-style agencies, hospitals, intel services, regulators, and so on). It also shows 3-6 recommended defaults for this exact event so common cascades take one click.
+
+---
+
+## What a receiver sees when a cascade lands
+
+```mermaid
+flowchart TD
+  A[Cascade arrives<br/>e.g. from Copenhagen Airport]
+  B[Notification]
+  C[Open the case file]
+  D[See operator's assessment<br/>+ AI take + what's been done so far]
+  E1[Reply back to the operator]
+  E2[Dispatch own resources]
+  E3[Cascade further to peers]
+  E4[Loop in a specialist as observer]
+  A --> B --> C --> D
+  D --> E1 & E2 & E3 & E4
+  style A fill:#2a1d0a,stroke:#ffb84d,color:#fff
+  style C fill:#0d1a26,stroke:#4dd2ff,color:#fff
+```
+
+The receiver arrives at the case already briefed. They see what the operator thinks, what the AI thinks, and everything that has been dispatched or coordinated on the case up to that moment. Their next action is a single button click, not a form.
+
+---
+
+## How the shared Incident Report is built
+
+Once the event closes (drone leaves, threat neutralised, all-clear given), a single Incident Report is generated. Every agency that touched the event gets a chapter inside it.
+
+```mermaid
+flowchart TD
+  E[Event closes]
+  R[Incident Report generated]
+  S[Summary at the top<br/>what happened, how long, outcome]
+  CH[One chapter per agency<br/>ordered by when they arrived on the case]
+  CH1[Copenhagen Airport chapter<br/>e.g. cascade timings, sensor picture]
+  CH2[Local police chapter<br/>patrols dispatched, arrival times, outcome]
+  CH3[Intelligence chapter<br/>pattern notes]
+  CH4[Airspace regulator chapter<br/>restriction issued, duration]
+  E --> R --> S
+  R --> CH
+  CH --> CH1
+  CH --> CH2
+  CH --> CH3
+  CH --> CH4
+  style R fill:#2a1d0a,stroke:#ffb84d,color:#fff
+```
+
+Every chapter has the same shape so readers know where to look:
+
+1. **Who this agency is** (name, tier, what they do)
+2. **How they got involved** (who cascaded to them, at what time, or if they self-initiated)
+3. **What they did** (summary: patrols dispatched, replies sent, notes written)
+4. **Timeline** (chronological list of their actions)
+5. **Deep detail sections** (only the sections that agency actually populated on this event)
+
+The deep-detail sections are shaped by the kind of work the agency does. Police get a dispatched-assets section. Hospitals get a casualty section. Regulators get an advisories section. Intel gets an attribution section. The platform picks the right shapes automatically based on who wrote what.
+
+---
+
+## The reader's own chapter is pinned to the top
+
+```mermaid
+flowchart TD
+  V[Local police officer opens<br/>the Incident Report]
+  P[Their own chapter is pinned on top<br/>and already expanded]
+  O[Other agencies' chapters are collapsed<br/>they can click to expand]
+  V --> P
+  V --> O
+  style P fill:#0d2610,stroke:#4dff9c,color:#fff
+```
+
+A police officer reading the report sees Local Police at the top, already open, tagged "your chapter". Everyone else is one click away. No hunting.
+
+---
+
+## Some chapters are redacted for tenant boundaries
+
+Not everyone should see everything. Intelligence services and forensic units write notes that stay inside their branch by default. A police officer reading the same incident sees the intel chapter's presence but the internal notes are held back.
+
+```mermaid
+flowchart TD
+  V[Police officer<br/>viewing the report]
+  I[Intelligence chapter]
+  I --> Q{Is the viewer<br/>cleared for intel?}
+  Q -->|no| S[Shows the name +<br/>a note that says<br/>Redacted for tenant boundary]
+  Q -->|yes| F[Shows the full chapter]
+  style S fill:#2a1d0a,stroke:#ffb84d,color:#ffb84d
+  style F fill:#0d2610,stroke:#4dff9c,color:#fff
+```
+
+The reader still sees the intel agency was on the case (audit trail intact) but the internal notes stay compartmented. The intel agency reading the same report sees their own chapter fully. Different windows on the same underlying record.
+
+---
+
+## When one incident is actually a chain of incidents
+
+Sometimes one drone visits three sites in an hour. Or a swarm hits several targets at once. The platform links related events into a chain automatically and shows a chain view at the top of each report.
 
 ```mermaid
 flowchart LR
-  role[role] --> R[renderAllSubsections]
-  event[event] --> R
-  R --> K[renderKineticSubsection]
-  R --> CO[renderCoordinationSubsection]
-  R --> IN[renderIntelSubsection]
-  R --> FO[renderForensicSubsection]
-  R --> ME[renderMedicalSubsection]
-  R --> RE[renderRegulatorySubsection]
-  R --> PU[renderPublicSafetySubsection]
-  R --> LI[renderLiaisonSubsection]
-  K & CO & IN & FO & ME & RE & PU & LI -->|filter by ownerRoleId or authorRoleId + archetype| OUT[0..8 sub-section HTMLs]
+  A["Event 1<br/>Billund Airport<br/>10:12"]
+  B["Event 2<br/>Copenhagen Airport<br/>10:41"]
+  C["Event 3<br/>Aalborg Airport<br/>11:08"]
+  D["Event 4<br/>Copenhagen Airport<br/>11:22"]
+  A -->|same drone signature| B
+  B -->|same drone signature| C
+  B -->|same actor, different platform| D
+  style A fill:#0d1a26,stroke:#4dd2ff,color:#fff
+  style B fill:#2a1d0a,stroke:#ffb84d,color:#fff
+  style C fill:#0d1a26,stroke:#4dd2ff,color:#fff
+  style D fill:#0d1a26,stroke:#4dd2ff,color:#fff
 ```
 
-Contributor scoping is enforced at read time (filter counterDispatches by archetype + ownerRoleId, filter catalog sub-arrays by authorRoleId). The renderer never claims data authored by someone else.
-
-**Read this for details:** cross-agency-flows.md Section 7 "The 8 archetypes".
+The report says "4-event chain across 3 sites over 70 minutes. Billund → Copenhagen → Aalborg" and lists every event in the chain. If the reader was involved in more than one of them (like local police at both airports), each of their events is tagged "you were on this" so they can see their footprint across the whole campaign.
 
 ---
 
-### Phase 3 · Chapter composer (`src/chapter_composer.js`)
+## What the platform will NOT do
 
-One chapter per contributor. Chapter = 4 canonical top blocks + 0-8 archetype sub-sections. Empty return when the role didn't touch the event so the master PIR composer can iterate every RECEIVERS entry and only surface the ones that earned a chapter.
+Three hard guardrails, worth knowing up front:
 
-```mermaid
-flowchart TD
-  E[event] --> CI{contributorsForEvent}
-  RC["RECEIVERS[]"] --> CI
-  CI -->|for each contributor| CC[composeChapter]
-  CC --> B1[Block 1 Identifier<br/>name + tier + archetype badges]
-  CC --> B2[Block 2 Situation received<br/>cascade in / out / self-initiated]
-  CC --> B3[Block 3 Involvement summary<br/>6 stats + populated archetypes]
-  CC --> B4[Block 4 Timeline slice<br/>chronological actions]
-  CC --> SS[renderAllSubsections]
-  B1 & B2 & B3 & B4 & SS --> ART[article.chapter]
-  style ART fill:#0d1a26,stroke:#4dd2ff,color:#fff
-```
+1. **The platform never dispatches on its own.** It observes, recommends, and lets humans decide. Every action goes through a human click. This is what "detection-only" means in our positioning.
 
-**Contributor detection:** a role contributed if ANY of these is true:
-- Initiated an escalation on this event
-- Was an escalation destination
-- Owns any counter-dispatch
-- Authored any catalog entry
+2. **Tenant data stays inside tenant boundaries.** Copenhagen Airport does not see Esbjerg Port's events. Intelligence notes do not leak to civil agencies. The redaction shown above is the visible half of a stricter server-side gate.
 
-Contributors ordered by first-touch timestamp so the master PIR reads in the sequence events actually unfolded.
-
-**Read this for details:** cross-agency-flows.md Section 7 "Chapter composition rule".
+3. **No half-truths in the record.** If an agency touched the case, they appear in the report. If their notes are compartmented, the presence still shows even when the content doesn't. The audit trail is always complete.
 
 ---
 
-### Phase 4 · Master PIR mount (`_renderPirContributorChapters`)
+## The one thing to remember
 
-Contributor chapters mount in the Step 7 PIR panel below the classic summary rows. One collapsible `<details>` card per contributor. Active viewer's own chapter pins to the top and opens by default.
+Every drone detection becomes one shared record. Every agency involved gets their own chapter in it. Every reader sees the version they are cleared to see, with their own contribution up top. Chains of related events surface together. The platform stitches it all live so nobody is writing situation reports by hand at 3am after an incident.
 
-```mermaid
-sequenceDiagram
-  participant U as Viewer (activeRole)
-  participant P as Step 7 PIR panel
-  participant C as contributorsForEvent()
-  participant K as composeChapter()
-  participant S as renderAllSubsections()
-  participant V as chapterVisibilityFor()
-  participant X as xlink_graph
-  U->>P: opens closed event
-  P->>X: chainFor(eventId, EVENTS)
-  X-->>P: chain summary (Phase 7)
-  P->>C: (event, RECEIVERS)
-  C-->>P: contributors[] sorted by first-touch
-  P->>P: pin activeRole to top when contributor
-  loop for each contributor
-    P->>V: (viewer, chapterRole, event)
-    V-->>P: FULL | SUMMARY | HIDDEN (Phase 6)
-    P->>K: (role, event, viewer)
-    K->>S: (role, event)
-    S-->>K: 0..8 sub-section HTMLs
-    K-->>P: chapter HTML (may be redacted)
-  end
-  P-->>U: collapsed cards, viewer's chapter open,<br/>chain view above
-```
-
-**Zero JS state** — every card is a native `<details>` element so collapse/expand is free. Redacted cards carry a `chapter-card-redacted` accent + "redacted" tag so the reader spots them without expanding.
-
-**Read this for details:** cross-agency-flows.md Section 7 "PIR panel data flow".
+That is the whole product.
 
 ---
 
-### Phase 5 · Universal cascade picker (`src/cascade_picker.js` + `_openArchetypeCascadeModal`)
+## Where each piece lives (for later)
 
-The "Cascade to any agency" CTA in every active event's Mission Console opens a picker over all 386 receivers. Thick archetypes collapse to category tiles the operator expands on click; thin archetypes show their chips open.
+When you do want to open the code, this is the map:
 
-```mermaid
-flowchart TD
-  CTA[Cascade to any agency CTA]
-  CTA --> M[_openArchetypeCascadeModal]
-  M --> BUILD[buildPickerGroups]
-  M --> REC[recommendationsForEvent]
-  BUILD --> GRP["8 archetype groups<br/>+ onCase[] + all[]"]
-  REC --> CHIPS[3-6 recommended chips]
-  M --> S[search input]
-  S --> F[filterByQuery]
-  F --> UI[filtered chip list<br/>groups auto-expand]
-  UI --> SEL[selectedRoleIds]
-  CHIPS --> SEL
-  GRP --> SEL
-  SEL --> SUB[submit]
-  SUB --> ESC[escalateEvent<br/>per selected role]
-  style CTA fill:#0d2610,stroke:#4dff9c,color:#fff
-  style ESC fill:#0d1a26,stroke:#4dd2ff,color:#fff
-```
-
-**Recommender rules** — 3-6 defaults surfaced per event based on classification, threat, platform, domainScope, outEnv. Full rule table in cross-agency-flows.md Section 7 "Cascade picker grouping".
-
-**Legacy shortcuts stay wired.** Cascade to intel services (FE + PET) and Cascade to local police (Politikreds) still use their hardcoded 2-chip modal for one-click send. Phase 5 is the universal path.
-
----
-
-### Phase 6 · Visibility scoping (`src/visibility.js`)
-
-Cross-tenant redaction policy. Non-cleared viewers see intel + forensic chapters as SUMMARY: nameplate + involvement counts, no situation / timeline / sub-section bodies.
-
-```mermaid
-flowchart TD
-  V[viewer role] --> P[chapterVisibilityFor]
-  C[chapter role] --> P
-  E[event] --> P
-  P --> R1{viewer null?}
-  R1 -->|yes| FULL
-  R1 -->|no| R2{admin bypass?}
-  R2 -->|yes| FULL
-  R2 -->|no| R3{viewer == chapter?}
-  R3 -->|yes| FULL
-  R3 -->|no| R4{same parent branch?}
-  R4 -->|yes| FULL
-  R4 -->|no| R5{chapter is INTEL or FORENSIC<br/>AND viewer not cleared?}
-  R5 -->|yes| SUM[SUMMARY]
-  R5 -->|no| FULL
-  style FULL fill:#0d2610,stroke:#4dff9c,color:#fff
-  style SUM fill:#2a1d0a,stroke:#ffb84d,color:#fff
-```
-
-**Server-side backstop:** client-side visibility is defence in depth. The real access gate lives at the API layer. visibility.js prevents accidental cross-tenant leakage in the UI.
-
-**Read this for details:** cross-agency-flows.md Section 7 "Visibility scoping".
-
----
-
-### Phase 7 · Cross-event chain graph (`src/xlink_graph.js`)
-
-Unifies three link sources into one undirected graph. Connected components define chains. Chain view mounts above the contributor chapters in the PIR when the chain size is greater than 1.
-
-```mermaid
-flowchart LR
-  A["evt-001<br/>BILLUND<br/>10:12"]
-  B["evt-002<br/>CPH<br/>10:41"]
-  C["evt-003<br/>AALBORG<br/>11:08"]
-  D["evt-004<br/>CPH<br/>11:22"]
-  A -.linkedEventIds<br/>0.82.- B
-  B -.linkedEventIds<br/>0.78.- C
-  B -.catalog.xlinks<br/>same-actor.- D
-  E[Connected component]
-  A --> E
-  B --> E
-  C --> E
-  D --> E
-  E --> CHAIN["chain-evt-001<br/>4 events, 3 sites, 70 min"]
-  style E fill:#0d1a26,stroke:#4dd2ff,color:#fff
-  style CHAIN fill:#2a1d0a,stroke:#ffb84d,color:#fff
-```
-
-**Role presence in chain:** `rolePresenceInChain(chain, roleId)` returns which events in the chain a role touched. Feeds the "you were on this" tag in the PIR chain view.
-
-**Read this for details:** cross-agency-flows.md Section 7 "Cross-event chain graph".
-
----
-
-## Data flow across all phases (dispatch → chapter → viewer)
-
-The lifecycle from the moment an operator fires a dispatch to the moment a specific viewer sees a specific version of that action in a specific contributor's chapter.
-
-```mermaid
-sequenceDiagram
-  participant OP as Operator
-  participant MC as Mission Console
-  participant EV as event record
-  participant EX as escalateEvent / dispatch
-  participant CAT as event.catalog
-  participant CCM as chapter_composer
-  participant VIS as visibility
-  participant PIR as Step 7 panel
-  participant VR as Viewer role
-
-  OP->>MC: click Cascade to any agency
-  MC->>EX: escalateEvent(destinationIds, assessmentPackage)
-  EX->>EV: append escalation with initiatedByRoleId
-  EX->>EV: append counterDispatch with ownerRoleId + archetype tag
-  EX->>CAT: append coordDecisions / advisories / etc
-
-  Note over EV: event closes
-
-  VR->>PIR: opens Step 7
-  PIR->>CCM: contributorsForEvent(event, RECEIVERS)
-  loop for each contributor
-    PIR->>VIS: chapterVisibilityFor(viewer, chapter, event)
-    VIS-->>PIR: FULL | SUMMARY | HIDDEN
-    PIR->>CCM: composeChapter(role, event, viewer)
-    CCM->>CAT: read catalog filtered by authorRoleId
-    CCM->>EV: read escalations / counterDispatches filtered by role
-    CCM-->>PIR: chapter HTML
-  end
-  PIR-->>VR: renders cards (viewer's pinned + open)
-```
-
-**Detection-only invariant** holds end-to-end. No phase writes back into the event during a render. Every module reads the event and derives its output; state changes only happen through the escalateEvent / dispatch / catalog-append paths on the write side.
-
----
-
-## Debugging + dev handles
-
-Every phase exposes a browser-console dev handle for spot-checking. Open a closed event, then in the console:
-
-| Handle | What it does |
+| What you see | Where it lives |
 |---|---|
-| `window.__isr_archetypes.byArchetype('kinetic-response')` | List every role tagged with an archetype |
-| `window.__isr_archetypes.coverage()` | Count of roles per archetype |
-| `window.__isr_subsections.populated(role, event)` | Array of archetypes this role populated |
-| `window.__isr_subsections.all(role, event)` | Concatenated sub-section HTML for a role |
-| `window.__isr_chapters.contributors(event)` | Array of role objects that touched this event |
-| `window.__isr_chapters.compose(role, event)` | Composed chapter HTML for one role |
-| `window.__isr_chapters.preview(event, elementId)` | Mount all chapters into a DOM element for inspection |
-| `window.__isr_picker.groups(event)` | Grouped picker spec: groups[], onCase[], all[] |
-| `window.__isr_picker.recommend(event)` | 3-6 recommended defaults for this event |
-| `window.__isr_visibility.level(viewer, chapterRole, event)` | FULL / SUMMARY / HIDDEN |
-| `window.__isr_visibility.adminOn('some-role-id')` | Register admin bypass for local preview |
-| `window.__isr_xlink.graph()` | Full xlink graph over all EVENTS |
-| `window.__isr_xlink.chainFor(eventId)` | Chain summary for one event |
-| `window.__isr_xlink.narrative(eventId)` | One-line chain description |
-| `window.__isr_xlink.rolePresence(eventId, roleId)` | Which events a role touched in the chain |
+| The Cascade-to-any-agency picker | `src/cascade_picker.js` |
+| The report chapters (one per agency) | `src/chapter_composer.js` + `src/report_subsections.js` |
+| The redaction rules for chapters | `src/visibility.js` |
+| The chain view at the top of a report | `src/xlink_graph.js` |
+| The list of 386 agencies + what each one does | `src/roles.js` + `src/archetypes.js` |
+| The Incident Report generator itself | `src/post_incident_report.js` |
 
----
+All wired together inside `src/main.js`, which is the shell everything sits inside.
 
-## What comes next (not in scope of these seven phases)
-
-- **Threat-type routing matrix** (`routing.js`) — the `(siteType × platform × classification) → auto-observer role set` lookup for automatic cascade defaults.
-- **Cross-site combined evidence report** — multi-event PDF / JSON / CSV bundling for chain incidents. Option B in the marker-filter chain-scope work.
-- **UI affordances for observer-promote acceptance / rejection** — Phase 4 in the earlier docs' P8 numbering.
-- **Rejection / declined flow protocol** — audit trail + backup escalation path when a receiver rejects a cascade or handoff.
-- **PDF layout of the multi-event report** — template TBD.
-- **Server-side visibility enforcement** — real auth gate at the API layer; visibility.js is only the client-side rendering companion.
-
-These are tracked in `docs/cross-agency-flows.md` Section 8 "What this document does NOT cover".
+Deep architecture reference: `docs/cross-agency-flows.md`. This overview is the map; that doc is the terrain.
