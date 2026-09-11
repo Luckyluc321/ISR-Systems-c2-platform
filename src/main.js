@@ -177,6 +177,36 @@ import {
   chainNarrative,
   rolePresenceInChain,
 } from './xlink_graph.js';
+// Threat taxonomy · two-layer catalog (families + models). Consumed
+// by src/routing.js for the auto-observer matrix, by NN adapter for
+// classification output, by chapter renderers for readable model
+// names, and by Agent B for narrative context. Pure data.
+import {
+  FAMILIES,
+  FAMILY_LABELS,
+  MODELS as THREAT_MODELS,
+  familyOf,
+  modelFor,
+  modelsInFamily,
+  threatProfileFor,
+  candidateModelsBySignature,
+  taxonomyCoverage,
+} from './threat_taxonomy.js';
+// Threat routing matrix · auto-observer selection per event shape.
+// Pure lookup keyed on (domain, family, classification, threat).
+// Detection-only: returns observer SUGGESTIONS; the event lifecycle
+// wires them in as observers only (log visibility, no cascade).
+// File named threat_routing.js to avoid collision with routing.js
+// (OSRM driving-route lookup, unrelated).
+import {
+  routeFor,
+  explainRoute,
+  routingCoverage,
+  familyForPlatformString,
+  contextForEvent,
+  observerRoleObjectsForEvent,
+  DOMAIN,
+} from './threat_routing.js';
 const _archetypeTaggedCount = assignArchetypes(RECEIVERS);
 // Surface any role that fell through to the defensive COORD default
 // so new receivers added without a matching rule are visible in the
@@ -213,6 +243,39 @@ if (typeof window !== 'undefined') {
     render:    renderSubsection,
     populated: subsectionsForContributor,
     all:       renderAllSubsections,
+  };
+  // Threat routing dev handle for spot-checking auto-observer output.
+  // Usage: window.__isr_routing.route({domain:'aviation', family:'cruise-missile', classification:'hostile', threat:'high'})
+  //        window.__isr_routing.explain({...})           → per-rule fire trace
+  //        window.__isr_routing.familyFromPlatform('cruise-missile')
+  //        window.__isr_routing.forEvent(event)          → route inferred from event
+  window.__isr_routing = {
+    route:              routeFor,
+    explain:            explainRoute,
+    coverage:           routingCoverage,
+    familyFromPlatform: familyForPlatformString,
+    DOMAIN,
+    contextFor:         contextForEvent,
+    forEvent:  (event) => event ? routeFor(contextForEvent(event)) : null,
+    observers: (event) => observerRoleObjectsForEvent(event, RECEIVERS),
+  };
+  // Threat taxonomy dev handle for spot-checking model coverage.
+  // Usage: window.__isr_threats.coverage()             → per-family counts
+  //        window.__isr_threats.familyOf('shahed-136') → 'loitering-munition'
+  //        window.__isr_threats.modelsIn('cruise-missile')
+  //        window.__isr_threats.threatFor('shahed-136') → 'critical'
+  //        window.__isr_threats.candidates({acoustic:'moped-buzz'})
+  window.__isr_threats = {
+    FAMILIES,
+    FAMILY_LABELS,
+    total:      THREAT_MODELS.length,
+    all:        THREAT_MODELS,
+    modelFor,
+    familyOf,
+    modelsIn:   modelsInFamily,
+    threatFor:  threatProfileFor,
+    candidates: candidateModelsBySignature,
+    coverage:   taxonomyCoverage,
   };
   // Phase 7 dev handle for spot-checking xlink graph + chain data.
   // Usage: window.__isr_xlink.graph()               → full graph over EVENTS

@@ -769,11 +769,120 @@ sequenceDiagram
 
 Explicitly out of scope for v0.1 — track separately as they land.
 
-- **Threat-type routing matrix** (`routing.js`) — the `(siteType × platform × classification) → auto-observer role set` lookup. Planned P3 audit patch.
+- ~~**Threat-type routing matrix** (`routing.js`) — the `(siteType × platform × classification) → auto-observer role set` lookup.~~ **LANDED 2026-09-11** as `src/threat_routing.js` (file renamed to avoid collision with the OSRM driving-route module). Two-layer taxonomy: `src/threat_taxonomy.js` catalogs ~164 platform models across 16 families; `src/threat_routing.js` runs a data-driven rules matrix over `(domain, family, classification, threat)` returning observer role ids + rationale + confidence. See Section 9 for the design contract.
 - **Cross-site combined evidence report** — multi-event PDF / JSON / CSV bundling for chain incidents. Planned as Option B in the marker-filter chain-scope work.
 - **PDF layout of the multi-event report** — TBD template.
 - **UI affordances for observer-promote acceptance / rejection** — Phase 4 work.
 - **Rejection / declined flow protocol** — when a receiver rejects a cascade or handoff, what's the audit trail + backup escalation path.
+
+---
+
+## 9. Threat taxonomy + routing matrix (landed 2026-09-11)
+
+Two-layer platform catalog + rules-driven observer routing. Fully separate from the report-shape work (Phases 1-7) but built on the same 386-receiver registry.
+
+### Two-layer taxonomy
+
+```mermaid
+flowchart LR
+  NN[NN adapter output<br/>or event.platform]
+  M[Layer B · MODELS<br/>~164 specific platforms<br/>DJI Mavic 3, Shahed-136, F-35, MQ-9, R44, Cessna 172, ...]
+  F[Layer A · FAMILIES<br/>16 canonical bins<br/>commercial-quadcopter, cruise-missile, loitering-munition, ...]
+  R[src/threat_routing.js<br/>routeFor context]
+  A[Attribution + chapter display + Agent B]
+  NN --> M
+  M -->|familyOf| F
+  F --> R
+  M --> A
+  style F fill:#0d1a26,stroke:#4dd2ff,color:#fff
+  style R fill:#0d2610,stroke:#4dff9c,color:#fff
+```
+
+**Why two layers.** Layer A stays small (16 families) so the routing matrix is auditable (~13 rules today, keyed on family + domain + classification + threat). Layer B holds model-level signature bindings (RF band, acoustic profile, cruise speed, payload) for attribution, chapter rendering, and Agent B narrative context. Adding a new drone model = one Layer B entry with a family binding, zero routing changes.
+
+**Model catalog coverage** (`window.__isr_threats.coverage()`):
+
+| Family | Model count |
+|---|---|
+| commercial-quadcopter | 29 |
+| fpv-quadcopter | 11 |
+| consumer-fixed-wing | 10 |
+| military-isr-fixed-wing | 21 |
+| strategic-uav | 6 |
+| loitering-munition | 17 |
+| cruise-missile | 13 |
+| helicopter-civilian | 11 |
+| helicopter-military | 16 |
+| jet-military | 12 |
+| jet-civilian | 3 |
+| light-aircraft | 8 |
+| glider | 2 |
+| tethered-platform | 3 |
+| drone-swarm | 1 |
+| unknown-signature | 1 |
+| **total** | **164** |
+
+Each MODELS entry: `{id, label, family, origin, cruiseMs, rangeKm, payloadKg, wingspanM, signatures: {rf[], acoustic, visual}, threatProfile?}`. Signatures use enum categories (`ACOUSTIC.MOPED_BUZZ` for the Shahed rotary-engine tell, `RF_BANDS.SILENT` for autonomous cruise missiles, etc.) so future signature attribution can filter models by observed signature slice.
+
+### Routing matrix flow
+
+```mermaid
+flowchart TD
+  E[event]
+  CTX[contextForEvent<br/>domain, family, classification, threat]
+  R[routeFor context]
+  OBS[observers: role ids]
+  RAT[rationale: string]
+  CONF[confidence: high / medium / low]
+  FIRED[firedRules: rule tags]
+  E --> CTX --> R
+  R --> OBS
+  R --> RAT
+  R --> CONF
+  R --> FIRED
+  OBS --> UI[Mission Console loop-in suggestions<br/>planned Phase 4 UI hook]
+  RAT --> UI
+  style R fill:#0d1a26,stroke:#4dd2ff,color:#fff
+  style UI fill:#2a1d0a,stroke:#ffb84d,color:#fff
+```
+
+### Rules table
+
+Each rule = `{tag, when, adds, rationale, confidence}`. Rules fire in order; observer ids added by multiple rules dedupe. Order doesn't determine priority — every matching rule adds its observers.
+
+| Rule tag | Fires when | Observers added |
+|---|---|---|
+| `aviation-regulator-baseline` | `domain=aviation` | `agency-traf` |
+| `maritime-regulator-baseline` | `domain=maritime` | `agency-sof` |
+| `energy-regulator-baseline` | `domain=energy` | `agency-ener` |
+| `hostile-intel-baseline` | `classification=hostile` | `pet, fe` |
+| `strategic-strike-platform` | `family=cruise-missile OR loitering-munition` | `forsvarskmd, rigspoliti, flv-karup, beredskab` |
+| `military-isr-platform` | `family=military-isr-fixed-wing` | `fe, flv-karup` |
+| `strategic-uav` | `family=strategic-uav` | `forsvarskmd, fe, pet, nato-caoc-uedem` |
+| `military-jet` | `family=jet-military` | `flv-qra, flv-karup, forsvarskmd, nato-caoc-uedem` |
+| `military-helicopter` | `family=helicopter-military` | `forsvarskmd, rigspoliti` |
+| `drone-swarm` | `family=drone-swarm` | `forsvarskmd, rigspoliti, fe, pet, flv-karup, beredskab` |
+| `fpv-kamikaze-hostile` | `family=fpv-quadcopter AND classification=hostile` | `rigspoliti, pet, beredskab` |
+| `commercial-quad-hostile` | `family=commercial-quadcopter AND classification=hostile` | `rigspoliti` |
+| `unknown-signature` | `family=unknown-signature` | `pet, fe` |
+| `high-threat-consequence` | `threat=high AND classification=hostile` | `beredskab` |
+
+### Sample routings (runtime-verified)
+
+| Scenario | Fired rules | Observer set |
+|---|---|---|
+| Shahed at CPH airport, hostile+high | aviation-baseline, hostile-intel, strategic-strike, high-threat-consequence | agency-traf, pet, fe, forsvarskmd, rigspoliti, flv-karup, beredskab |
+| DJI Mavic at Esbjerg port, hostile+low | maritime-baseline, hostile-intel, commercial-quad-hostile | agency-sof, pet, fe, rigspoliti |
+| Su-27 over Bornholm, hostile+high | hostile-intel, military-jet, high-threat-consequence | pet, fe, flv-qra, flv-karup, forsvarskmd, nato-caoc-uedem, beredskab |
+| Unknown signature at Energinet substation | energy-baseline, unknown-signature | agency-ener, pet, fe |
+| Drone swarm at CPH airport, hostile+high | aviation-baseline, hostile-intel, drone-swarm, high-threat-consequence | agency-traf, pet, fe, forsvarskmd, rigspoliti, flv-karup, beredskab |
+
+### Wiring status
+
+- **`window.__isr_routing`** dev handle exposes `route()`, `explain()`, `coverage()`, `familyFromPlatform()`, `contextFor()`, `forEvent()`, `observers()` for browser-console spot-checks.
+- **`window.__isr_threats`** dev handle exposes `coverage()`, `familyOf(modelId)`, `modelsIn(family)`, `threatFor(modelId)`, `candidates(signature)` for taxonomy spot-checks.
+- **Production UI hook** — planned Phase 4: pre-populate the existing "Loop in observer" CTA with `observerRoleObjectsForEvent(event, RECEIVERS)`. Not wired today; the operator manually adds observers through the current picker.
+- **Detection-only preserved.** `threat_routing.js` returns suggestions. Nothing in the module dispatches, escalates, or writes.
 
 ---
 
@@ -794,3 +903,4 @@ Explicitly out of scope for v0.1 — track separately as they land.
 | 2026-09-11 | Audit patch. Verification agent surfaced 2 BLOCKERS and 4 HIGH findings; all six fixed in one pass. (1) Every chapter, chip, mount card, toast, and pill now reads `role.label` (canonical RECEIVERS field) with fallback to .name then .id — previously read .name only, so every card rendered the raw role id like `pet` instead of `PET — Politiets Efterretningstjeneste`. (2) 62 receivers that silently fell through to the default COORD archetype now have real rules: `kbr-*` (29 fire brigades → Kinetic), `amk-*` (5 medical dispatch → Medical), `alarm-*` (Coord/Medical), `eu-*` (7 EU agencies → Liaison), `bucket-*` (9 pivot tiles → Coord), `cert-*` (Forensic/Intel), plus 7 `rigspoliti-*` sub-units and `kbh-politi-rytteri`. Fallback now emits console.warn at boot so future misses surface immediately. (3) Chapter identifier branch line reads .parentId too (was empty for every real receiver). (4) contributorsForEvent tie-breaks by role.id when timestamps match (was insertion-order). (5) Dead `event.outEnv` CBRN rules removed from recommender (no code path ever populated outEnv). (6) Section 7 role-count table updated to actual post-patch counts (Forensic = 5, not 1 — compartment-clearance policy now real). Coverage rules table extended with the new prefix rules | ISR C2 build |
 | 2026-09-11 | Audit patch 2. Second verification pass caught 1 HIGH + 2 MEDIUM + 1 LOW. (1) HIGH: seven cascade-message composition sites in main.js (strategic-cascade, politi-cascade, cascade-any, tactical-intervention CTAs + eyebrow at line 19440) still read raw `role.name` — every receiver-tenant cascade shipped as "Strategic cascade from Receiver: ..." instead of the actual agency name. All now read `role.label || role.name || role.org || 'Receiver'`. (2) MEDIUM: recommender pick loop rewritten as ordered pick-list architecture. Previous "rule reorder" fix was cosmetic because IDs were consumed before archetype fallback — on triple-domain hostile+high+cruise the cap-6 filled with intel + command + regulator IDs and dropped every life-safety stand-in. New architecture appends { id } or { arch } items to one ordered list, honored strictly. (3) MEDIUM: filterByQuery null-guarded to match buildPickerGroups' defensive contract. (4) LOW: buildXlinkGraph memoised per events-array reference via WeakMap; invalidateXlinkCache hook exported | ISR C2 build |
 | 2026-09-11 | Audit patch 3 (final greenlight). Third verification pass caught 1 MEDIUM regression from patch 2 + 1 doc drift. (1) MEDIUM: pick-list order dropped PUBLIC on the extreme cruise+high+hostile scenario. Rule 2 pushed forsvarskmd + KINETIC + rigspoliti (3 slots) before Rule 3's MEDICAL + PUBLIC (2 slots) — cap-6 filled after MEDICAL, PUBLIC dropped. Rule 2's rigspoliti + Rule 3's beredskab now deferred to a tail pass so on mass-casualty cruise-missile scenarios all three life-safety archetypes (KINETIC + MEDICAL + PUBLIC) always win their slots. rigspoliti still surfaces on hostile+high WITHOUT cruise (no cap pressure). (2) Section 7 recommender rules table updated with actual current rules + priority-ordered pick list + explicit note that CBRN rules are pending a real hazmat field. Three independent audit passes now agree: zero open findings, ship-ready | ISR C2 build |
+| 2026-09-11 | Threat taxonomy + routing matrix landed. Two-layer catalog: `src/threat_taxonomy.js` enumerates 16 threat FAMILIES + 164 specific MODELS (29 commercial quadcopters, 11 FPV / kamikaze, 10 consumer fixed-wings, 21 military ISR fixed-wings, 6 strategic UAVs, 17 loitering munitions incl. Shahed variants, 13 cruise missiles, 27 helicopters civil + military, 15 jets, 8 light aircraft, plus gliders / tethered / swarm). Each MODELS entry carries signature bindings (RF band, acoustic profile, cruise speed, payload, wingspan, origin). `src/threat_routing.js` runs a data-driven 13-rule matrix over `(domain, family, classification, threat)` returning observer role ids + rationale + confidence. Detection-only: returns suggestions, no writes. `window.__isr_threats` + `window.__isr_routing` dev handles exposed. Section 9 doc added with mermaid flowcharts, rules table, and runtime-verified sample routings. Original `src/routing.js` (OSRM driving-route lookup) untouched — new module named `threat_routing.js` to avoid collision. Production UI wiring for the observer suggestions is planned Phase 4 (pre-populate existing Loop-in-observer CTA) | ISR C2 build |
