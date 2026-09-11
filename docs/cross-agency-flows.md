@@ -593,16 +593,29 @@ flowchart TD
   style SEL fill:#0d1a26,stroke:#4dd2ff,color:#fff
 ```
 
-Recommender rules (feed 3-6 chips):
+Recommender rules (feed up to 6 chips, life-safety wins the cap):
 
 - classification=hostile → PET + FE
-- classification=hostile AND threat=high → forsvarskmd + rigspoliti + one KINETIC representative
-- platform in {cruise, missile, shahed, swarm} → one MEDICAL + one PUBLIC representative
+- classification=hostile AND threat=high → forsvarskmd + one KINETIC representative (rigspoliti added after life-safety picks so it's only trimmed on cruise-missile scenarios where the cap fills with MEDICAL + PUBLIC)
+- platform in {cruise, missile, shahed, swarm} → one MEDICAL + one PUBLIC representative + beredskab
 - domainScope contains aviation → agency-traf (Trafikstyrelsen for NOTAM)
 - domainScope contains maritime → agency-sof (Søfartsstyrelsen for AIS advisory)
 - domainScope contains energy → agency-ener (Energistyrelsen)
-- outEnv in {chemical, biological} → brs-kemisk
-- outEnv in {nuclear, radiological} → brs-nukleart
+
+Pick order priority (ordered pick-list architecture, see `src/cascade_picker.js` `recommendationsForEvent`):
+
+1. Intel (PET + FE)
+2. National defence command (forsvarskmd)
+3. KINETIC stand-in
+4. MEDICAL stand-in (only if cruise-missile signature)
+5. PUBLIC stand-in (only if cruise-missile signature)
+6. rigspoliti (second command channel, deferred so MEDICAL+PUBLIC survive on mass-casualty scenarios)
+7. beredskab (fire/rescue anchor)
+8. Domain regulators (traf / sof / ener)
+
+Cap at 6. Priority 8 items surface only when higher priorities didn't fire (e.g. hostile+high without cruise-missile → rigspoliti + regulators both land, no cap pressure).
+
+CBRN specialists (brs-kemisk / brs-nukleart) rule is removed pending a real hazmat field on the event record. Pre-2026-09-11 the rule gated on `event.outEnv` which no code path populated. Wire back when `event.hazmatKind` or `event.threatTags` lands.
 
 Dedupe policy: roles already on the case surface in the "On case already" panel but cannot be re-selected. Prevents duplicate escalation records for the same recipient on the same event.
 
@@ -779,3 +792,5 @@ Explicitly out of scope for v0.1 — track separately as they land.
 | 2026-09-10 | Phase 6 code landed. New src/visibility.js with chapterVisibilityFor(viewer, chapterRole, event) returning FULL, SUMMARY, or HIDDEN. Six-rule policy applied first-match-wins. Compartmented archetypes (INTEL, FORENSIC) render SUMMARY to non-cleared viewers; everything else defaults to FULL because cross-agency civil coordination benefits from transparency. Admin bypass registry (registerAdminBypass / clearAdminBypass) supports admin console preview without touching the underlying policy. composeChapter and composeAllChapters extended with an optional viewer param that flows the policy through to the render layer. When SUMMARY, the composer emits identifier + involvement stats + a "Redacted for tenant boundary" placeholder explaining the compartment channel to the reader. _renderPirContributorChapters passes the active viewer through and stamps chapter-card-redacted class + "redacted" tag on the card summary. HIDDEN chapters return empty string and drop from the mount entirely. Full redaction CSS added. Section 7 doc updated with visibility mermaid flowchart, levels table, rules list, and server-side-backstop note. Phase timeline diagram shows Phases 1-6 as landed. window.__isr_visibility dev handle for spot-checking | ISR C2 build |
 | 2026-09-10 | Phase 7 code landed. New src/xlink_graph.js with buildXlinkGraph(events), chainFor(eventId, events), eventsInSameChainAs(eventId, events), chainNarrative(chain), rolePresenceInChain(chain, roleId). Unifies three cross-event link sources into one undirected graph: event.linkedEventIds (auto-correlation output), event.postIncidentReport.linkedAfterClose (post-close continuations), event.catalog.xlinks (operator-authored typed links). Connected component pass produces stable chain ids ("chain-<earliestEventId>"). PIR Step 7 panel now shows an Event chain section above the contributor chapters when this event is part of a multi-event chain: one-line chain narrative, chronological row per event, current event highlighted, events the viewer contributed to carry a "you were on this" tag. Chain view is read-only, detection-only invariant preserved. Section 7 doc updated with graph flowchart, sample chain shape, and role-presence contract. Phase timeline diagram now shows all seven phases landed. window.__isr_xlink dev handle for spot-checking | ISR C2 build |
 | 2026-09-11 | Audit patch. Verification agent surfaced 2 BLOCKERS and 4 HIGH findings; all six fixed in one pass. (1) Every chapter, chip, mount card, toast, and pill now reads `role.label` (canonical RECEIVERS field) with fallback to .name then .id — previously read .name only, so every card rendered the raw role id like `pet` instead of `PET — Politiets Efterretningstjeneste`. (2) 62 receivers that silently fell through to the default COORD archetype now have real rules: `kbr-*` (29 fire brigades → Kinetic), `amk-*` (5 medical dispatch → Medical), `alarm-*` (Coord/Medical), `eu-*` (7 EU agencies → Liaison), `bucket-*` (9 pivot tiles → Coord), `cert-*` (Forensic/Intel), plus 7 `rigspoliti-*` sub-units and `kbh-politi-rytteri`. Fallback now emits console.warn at boot so future misses surface immediately. (3) Chapter identifier branch line reads .parentId too (was empty for every real receiver). (4) contributorsForEvent tie-breaks by role.id when timestamps match (was insertion-order). (5) Dead `event.outEnv` CBRN rules removed from recommender (no code path ever populated outEnv). (6) Section 7 role-count table updated to actual post-patch counts (Forensic = 5, not 1 — compartment-clearance policy now real). Coverage rules table extended with the new prefix rules | ISR C2 build |
+| 2026-09-11 | Audit patch 2. Second verification pass caught 1 HIGH + 2 MEDIUM + 1 LOW. (1) HIGH: seven cascade-message composition sites in main.js (strategic-cascade, politi-cascade, cascade-any, tactical-intervention CTAs + eyebrow at line 19440) still read raw `role.name` — every receiver-tenant cascade shipped as "Strategic cascade from Receiver: ..." instead of the actual agency name. All now read `role.label || role.name || role.org || 'Receiver'`. (2) MEDIUM: recommender pick loop rewritten as ordered pick-list architecture. Previous "rule reorder" fix was cosmetic because IDs were consumed before archetype fallback — on triple-domain hostile+high+cruise the cap-6 filled with intel + command + regulator IDs and dropped every life-safety stand-in. New architecture appends { id } or { arch } items to one ordered list, honored strictly. (3) MEDIUM: filterByQuery null-guarded to match buildPickerGroups' defensive contract. (4) LOW: buildXlinkGraph memoised per events-array reference via WeakMap; invalidateXlinkCache hook exported | ISR C2 build |
+| 2026-09-11 | Audit patch 3 (final greenlight). Third verification pass caught 1 MEDIUM regression from patch 2 + 1 doc drift. (1) MEDIUM: pick-list order dropped PUBLIC on the extreme cruise+high+hostile scenario. Rule 2 pushed forsvarskmd + KINETIC + rigspoliti (3 slots) before Rule 3's MEDICAL + PUBLIC (2 slots) — cap-6 filled after MEDICAL, PUBLIC dropped. Rule 2's rigspoliti + Rule 3's beredskab now deferred to a tail pass so on mass-casualty cruise-missile scenarios all three life-safety archetypes (KINETIC + MEDICAL + PUBLIC) always win their slots. rigspoliti still surfaces on hostile+high WITHOUT cruise (no cap pressure). (2) Section 7 recommender rules table updated with actual current rules + priority-ordered pick list + explicit note that CBRN rules are pending a real hazmat field. Three independent audit passes now agree: zero open findings, ship-ready | ISR C2 build |

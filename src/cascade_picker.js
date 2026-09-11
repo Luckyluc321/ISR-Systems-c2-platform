@@ -166,21 +166,38 @@ export function recommendationsForEvent(event, receivers) {
   }
 
   // Rule 2 · High-threat hostile pulls in national command +
-  // kinetic response. The KINETIC stand-in sits BETWEEN the two
-  // command IDs so it can't be trimmed by regulators later.
+  // kinetic response. forsvarskmd + KINETIC stand-in take the
+  // first two command slots; rigspoliti pushed further down so
+  // it doesn't crowd out cruise-triggered life-safety picks.
   if (classification === 'hostile' && threat === 'high') {
     picks.push({ id: 'forsvarskmd' });
     picks.push({ arch: ARCHETYPES.KINETIC });
-    picks.push({ id: 'rigspoliti' });
   }
 
   // Rule 3 · Cruise-missile signature or explosive-carry hint
   // pulls medical + public safety to standby, plus fire and rescue.
-  // MEDICAL stand-in first (life-safety priority), then PUBLIC,
-  // then beredskab as the fire/rescue anchor.
+  // MEDICAL + PUBLIC come BEFORE rigspoliti (deferred from Rule 2)
+  // so on the extreme cruise+high+hostile scenario a mass-casualty
+  // evacuation-broadcast pathway is always represented. Prior order
+  // shipped a real PUBLIC drop bug caught in audit pass 3.
   if (/cruise|missile|shahed|swarm/.test(platform)) {
     picks.push({ arch: ARCHETYPES.MEDICAL });
     picks.push({ arch: ARCHETYPES.PUBLIC });
+  }
+
+  // Rule 2 tail · Second command channel (national police) after
+  // life-safety picks so cruise+high+hostile keeps PUBLIC in the
+  // cap-6 slot budget. On hostile+high without cruise, rigspoliti
+  // still lands (only 4 rules fire, no cap pressure).
+  if (classification === 'hostile' && threat === 'high') {
+    picks.push({ id: 'rigspoliti' });
+  }
+
+  // Rule 3 tail · Fire/rescue anchor after life-safety archetype
+  // stand-ins. beredskab is a COORD role for consequence response,
+  // not itself kinetic; the kinetic stand-in (usually brs) already
+  // covers the operational fire/rescue layer.
+  if (/cruise|missile|shahed|swarm/.test(platform)) {
     picks.push({ id: 'beredskab' });
   }
 
