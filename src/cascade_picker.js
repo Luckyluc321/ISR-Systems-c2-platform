@@ -148,44 +148,49 @@ export function recommendationsForEvent(event, receivers) {
   const platform = (event.platform || event.droneType || '').toLowerCase();
   const domainScope = Array.isArray(event.domainScope) ? event.domainScope : [];
 
-  const desiredArchetypes = [];
-  const desiredRoleIds = [];
-
-  // Rule order matters — the cap-at-6 slot budget fills in the order
-  // rules push to desiredRoleIds. Life-safety specialists (kinetic
-  // response, mass-casualty) come BEFORE domain regulators so a
-  // triple-domain hostile event doesn't push the medical / kinetic
-  // stand-in out of the recommendation row.
+  // Ordered pick-list architecture. Each rule appends items to `picks`
+  // in the order they should compete for slots. Items are either
+  // { id } (specific role) or { arch } (best RECEIVERS candidate for
+  // that archetype). The cap trims from the tail so life-safety picks
+  // interleaved with intel/command always survive at the expense of
+  // domain regulators.
+  //
+  // Pre-audit ordering pushed all IDs first, then ran the archetype
+  // fallback pass — a triple-domain hostile filled the cap with
+  // regulator IDs and dropped every stand-in. Fixed 2026-09-11 pass 2.
+  const picks = [];
 
   // Rule 1 · Any hostile detection gets intel eyes on it.
   if (classification === 'hostile') {
-    desiredRoleIds.push('pet', 'fe');
+    picks.push({ id: 'pet' }, { id: 'fe' });
   }
 
   // Rule 2 · High-threat hostile pulls in national command +
-  // kinetic response. Command sits before individual district
-  // dispatch because a national handoff drives the ground layer.
+  // kinetic response. The KINETIC stand-in sits BETWEEN the two
+  // command IDs so it can't be trimmed by regulators later.
   if (classification === 'hostile' && threat === 'high') {
-    desiredArchetypes.push(ARCHETYPES.KINETIC);
-    desiredRoleIds.push('forsvarskmd', 'rigspoliti');
+    picks.push({ id: 'forsvarskmd' });
+    picks.push({ arch: ARCHETYPES.KINETIC });
+    picks.push({ id: 'rigspoliti' });
   }
 
   // Rule 3 · Cruise-missile signature or explosive-carry hint
-  // pulls medical + public safety to standby, plus fire and
-  // rescue for mass-casualty extraction.
+  // pulls medical + public safety to standby, plus fire and rescue.
+  // MEDICAL stand-in first (life-safety priority), then PUBLIC,
+  // then beredskab as the fire/rescue anchor.
   if (/cruise|missile|shahed|swarm/.test(platform)) {
-    desiredArchetypes.push(ARCHETYPES.MEDICAL, ARCHETYPES.PUBLIC);
-    desiredRoleIds.push('beredskab');
+    picks.push({ arch: ARCHETYPES.MEDICAL });
+    picks.push({ arch: ARCHETYPES.PUBLIC });
+    picks.push({ id: 'beredskab' });
   }
 
-  // Rule 4 · Domain-shaped tie-ins. Aviation domain → Trafikstyrelsen
-  // for NOTAM; maritime → Sofartsstyrelsen for AIS advisory;
-  // energy → Energistyrelsen when grid site is affected.
-  // Deliberately last so a triple-domain hostile doesn't crowd out
-  // life-safety specialists from the 6-slot recommendation cap.
-  if (domainScope.includes('aviation')) desiredRoleIds.push('agency-traf');
-  if (domainScope.includes('maritime')) desiredRoleIds.push('agency-sof');
-  if (domainScope.includes('energy'))   desiredRoleIds.push('agency-ener');
+  // Rule 4 · Domain-shaped tie-ins. Aviation → Trafikstyrelsen for
+  // NOTAM; maritime → Sofartsstyrelsen for AIS advisory; energy →
+  // Energistyrelsen. Regulators come LAST so cap-at-6 trims them
+  // first when life-safety picks are competing for the same slots.
+  if (domainScope.includes('aviation')) picks.push({ id: 'agency-traf' });
+  if (domainScope.includes('maritime')) picks.push({ id: 'agency-sof' });
+  if (domainScope.includes('energy'))   picks.push({ id: 'agency-ener' });
 
   // Rule 5 · CBRN specialists (brs-kemisk / brs-nukleart) are
   // REMOVED pending a real hazmat field on the event record. Pre-audit
@@ -195,25 +200,25 @@ export function recommendationsForEvent(event, receivers) {
   // lands. Until then the operator adds them manually through the
   // full picker so we don't hide a specialist behind an unset field.
 
-  // Assemble: explicit role ids first, then one representative per
-  // desired archetype. Cap at 6 to keep the recommendation row
-  // scannable. The archetype fallback pass sorts candidates by role
-  // id so the "stand-in" pick is deterministic across renders (was
-  // insertion order in RECEIVERS pre-audit).
+  const CAP = 6;
   const picked = new Map();
-  for (const rid of desiredRoleIds) {
+  const _addId = (rid) => {
+    if (picked.size >= CAP || picked.has(rid)) return;
     const role = receivers.find(r => r.id === rid);
-    if (role && !picked.has(rid)) picked.set(rid, role);
-    if (picked.size >= 6) break;
-  }
-  if (picked.size < 6) {
-    for (const arch of desiredArchetypes) {
-      const rep = receivers
-        .filter(r => r.archetype === arch && !picked.has(r.id))
-        .sort((a, b) => (a.id || '').localeCompare(b.id || ''))[0];
-      if (rep) picked.set(rep.id, rep);
-      if (picked.size >= 6) break;
-    }
+    if (role) picked.set(rid, role);
+  };
+  const _addArch = (arch) => {
+    if (picked.size >= CAP) return;
+    const rep = receivers
+      .filter(r => r.archetype === arch && !picked.has(r.id))
+      .sort((a, b) => (a.id || '').localeCompare(b.id || ''))[0];
+    if (rep) picked.set(rep.id, rep);
+  };
+
+  for (const p of picks) {
+    if (p.id) _addId(p.id);
+    else if (p.arch) _addArch(p.arch);
+    if (picked.size >= CAP) break;
   }
 
   return Array.from(picked.values());
@@ -230,6 +235,10 @@ export function filterByQuery(roles, query) {
   const q = String(query || '').trim().toLowerCase();
   if (!q) return roles;
   return roles.filter(r => {
+    // Defensive null-guard matches buildPickerGroups' contract:
+    // exported pure functions can't throw on a caller's stray null.
+    // Added 2026-09-11 audit pass 2.
+    if (!r) return false;
     const hay = [
       r.label || '',
       r.name || '',

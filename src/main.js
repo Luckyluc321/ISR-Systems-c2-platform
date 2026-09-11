@@ -19437,7 +19437,7 @@ async function main() {
 
     const actions = `
       <section class="rer-section rer-actions">
-        <div class="c-section-eyebrow" style="display: flex; align-items: center;">Your Response · ${role.name || 'Receiver'}${observerChip}</div>
+        <div class="c-section-eyebrow" style="display: flex; align-items: center;">Your Response · ${role.label || role.name || role.org || 'Receiver'}${observerChip}</div>
         ${_participantsStrip}
         ${_groupedRail}
         ${composerHtml}
@@ -21348,8 +21348,8 @@ async function main() {
             const records = escalateEvent(eventId, {
               destinationIds: targetIds,
               payload: 'summary',
-              message: `Strategic cascade from ${role.name || 'Receiver'}: ${assessmentPackage.operatorAssessment}`,
-              operator: `Receiver · ${role.name || role.org || role.person || 'Unknown'}`,
+              message: `Strategic cascade from ${role.label || role.name || role.org || 'Receiver'}: ${assessmentPackage.operatorAssessment}`,
+              operator: `Receiver · ${role.label || role.name || role.org || role.person || 'Unknown'}`,
               operatorRoleId: role?.id || null,
               assessmentPackage,
             });
@@ -21388,8 +21388,8 @@ async function main() {
             const records = escalateEvent(eventId, {
               destinationIds: politiIds,
               payload: 'summary',
-              message: `Politi coordination from ${role.name || 'Receiver'}: ${assessmentPackage.operatorAssessment}`,
-              operator: `Receiver · ${role.name || role.org || role.person || 'Unknown'}`,
+              message: `Politi coordination from ${role.label || role.name || role.org || 'Receiver'}: ${assessmentPackage.operatorAssessment}`,
+              operator: `Receiver · ${role.label || role.name || role.org || role.person || 'Unknown'}`,
               operatorRoleId: role?.id || null,
               assessmentPackage,
             });
@@ -21435,8 +21435,8 @@ async function main() {
             const records = escalateEvent(eventId, {
               destinationIds: uniqTargetIds,
               payload: 'summary',
-              message: `Cascade from ${role?.name || 'Receiver'}: ${assessmentPackage.operatorAssessment}`,
-              operator: `Receiver · ${role?.name || role?.org || role?.person || 'Unknown'}`,
+              message: `Cascade from ${role?.label || role?.name || role?.org || 'Receiver'}: ${assessmentPackage.operatorAssessment}`,
+              operator: `Receiver · ${role?.label || role?.name || role?.org || role?.person || 'Unknown'}`,
               operatorRoleId: role?.id || null,
               assessmentPackage,
             });
@@ -21676,8 +21676,8 @@ async function main() {
             const records = escalateEvent(eventId, {
               destinationIds: targetDestIds,
               payload: 'summary',
-              message: `Tactical intervention request from ${role.name || 'Receiver'}: ${assessmentPackage.operatorAssessment}`,
-              operator: `Receiver · ${role.name || role.org || role.person || 'Unknown'}`,
+              message: `Tactical intervention request from ${role.label || role.name || role.org || 'Receiver'}: ${assessmentPackage.operatorAssessment}`,
+              operator: `Receiver · ${role.label || role.name || role.org || role.person || 'Unknown'}`,
               operatorRoleId: role?.id || null,
               assessmentPackage,
             });

@@ -164,12 +164,29 @@ export function buildXlinkGraph(events) {
 
 // ── Public queries ─────────────────────────────────────────────
 
+// Weak per-events-array memoisation. Callers that repeatedly ask
+// about the same event list (PIR mount, per-chapter chain-scope
+// cross-reference) reuse a single graph instead of rebuilding on
+// every call. Key by array reference so a mutated in-place events
+// list still cache-hits (test coverage today: seed EVENTS array is
+// stable across the session). WeakMap so the entry auto-collects
+// when the caller's array reference goes out of scope.
+const _graphCache = new WeakMap();
+function _graphFor(events) {
+  if (!Array.isArray(events)) return buildXlinkGraph(events);
+  const cached = _graphCache.get(events);
+  if (cached) return cached;
+  const graph = buildXlinkGraph(events);
+  _graphCache.set(events, graph);
+  return graph;
+}
+
 // Get the chain summary for a specific event. Returns null when the
 // event is not in the graph.
 
 export function chainFor(eventId, events) {
   if (!eventId) return null;
-  const graph = buildXlinkGraph(events);
+  const graph = _graphFor(events);
   const node = graph.nodes.get(eventId);
   if (!node) return null;
   return graph.chains.get(node.chainId) || null;
@@ -181,6 +198,19 @@ export function chainFor(eventId, events) {
 export function eventsInSameChainAs(eventId, events) {
   const chain = chainFor(eventId, events);
   return chain ? chain.events.slice() : [];
+}
+
+// Cache invalidation hook. Call when the events array has been
+// mutated in place (new event added, existing event's linkedEventIds
+// changed) so the next chainFor picks up the fresh graph. The PIR
+// render path is safe today because it renders closed events (frozen
+// correlation state), but hook this into any future live-chain UI
+// mount if a chain-view opens on an actively-correlating event.
+export function invalidateXlinkCache(events) {
+  if (events) _graphCache.delete(events);
+  // WeakMap has no .clear(); pass the specific events reference to
+  // invalidate. Full-cache clears aren't supported by design — the
+  // WeakMap auto-collects entries whose keys go out of scope.
 }
 
 // One-line human summary of a chain. Compact enough for a card
