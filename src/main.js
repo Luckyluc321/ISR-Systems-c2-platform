@@ -13837,6 +13837,9 @@ async function main() {
       .replace(/'/g, '&#39;');
 
     const _labelFor = (role) => role.label || role.name || role.id;
+    // Tier chip removed 2026-09-11 — receivers have no .tier field
+    // (destination-level property). Kept renderer flat until a
+    // destination-rollup tier badge is warranted.
     const _renderChip = (role) => `
       <button class="arch-picker-chip"
               type="button"
@@ -13845,7 +13848,6 @@ async function main() {
               title="${_escHtml(_labelFor(role))}">
         <span class="arch-picker-chip-dot" aria-hidden="true"></span>
         <span class="arch-picker-chip-name">${_escHtml(_labelFor(role))}</span>
-        ${role.tier ? `<span class="arch-picker-chip-tier">${_escHtml(String(role.tier).toUpperCase())}</span>` : ''}
       </button>`;
 
     const _renderRecommendationRow = () => {
@@ -18884,7 +18886,11 @@ async function main() {
     const chain = chainFor(event.id, EVENTS);
     if (!chain || chain.size <= 1) return '';   // single-event → no chain view
 
-    const narrative = chainNarrative(chain);
+    const _e = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    // chainNarrative is built from raw siteId strings. Escape at the
+    // mount boundary so a future customer siteId with special chars
+    // can't break the chain header render.
+    const narrative = _e(chainNarrative(chain));
     const presence = activeRole ? rolePresenceInChain(chain, activeRole.id) : null;
     const rows = chain.events.map(ev => {
       const isCurrent = ev.id === event.id;
@@ -18894,7 +18900,6 @@ async function main() {
       const ts = ev.startTime ? ev.startTime.slice(11, 19) + 'Z' : '';
       const status = ev.status === 'closed' ? 'CLOSED' : 'ACTIVE';
       const isRolePresent = presence && presence.eventIds.includes(ev.id);
-      const _e = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       return `
         <li class="pir-chain-row${isCurrent ? ' pir-chain-row-current' : ''}${isRolePresent ? ' pir-chain-row-touched' : ''}"
             data-chain-event-id="${_e(ev.id)}">
@@ -18948,7 +18953,14 @@ async function main() {
       ? [contributors.find(r => r.id === activeId), ...contributors.filter(r => r.id !== activeId)]
       : contributors;
 
-    const cards = ordered.map(role => {
+    // Track shown vs contributed counts so the eyebrow reports the
+    // number of cards the viewer actually sees, not the total that
+    // touched the case. Diverges when HIDDEN visibility drops a
+    // contributor entirely (defensive-only today, real when a covert-
+    // role rule lands — see docs Section 7 Visibility scoping).
+    let shownCount = 0;
+    let viewerShown = false;
+    const cardHtmls = ordered.map(role => {
       const isViewer = role.id === activeId;
       const primaryLabel = ARCHETYPE_LABELS[role.archetype] || role.archetype || '';
       const secondaryCount = Array.isArray(role.secondaryArchetypes) ? role.secondaryArchetypes.length : 0;
@@ -18958,19 +18970,21 @@ async function main() {
       // empty string — filtered out below so the card drops entirely.
       const chapterHtml = composeChapter(role, event, activeRole);
       if (!chapterHtml) return '';
+      shownCount += 1;
+      if (isViewer) viewerShown = true;
       const visibility = chapterVisibilityFor(activeRole, role, event);
       const isRedacted = visibility === VISIBILITY.SUMMARY;
-      // Escape role.label/tier defensively — RECEIVERS is internal
+      // Escape role.label defensively — RECEIVERS is internal
       // but a customer-supplied receiver could carry HTML chars. Read
       // .label first (canonical RECEIVERS field), then .name (some
       // operator sources), then fall back to .id.
       const safeName = String(role.label || role.name || role.id).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-      const safeTier = role.tier ? String(role.tier).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').toUpperCase() : '';
+      // Tier chip removed 2026-09-11 — receivers don't carry .tier
+      // (destination-level property). See chapter_composer.js note.
       return `
         <details class="chapter-card${isViewer ? ' chapter-card-viewer' : ''}${isRedacted ? ' chapter-card-redacted' : ''}" ${isViewer ? 'open' : ''}>
           <summary class="chapter-card-summary">
             <span class="chapter-card-name">${safeName}${isViewer ? ' <span class="chapter-card-viewer-tag">your chapter</span>' : ''}${isRedacted ? ' <span class="chapter-card-redacted-tag">redacted</span>' : ''}</span>
-            ${safeTier ? `<span class="chapter-card-tier">${safeTier}</span>` : ''}
             <span class="chapter-card-primary">${primaryLabel}</span>
             <span class="chapter-card-stats">${isRedacted ? 'nameplate + counts only' : `${populatedCount} sub-section${populatedCount === 1 ? '' : 's'}${secondaryCount ? ` · ${secondaryCount} secondary archetype${secondaryCount === 1 ? '' : 's'}` : ''}`}</span>
           </summary>
@@ -18978,11 +18992,18 @@ async function main() {
             ${chapterHtml}
           </div>
         </details>`;
-    }).filter(Boolean).join('');
+    });
+    const cards = cardHtmls.filter(Boolean).join('');
+    if (!shownCount) return '';   // Every contributor dropped — no section.
+
+    const eyebrowSuffix = viewerShown ? ' · your chapter is expanded' : '';
+    const hiddenNote = shownCount < contributors.length
+      ? ` (${contributors.length - shownCount} additional contributor${contributors.length - shownCount === 1 ? '' : 's'} hidden from your view)`
+      : '';
 
     return `
       <div class="chapter-section" style="margin-bottom:var(--space-3);">
-        <div class="c-section-eyebrow" style="color:#ffb84d;">Contributor chapters · ${contributors.length} involved${activeIsContributor ? ' · your chapter is expanded' : ''}</div>
+        <div class="c-section-eyebrow" style="color:#ffb84d;">Contributor chapters · ${shownCount} shown${eyebrowSuffix}${hiddenNote}</div>
         <div class="chapter-section-note">One chapter per role that touched this event. Ordered chronologically by first-touch except your own, which is pinned to the top and expanded.</div>
         <div class="chapter-section-cards">
           ${cards}

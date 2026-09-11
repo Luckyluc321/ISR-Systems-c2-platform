@@ -146,12 +146,17 @@ function _blockIdentifier(role) {
   // `.name` (operator tenants, admin) and legacy seed data uses .id
   // as the fallback. Read all three so every source lights up.
   const name = esc(role.label || role.name || role.id);
-  const tier = esc(role.tier || '');
   // Same story for branch — RECEIVERS uses .parentId, some sources use
   // .parent, and .branch was the original doc-time field name.
   const branch = esc(role.branch || role.parent || role.parentId || '');
   const primaryLabel = ARCHETYPE_LABELS[role.archetype] || esc(role.archetype || '');
   const secondaries = Array.isArray(role.secondaryArchetypes) ? role.secondaryArchetypes : [];
+
+  // Note on tier — receivers don't carry a .tier field today (tier is
+  // a destination-level property, not a receiver-level one). The chip
+  // that used to render here was dead ceremony; removed 2026-09-11.
+  // Reintroduce via `getDestination(role.destinationIds[0])?.tier` if
+  // a tier badge is wanted back.
 
   const secondaryBadges = secondaries.map(a => `
     <span class="chapter-arch-badge chapter-arch-badge-secondary chapter-arch-badge-${esc(a)}">${esc(ARCHETYPE_LABELS[a] || a)}</span>
@@ -161,7 +166,6 @@ function _blockIdentifier(role) {
     <header class="chapter-identifier">
       <div class="chapter-identifier-row">
         <div class="chapter-identifier-name">${name}</div>
-        ${tier ? `<div class="chapter-identifier-tier">${tier.toUpperCase()}</div>` : ''}
       </div>
       ${branch ? `<div class="chapter-identifier-branch">${branch}</div>` : ''}
       <div class="chapter-identifier-badges">

@@ -151,14 +151,20 @@ export function recommendationsForEvent(event, receivers) {
   const desiredArchetypes = [];
   const desiredRoleIds = [];
 
+  // Rule order matters — the cap-at-6 slot budget fills in the order
+  // rules push to desiredRoleIds. Life-safety specialists (kinetic
+  // response, mass-casualty) come BEFORE domain regulators so a
+  // triple-domain hostile event doesn't push the medical / kinetic
+  // stand-in out of the recommendation row.
+
   // Rule 1 · Any hostile detection gets intel eyes on it.
   if (classification === 'hostile') {
     desiredRoleIds.push('pet', 'fe');
   }
 
   // Rule 2 · High-threat hostile pulls in national command +
-  // kinetic response. Otherwise coordinate to the local Politi
-  // district as the ground authority.
+  // kinetic response. Command sits before individual district
+  // dispatch because a national handoff drives the ground layer.
   if (classification === 'hostile' && threat === 'high') {
     desiredArchetypes.push(ARCHETYPES.KINETIC);
     desiredRoleIds.push('forsvarskmd', 'rigspoliti');
@@ -175,6 +181,8 @@ export function recommendationsForEvent(event, receivers) {
   // Rule 4 · Domain-shaped tie-ins. Aviation domain → Trafikstyrelsen
   // for NOTAM; maritime → Sofartsstyrelsen for AIS advisory;
   // energy → Energistyrelsen when grid site is affected.
+  // Deliberately last so a triple-domain hostile doesn't crowd out
+  // life-safety specialists from the 6-slot recommendation cap.
   if (domainScope.includes('aviation')) desiredRoleIds.push('agency-traf');
   if (domainScope.includes('maritime')) desiredRoleIds.push('agency-sof');
   if (domainScope.includes('energy'))   desiredRoleIds.push('agency-ener');
@@ -188,8 +196,10 @@ export function recommendationsForEvent(event, receivers) {
   // full picker so we don't hide a specialist behind an unset field.
 
   // Assemble: explicit role ids first, then one representative per
-  // desired archetype (the lowest-id alphabetical stand-in). Cap at
-  // 6 to keep the recommendation row scannable.
+  // desired archetype. Cap at 6 to keep the recommendation row
+  // scannable. The archetype fallback pass sorts candidates by role
+  // id so the "stand-in" pick is deterministic across renders (was
+  // insertion order in RECEIVERS pre-audit).
   const picked = new Map();
   for (const rid of desiredRoleIds) {
     const role = receivers.find(r => r.id === rid);
@@ -198,7 +208,9 @@ export function recommendationsForEvent(event, receivers) {
   }
   if (picked.size < 6) {
     for (const arch of desiredArchetypes) {
-      const rep = receivers.find(r => r.archetype === arch && !picked.has(r.id));
+      const rep = receivers
+        .filter(r => r.archetype === arch && !picked.has(r.id))
+        .sort((a, b) => (a.id || '').localeCompare(b.id || ''))[0];
       if (rep) picked.set(rep.id, rep);
       if (picked.size >= 6) break;
     }

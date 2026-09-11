@@ -654,7 +654,7 @@ flowchart TD
 
 **What SUMMARY protects:** the situation-received block (WHO cascaded this role in, or WHO they cascaded out to), the per-contributor timeline slice, and every archetype sub-section body (kinetic asset table, intel attribution notes, forensic evidence chain, medical casualty entries, etc). The reader still sees the role was on the case + counts, so cross-tenant awareness is preserved without leaking authoring-branch internal notes.
 
-**HIDDEN is reserved** for future covert-role scenarios (PET-NSK on a civil event, allied liaison on a sensitive cross-border incident). No current rule returns HIDDEN — the policy defaults to SUMMARY over HIDDEN so the audit trail always shows a role was involved.
+**HIDDEN is currently a defensive-only outcome.** No policy rule returns HIDDEN for real contributors today — only the null-chapter guard emits it. The policy deliberately defaults to SUMMARY over HIDDEN so the audit trail always shows a role was involved, even when their notes are compartmented. Future covert-role scenarios (PET-NSK on a civil event, allied liaison on a sensitive cross-border incident) would add a `chapterRole.covertOnly` flag with a HIDDEN rule when the operational need is real.
 
 **Server-side backstop:** client-side visibility is defence in depth. The real access gate lives at the API layer; visibility.js is the client-side rendering companion that prevents accidental cross-tenant leakage in the UI.
 

@@ -191,7 +191,9 @@ export function chainNarrative(chain) {
   if (chain.size <= 1) {
     return `Single event, no cross-links.`;
   }
-  const sites = Array.from(new Set(chain.events.map(e => (e.siteId || 'unknown').toUpperCase())));
+  // Reuse the sites array already computed by _summariseChain — one
+  // uppercase pass here instead of a second dedupe against chain.events.
+  const sites = (chain.sites || []).map(s => String(s || 'unknown').toUpperCase());
   const span = chain.spanMinutes;
   const spanLabel = span == null ? 'unknown span'
                   : span < 1     ? 'under a minute'

@@ -219,7 +219,7 @@ export function assignArchetypes(receivers) {
 // receiver-cyber-team is the notable exception (Forensic archetype
 // even though it's dispatched via the counter-response engine).
 export const DISPATCH_KIND_ARCHETYPES = {
-  // Operator + national pool
+  // Operator + national pool (dispatch-capable today via CD_PROFILE)
   'helicopter-intercept':    ARCHETYPES.KINETIC,
   'army-c-uas':              ARCHETYPES.KINETIC,
   'police-c-uas':            ARCHETYPES.KINETIC,
@@ -237,6 +237,22 @@ export const DISPATCH_KIND_ARCHETYPES = {
   'receiver-strike-team':    ARCHETYPES.KINETIC,
   'receiver-coord-cell':     ARCHETYPES.COORD,
   'receiver-cyber-team':     ARCHETYPES.FORENSIC,
+
+  // response_assets.js kinds — declared as inventory but not yet
+  // dispatch-capable via CD_PROFILE. Enumerated explicitly so a
+  // future promotion to dispatch-capable is a one-line map update
+  // rather than a silent default to KINETIC (audit finding
+  // 2026-09-11). Reviewed and classified per each unit's actual work.
+  'air-force':               ARCHETYPES.KINETIC,   // Generic Air Force asset
+  'air-force-qra':           ARCHETYPES.KINETIC,   // Quick Reaction Alert fighter
+  'army-ground':             ARCHETYPES.KINETIC,   // Ground troops
+  'coast-guard':             ARCHETYPES.KINETIC,   // Maritime patrol + interdiction
+  'defence-command':         ARCHETYPES.COORD,     // Marshals defence response; doesn't itself engage
+  'emergency':               ARCHETYPES.COORD,     // Generic emergency coordination (1-1-2 layer)
+  'home-guard':              ARCHETYPES.KINETIC,   // Hjemmeværnet ground units
+  'navy':                    ARCHETYPES.KINETIC,   // Naval assets
+  'police':                  ARCHETYPES.KINETIC,   // Generic police response
+  'police-national':         ARCHETYPES.KINETIC,   // Rigspoliti national response
 };
 
 export function archetypeForDispatchKind(kind) {

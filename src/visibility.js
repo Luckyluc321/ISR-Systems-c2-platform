@@ -81,6 +81,11 @@ const COMPARTMENT_CLEARED_ARCHETYPES = new Set([
 // Rule order matters — first rule that hits wins.
 
 export function chapterVisibilityFor(viewer, chapterRole, event) {
+  // `event` is reserved for future per-event overrides (event-level
+  // sensitivity tags, incident-specific compartment flags). No current
+  // rule reads it — signature preserved so callers don't need to
+  // refactor when per-event policy lands.
+  void event;
   if (!chapterRole) return VISIBILITY.HIDDEN;
 
   // Rule 0 · No active viewer (dev handle, admin console, seed
