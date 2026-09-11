@@ -132,11 +132,11 @@ Runtime-verified across five different scenarios. Same architecture, different o
 
 ## Why rules, not code
 
-The routing matrix is 13 rules today. Each rule is a data entry: WHEN this predicate matches, ADD these observer role ids, WITH this rationale.
+The routing matrix is 14 rules today. Each rule is a data entry: WHEN this predicate matches, ADD these observer role ids, WITH this rationale.
 
 ```mermaid
 flowchart LR
-  R[Rule table<br/>13 entries today]
+  R[Rule table<br/>14 entries today]
   E[Event context]
   M[Matcher runs each rule]
   D[Deduped observer set]

@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════════
 // Threat taxonomy — two-layer catalog for routing + attribution
 // ───────────────────────────────────────────────────────────────────
-// Layer A (FAMILIES): 15 canonical bins the routing matrix keys on.
+// Layer A (FAMILIES): 16 canonical bins the routing matrix keys on.
 // Coarse enough to be stable, rich enough to differentiate response
 // tiers. Adding a new drone model doesn't change routing rules.
 //
@@ -25,7 +25,7 @@
 // ── Layer A · Threat families ──────────────────────────────────
 // Every model binds to exactly one primary family. Routing matrix
 // (src/routing.js) uses ONLY these — never model-level identifiers —
-// so the matrix stays ~15 × 8 site types = auditable.
+// so the matrix stays ~16 × 8 site types = auditable.
 
 export const FAMILIES = {
   COMMERCIAL_QUADCOPTER:        'commercial-quadcopter',
@@ -176,7 +176,8 @@ export const ORIGIN = {
 
 export const MODELS = [
   // ═══════════════════════════════════════════════════════════════
-  // COMMERCIAL QUADCOPTERS (~30) — most common civilian sighting
+  // COMMERCIAL QUADCOPTERS — most common civilian sighting.
+  // Counts intentionally omitted; `taxonomyCoverage()` is authoritative.
   // ═══════════════════════════════════════════════════════════════
   { id: 'dji-mavic-3-pro',      label: 'DJI Mavic 3 Pro',         family: FAMILIES.COMMERCIAL_QUADCOPTER, origin: ORIGIN.CN, cruiseMs: 21, rangeKm: 15, payloadKg: null, wingspanM: 0.35, signatures: { rf: [RF_BANDS.BAND_2_4_GHZ, RF_BANDS.BAND_5_8_GHZ], acoustic: ACOUSTIC.HIGH_WHINE, visual: VISUAL.QUADCOPTER_SMALL }, notes: 'Prosumer aerial photography, triple-camera Hasselblad.' },
   { id: 'dji-mavic-3',          label: 'DJI Mavic 3',             family: FAMILIES.COMMERCIAL_QUADCOPTER, origin: ORIGIN.CN, cruiseMs: 21, rangeKm: 15, payloadKg: null, wingspanM: 0.35, signatures: { rf: [RF_BANDS.BAND_2_4_GHZ, RF_BANDS.BAND_5_8_GHZ], acoustic: ACOUSTIC.HIGH_WHINE, visual: VISUAL.QUADCOPTER_SMALL }, notes: 'Prosumer photography quadcopter, Hasselblad camera.' },
@@ -209,7 +210,7 @@ export const MODELS = [
   { id: 'freefly-alta-x',       label: 'Freefly Alta X',          family: FAMILIES.COMMERCIAL_QUADCOPTER, origin: ORIGIN.US, cruiseMs: 15, rangeKm: 5,  payloadKg: 15,   wingspanM: 1.19, signatures: { rf: [RF_BANDS.BAND_2_4_GHZ, RF_BANDS.BAND_900_MHZ], acoustic: ACOUSTIC.HIGH_WHINE, visual: VISUAL.QUADCOPTER_LARGE }, notes: 'Heavy-lift cinema + industrial quadcopter.' },
 
   // ═══════════════════════════════════════════════════════════════
-  // FPV / RACING / KAMIKAZE QUADCOPTERS (~15)
+  // FPV / RACING / KAMIKAZE QUADCOPTERS
   // ═══════════════════════════════════════════════════════════════
   { id: 'fpv-5inch-freestyle',  label: 'FPV 5-inch freestyle build',    family: FAMILIES.FPV_QUADCOPTER, origin: ORIGIN.UNKNOWN, cruiseMs: 30, rangeKm: 3, payloadKg: 0.5, wingspanM: 0.22, signatures: { rf: [RF_BANDS.BAND_2_4_GHZ, RF_BANDS.BAND_5_8_GHZ, RF_BANDS.BAND_900_MHZ], acoustic: ACOUSTIC.BUZZ, visual: VISUAL.FPV_FRAME }, notes: 'Generic hobbyist FPV racing frame. Highly modifiable.' },
   { id: 'fpv-7inch-longrange',  label: 'FPV 7-inch long-range build',   family: FAMILIES.FPV_QUADCOPTER, origin: ORIGIN.UNKNOWN, cruiseMs: 25, rangeKm: 20, payloadKg: 1.5, wingspanM: 0.30, signatures: { rf: [RF_BANDS.BAND_900_MHZ, RF_BANDS.BAND_5_8_GHZ], acoustic: ACOUSTIC.BUZZ, visual: VISUAL.FPV_FRAME }, notes: 'Long-range FPV, common payload delivery frame.' },
@@ -224,7 +225,7 @@ export const MODELS = [
   { id: 'kargu-2',              label: 'STM Kargu-2 (rotary)',          family: FAMILIES.FPV_QUADCOPTER, origin: ORIGIN.TR, cruiseMs: 20, rangeKm: 10, payloadKg: 1.4, wingspanM: 0.60, signatures: { rf: [RF_BANDS.BAND_2_4_GHZ, RF_BANDS.SILENT], acoustic: ACOUSTIC.HIGH_WHINE, visual: VISUAL.QUADCOPTER_SMALL }, threatProfile: 'high', notes: 'Turkish autonomous rotary loitering munition. Used in Libya reports.' },
 
   // ═══════════════════════════════════════════════════════════════
-  // CONSUMER + INDUSTRIAL FIXED-WING (~10)
+  // CONSUMER + INDUSTRIAL FIXED-WING
   // ═══════════════════════════════════════════════════════════════
   { id: 'sensefly-ebee-x',      label: 'SenseFly eBee X',              family: FAMILIES.CONSUMER_FIXED_WING, origin: ORIGIN.CH, cruiseMs: 15, rangeKm: 90, payloadKg: null, wingspanM: 1.16, signatures: { rf: [RF_BANDS.BAND_2_4_GHZ, RF_BANDS.BAND_900_MHZ], acoustic: ACOUSTIC.PROP_HUM, visual: VISUAL.FIXED_WING_GENERAL }, notes: 'Professional mapping fixed-wing, hand-launched.' },
   { id: 'wingtra-one-gen-ii',   label: 'WingtraOne Gen II',            family: FAMILIES.CONSUMER_FIXED_WING, origin: ORIGIN.CH, cruiseMs: 16, rangeKm: 60, payloadKg: 1.2, wingspanM: 1.25, signatures: { rf: [RF_BANDS.BAND_2_4_GHZ], acoustic: ACOUSTIC.PROP_HUM, visual: VISUAL.FIXED_WING_GENERAL }, notes: 'VTOL fixed-wing mapper.' },
@@ -238,7 +239,7 @@ export const MODELS = [
   { id: 'x-uav-mini-talon',     label: 'X-UAV Mini Talon',             family: FAMILIES.CONSUMER_FIXED_WING, origin: ORIGIN.CN, cruiseMs: 20, rangeKm: 15, payloadKg: 0.5, wingspanM: 1.30, signatures: { rf: [RF_BANDS.BAND_2_4_GHZ, RF_BANDS.BAND_900_MHZ], acoustic: ACOUSTIC.PROP_HUM, visual: VISUAL.FIXED_WING_GENERAL }, notes: 'FPV V-tail long-range platform.' },
 
   // ═══════════════════════════════════════════════════════════════
-  // MILITARY ISR FIXED-WING (~15)
+  // MILITARY ISR FIXED-WING
   // ═══════════════════════════════════════════════════════════════
   { id: 'ga-mq-1-predator',     label: 'General Atomics MQ-1 Predator', family: FAMILIES.MILITARY_ISR_FIXED_WING, origin: ORIGIN.US, cruiseMs: 40, rangeKm: 1250, payloadKg: 204, wingspanM: 14.8, signatures: { rf: [RF_BANDS.BAND_KU, RF_BANDS.BAND_C, RF_BANDS.BAND_UHF], acoustic: ACOUSTIC.PROP_HUM, visual: VISUAL.BOOM_TAIL }, notes: 'Legacy ISR + strike UAV. Retired US inventory 2018.' },
   { id: 'ga-mq-9-reaper',       label: 'General Atomics MQ-9 Reaper',   family: FAMILIES.MILITARY_ISR_FIXED_WING, origin: ORIGIN.US, cruiseMs: 82, rangeKm: 1850, payloadKg: 1700,wingspanM: 20.1, signatures: { rf: [RF_BANDS.BAND_KU, RF_BANDS.BAND_C, RF_BANDS.BAND_UHF], acoustic: ACOUSTIC.TURBINE_ROAR, visual: VISUAL.BOOM_TAIL }, threatProfile: 'critical', notes: 'MALE armed ISR UAV, primary US strike drone.' },
@@ -263,7 +264,7 @@ export const MODELS = [
   { id: 'rq-7-shadow',          label: 'AAI RQ-7 Shadow',               family: FAMILIES.MILITARY_ISR_FIXED_WING, origin: ORIGIN.US, cruiseMs: 45, rangeKm: 125, payloadKg: 46,  wingspanM: 4.30, signatures: { rf: [RF_BANDS.BAND_UHF, RF_BANDS.BAND_C], acoustic: ACOUSTIC.PROP_HUM, visual: VISUAL.V_TAIL }, notes: 'US Army tactical ISR, catapult-launched.' },
 
   // ═══════════════════════════════════════════════════════════════
-  // STRATEGIC UAVs (~5)
+  // STRATEGIC UAVs
   // ═══════════════════════════════════════════════════════════════
   { id: 'rq-4-global-hawk',     label: 'Northrop RQ-4 Global Hawk',     family: FAMILIES.STRATEGIC_UAV, origin: ORIGIN.US, cruiseMs: 175, rangeKm: 22800, payloadKg: 1360, wingspanM: 39.9, signatures: { rf: [RF_BANDS.BAND_KU, RF_BANDS.BAND_KA, RF_BANDS.BAND_X], acoustic: ACOUSTIC.TURBINE_ROAR, visual: VISUAL.STRAIGHT_WING }, threatProfile: 'critical', notes: 'HALE strategic ISR, 60000+ ft ceiling.' },
   { id: 'mq-4c-triton',         label: 'Northrop MQ-4C Triton',         family: FAMILIES.STRATEGIC_UAV, origin: ORIGIN.US, cruiseMs: 170, rangeKm: 15200, payloadKg: 1450, wingspanM: 39.9, signatures: { rf: [RF_BANDS.BAND_KU, RF_BANDS.BAND_KA], acoustic: ACOUSTIC.TURBINE_ROAR, visual: VISUAL.STRAIGHT_WING }, notes: 'Naval variant, maritime patrol.' },
@@ -273,7 +274,7 @@ export const MODELS = [
   { id: 'wz-8',                 label: 'AVIC WZ-8',                     family: FAMILIES.STRATEGIC_UAV, origin: ORIGIN.CN, cruiseMs: 1030, rangeKm: 6000, payloadKg: null, wingspanM: 4.50, signatures: { rf: [RF_BANDS.BAND_KA, RF_BANDS.BAND_KU], acoustic: ACOUSTIC.JET_SCREAM, visual: VISUAL.DELTA_WING }, threatProfile: 'critical', notes: 'Chinese hypersonic supersonic ISR drone.' },
 
   // ═══════════════════════════════════════════════════════════════
-  // LOITERING MUNITIONS (~15) — the Shahed / Lancet / Switchblade class
+  // LOITERING MUNITIONS — the Shahed / Lancet / Switchblade class
   // ═══════════════════════════════════════════════════════════════
   { id: 'shahed-136',           label: 'Shahed-136 / Geran-2',          family: FAMILIES.LOITERING_MUNITION, origin: ORIGIN.IR, operators: ['IR', 'RU'], cruiseMs: 50, rangeKm: 2500, payloadKg: 50,  wingspanM: 2.50, signatures: { rf: [RF_BANDS.SILENT, RF_BANDS.BAND_L], acoustic: ACOUSTIC.MOPED_BUZZ, visual: VISUAL.DELTA_WING }, threatProfile: 'critical', notes: 'Iranian one-way attack UAV, autonomous. Distinctive rotary engine.' },
   { id: 'shahed-131',           label: 'Shahed-131 / Geran-1',          family: FAMILIES.LOITERING_MUNITION, origin: ORIGIN.IR, operators: ['IR', 'RU'], cruiseMs: 50, rangeKm: 900,  payloadKg: 15,  wingspanM: 2.20, signatures: { rf: [RF_BANDS.SILENT, RF_BANDS.BAND_L], acoustic: ACOUSTIC.MOPED_BUZZ, visual: VISUAL.DELTA_WING }, threatProfile: 'critical', notes: 'Smaller Shahed variant, shorter range.' },
@@ -294,7 +295,7 @@ export const MODELS = [
   { id: 'ch-901',               label: 'CASC CH-901',                   family: FAMILIES.LOITERING_MUNITION, origin: ORIGIN.CN, cruiseMs: 42, rangeKm: 15,   payloadKg: 3,   wingspanM: null, signatures: { rf: [RF_BANDS.BAND_L], acoustic: ACOUSTIC.HIGH_WHINE, visual: VISUAL.CRUISE_MISSILE }, notes: 'Chinese tube-launched loitering munition.' },
 
   // ═══════════════════════════════════════════════════════════════
-  // CRUISE MISSILES (~10)
+  // CRUISE MISSILES
   // ═══════════════════════════════════════════════════════════════
   { id: 'kh-101',               label: 'Kh-101 / Kh-102',               family: FAMILIES.CRUISE_MISSILE, origin: ORIGIN.RU, cruiseMs: 220, rangeKm: 4500, payloadKg: 400, wingspanM: 3.00, signatures: { rf: [RF_BANDS.SILENT, RF_BANDS.BAND_L], acoustic: ACOUSTIC.JET_SCREAM, visual: VISUAL.CRUISE_MISSILE }, threatProfile: 'critical', notes: 'Russian air-launched stealth cruise missile.' },
   { id: 'kh-555',               label: 'Kh-555',                        family: FAMILIES.CRUISE_MISSILE, origin: ORIGIN.RU, cruiseMs: 240, rangeKm: 2500, payloadKg: 410, wingspanM: 3.10, signatures: { rf: [RF_BANDS.SILENT], acoustic: ACOUSTIC.JET_SCREAM, visual: VISUAL.CRUISE_MISSILE }, threatProfile: 'critical', notes: 'Russian modernised Kh-55.' },
@@ -311,7 +312,7 @@ export const MODELS = [
   { id: 'yj-18',                label: 'YJ-18',                         family: FAMILIES.CRUISE_MISSILE, origin: ORIGIN.CN, cruiseMs: 900, rangeKm: 540,  payloadKg: 300, wingspanM: null, signatures: { rf: [RF_BANDS.BAND_X], acoustic: ACOUSTIC.JET_SCREAM, visual: VISUAL.CRUISE_MISSILE }, threatProfile: 'critical', notes: 'Chinese naval supersonic anti-ship cruise missile.' },
 
   // ═══════════════════════════════════════════════════════════════
-  // CIVILIAN HELICOPTERS (~10)
+  // CIVILIAN HELICOPTERS
   // ═══════════════════════════════════════════════════════════════
   { id: 'robinson-r22',         label: 'Robinson R22',                  family: FAMILIES.HELICOPTER_CIVILIAN, origin: ORIGIN.US, cruiseMs: 47, rangeKm: 386, payloadKg: 181, wingspanM: 7.67, signatures: { rf: [RF_BANDS.BAND_VHF], acoustic: ACOUSTIC.ROTOR_THUMP, visual: VISUAL.MAIN_TAIL_ROTOR }, notes: 'Training + small utility helicopter.' },
   { id: 'robinson-r44',         label: 'Robinson R44',                  family: FAMILIES.HELICOPTER_CIVILIAN, origin: ORIGIN.US, cruiseMs: 55, rangeKm: 560, payloadKg: 349, wingspanM: 10.06,signatures: { rf: [RF_BANDS.BAND_VHF], acoustic: ACOUSTIC.ROTOR_THUMP, visual: VISUAL.MAIN_TAIL_ROTOR }, notes: 'Popular 4-seat piston helicopter.' },
@@ -326,7 +327,7 @@ export const MODELS = [
   { id: 'leonardo-aw139',       label: 'Leonardo AW139',                family: FAMILIES.HELICOPTER_CIVILIAN, origin: ORIGIN.IT, cruiseMs: 82, rangeKm: 1250,payloadKg: 2500,wingspanM: 13.80,signatures: { rf: [RF_BANDS.BAND_VHF], acoustic: ACOUSTIC.TURBINE_ROAR, visual: VISUAL.MAIN_TAIL_ROTOR }, notes: 'Medium twin, offshore + SAR + EMS.' },
 
   // ═══════════════════════════════════════════════════════════════
-  // MILITARY HELICOPTERS (~15)
+  // MILITARY HELICOPTERS
   // ═══════════════════════════════════════════════════════════════
   { id: 'ah-64-apache',         label: 'Boeing AH-64 Apache',           family: FAMILIES.HELICOPTER_MILITARY, origin: ORIGIN.US, cruiseMs: 79, rangeKm: 480, payloadKg: 1421,wingspanM: 14.63,signatures: { rf: [RF_BANDS.BAND_UHF, RF_BANDS.BAND_L], acoustic: ACOUSTIC.ROTOR_THUMP, visual: VISUAL.MAIN_TAIL_ROTOR }, threatProfile: 'high', notes: 'Attack helicopter, 30mm cannon + Hellfire.' },
   { id: 'uh-60-blackhawk',      label: 'Sikorsky UH-60 Black Hawk',     family: FAMILIES.HELICOPTER_MILITARY, origin: ORIGIN.US, cruiseMs: 80, rangeKm: 500, payloadKg: 4082,wingspanM: 16.36,signatures: { rf: [RF_BANDS.BAND_UHF, RF_BANDS.BAND_VHF], acoustic: ACOUSTIC.ROTOR_THUMP, visual: VISUAL.MAIN_TAIL_ROTOR }, notes: 'Ubiquitous utility helicopter.' },
@@ -346,7 +347,7 @@ export const MODELS = [
   { id: 'z-10',                 label: 'Changhe Z-10',                  family: FAMILIES.HELICOPTER_MILITARY, origin: ORIGIN.CN, cruiseMs: 77, rangeKm: 800, payloadKg: 1500,wingspanM: 13.00,signatures: { rf: [RF_BANDS.BAND_UHF], acoustic: ACOUSTIC.ROTOR_THUMP, visual: VISUAL.MAIN_TAIL_ROTOR }, threatProfile: 'high', notes: 'Chinese attack helicopter.' },
 
   // ═══════════════════════════════════════════════════════════════
-  // MILITARY JETS (~10)
+  // MILITARY JETS
   // ═══════════════════════════════════════════════════════════════
   { id: 'f-16-fighting-falcon', label: 'Lockheed Martin F-16',          family: FAMILIES.JET_MILITARY, origin: ORIGIN.US, cruiseMs: 250, rangeKm: 4220, payloadKg: 7700, wingspanM: 9.96, signatures: { rf: [RF_BANDS.BAND_X, RF_BANDS.BAND_UHF, RF_BANDS.BAND_L], acoustic: ACOUSTIC.JET_SCREAM, visual: VISUAL.SWEPT_WING }, notes: 'Danish F-16 fleet transitioning to F-35.' },
   { id: 'f-35-lightning-ii',    label: 'Lockheed Martin F-35 Lightning II', family: FAMILIES.JET_MILITARY, origin: ORIGIN.US, cruiseMs: 280, rangeKm: 2200, payloadKg: 8100, wingspanM: 10.70,signatures: { rf: [RF_BANDS.BAND_X, RF_BANDS.BAND_KA, RF_BANDS.BAND_L], acoustic: ACOUSTIC.JET_SCREAM, visual: VISUAL.SWEPT_WING }, notes: 'Denmark operates 27 F-35A. Low RCS.' },
@@ -362,7 +363,7 @@ export const MODELS = [
   { id: 'a-10-thunderbolt',     label: 'Fairchild A-10 Thunderbolt II', family: FAMILIES.JET_MILITARY, origin: ORIGIN.US, cruiseMs: 155, rangeKm: 1200, payloadKg: 7260, wingspanM: 17.53,signatures: { rf: [RF_BANDS.BAND_X, RF_BANDS.BAND_UHF], acoustic: ACOUSTIC.TURBINE_ROAR, visual: VISUAL.STRAIGHT_WING }, notes: 'CAS jet, 30mm GAU-8 gun.' },
 
   // ═══════════════════════════════════════════════════════════════
-  // CIVILIAN JETS + LIGHT AIRCRAFT (~10)
+  // CIVILIAN JETS + LIGHT AIRCRAFT
   // ═══════════════════════════════════════════════════════════════
   { id: 'cessna-172',           label: 'Cessna 172 Skyhawk',            family: FAMILIES.LIGHT_AIRCRAFT, origin: ORIGIN.US, cruiseMs: 63, rangeKm: 1272, payloadKg: 481, wingspanM: 11.00,signatures: { rf: [RF_BANDS.BAND_VHF], acoustic: ACOUSTIC.PROP_HUM, visual: VISUAL.STRAIGHT_WING }, notes: 'Most-produced aircraft ever. Trainer + tourism.' },
   { id: 'cessna-182',           label: 'Cessna 182 Skylane',            family: FAMILIES.LIGHT_AIRCRAFT, origin: ORIGIN.US, cruiseMs: 78, rangeKm: 1722, payloadKg: 636, wingspanM: 11.00,signatures: { rf: [RF_BANDS.BAND_VHF], acoustic: ACOUSTIC.PROP_HUM, visual: VISUAL.STRAIGHT_WING }, notes: '4-seat single-engine, common charter.' },
@@ -377,7 +378,7 @@ export const MODELS = [
   { id: 'embraer-phenom-300',   label: 'Embraer Phenom 300',            family: FAMILIES.JET_CIVILIAN, origin: ORIGIN.BR, cruiseMs: 237, rangeKm: 3650, payloadKg: 1200,wingspanM: 16.24,signatures: { rf: [RF_BANDS.BAND_VHF, RF_BANDS.BAND_UHF], acoustic: ACOUSTIC.JET_SCREAM, visual: VISUAL.SWEPT_WING }, notes: 'Light business jet.' },
 
   // ═══════════════════════════════════════════════════════════════
-  // GLIDERS + TETHERED + SWARM PATTERNS (~5)
+  // GLIDERS + TETHERED + SWARM PATTERNS
   // ═══════════════════════════════════════════════════════════════
   { id: 'schleicher-ask21',     label: 'Schleicher ASK 21 (glider)',    family: FAMILIES.GLIDER, origin: ORIGIN.DE, cruiseMs: 30, rangeKm: null, payloadKg: null, wingspanM: 17.00, signatures: { rf: [RF_BANDS.SILENT, RF_BANDS.BAND_VHF], acoustic: ACOUSTIC.SILENT_ELECTRIC, visual: VISUAL.GLIDER }, notes: 'Two-seat training glider. Effectively silent.' },
   { id: 'stemme-s12',           label: 'Stemme S12 motor glider',       family: FAMILIES.GLIDER, origin: ORIGIN.DE, cruiseMs: 55, rangeKm: 1800, payloadKg: 200, wingspanM: 25.00, signatures: { rf: [RF_BANDS.BAND_VHF], acoustic: ACOUSTIC.PROP_HUM, visual: VISUAL.GLIDER }, notes: 'Self-launching motor glider.' },

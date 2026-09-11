@@ -69,16 +69,23 @@ export const THREAT = {
 export function familyForPlatformString(platform) {
   if (!platform) return FAMILIES.UNKNOWN_SIGNATURE;
   const p = String(platform).toLowerCase();
-  if (/cruise|missile/.test(p))               return FAMILIES.CRUISE_MISSILE;
-  if (/shahed|geran|loiter/.test(p))          return FAMILIES.LOITERING_MUNITION;
-  if (/swarm/.test(p))                        return FAMILIES.DRONE_SWARM;
-  if (/fpv|kamikaze|racing/.test(p))          return FAMILIES.FPV_QUADCOPTER;
-  if (/quadcopter|quad|multirotor/.test(p))   return FAMILIES.COMMERCIAL_QUADCOPTER;
-  if (/heli|rotorcraft/.test(p))              return FAMILIES.HELICOPTER_MILITARY;
-  if (/jet|fighter|bomber/.test(p))           return FAMILIES.JET_MILITARY;
-  if (/fixed-wing|fixed wing|drone/.test(p))  return FAMILIES.MILITARY_ISR_FIXED_WING;
-  if (/glider/.test(p))                       return FAMILIES.GLIDER;
-  if (/balloon|tethered/.test(p))             return FAMILIES.TETHERED_PLATFORM;
+  if (/cruise|missile/.test(p))             return FAMILIES.CRUISE_MISSILE;
+  if (/shahed|geran|loiter/.test(p))        return FAMILIES.LOITERING_MUNITION;
+  if (/swarm/.test(p))                      return FAMILIES.DRONE_SWARM;
+  if (/fpv|kamikaze|racing/.test(p))        return FAMILIES.FPV_QUADCOPTER;
+  if (/quadcopter|quad|multirotor/.test(p)) return FAMILIES.COMMERCIAL_QUADCOPTER;
+  if (/heli|rotorcraft/.test(p))            return FAMILIES.HELICOPTER_MILITARY;
+  if (/jet|fighter|bomber/.test(p))         return FAMILIES.JET_MILITARY;
+  if (/fixed[- ]wing/.test(p))              return FAMILIES.MILITARY_ISR_FIXED_WING;
+  if (/glider/.test(p))                     return FAMILIES.GLIDER;
+  if (/balloon|tethered/.test(p))           return FAMILIES.TETHERED_PLATFORM;
+  // Bare "drone" is ambiguous — operator strings like "hobby drone",
+  // "unknown drone" would previously fall into military-isr-fixed-wing
+  // (which triggers fe + flv-karup observer auto-loop). Pre-audit
+  // regex included `|drone` in the fixed-wing branch; removed 2026-09-11
+  // so ambiguous "drone" strings route to UNKNOWN_SIGNATURE where the
+  // unknown-signature rule surfaces intel for manual attribution
+  // instead of auto-notifying air force.
   return FAMILIES.UNKNOWN_SIGNATURE;
 }
 
@@ -166,7 +173,12 @@ const RULES = [
   {
     tag: 'military-jet',
     when: (c) => c.family === FAMILIES.JET_MILITARY,
-    adds: ['flv-qra', 'flv-karup', 'forsvarskmd', 'nato-caoc-uedem'],
+    // flv-skrydstrup is the Danish F-35 QRA squadron. `flv-qra` was the
+    // pre-refactor id and now only exists as ROLE_ID_ALIAS in roles.js —
+    // observerRoleObjectsForEvent doesn't apply that alias, so using the
+    // legacy id silently drops the QRA squadron from military-jet events.
+    // Audit finding 2026-09-11.
+    adds: ['flv-skrydstrup', 'flv-karup', 'forsvarskmd', 'nato-caoc-uedem'],
     rationale: 'Military jet detected. QRA squadron + NATO CAOC notified.',
     confidence: 'high',
   },
@@ -223,12 +235,15 @@ const RULES = [
 
 // ── Public entry point ─────────────────────────────────────────
 
-export function routeFor(context = {}) {
+export function routeFor(context) {
+  // Default parameter `= {}` only substitutes for undefined, not null.
+  // Coerce here so `routeFor(null)` matches `routeFor()` behaviour.
+  const src = context || {};
   const ctx = {
-    domain:         context.domain         || DOMAIN.GROUND,
-    family:         context.family         || FAMILIES.UNKNOWN_SIGNATURE,
-    classification: context.classification || CLS.UNKNOWN,
-    threat:         context.threat         || THREAT.UNKNOWN,
+    domain:         src.domain         || DOMAIN.GROUND,
+    family:         src.family         || FAMILIES.UNKNOWN_SIGNATURE,
+    classification: src.classification || CLS.UNKNOWN,
+    threat:         src.threat         || THREAT.UNKNOWN,
   };
 
   const obsSet = new Set();
@@ -255,12 +270,13 @@ export function routeFor(context = {}) {
   };
 }
 
-export function explainRoute(context = {}) {
+export function explainRoute(context) {
+  const src = context || {};
   const ctx = {
-    domain:         context.domain         || DOMAIN.GROUND,
-    family:         context.family         || FAMILIES.UNKNOWN_SIGNATURE,
-    classification: context.classification || CLS.UNKNOWN,
-    threat:         context.threat         || THREAT.UNKNOWN,
+    domain:         src.domain         || DOMAIN.GROUND,
+    family:         src.family         || FAMILIES.UNKNOWN_SIGNATURE,
+    classification: src.classification || CLS.UNKNOWN,
+    threat:         src.threat         || THREAT.UNKNOWN,
   };
   return RULES.map(r => ({
     tag: r.tag,
