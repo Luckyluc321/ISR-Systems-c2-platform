@@ -92,9 +92,13 @@ export function contributorsForEvent(event, receivers) {
   out.sort((a, b) => {
     const at = a.firstTouchAt || '';
     const bt = b.firstTouchAt || '';
-    if (at && bt) return at.localeCompare(bt);
-    if (at) return -1;
-    if (bt) return 1;
+    if (at && bt) {
+      const cmp = at.localeCompare(bt);
+      if (cmp !== 0) return cmp;
+      // Same timestamp — fall through to id tie-break so order is
+      // deterministic across renders (was insertion order pre-audit).
+    } else if (at) return -1;
+    else if (bt) return 1;
     return a.role.id.localeCompare(b.role.id);
   });
   return out.map(x => x.role);
@@ -137,9 +141,15 @@ function _firstTouchTimestamp(role, event) {
 // archetype badges. Rendered as the chapter header row.
 
 function _blockIdentifier(role) {
-  const name = esc(role.name || role.id);
+  // Field name history: RECEIVERS entries carry `.label` for their
+  // human-facing display string. Some upstream role sources also carry
+  // `.name` (operator tenants, admin) and legacy seed data uses .id
+  // as the fallback. Read all three so every source lights up.
+  const name = esc(role.label || role.name || role.id);
   const tier = esc(role.tier || '');
-  const branch = esc(role.branch || role.parent || '');
+  // Same story for branch — RECEIVERS uses .parentId, some sources use
+  // .parent, and .branch was the original doc-time field name.
+  const branch = esc(role.branch || role.parent || role.parentId || '');
   const primaryLabel = ARCHETYPE_LABELS[role.archetype] || esc(role.archetype || '');
   const secondaries = Array.isArray(role.secondaryArchetypes) ? role.secondaryArchetypes : [];
 

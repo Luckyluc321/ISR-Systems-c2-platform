@@ -117,7 +117,7 @@ export function buildPickerGroups(event, receivers, ctx = {}) {
     const roles = byArchetype.get(arch) || [];
     if (!roles.length) continue;
     // Alphabetical inside each group for predictable scan order.
-    roles.sort((a, b) => (a.name || a.id).localeCompare(b.name || b.id));
+    roles.sort((a, b) => (a.label || a.name || a.id).localeCompare(b.label || b.name || b.id));
     groups.push({
       archetype: arch,
       label:     ARCHETYPE_LABELS[arch] || arch,
@@ -147,8 +147,6 @@ export function recommendationsForEvent(event, receivers) {
   const threat = event.threat || 'unknown';
   const platform = (event.platform || event.droneType || '').toLowerCase();
   const domainScope = Array.isArray(event.domainScope) ? event.domainScope : [];
-  const siteId = event.siteId || null;
-  const outEnv = event.outEnv || null;
 
   const desiredArchetypes = [];
   const desiredRoleIds = [];
@@ -167,9 +165,11 @@ export function recommendationsForEvent(event, receivers) {
   }
 
   // Rule 3 · Cruise-missile signature or explosive-carry hint
-  // pulls medical + public safety to standby.
+  // pulls medical + public safety to standby, plus fire and
+  // rescue for mass-casualty extraction.
   if (/cruise|missile|shahed|swarm/.test(platform)) {
     desiredArchetypes.push(ARCHETYPES.MEDICAL, ARCHETYPES.PUBLIC);
+    desiredRoleIds.push('beredskab');
   }
 
   // Rule 4 · Domain-shaped tie-ins. Aviation domain → Trafikstyrelsen
@@ -179,9 +179,13 @@ export function recommendationsForEvent(event, receivers) {
   if (domainScope.includes('maritime')) desiredRoleIds.push('agency-sof');
   if (domainScope.includes('energy'))   desiredRoleIds.push('agency-ener');
 
-  // Rule 5 · CBRN / hazmat outenv triggers specialist units.
-  if (outEnv === 'chemical' || outEnv === 'biological') desiredRoleIds.push('brs-kemisk');
-  if (outEnv === 'nuclear'  || outEnv === 'radiological') desiredRoleIds.push('brs-nukleart');
+  // Rule 5 · CBRN specialists (brs-kemisk / brs-nukleart) are
+  // REMOVED pending a real hazmat field on the event record. Pre-audit
+  // (2026-09-11) this rule gated on event.outEnv which no code path
+  // ever populated — dead branch. Wire it back the moment a real
+  // classification like `event.hazmatKind` or `event.threatTags`
+  // lands. Until then the operator adds them manually through the
+  // full picker so we don't hide a specialist behind an unset field.
 
   // Assemble: explicit role ids first, then one representative per
   // desired archetype (the lowest-id alphabetical stand-in). Cap at
@@ -205,7 +209,7 @@ export function recommendationsForEvent(event, receivers) {
 
 // ── Public: type-ahead ─────────────────────────────────────────
 
-// Case-insensitive substring match across role.name, role.id,
+// Case-insensitive substring match across role.label, role.id,
 // role.branch, role.org. Returns a NEW array — never mutates the
 // input. Empty query returns the input unchanged.
 
@@ -215,10 +219,12 @@ export function filterByQuery(roles, query) {
   if (!q) return roles;
   return roles.filter(r => {
     const hay = [
+      r.label || '',
       r.name || '',
       r.id || '',
       r.branch || '',
       r.parent || '',
+      r.parentId || '',
       r.org || '',
       ARCHETYPE_LABELS[r.archetype] || '',
     ].join(' ').toLowerCase();

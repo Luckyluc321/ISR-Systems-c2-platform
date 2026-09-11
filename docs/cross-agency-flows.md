@@ -472,16 +472,20 @@ Foundation for recipient chapter shapes + cascade picker grouping. Every one of 
 
 ### The 8 archetypes
 
+Counts below are the actual `assignArchetypes(RECEIVERS)` output as of 2026-09-11 (386 receivers total, zero fallback misses). Run `window.__isr_archetypes.coverage()` in the console to verify at any time.
+
 | Archetype | What it is | Kind | Role count |
 |---|---|---|---|
-| **Kinetic response** | Dispatches ground / air / maritime / specialist assets, engages, produces outcomes | thick | ~50 |
-| **Coordination & command** | Marshals cross-agency response, no direct kinetic action, situational reports + cascade decisions | thin | ~15 |
-| **Intelligence & attribution** | Pattern-of-life, attribution, national-security oversight; observer by default | thin | 4 |
-| **Forensic & cyber** | Post-incident digital forensics, evidence chain of custody, attribution on captured artifacts | thin | 4 |
-| **Medical & consequence** | Casualty response, ambulance dispatch, hospital coordination, mass-casualty triage | thick | ~30 |
-| **Regulatory & advisory** | Airspace / waterway control, NOTAMs, restrictions, evacuation authorities | thin | ~5 |
-| **Public safety & communication** | Shelter-in-place, evacuation orders, public alerts (SMS / siren / DR), civilian coordination | thick | ~102 |
-| **International liaison** | Cross-border cascade, allied information sharing, NATO handover, cross-Nordic coordination | thin | ~10 |
+| **Kinetic response** | Dispatches ground / air / maritime / specialist assets, engages, produces outcomes | thick | 182 |
+| **Coordination & command** | Marshals cross-agency response, no direct kinetic action, situational reports + cascade decisions | thin | 42 |
+| **Intelligence & attribution** | Pattern-of-life, attribution, national-security oversight; observer by default | thin | 7 |
+| **Forensic & cyber** | Post-incident digital forensics, evidence chain of custody, attribution on captured artifacts | thin | 5 |
+| **Medical & consequence** | Casualty response, ambulance dispatch, hospital coordination, mass-casualty triage | thick | 34 |
+| **Regulatory & advisory** | Airspace / waterway control, NOTAMs, restrictions, evacuation authorities | thin | 3 |
+| **Public safety & communication** | Shelter-in-place, evacuation orders, public alerts (SMS / siren / DR), civilian coordination | thick | 98 |
+| **International liaison** | Cross-border cascade, allied information sharing, NATO handover, cross-Nordic coordination | thin | 15 |
+
+Kinetic is dominant because Danish emergency services default to physical-response mode (98 municipal kommunale beredskaber + 29 kbr fire brigades + politi districts + military branches). Coord = 42 covers the command layer + parent tiles + ministries. Forensic = 5 (was 1 before the 2026-09-11 audit patch) is what makes the compartment-clearance visibility policy real: Rigspoliti NC3 + NCIK + DVI, DKCERT, and Forsvar-Cyber all read each other's chapters as FULL.
 
 ### Thick vs thin branches
 
@@ -519,6 +523,15 @@ Rules over prefix instead of hand-editing all 386 receivers. New roles inherit a
 | `agency-ener` (Energistyrelsen) | Regulatory | — |
 | `kom-*` (98 kommunes) | Public safety | Coordination |
 | `nato-*`, `nordic-*`, `allied-*` | Liaison | varies (intel for CCDCOE, kinetic for MARCOM) |
+| `kbr-*` (29 municipal fire + rescue brigades) | Kinetic | Public safety |
+| `amk-*` (5 medical dispatch centres) | Medical | Coordination |
+| `alarm-*` (1-1-2 alarm centrals) | Coordination | Medical |
+| `cert-*` (national cyber emergency response) | Forensic | Intel (for `cert-dkcert`) |
+| `eu-*` (Europol, Frontex, EMSA, ENISA, CERT-EU, Eurojust, Eurocontrol) | Liaison | Intel |
+| `bucket-*` (browsable pivot tiles, not real receivers) | Coordination | — |
+| `rigspoliti-nc3` / `rigspoliti-ncik` / `rigspoliti-dvi` | Forensic | Intel / Medical |
+| `rigspoliti-nkc` / `rigspoliti-sirene` | Intel / Coordination | — |
+| `rigspoliti-hundetjeneste` / `kbh-politi-rytteri` | Kinetic | — |
 
 ### Chapter composition rule
 
@@ -765,3 +778,4 @@ Explicitly out of scope for v0.1 — track separately as they land.
 | 2026-09-10 | Phase 5 code landed. New src/cascade_picker.js with buildPickerGroups(event, receivers, ctx), recommendationsForEvent(event, receivers), filterByQuery(roles, query). Groups all 386 receivers by archetype into THICK (kinetic, medical, public safety) collapsed-by-default tiles and THIN (coord, intel, forensic, regulatory, liaison) open-by-default tiles. Recommender applies classification, threat, platform, domain, outEnv rules to surface 3-6 defaults per event. Type-ahead searches name, id, branch, org, archetype label. New _openArchetypeCascadeModal function in main.js renders the grouped picker with recommended row, search input with selected pills, per-group collapse, and read-only "On case already" section (dedupe policy). New "Cascade to any agency" CTA in the Mission Console fires this modal. Legacy cascade-fe-pet and cascade-politi shortcuts stay wired to _openCascadeCaptureModal for one-click send. window.__isr_picker dev handle for spot-checking. Full CSS for the picker in src/style.css. Section 7 "Cascade picker grouping" doc updated with mermaid flowchart and recommender rules | ISR C2 build |
 | 2026-09-10 | Phase 6 code landed. New src/visibility.js with chapterVisibilityFor(viewer, chapterRole, event) returning FULL, SUMMARY, or HIDDEN. Six-rule policy applied first-match-wins. Compartmented archetypes (INTEL, FORENSIC) render SUMMARY to non-cleared viewers; everything else defaults to FULL because cross-agency civil coordination benefits from transparency. Admin bypass registry (registerAdminBypass / clearAdminBypass) supports admin console preview without touching the underlying policy. composeChapter and composeAllChapters extended with an optional viewer param that flows the policy through to the render layer. When SUMMARY, the composer emits identifier + involvement stats + a "Redacted for tenant boundary" placeholder explaining the compartment channel to the reader. _renderPirContributorChapters passes the active viewer through and stamps chapter-card-redacted class + "redacted" tag on the card summary. HIDDEN chapters return empty string and drop from the mount entirely. Full redaction CSS added. Section 7 doc updated with visibility mermaid flowchart, levels table, rules list, and server-side-backstop note. Phase timeline diagram shows Phases 1-6 as landed. window.__isr_visibility dev handle for spot-checking | ISR C2 build |
 | 2026-09-10 | Phase 7 code landed. New src/xlink_graph.js with buildXlinkGraph(events), chainFor(eventId, events), eventsInSameChainAs(eventId, events), chainNarrative(chain), rolePresenceInChain(chain, roleId). Unifies three cross-event link sources into one undirected graph: event.linkedEventIds (auto-correlation output), event.postIncidentReport.linkedAfterClose (post-close continuations), event.catalog.xlinks (operator-authored typed links). Connected component pass produces stable chain ids ("chain-<earliestEventId>"). PIR Step 7 panel now shows an Event chain section above the contributor chapters when this event is part of a multi-event chain: one-line chain narrative, chronological row per event, current event highlighted, events the viewer contributed to carry a "you were on this" tag. Chain view is read-only, detection-only invariant preserved. Section 7 doc updated with graph flowchart, sample chain shape, and role-presence contract. Phase timeline diagram now shows all seven phases landed. window.__isr_xlink dev handle for spot-checking | ISR C2 build |
+| 2026-09-11 | Audit patch. Verification agent surfaced 2 BLOCKERS and 4 HIGH findings; all six fixed in one pass. (1) Every chapter, chip, mount card, toast, and pill now reads `role.label` (canonical RECEIVERS field) with fallback to .name then .id — previously read .name only, so every card rendered the raw role id like `pet` instead of `PET — Politiets Efterretningstjeneste`. (2) 62 receivers that silently fell through to the default COORD archetype now have real rules: `kbr-*` (29 fire brigades → Kinetic), `amk-*` (5 medical dispatch → Medical), `alarm-*` (Coord/Medical), `eu-*` (7 EU agencies → Liaison), `bucket-*` (9 pivot tiles → Coord), `cert-*` (Forensic/Intel), plus 7 `rigspoliti-*` sub-units and `kbh-politi-rytteri`. Fallback now emits console.warn at boot so future misses surface immediately. (3) Chapter identifier branch line reads .parentId too (was empty for every real receiver). (4) contributorsForEvent tie-breaks by role.id when timestamps match (was insertion-order). (5) Dead `event.outEnv` CBRN rules removed from recommender (no code path ever populated outEnv). (6) Section 7 role-count table updated to actual post-patch counts (Forensic = 5, not 1 — compartment-clearance policy now real). Coverage rules table extended with the new prefix rules | ISR C2 build |

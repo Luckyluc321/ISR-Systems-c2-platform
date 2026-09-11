@@ -51,6 +51,15 @@ const RULES = [
   { match: exact('politi-aks'),      primary: ARCHETYPES.KINETIC,   secondary: [] },
   { match: exact('politi-nsk'),      primary: ARCHETYPES.INTEL,     secondary: [ARCHETYPES.KINETIC] },
   { match: exact('rigspoliti'),      primary: ARCHETYPES.COORD,     secondary: [ARCHETYPES.INTEL] },
+  // Rigspoliti sub-units — bespoke roles inside the national police
+  { match: exact('rigspoliti-nc3'),           primary: ARCHETYPES.FORENSIC, secondary: [ARCHETYPES.INTEL] },  // National Cybercrime Centre
+  { match: exact('rigspoliti-ncik'),          primary: ARCHETYPES.FORENSIC, secondary: [] },                  // National Cyber Investigation
+  { match: exact('rigspoliti-nkc'),           primary: ARCHETYPES.INTEL,    secondary: [] },                  // National Coordination Centre
+  { match: exact('rigspoliti-dvi'),           primary: ARCHETYPES.FORENSIC, secondary: [ARCHETYPES.MEDICAL] },// Disaster Victim Identification
+  { match: exact('rigspoliti-sirene'),        primary: ARCHETYPES.COORD,    secondary: [ARCHETYPES.LIAISON] },// Schengen SIRENE liaison
+  { match: exact('rigspoliti-hundetjeneste'), primary: ARCHETYPES.KINETIC,  secondary: [] },                  // Dog service
+  { match: exact('rigspoliti-politiskolen'),  primary: ARCHETYPES.COORD,    secondary: [] },                  // Police academy
+  { match: exact('kbh-politi-rytteri'),       primary: ARCHETYPES.KINETIC,  secondary: [ARCHETYPES.PUBLIC] }, // Copenhagen mounted police
   { match: prefix('politi-'),        primary: ARCHETYPES.KINETIC,   secondary: [ARCHETYPES.COORD, ARCHETYPES.PUBLIC] },
 
   // Forsvaret branches
@@ -94,6 +103,35 @@ const RULES = [
   // Kommuner (98) — public safety + crisis staff coordination
   { match: prefix('kom-'),           primary: ARCHETYPES.PUBLIC,    secondary: [ARCHETYPES.COORD] },
 
+  // Kommunalt Beredskab — municipal fire + rescue brigades (~29). Primary
+  // action is kinetic (fire suppression, rescue extraction, hazmat first
+  // response) with public safety as secondary (evacuation coordination
+  // with kommune crisis staff).
+  { match: prefix('kbr-'),           primary: ARCHETYPES.KINETIC,   secondary: [ARCHETYPES.PUBLIC] },
+
+  // Akutmedicinsk Kommunikationscentral — regional medical emergency
+  // dispatch (5 regions). Coordinates ambulance routing + hospital
+  // triage handoff.
+  { match: prefix('amk-'),           primary: ARCHETYPES.MEDICAL,   secondary: [ARCHETYPES.COORD] },
+
+  // 1-1-2 Alarm centrals + related — the initial emergency call
+  // routing layer. Coord primary (they route work), medical secondary.
+  { match: prefix('alarm-'),         primary: ARCHETYPES.COORD,     secondary: [ARCHETYPES.MEDICAL] },
+
+  // DKCERT + national cyber emergency response teams — forensic and
+  // cyber attribution work. Bespoke standalone entity.
+  { match: exact('cert-dkcert'),     primary: ARCHETYPES.FORENSIC,  secondary: [ARCHETYPES.INTEL] },
+  { match: prefix('cert-'),          primary: ARCHETYPES.FORENSIC,  secondary: [] },
+
+  // EU agencies — Europol, Frontex, EMSA, Eurocontrol, ENISA, CERT-EU,
+  // Eurojust. All cross-border coordination + intel sharing = liaison.
+  { match: prefix('eu-'),            primary: ARCHETYPES.LIAISON,   secondary: [ARCHETYPES.INTEL] },
+
+  // Pivot tiles — browsable category headers in the receiver tree
+  // (bucket-kommuner, bucket-eu, bucket-nato, etc). Not selectable as
+  // real receivers but tagged so they don't fall through the default.
+  { match: prefix('bucket-'),        primary: ARCHETYPES.COORD,     secondary: [] },
+
   // International — NATO / Nordic / allied
   // Specific NATO units get bespoke secondary tags per their function
   { match: exact('nato-marcom'),         primary: ARCHETYPES.LIAISON, secondary: [ARCHETYPES.KINETIC] },
@@ -130,6 +168,11 @@ const OVERRIDES = {
   // 'some-weird-role-id': { primary: ARCHETYPES.KINETIC, secondary: [] },
 };
 
+// Track role ids that hit the defensive fallback so a boot log can
+// surface them once. Prevents the 62-role-fell-through-silently
+// class of bug that shipped before Phase 1 audit patch (2026-09-11).
+const _fallbackHits = new Set();
+
 // Return the archetype spec for a role. Overrides first, then rules.
 // Falls back to COORD with empty secondaries when no rule matches
 // (defensive — every registered role should hit a rule, but a new
@@ -142,7 +185,15 @@ export function archetypeFor(roleId) {
       return { primary: rule.primary, secondary: rule.secondary || [] };
     }
   }
+  _fallbackHits.add(roleId);
   return { primary: ARCHETYPES.COORD, secondary: [] };
+}
+
+// Callers can inspect what fell through after assignArchetypes runs.
+// Used by main.js at boot to console.warn any misses so new roles
+// don't silently inherit COORD.
+export function getArchetypeFallbackHits() {
+  return Array.from(_fallbackHits);
 }
 
 // Mutates the RECEIVERS array in place, stamping .archetype (primary)

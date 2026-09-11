@@ -125,7 +125,7 @@ import { ADMIN, OPERATORS, RECEIVERS, ACCOUNTS, getActiveRole, setActiveRole, on
 // contributor-chapter renderer, the archetype-grouped cascade picker,
 // and per-agency aggregate reports. See src/archetypes.js for the
 // rule table and docs/cross-agency-flows.md Section 7 for the taxonomy.
-import { assignArchetypes, ARCHETYPES, ARCHETYPE_LABELS, archetypeForDispatchKind, archetypeFor } from './archetypes.js';
+import { assignArchetypes, ARCHETYPES, ARCHETYPE_LABELS, archetypeForDispatchKind, archetypeFor, getArchetypeFallbackHits } from './archetypes.js';
 // Phase 2 · 8 sub-section renderers (kinetic / coord / intel /
 // forensic / medical / regulatory / public / liaison). Pure functions
 // (role, event) → HTMLString. Composed into contributor chapters in
@@ -178,6 +178,15 @@ import {
   rolePresenceInChain,
 } from './xlink_graph.js';
 const _archetypeTaggedCount = assignArchetypes(RECEIVERS);
+// Surface any role that fell through to the defensive COORD default
+// so new receivers added without a matching rule are visible in the
+// console at boot. Added 2026-09-11 after audit found 62 silent misses.
+{
+  const misses = getArchetypeFallbackHits();
+  if (misses.length) {
+    console.warn(`[archetypes] ${misses.length} receiver id${misses.length === 1 ? '' : 's'} fell through to default COORD. Add a rule for:`, misses);
+  }
+}
 if (typeof window !== 'undefined') {
   // Console handle for spot-checking coverage during development.
   // Example: window.__isr_archetypes.byArchetype('kinetic-response')
@@ -13827,14 +13836,15 @@ async function main() {
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
 
+    const _labelFor = (role) => role.label || role.name || role.id;
     const _renderChip = (role) => `
       <button class="arch-picker-chip"
               type="button"
               data-role-id="${_escHtml(role.id)}"
               data-selected="false"
-              title="${_escHtml(role.name || role.id)}">
+              title="${_escHtml(_labelFor(role))}">
         <span class="arch-picker-chip-dot" aria-hidden="true"></span>
-        <span class="arch-picker-chip-name">${_escHtml(role.name || role.id)}</span>
+        <span class="arch-picker-chip-name">${_escHtml(_labelFor(role))}</span>
         ${role.tier ? `<span class="arch-picker-chip-tier">${_escHtml(String(role.tier).toUpperCase())}</span>` : ''}
       </button>`;
 
@@ -13849,9 +13859,9 @@ async function main() {
                       type="button"
                       data-role-id="${_escHtml(r.id)}"
                       data-selected="false"
-                      title="${_escHtml(r.name || r.id)}">
+                      title="${_escHtml(_labelFor(r))}">
                 <span class="arch-picker-chip-dot" aria-hidden="true"></span>
-                <span class="arch-picker-chip-name">${_escHtml(r.name || r.id)}</span>
+                <span class="arch-picker-chip-name">${_escHtml(_labelFor(r))}</span>
               </button>
             `).join('')}
           </div>
@@ -13885,7 +13895,7 @@ async function main() {
           <div class="arch-picker-on-case-row">
             ${_spec.onCase.map(r => `
               <span class="arch-picker-on-case-chip" title="Already received a cascade on this event">
-                ${_escHtml(r.name || r.id)}
+                ${_escHtml(_labelFor(r))}
               </span>
             `).join('')}
           </div>
@@ -13993,7 +14003,7 @@ async function main() {
       // Selected pills row above search.
       selectedRow.innerHTML = Array.from(_selectedRoleIds).map(rid => {
         const role = RECEIVERS.find(r => r.id === rid);
-        const label = role ? (role.name || role.id) : rid;
+        const label = role ? _labelFor(role) : rid;
         return `<span class="arch-picker-selected-pill" data-role-id="${_escHtml(rid)}">
           ${_escHtml(label)}
           <span class="arch-picker-selected-x" aria-hidden="true">✕</span>
@@ -18950,9 +18960,11 @@ async function main() {
       if (!chapterHtml) return '';
       const visibility = chapterVisibilityFor(activeRole, role, event);
       const isRedacted = visibility === VISIBILITY.SUMMARY;
-      // Escape role.name/tier defensively — RECEIVERS is internal
-      // but a customer-supplied receiver could carry HTML chars.
-      const safeName = String(role.name || role.id).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      // Escape role.label/tier defensively — RECEIVERS is internal
+      // but a customer-supplied receiver could carry HTML chars. Read
+      // .label first (canonical RECEIVERS field), then .name (some
+      // operator sources), then fall back to .id.
+      const safeName = String(role.label || role.name || role.id).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
       const safeTier = role.tier ? String(role.tier).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').toUpperCase() : '';
       return `
         <details class="chapter-card${isViewer ? ' chapter-card-viewer' : ''}${isRedacted ? ' chapter-card-redacted' : ''}" ${isViewer ? 'open' : ''}>
@@ -21410,7 +21422,10 @@ async function main() {
             _simulateEscalationDelivery(eventId, records);
             _fireEscalationAdapterSend(ev, records);
             const selectedLabels = (selectedRoleIds || [])
-              .map(rid => RECEIVERS.find(r => r.id === rid)?.name || rid)
+              .map(rid => {
+                const r = RECEIVERS.find(x => x.id === rid);
+                return r ? (r.label || r.name || r.id) : rid;
+              })
               .join(', ');
             if (records.length === 0) toast(`${selectedLabels || 'Selected agencies'} already on the case`, 'info');
             else toast(`Cascaded to ${selectedLabels}.`, 'ok');
