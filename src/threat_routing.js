@@ -260,7 +260,13 @@ export function routeFor(context) {
     if (rc < confidenceScore) confidenceScore = rc;
   }
 
-  const confidence = confidenceScore === 3 ? 'high' : confidenceScore === 2 ? 'medium' : 'low';
+  // When zero rules match, confidenceScore is still 3 from init —
+  // reporting 'high' on an empty routing result would misdirect a UI
+  // badge. Force 'low' so a no-rule-fired result is clearly weak.
+  // Audit finding 2026-09-12.
+  const confidence = firedRules.length === 0
+    ? 'low'
+    : (confidenceScore === 3 ? 'high' : confidenceScore === 2 ? 'medium' : 'low');
 
   return {
     observers: Array.from(obsSet),
@@ -297,6 +303,13 @@ export function routingCoverage() {
 
 // ── Event-shaped convenience wrappers ──────────────────────────
 
+// Single-context wrapper. Kept for backward compat; picks the first
+// domain from event.domainScope. Callers that need multi-domain
+// routing should use contextsForEvent (plural) instead — a
+// domain-boundary event (drone crossing from maritime port airspace
+// into inland substation airspace) legitimately carries both scopes
+// via events.js expandEventDomainScope / unionLinkedEventDomains,
+// and the single-context form silently drops the second baseline.
 export function contextForEvent(event) {
   if (!event) return null;
   const domain = Array.isArray(event.domainScope) && event.domainScope.length
@@ -311,19 +324,61 @@ export function contextForEvent(event) {
   };
 }
 
+// Multi-domain wrapper. Returns one context per domain in the event
+// scope so the caller can union observer sets across every domain-
+// baseline rule that legitimately applies. Empty domainScope falls
+// back to a single GROUND context so the return is never empty.
+// Added 2026-09-12 after pass-2 audit surfaced silent aviation-drop
+// on multi-domain events.
+export function contextsForEvent(event) {
+  if (!event) return [];
+  const scope = Array.isArray(event.domainScope) && event.domainScope.length
+    ? event.domainScope
+    : [DOMAIN.GROUND];
+  const family = event.family || familyForPlatformString(event.platform || event.droneType);
+  const classification = event.classification || CLS.UNKNOWN;
+  const threat = event.threat || THREAT.UNKNOWN;
+  return scope.map(domain => ({ domain, family, classification, threat }));
+}
+
 export function observerRoleObjectsForEvent(event, receivers, { alreadyOnCaseRoleIds = null } = {}) {
   if (!event || !Array.isArray(receivers)) return { roles: [], rationale: '', confidence: 'low', firedRules: [] };
-  const ctx = contextForEvent(event);
-  const route = routeFor(ctx);
+
+  // Multi-domain safe: iterate every context in the event's domain
+  // scope and union the resulting observer sets. Confidence collapses
+  // to the weakest matched across all contexts; rationale + firedRules
+  // dedupe across the same. This is the fix for the pass-2 finding
+  // that maritime+aviation events silently dropped agency-traf.
+  const contexts = contextsForEvent(event);
+  const obsSet = new Set();
+  const ruleSet = new Set();
+  const rationaleSet = new Set();
+  let confidenceScore = 3;
+
+  for (const ctx of contexts) {
+    const route = routeFor(ctx);
+    for (const rid of route.observers) obsSet.add(rid);
+    for (const tag of route.firedRules) ruleSet.add(tag);
+    if (route.rationale) rationaleSet.add(route.rationale);
+    const rc = route.confidence === 'high' ? 3 : route.confidence === 'medium' ? 2 : 1;
+    if (rc < confidenceScore) confidenceScore = rc;
+  }
+
   const dedupe = alreadyOnCaseRoleIds instanceof Set ? alreadyOnCaseRoleIds : null;
-  const roles = route.observers
+  const roles = Array.from(obsSet)
     .map(rid => receivers.find(r => r.id === rid))
     .filter(Boolean)
     .filter(r => !dedupe || !dedupe.has(r.id));
+  // Same no-rules-fired guard as routeFor: report 'low' when nothing
+  // matched so an empty union result doesn't display as 'high'.
+  const confidence = ruleSet.size === 0
+    ? 'low'
+    : (confidenceScore === 3 ? 'high' : confidenceScore === 2 ? 'medium' : 'low');
+
   return {
     roles,
-    rationale:  route.rationale,
-    confidence: route.confidence,
-    firedRules: route.firedRules,
+    rationale:  Array.from(rationaleSet).join(' · ') || 'No routing rules matched — no auto-observers assigned.',
+    confidence,
+    firedRules: Array.from(ruleSet),
   };
 }

@@ -859,7 +859,7 @@ Each rule = `{tag, when, adds, rationale, confidence}`. Rules fire in order; obs
 | `strategic-strike-platform` | `family=cruise-missile OR loitering-munition` | `forsvarskmd, rigspoliti, flv-karup, beredskab` |
 | `military-isr-platform` | `family=military-isr-fixed-wing` | `fe, flv-karup` |
 | `strategic-uav` | `family=strategic-uav` | `forsvarskmd, fe, pet, nato-caoc-uedem` |
-| `military-jet` | `family=jet-military` | `flv-qra, flv-karup, forsvarskmd, nato-caoc-uedem` |
+| `military-jet` | `family=jet-military` | `flv-skrydstrup, flv-karup, forsvarskmd, nato-caoc-uedem` |
 | `military-helicopter` | `family=helicopter-military` | `forsvarskmd, rigspoliti` |
 | `drone-swarm` | `family=drone-swarm` | `forsvarskmd, rigspoliti, fe, pet, flv-karup, beredskab` |
 | `fpv-kamikaze-hostile` | `family=fpv-quadcopter AND classification=hostile` | `rigspoliti, pet, beredskab` |
@@ -873,7 +873,7 @@ Each rule = `{tag, when, adds, rationale, confidence}`. Rules fire in order; obs
 |---|---|---|
 | Shahed at CPH airport, hostile+high | aviation-baseline, hostile-intel, strategic-strike, high-threat-consequence | agency-traf, pet, fe, forsvarskmd, rigspoliti, flv-karup, beredskab |
 | DJI Mavic at Esbjerg port, hostile+low | maritime-baseline, hostile-intel, commercial-quad-hostile | agency-sof, pet, fe, rigspoliti |
-| Su-27 over Bornholm, hostile+high | hostile-intel, military-jet, high-threat-consequence | pet, fe, flv-qra, flv-karup, forsvarskmd, nato-caoc-uedem, beredskab |
+| Su-27 over Bornholm, hostile+high | hostile-intel, military-jet, high-threat-consequence | pet, fe, flv-skrydstrup, flv-karup, forsvarskmd, nato-caoc-uedem, beredskab |
 | Unknown signature at Energinet substation | energy-baseline, unknown-signature | agency-ener, pet, fe |
 | Drone swarm at CPH airport, hostile+high | aviation-baseline, hostile-intel, drone-swarm, high-threat-consequence | agency-traf, pet, fe, forsvarskmd, rigspoliti, flv-karup, beredskab |
 

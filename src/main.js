@@ -204,6 +204,7 @@ import {
   routingCoverage,
   familyForPlatformString,
   contextForEvent,
+  contextsForEvent,
   observerRoleObjectsForEvent,
   DOMAIN,
 } from './threat_routing.js';
@@ -256,6 +257,7 @@ if (typeof window !== 'undefined') {
     familyFromPlatform: familyForPlatformString,
     DOMAIN,
     contextFor:         contextForEvent,
+    contextsFor:        contextsForEvent,   // multi-domain aware
     forEvent:  (event) => event ? routeFor(contextForEvent(event)) : null,
     observers: (event) => observerRoleObjectsForEvent(event, RECEIVERS),
   };

@@ -24,8 +24,10 @@
 
 // ── Layer A · Threat families ──────────────────────────────────
 // Every model binds to exactly one primary family. Routing matrix
-// (src/routing.js) uses ONLY these — never model-level identifiers —
-// so the matrix stays ~16 × 8 site types = auditable.
+// (src/threat_routing.js — NOT src/routing.js which is the OSRM
+// driving-route utility) uses ONLY these, never model-level ids,
+// so the routing matrix stays 14 data-driven rules keyed on
+// (domain, family, classification, threat) rather than a per-model matrix.
 
 export const FAMILIES = {
   COMMERCIAL_QUADCOPTER:        'commercial-quadcopter',
