@@ -598,6 +598,15 @@ async function main() {
   });
   viewer.cesiumWidget.creditContainer.style.display = 'none';
 
+  // Preload the Shahed 238 GLB (71MB) into the browser HTTP cache
+  // so the first billboard→model swap at ≤500m doesn't stutter
+  // mid-scenario. Fire-and-forget; Cesium will pull from cache when
+  // the first loitering-munition entity spawns.
+  try {
+    fetch('/aircraft/shahed_238_drone.glb', { cache: 'force-cache' })
+      .catch(() => {});
+  } catch (_) {}
+
   // ── Bing Maps Aerial (asset 2) ──
   let bingLayer = null;
   try {
@@ -10635,7 +10644,49 @@ async function main() {
       Cesium.Cartesian3.normalize(fwd, fwd);
       return fwd;
     };
-    const billboard = viewer.entities.add({
+    // Loitering-munition (Shahed class) gets a 3D GLB model that
+    // swaps in when the camera is within ~500m. Billboard hides
+    // reciprocally under that threshold so the reader sees the 3D
+    // silhouette up close and the top-down icon at map zoom. Model
+    // is oriented per-frame from the current heading with a low-pass
+    // roll bank that visibly banks the airframe as it maneuvers.
+    const isLoiterMun = platform === 'loitering-munition' || platform === 'loitering_munition';
+    const MODEL_SWAP_M = 500;
+
+    // Bank state — closure-captured per entity so each Shahed has
+    // independent roll smoothing.
+    let _prevHeadingRadForBank = null;
+    let _prevHeadingTimeForBank = performance.now();
+    let _smoothedRoll = 0;
+    const _bankedOrientation = () => {
+      const cart = _billboardRef?.position?.getValue?.(Cesium.JulianDate.now());
+      if (!cart) return undefined;
+      const now = performance.now();
+      // stateHolder.headingRad is written as -atan2(dLon, dLat); invert
+      // to get standard compass bearing (CW from north, radians) which
+      // matches HeadingPitchRoll's heading convention.
+      const currHeading = -stateHolder.headingRad;
+      let roll = 0;
+      if (_prevHeadingRadForBank !== null) {
+        let dh = currHeading - _prevHeadingRadForBank;
+        while (dh > Math.PI)  dh -= 2 * Math.PI;
+        while (dh < -Math.PI) dh += 2 * Math.PI;
+        const dt = Math.max(0.016, (now - _prevHeadingTimeForBank) / 1000);
+        const yawRate = dh / dt;
+        // Bank proportional to yaw rate. Positive dh (right turn) →
+        // positive roll (right wing down). Clamped to ±35° which is
+        // realistic upper bound for a delta-wing airframe.
+        const bankFactor = 2.5;
+        roll = Math.max(-0.61, Math.min(0.61, yawRate * bankFactor));
+      }
+      _smoothedRoll = 0.90 * _smoothedRoll + 0.10 * roll;
+      _prevHeadingRadForBank = currHeading;
+      _prevHeadingTimeForBank = now;
+      const hpr = new Cesium.HeadingPitchRoll(currHeading, 0, _smoothedRoll);
+      return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
+    };
+
+    const _droneEntitySpec = {
       id: `drone-${event.id}`,
       position: Cesium.Cartesian3.fromDegrees(...startPos),
       billboard: {
@@ -10653,6 +10704,11 @@ async function main() {
             }, false)
           : Cesium.Color.WHITE,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        // Loitering-munition: billboard hides under 500m so the 3D
+        // model takes over. Every other platform: no distance gate.
+        distanceDisplayCondition: isLoiterMun
+          ? new Cesium.DistanceDisplayCondition(MODEL_SWAP_M, Number.POSITIVE_INFINITY)
+          : undefined,
       },
       label: {
         text: event.droneType,
@@ -10668,7 +10724,23 @@ async function main() {
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
       properties: { type: 'drone', eventId: event.id },
-    });
+    };
+    if (isLoiterMun) {
+      _droneEntitySpec.model = {
+        uri: '/aircraft/shahed_238_drone.glb',
+        // 1:1 world units so the ~3m wingspan reads at true scale
+        // against Cesium's height-above-terrain.
+        scale: 1.0,
+        // Floor so the model never disappears when zoomed in.
+        minimumPixelSize: 24,
+        // Reciprocal of the billboard's distance gate.
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
+        // Shadows off — cheap default, revisit if visual QA calls for them.
+        shadows: Cesium.ShadowMode.DISABLED,
+      };
+      _droneEntitySpec.orientation = new Cesium.CallbackProperty(() => _bankedOrientation(), false);
+    }
+    const billboard = viewer.entities.add(_droneEntitySpec);
     _billboardRef = billboard;
 
     // Swarm formation — if the template declares template.swarm.formation
@@ -10697,7 +10769,34 @@ async function main() {
           Cesium.Cartesian3.normalize(fwd, fwd);
           return fwd;
         };
-        const swarmBb = viewer.entities.add({
+        // Swarm-member bank state (own closure; formation members share
+        // the lead's heading so all bank together in practice, but
+        // per-entity state keeps CallbackProperty computations trivially
+        // consistent frame-to-frame).
+        let _swPrevHeadingRad = null;
+        let _swPrevHeadingTime = performance.now();
+        let _swSmoothedRoll = 0;
+        const _swBankedOrientation = () => {
+          const cart = _swBbRef?.position?.getValue?.(Cesium.JulianDate.now());
+          if (!cart) return undefined;
+          const now = performance.now();
+          const currHeading = -stateHolder.headingRad;
+          let roll = 0;
+          if (_swPrevHeadingRad !== null) {
+            let dh = currHeading - _swPrevHeadingRad;
+            while (dh > Math.PI)  dh -= 2 * Math.PI;
+            while (dh < -Math.PI) dh += 2 * Math.PI;
+            const dt = Math.max(0.016, (now - _swPrevHeadingTime) / 1000);
+            roll = Math.max(-0.61, Math.min(0.61, (dh / dt) * 2.5));
+          }
+          _swSmoothedRoll = 0.90 * _swSmoothedRoll + 0.10 * roll;
+          _swPrevHeadingRad = currHeading;
+          _swPrevHeadingTime = now;
+          const hpr = new Cesium.HeadingPitchRoll(currHeading, 0, _swSmoothedRoll);
+          return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
+        };
+
+        const _swEntitySpec = {
           id: `drone-${event.id}-swarm-${i}`,
           position: Cesium.Cartesian3.fromDegrees(...startPos),
           billboard: {
@@ -10712,9 +10811,24 @@ async function main() {
                 }, false)
               : Cesium.Color.WHITE,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            // Loitering-munition: billboard hides under 500m so 3D model takes over.
+            distanceDisplayCondition: isLoiterMun
+              ? new Cesium.DistanceDisplayCondition(MODEL_SWAP_M, Number.POSITIVE_INFINITY)
+              : undefined,
           },
           properties: { type: 'drone', eventId: event.id, swarmIndex: i, swarmRole: slot.role },
-        });
+        };
+        if (isLoiterMun) {
+          _swEntitySpec.model = {
+            uri: '/aircraft/shahed_238_drone.glb',
+            scale: 1.0,
+            minimumPixelSize: 24,
+            distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
+            shadows: Cesium.ShadowMode.DISABLED,
+          };
+          _swEntitySpec.orientation = new Cesium.CallbackProperty(() => _swBankedOrientation(), false);
+        }
+        const swarmBb = viewer.entities.add(_swEntitySpec);
         _swBbRef = swarmBb;
         // Per-drone TRAIL (red dashed, past track) — grows behind the drone
         // while inside sensor coverage, freezes when out.
