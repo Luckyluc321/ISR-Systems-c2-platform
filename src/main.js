@@ -258,7 +258,32 @@ if (typeof window !== 'undefined') {
     DOMAIN,
     contextFor:         contextForEvent,
     contextsFor:        contextsForEvent,   // multi-domain aware
-    forEvent:  (event) => event ? routeFor(contextForEvent(event)) : null,
+    // forEvent is the shape a production wire-up will consume — always
+    // multi-domain safe. Was using the singular contextForEvent pre-
+    // audit which silently dropped baselines on multi-domain events.
+    // Fixed 2026-09-12 pass-3.
+    forEvent: (event) => {
+      if (!event) return null;
+      const ctxs = contextsForEvent(event);
+      const merged = { observers: new Set(), rationale: [], firedRules: new Set(), score: 3 };
+      for (const ctx of ctxs) {
+        const r = routeFor(ctx);
+        r.observers.forEach(o => merged.observers.add(o));
+        r.firedRules.forEach(t => merged.firedRules.add(t));
+        if (r.rationale) merged.rationale.push(r.rationale);
+        const s = r.confidence === 'high' ? 3 : r.confidence === 'medium' ? 2 : 1;
+        if (s < merged.score) merged.score = s;
+      }
+      const confidence = merged.firedRules.size === 0
+        ? 'low'
+        : (merged.score === 3 ? 'high' : merged.score === 2 ? 'medium' : 'low');
+      return {
+        observers:  Array.from(merged.observers),
+        rationale:  Array.from(new Set(merged.rationale)).join(' · '),
+        firedRules: Array.from(merged.firedRules),
+        confidence,
+      };
+    },
     observers: (event) => observerRoleObjectsForEvent(event, RECEIVERS),
   };
   // Threat taxonomy dev handle for spot-checking model coverage.

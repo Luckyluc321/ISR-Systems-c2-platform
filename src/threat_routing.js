@@ -74,7 +74,24 @@ export function familyForPlatformString(platform) {
   if (/swarm/.test(p))                      return FAMILIES.DRONE_SWARM;
   if (/fpv|kamikaze|racing/.test(p))        return FAMILIES.FPV_QUADCOPTER;
   if (/quadcopter|quad|multirotor/.test(p)) return FAMILIES.COMMERCIAL_QUADCOPTER;
+  // Civilian helicopter markers checked BEFORE the general
+  // helicopter branch so a rescue / medevac / HEMS / police / ambulance
+  // string routes to HELICOPTER_CIVILIAN (low default threat, no
+  // forsvarskmd auto-observer) rather than HELICOPTER_MILITARY.
+  // Added 2026-09-12 after pass-3 audit noted HELICOPTER_CIVILIAN
+  // was unreachable via this shim.
+  if (/(heli|rotorcraft).*?(civil|rescue|medevac|hems|ambulance|police|air-med|airmed)/.test(p)
+      || /(civil|rescue|medevac|hems|ambulance|police|air-med|airmed).*?(heli|rotorcraft)/.test(p)) {
+    return FAMILIES.HELICOPTER_CIVILIAN;
+  }
   if (/heli|rotorcraft/.test(p))            return FAMILIES.HELICOPTER_MILITARY;
+  // Same civilian-first pattern for jets: business / private / executive /
+  // corporate / airliner routes to JET_CIVILIAN (low default threat).
+  // Bare "jet" continues to route JET_MILITARY (over-safe default).
+  if (/(jet|airliner|business|executive|corporate|private).*?(civil|business|executive|corporate|private|airline|charter)/.test(p)
+      || /(business|executive|corporate|private|airline|charter).*jet/.test(p)) {
+    return FAMILIES.JET_CIVILIAN;
+  }
   if (/jet|fighter|bomber/.test(p))         return FAMILIES.JET_MILITARY;
   if (/fixed[- ]wing/.test(p))              return FAMILIES.MILITARY_ISR_FIXED_WING;
   if (/glider/.test(p))                     return FAMILIES.GLIDER;
@@ -86,6 +103,12 @@ export function familyForPlatformString(platform) {
   // so ambiguous "drone" strings route to UNKNOWN_SIGNATURE where the
   // unknown-signature rule surfaces intel for manual attribution
   // instead of auto-notifying air force.
+  //
+  // Note on the shim in general: NN adapters SHOULD emit event.family
+  // directly and skip this string-mapper entirely. This shim is the
+  // fallback for legacy event.platform strings. LIGHT_AIRCRAFT and
+  // CIVILIAN JETS beyond the narrow business-jet heuristic above are
+  // not inferable from freeform strings — set event.family upstream.
   return FAMILIES.UNKNOWN_SIGNATURE;
 }
 
@@ -270,7 +293,7 @@ export function routeFor(context) {
 
   return {
     observers: Array.from(obsSet),
-    rationale: rationales.join(' · ') || 'No routing rules matched — no auto-observers assigned.',
+    rationale: rationales.join(' · ') || 'No routing rules matched. No auto-observers assigned.',
     confidence,
     firedRules,
   };
@@ -377,7 +400,7 @@ export function observerRoleObjectsForEvent(event, receivers, { alreadyOnCaseRol
 
   return {
     roles,
-    rationale:  Array.from(rationaleSet).join(' · ') || 'No routing rules matched — no auto-observers assigned.',
+    rationale:  Array.from(rationaleSet).join(' · ') || 'No routing rules matched. No auto-observers assigned.',
     confidence,
     firedRules: Array.from(ruleSet),
   };
