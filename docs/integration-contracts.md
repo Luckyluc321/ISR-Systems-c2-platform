@@ -651,14 +651,23 @@ Detail is carried in the response body (`_redactions` field for JSON, watermark 
   "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
   "scope": "chain",
   "chain": {
-    "chain_id": "chain-evt-1201",
+    "id": "chain-evt-1201",
     "size": 4,
     "first_at": "2026-09-13T09:12:00.000Z",
     "last_at":  "2026-09-13T10:22:00.000Z",
     "span_minutes": 70,
     "sites": ["BILLUND", "CPH", "AALBORG"]
   },
-  "events": [
+  "event_count": 4,
+  "contributors": [
+    { "role_id": "politi-kbh", "events": ["evt-1201", "evt-1202"], "event_count": 2, "span_percent": 50 },
+    { "role_id": "pet",        "events": ["evt-1201", "evt-1202", "evt-1203", "evt-1204"], "event_count": 4, "span_percent": 100 }
+  ],
+  "unified_timeline": [
+    { "event_id": "evt-1201", "ts": "2026-09-13T09:12:00.000Z", "kind": "detected",   "detail": "Shahed-136 classified hostile at BILLUND" },
+    { "event_id": "evt-1201", "ts": "2026-09-13T09:14:00.000Z", "kind": "escalated",  "detail": "Cascade to politi-kbh" }
+  ],
+  "events_pir": [
     {
       "event_snapshot": {
         "id": "evt-1201",
