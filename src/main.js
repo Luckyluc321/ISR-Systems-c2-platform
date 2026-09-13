@@ -3,7 +3,34 @@ import 'cesium/Build/Cesium/Widgets/widgets.css';
 import './style.css';
 import { SITES as SITES_CORE } from './sites.js';
 import { ENERGINET_SITES } from './sites_energinet.js';
-const SITES = { ...SITES_CORE, ...ENERGINET_SITES };
+import { loadSitesFromGlob, mergeSites, siteLoaderCoverage } from './site_loader.js';
+
+// Manifest-driven sites (sites/*.yaml) per docs/integration-contracts.md
+// Section 3. Vite's import.meta.glob pulls YAML contents at bundle time
+// so no runtime filesystem access is needed. Loader parses + validates +
+// normalises to the runtime SITES shape existing consumers already read.
+const _yamlManifests = import.meta.glob('/sites/*.yaml', { query: '?raw', import: 'default', eager: true });
+const { sites: SITES_FROM_MANIFESTS, errors: _siteLoaderErrors } = loadSitesFromGlob(_yamlManifests);
+if (_siteLoaderErrors.length) {
+  for (const e of _siteLoaderErrors) console.warn(`[site_loader] ${e.file}: ${e.error}`);
+}
+
+// Merge order: manifest-loaded sites first, then inline SITES_CORE +
+// ENERGINET_SITES overlay. Inline entries take precedence for any id
+// collision during the migration window — safer default (existing
+// runtime behaviour preserved). Once a site is migrated to a manifest,
+// delete its inline entry and the manifest becomes the sole source.
+const SITES = mergeSites(SITES_FROM_MANIFESTS, { ...SITES_CORE, ...ENERGINET_SITES });
+
+if (typeof window !== 'undefined') {
+  window.__isr_sites = {
+    coverage: () => siteLoaderCoverage(SITES_FROM_MANIFESTS, { ...SITES_CORE, ...ENERGINET_SITES }),
+    manifests: () => SITES_FROM_MANIFESTS,
+    inline: () => ({ ...SITES_CORE, ...ENERGINET_SITES }),
+    merged: () => SITES,
+    errors: () => _siteLoaderErrors,
+  };
+}
 import {
   filteredEvents, getEvent, getSelectedEventId, selectEvent,
   onSelectionChange, setFilter, onFilterChange,
