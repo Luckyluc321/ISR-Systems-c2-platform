@@ -47,6 +47,8 @@ flowchart TD
 
 **Blind spots:** the western perimeter (~500m sector centred on 55.616, 12.630) has degraded RF coverage due to terminal building shadowing. Radar + acoustic compensate. EO cannot resolve targets in that sector — a detection there always renders without visual confirmation and is flagged in the case-file emphasis.
 
+**Sensor id note:** the four sensor ids above (`cph-rf-01`, `cph-acoustic-01`, `cph-radar-01`, `cph-eo-01`) are illustrative modality archetypes for narrative clarity. The actual seed data in `src/sites.js` registers CPH with 22 online / 24 total multi-modality Radxa nodes (ids `N01`-`N24`, each combining RF + acoustic + visual on one board, with the HackRF SDR core on N08). When the site definition schema per `docs/integration-contracts.md` Section 3 migrates the seed data, each Radxa node becomes one manifest `sensors[]` entry with multi-modality flags — the four-archetype narrative here still holds as a role-grouping.
+
 **Overlap zones:** central runway area (~200m radius around 55.618, 12.656) has full 4-modality coverage. Detections here get the highest fusion confidence.
 
 ## 3. Domain scope + operating mode
@@ -65,7 +67,7 @@ flowchart TD
 | FPV / kamikaze | + politi-aks (Aktionsstyrken) | Tactical intervention specialist |
 | Drone swarm | + full national command chain + beredskab | Multi-threat escalation |
 | Cyber signature | + rigspoliti-nc3, cert-dkcert | Forensic + cyber attribution |
-| Mass gathering event onsite (e.g. VIP flight, terminal evacuation) | + kbr-hedehusene, region-hst | Fire/rescue + medical |
+| Mass gathering event onsite (e.g. VIP flight, terminal evacuation) | + kbr-taarnby, region-hst | Fire/rescue + medical |
 
 Always-observers (baseline, regardless of routing rule): `agency-traf` (Trafikstyrelsen is baseline for aviation domain).
 

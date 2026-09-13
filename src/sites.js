@@ -116,7 +116,10 @@ export const SITES = {
     // when the condition matches. See IDD IF-6.8 for full schema.
     receivers: [
       // Actors (Esbjerg Harbour — maritime + industrial)
-      { id: 'politi-sydsonderjyl',     mode: 'actor',    role: 'primary-response',   tier: 1 },
+      // Esbjerg falls within Politi Sydvestjylland (per politi.dk district map);
+      // Syd- og Sønderjyllands covers Aabenraa + Sønderborg further south.
+      // Corrected 2026-09-13 after site-doc audit caught the mismatch.
+      { id: 'politi-sydvest',          mode: 'actor',    role: 'primary-response',   tier: 1 },
       { id: 'brs-haderslev',           mode: 'actor',    role: 'emergency-response', tier: 2 },
       { id: 'sov-frederikshavn',       mode: 'actor',    role: 'maritime-response',  tier: 3 },
       { id: 'agency-sof',              mode: 'actor',    role: 'regulator',          tier: 3 },

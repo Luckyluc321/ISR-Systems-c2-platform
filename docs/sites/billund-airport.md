@@ -6,11 +6,11 @@
 | Label | Billund Airport / Billund Lufthavn |
 | Code | BLL (IATA) / EKBI (ICAO) |
 | Tenant | `op-billund-airport` (planned, tenant onboarding queued) |
-| Onboarded | queued — write this doc first, land the manifest + tenant when contract closes |
+| Onboarded | 2026-09 (seed) — customer contract still closing |
 | Site type | airport |
-| Operating mode | sim initially, mixed once sensors deploy |
+| Operating mode | live (sensors already deployed via seed data), operator tenant activation pending contract close |
 
-Onboarding queued. This doc validates the "7-step config-only add" claim: write this + the site manifest first, land the tenant + sensors last. When the contract closes, the doc + manifest are ready to go.
+Site seed data is already registered in `src/sites.js` (19 sensors online, tenant + coordinates + boundary configured). The 7-step config-only add claim held — the platform picked up Billund as a fully-configured site the moment the seed manifest landed, with no code changes. What remains is the CUSTOMER-SIDE onboarding (contract close, tenant users, real-world sensor commissioning at the physical airport). This doc describes the flow as it will operate once the customer tenant is live.
 
 ## 1. Overview
 
@@ -48,6 +48,8 @@ flowchart TD
 
 **Blind spots:** west sector towards LEGOLAND (~200° arc bearing 220°-320°) has degraded coverage due to LEGOLAND's tall structures. LEGOLAND is 2km SW — this matters because low-alt drone activity there is exactly the public-safety scenario we care about.
 
+**Sensor id note:** the four sensor ids above are illustrative modality archetypes for narrative clarity. Actual seed data in `src/sites.js` registers Billund with 19 online multi-modality Radxa nodes (ids `N01`-`N19`, each combining RF + acoustic + visual on one board). Same schema migration path as CPH + Esbjerg.
+
 **Coverage gap coordination with LEGOLAND security:** ongoing conversation about placing an additional sensor at LEGOLAND perimeter to close the western gap. TBD contract structure.
 
 ## 3. Domain scope + operating mode
@@ -61,7 +63,7 @@ flowchart TD
 
 | Event shape | Recipients | Rationale |
 |---|---|---|
-| Any hostile | pet, fe, politi-sydoestjylland | Intel + local politikreds (Sydøstjylland) |
+| Any hostile | pet, fe, politi-sydostjyl | Intel + local politikreds (Sydøstjylland) |
 | Hostile + high threat | + forsvarskmd, rigspoliti, beredskab, agency-traf | National command + emergency + NOTAM |
 | Low-altitude event near LEGOLAND (< 500m from park boundary) | + kom-billund (kommune SOC) | Public safety broadcast + park evacuation coordination |
 | Cruise / missile signature | + flv-karup, flv-skrydstrup | Airspace intercept |
@@ -83,7 +85,7 @@ flowchart TD
   E --> OPS[Site operator]
   OPS -->|cascade LEGOLAND proximity| KOM[kom-billund<br/>kommune SOC]
   KOM -->|coordinate| LGL[LEGOLAND security<br/>internal notification]
-  OPS -->|cascade| POLSOJ[politi-sydoestjylland]
+  OPS -->|cascade| POLSOJ[politi-sydostjyl]
   POLSOJ -->|dispatch| PATROL[Ground patrol]
   style E fill:#2a0d0d,stroke:#ff7878,color:#fff
 ```
@@ -100,7 +102,7 @@ sequenceDiagram
   participant EF as Event Fabric
   participant OP as Operator (op-billund-airport)
   participant TRAF as Trafikstyrelsen
-  participant POL as politi-sydoestjylland
+  participant POL as politi-sydostjyl
   participant KOM as kom-billund
   participant PIR as PIR
   RF->>EF: DJI-signature RF at 55.740, 9.150

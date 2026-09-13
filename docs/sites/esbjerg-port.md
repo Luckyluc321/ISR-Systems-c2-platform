@@ -42,6 +42,8 @@ flowchart TD
 
 **Blind spots:** north sector (~90° arc bearing 340°-070°) has degraded coverage across all three sensors due to industrial warehouse structures on-site. Detections in that arc are logged with a "reduced coverage" flag.
 
+**Sensor id note:** the three sensor ids above (`esbjerg-rf-01`, `esbjerg-acoustic-01`, `esbjerg-radar-01`) are illustrative modality archetypes for narrative clarity. The actual seed data in `src/sites.js` registers Esbjerg with 16 online / 18 total multi-modality Radxa nodes (ids `N01`-`N18`, each combining RF + acoustic + visual on one board, with the HackRF SDR core on N08). Same schema migration path as CPH.
+
 ## 3. Domain scope + operating mode
 
 - **Domain scope:** `[maritime, ground]`
@@ -55,7 +57,7 @@ flowchart TD
 |---|---|---|
 | Any hostile | pet, fe, politi-sydvest | Intel + local politikreds (SVJ) |
 | Hostile + high threat | + forsvarskmd, rigspoliti, beredskab, agency-sof | National command + emergency + AIS advisory |
-| Unauthorized vessel (maritime domain) | + kystvagt-esbjerg (Kystvagten Esbjerg) | Coast guard on-water response |
+| Unauthorized vessel (maritime domain) | + sov-frederikshavn (Søværnet Frederikshavn (maritime response)) | Coast guard on-water response |
 | Cyber signature against port SCADA | + rigspoliti-nc3, cert-dkcert, agency-cfcs | Forensic + cyber attribution |
 | Wind-installation vessel present + hostile drone | + fe (heightened) | Critical energy-infra intel priority |
 
@@ -76,7 +78,7 @@ flowchart TD
   AUTO --> RIGSP[rigspoliti]
   AUTO --> FORSK[forsvarskmd]
   OPS -->|cascade| POLSV[politi-sydvest<br/>local politikreds]
-  OPS -->|cascade| KYSTVAKT[kystvagt-esbjerg<br/>coast guard]
+  OPS -->|cascade| SOV[sov-frederikshavn<br/>Søværnet maritime response]
   style E fill:#2a0d0d,stroke:#ff7878,color:#fff
 ```
 
@@ -87,7 +89,7 @@ flowchart TD
   E["Non-cooperative vessel<br/>bearing 240°, closing on port"]
   E --> AUTO
   AUTO --> SOF[agency-sof]
-  AUTO --> KYSTVAKT[kystvagt-esbjerg]
+  AUTO --> SOV[sov-frederikshavn]
   E --> OPS[Site operator]
   OPS -->|coordinate| VTS[Port Vessel Traffic Service]
   OPS -->|cascade| POLSV[politi-sydvest]
@@ -95,7 +97,7 @@ flowchart TD
 
 ## 6. Full flow: detection → closed report
 
-Canonical case: hostile FPV drone over wind-installation vessel at berth, operator escalates, Kystvagten Esbjerg dispatches vessel, drone neutralised.
+Canonical case: hostile FPV drone over wind-installation vessel at berth, operator escalates, Søværnet Frederikshavn (maritime response) dispatches vessel, drone neutralised.
 
 ```mermaid
 sequenceDiagram
@@ -106,7 +108,7 @@ sequenceDiagram
   participant EF as Event Fabric
   participant AB as Agent B
   participant OP as Operator (op-esbjerg-port)
-  participant KV as Kystvagten Esbjerg
+  participant KV as Søværnet Frederikshavn (maritime response)
   participant SOF as Søfartsstyrelsen
   participant PIR as PIR
   RF->>EF: 5.8GHz FPV signature
@@ -120,7 +122,7 @@ sequenceDiagram
   OP->>OP: reclassify hostile + high (wind vessel proximity)
   OP->>AB: request live-briefing
   AB-->>OP: "FPV kamikaze over Vestas installation vessel..."
-  OP->>KV: cascade to Kystvagten Esbjerg
+  OP->>KV: cascade to Søværnet Frederikshavn (maritime response)
   KV-->>OP: acknowledged, patrol vessel deploying
   KV->>KV: dispatch RIB with jamming payload
   KV-->>OP: drone neutralised via RF jamming
@@ -173,7 +175,7 @@ Esbjerg Port operates under Danish Port Authority + Søfartsstyrelsen (Danish Ma
 |---|---|---|
 | Port of Esbjerg Ops Lead | | 24/7 |
 | Harbour Master | | 24/7 |
-| Kystvagten Esbjerg | | 24/7 |
+| Søværnet Frederikshavn (maritime response) | | 24/7 |
 | Politi Sydvestjylland | | 114 |
 | Søfartsstyrelsen liaison | | Business hours + on-call |
 
