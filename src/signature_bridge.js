@@ -55,7 +55,10 @@ const RULES = [
     tag: 'fpv-analog-video-rf',
     when: (sig) => sig.rf
                 && sig.rf.band === RF_BANDS.BAND_5_8_GHZ
-                && (sig.rf.modulation_hint === 'analog' || sig.rf.modulation_hint === null)
+                // Accept `null` (explicit absence) and `undefined`
+                // (field omitted by sensor). Real sensor payloads
+                // frequently omit modulation_hint entirely.
+                && (sig.rf.modulation_hint === 'analog' || sig.rf.modulation_hint == null)
                 && sig.rf.bandwidth_hz != null
                 && sig.rf.bandwidth_hz >= 15000000,
     narrative: 'Wideband 5.8 GHz analog video pattern consistent with FPV racing / kamikaze quadcopter.',
@@ -167,7 +170,10 @@ export function bridgeSignature(input) {
     fired_rules:       [],
   };
   if (!input || typeof input !== 'object') return empty;
-  const sig = input.raw_signature || {};
+  // Missing raw_signature counts as malformed per Section 9 contract
+  // (the "no rules match" state is reserved for present-but-unrecognised
+  // signatures; absent signature is a different failure class).
+  const sig = input.raw_signature;
   if (!sig || typeof sig !== 'object') return empty;
 
   const firedRules = [];
@@ -211,6 +217,13 @@ export function bridgeSignature(input) {
   // rule-count → confidence mapping. NN confidence dominates when
   // present; rule-only confidence caps at 0.85 (never assert
   // certainty from signature-side rules alone).
+  //
+  // Note: bestScore counts FAMILY VOTES, not fired rules. Rules with
+  // `modelFilterFamily: null` (stealth-autonomous, helicopter-thump)
+  // fire narrative + attributions but cast no family vote. Floor
+  // confidence off firedRules.length when at least one rule matched
+  // so those rules produce a coherent confidence signal alongside the
+  // narrative they emit.
   let familyConfidence;
   if (nn && nn.family === bestFamily) {
     familyConfidence = nn.family_confidence != null ? nn.family_confidence : 0.75;
@@ -220,6 +233,8 @@ export function bridgeSignature(input) {
     familyConfidence = 0.70;
   } else if (bestScore >= 1) {
     familyConfidence = 0.55;
+  } else if (firedRules.length >= 1) {
+    familyConfidence = 0.40;   // rules fired but no family vote — soft signal
   } else {
     familyConfidence = 0.20;
   }
