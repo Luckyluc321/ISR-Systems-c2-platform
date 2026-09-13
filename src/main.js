@@ -42,16 +42,19 @@ import {
 // non-CPH / non-Esbjerg sites, e.g. "energinet_kassoe" leaking into panels).
 for (const sid of Object.keys(SITES)) {
   registerSiteName(sid, SITES[sid].name || sid);
-  // Domain scope defaults per site type (Phase A). Feeds event.domainScope
-  // at detection time; destinations.js reads this to filter escalation
-  // targets so an inland substation event never routes to Kystvagten.
-  // Airport → aviation + ground. Harbour → maritime + ground. Substation
-  // + inland infra → ground only. Inference by id/name pattern; explicit
-  // customer overrides land here as mixed-profile sites come online.
+  // Domain scope: prefer explicit manifest declaration when present
+  // (site.domainScope comes from the loader's normaliser). Falls back
+  // to id/name pattern inference for sites still on the inline SITES
+  // shape without an explicit declaration. Once every site migrates
+  // to a manifest, the pattern-inference branch can be deleted.
+  // Airport → aviation + ground. Harbour → maritime + ground.
+  // Substation + inland infra → ground only.
   const _sidLower = sid.toLowerCase();
   const _snameLower = (SITES[sid].name || '').toLowerCase();
   let _siteDomains;
-  if (_sidLower === 'cph' || _sidLower === 'billund' || /airport|lufthavn/.test(_snameLower)) {
+  if (Array.isArray(SITES[sid].domainScope) && SITES[sid].domainScope.length) {
+    _siteDomains = SITES[sid].domainScope.slice();
+  } else if (_sidLower === 'cph' || _sidLower === 'billund' || /airport|lufthavn/.test(_snameLower)) {
     _siteDomains = ['aviation', 'ground'];
   } else if (_sidLower === 'esbjerg' || /harbour|harbor|havn|port/.test(_snameLower)) {
     _siteDomains = ['maritime', 'ground'];

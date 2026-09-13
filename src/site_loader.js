@@ -174,7 +174,14 @@ function _validateValue(value, schema, path) {
   if (schema.type === 'array' && schema.items && Array.isArray(value)) {
     value.forEach((item, i) => errors.push(..._validateValue(item, schema.items, `${path}[${i}]`)));
   }
-  if (schema.type === 'object' && schema.properties && typeof value === 'object' && value !== null) {
+  // Recurse into objects when the sub-schema declares ANY child
+  // constraint (properties, required, or customChecks). Previously
+  // only properties triggered recursion, so array-item schemas that
+  // only used customChecks (like sensors[]) silently no-op'd. Audit
+  // 2026-09-13 pass 1.
+  if (schema.type === 'object'
+      && (schema.properties || schema.required || schema.customChecks)
+      && typeof value === 'object' && value !== null) {
     errors.push(...validateManifest(value, schema, path));
   }
   return errors;
@@ -254,6 +261,17 @@ export function normalizeManifest(manifest) {
     sensors,
     sensorsOnline: explicitOnline != null ? explicitOnline : sensors.length,
     sensorsTotal:  explicitTotal  != null ? explicitTotal  : sensors.length,
+    // main.js:13194+ reads site.stats.sensorsOnline / site.stats.hostileEvents24h
+    // etc for the site overview card. Preserve the stats wrapper so the
+    // moment an inline entry is deleted (per migration plan) the card
+    // doesn't crash. Sources: manifest.stats.* or top-level fallbacks.
+    stats: {
+      sensorsOnline:      explicitOnline != null ? explicitOnline : sensors.length,
+      sensorsTotal:       explicitTotal  != null ? explicitTotal  : sensors.length,
+      flaggedEvents24h:   manifest.stats?.flaggedEvents24h  ?? 0,
+      hostileEvents24h:   manifest.stats?.hostileEvents24h  ?? 0,
+      falseAlarms24h:     manifest.stats?.falseAlarms24h    ?? 0,
+    },
     // Runtime tenant assignment mirrors the manifest field.
     operatorAccountId: manifest.tenant,
     // Domain scope drives events.js registerSiteDomains at boot.
