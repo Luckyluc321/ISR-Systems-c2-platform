@@ -607,6 +607,25 @@ async function main() {
       .catch(() => {});
   } catch (_) {}
 
+  // Live-tunable Shahed model rig. Every field is read per-frame by
+  // the orientation callback so you can adjust from the browser
+  // console and see the change without a rebuild:
+  //   window.__isr_shahed_tuning.headingOffsetDeg = 180
+  //   window.__isr_shahed_tuning.bankFactor = 4.0
+  // The model's authored forward axis is unknown until visually
+  // confirmed; adjust headingOffsetDeg (0 / 90 / 180 / 270) until
+  // the nose points along the flight direction.
+  window.__isr_shahed_tuning = window.__isr_shahed_tuning || {
+    headingOffsetDeg: 90,      // rotate model forward axis. Try 0, 90, 180, 270 if nose points wrong direction.
+    pitchOffsetDeg: 0,         // additional pitch bias (usually 0)
+    headingSmoothing: 0.18,    // per-frame angular lerp toward target heading (0 = frozen, 1 = snap)
+    pitchSmoothing:   0.10,    // per-frame lerp toward target pitch
+    rollSmoothing:    0.08,    // per-frame lerp toward target roll (bank on turns)
+    bankFactor:       2.5,     // radians of roll per rad/s yaw rate
+    bankClampDeg:     35,      // ±maximum bank angle (delta-wing realistic ceiling)
+    pitchClampDeg:    30,      // ±maximum pitch angle
+  };
+
   // ── Bing Maps Aerial (asset 2) ──
   let bingLayer = null;
   try {
@@ -10653,36 +10672,98 @@ async function main() {
     const isLoiterMun = platform === 'loitering-munition' || platform === 'loitering_munition';
     const MODEL_SWAP_M = 500;
 
-    // Bank state — closure-captured per entity so each Shahed has
-    // independent roll smoothing.
-    let _prevHeadingRadForBank = null;
-    let _prevHeadingTimeForBank = performance.now();
-    let _smoothedRoll = 0;
+    // Flight rig — closure-captured per entity so each Shahed has
+    // independent orientation smoothing. Reads live from
+    // window.__isr_shahed_tuning every frame so console tweaks apply
+    // instantly (no rebuild).
+    //
+    // How each angle is derived:
+    //   Heading — target = stateHolder.headingRad inverted to compass
+    //     bearing. Smoothed via angular lerp so the nose swings toward
+    //     the new heading gradually rather than snapping.
+    //   Pitch   — target = atan2(dAltitude, dHorizontal) computed from
+    //     the position delta between frames. Nose lifts on climb, dips
+    //     on dive. Smoothed via lerp.
+    //   Roll    — target proportional to yaw rate (heading change per
+    //     second) times bankFactor. Positive yaw = right turn = right
+    //     wing down. Clamped and smoothed.
+    let _smoothedHeading = null;   // radians, compass bearing (CW from N)
+    let _smoothedPitch = 0;        // radians, +up
+    let _smoothedRoll = 0;         // radians, +right wing down
+    let _prevHeadingRad = null;
+    let _prevPosCart = null;
+    let _prevTime = performance.now();
     const _bankedOrientation = () => {
       const cart = _billboardRef?.position?.getValue?.(Cesium.JulianDate.now());
       if (!cart) return undefined;
+      const T = window.__isr_shahed_tuning || {};
+      const headingOffset  = ((T.headingOffsetDeg || 0) * Math.PI) / 180;
+      const pitchOffset    = ((T.pitchOffsetDeg   || 0) * Math.PI) / 180;
+      const headingSmooth  = T.headingSmoothing   ?? 0.18;
+      const pitchSmooth    = T.pitchSmoothing     ?? 0.10;
+      const rollSmooth     = T.rollSmoothing      ?? 0.08;
+      const bankFactor     = T.bankFactor         ?? 2.5;
+      const bankClamp      = ((T.bankClampDeg  || 35) * Math.PI) / 180;
+      const pitchClamp     = ((T.pitchClampDeg || 30) * Math.PI) / 180;
+
       const now = performance.now();
-      // stateHolder.headingRad is written as -atan2(dLon, dLat); invert
-      // to get standard compass bearing (CW from north, radians) which
-      // matches HeadingPitchRoll's heading convention.
-      const currHeading = -stateHolder.headingRad;
-      let roll = 0;
-      if (_prevHeadingRadForBank !== null) {
-        let dh = currHeading - _prevHeadingRadForBank;
-        while (dh > Math.PI)  dh -= 2 * Math.PI;
-        while (dh < -Math.PI) dh += 2 * Math.PI;
-        const dt = Math.max(0.016, (now - _prevHeadingTimeForBank) / 1000);
-        const yawRate = dh / dt;
-        // Bank proportional to yaw rate. Positive dh (right turn) →
-        // positive roll (right wing down). Clamped to ±35° which is
-        // realistic upper bound for a delta-wing airframe.
-        const bankFactor = 2.5;
-        roll = Math.max(-0.61, Math.min(0.61, yawRate * bankFactor));
+      const dt = Math.max(0.016, (now - _prevTime) / 1000);
+      // stateHolder.headingRad = -atan2(dLon, dLat); invert to get
+      // compass bearing (CW from north, radians) which matches
+      // Cesium HeadingPitchRoll's heading convention.
+      const targetHeading = -stateHolder.headingRad;
+
+      // Pitch — target from vertical-vs-horizontal velocity.
+      let targetPitch = 0;
+      if (_prevPosCart) {
+        const prev = Cesium.Cartographic.fromCartesian(_prevPosCart);
+        const curr = Cesium.Cartographic.fromCartesian(cart);
+        const dAlt = curr.height - prev.height;
+        const meanLat = (curr.latitude + prev.latitude) / 2;
+        const R = 6371000;
+        const dNorth = (curr.latitude  - prev.latitude)  * R;
+        const dEast  = (curr.longitude - prev.longitude) * R * Math.cos(meanLat);
+        const dHoriz = Math.sqrt(dNorth * dNorth + dEast * dEast);
+        if (dHoriz > 0.1) {
+          targetPitch = Math.atan2(dAlt, dHoriz);
+          if (targetPitch >  pitchClamp) targetPitch =  pitchClamp;
+          if (targetPitch < -pitchClamp) targetPitch = -pitchClamp;
+        }
       }
-      _smoothedRoll = 0.90 * _smoothedRoll + 0.10 * roll;
-      _prevHeadingRadForBank = currHeading;
-      _prevHeadingTimeForBank = now;
-      const hpr = new Cesium.HeadingPitchRoll(currHeading, 0, _smoothedRoll);
+
+      // Roll — target proportional to yaw rate.
+      let targetRoll = 0;
+      if (_prevHeadingRad !== null) {
+        let dh = targetHeading - _prevHeadingRad;
+        while (dh >  Math.PI) dh -= 2 * Math.PI;
+        while (dh < -Math.PI) dh += 2 * Math.PI;
+        const yawRate = dh / dt;
+        targetRoll = yawRate * bankFactor;
+        if (targetRoll >  bankClamp) targetRoll =  bankClamp;
+        if (targetRoll < -bankClamp) targetRoll = -bankClamp;
+      }
+
+      // Angular lerp for heading handles the ±π wraparound so the nose
+      // takes the shortest arc to the target, not the long way round.
+      if (_smoothedHeading === null) _smoothedHeading = targetHeading;
+      else {
+        let dh = targetHeading - _smoothedHeading;
+        while (dh >  Math.PI) dh -= 2 * Math.PI;
+        while (dh < -Math.PI) dh += 2 * Math.PI;
+        _smoothedHeading += dh * headingSmooth;
+      }
+      _smoothedPitch += (targetPitch - _smoothedPitch) * pitchSmooth;
+      _smoothedRoll  += (targetRoll  - _smoothedRoll)  * rollSmooth;
+
+      _prevHeadingRad = targetHeading;
+      _prevPosCart = Cesium.Cartesian3.clone(cart);
+      _prevTime = now;
+
+      const hpr = new Cesium.HeadingPitchRoll(
+        _smoothedHeading + headingOffset,
+        _smoothedPitch + pitchOffset,
+        _smoothedRoll,
+      );
       return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
     };
 
@@ -10769,30 +10850,80 @@ async function main() {
           Cesium.Cartesian3.normalize(fwd, fwd);
           return fwd;
         };
-        // Swarm-member bank state (own closure; formation members share
-        // the lead's heading so all bank together in practice, but
-        // per-entity state keeps CallbackProperty computations trivially
-        // consistent frame-to-frame).
-        let _swPrevHeadingRad = null;
-        let _swPrevHeadingTime = performance.now();
+        // Swarm-member flight rig — same structure as lead entity's
+        // _bankedOrientation. Own closure so each swarm member's
+        // smoothing state is independent. Reads live from
+        // window.__isr_shahed_tuning per frame.
+        let _swSmoothedHeading = null;
+        let _swSmoothedPitch = 0;
         let _swSmoothedRoll = 0;
+        let _swPrevHeadingRad = null;
+        let _swPrevPosCart = null;
+        let _swPrevTime = performance.now();
         const _swBankedOrientation = () => {
           const cart = _swBbRef?.position?.getValue?.(Cesium.JulianDate.now());
           if (!cart) return undefined;
+          const T = window.__isr_shahed_tuning || {};
+          const headingOffset  = ((T.headingOffsetDeg || 0) * Math.PI) / 180;
+          const pitchOffset    = ((T.pitchOffsetDeg   || 0) * Math.PI) / 180;
+          const headingSmooth  = T.headingSmoothing   ?? 0.18;
+          const pitchSmooth    = T.pitchSmoothing     ?? 0.10;
+          const rollSmooth     = T.rollSmoothing      ?? 0.08;
+          const bankFactor     = T.bankFactor         ?? 2.5;
+          const bankClamp      = ((T.bankClampDeg  || 35) * Math.PI) / 180;
+          const pitchClamp     = ((T.pitchClampDeg || 30) * Math.PI) / 180;
+
           const now = performance.now();
-          const currHeading = -stateHolder.headingRad;
-          let roll = 0;
-          if (_swPrevHeadingRad !== null) {
-            let dh = currHeading - _swPrevHeadingRad;
-            while (dh > Math.PI)  dh -= 2 * Math.PI;
-            while (dh < -Math.PI) dh += 2 * Math.PI;
-            const dt = Math.max(0.016, (now - _swPrevHeadingTime) / 1000);
-            roll = Math.max(-0.61, Math.min(0.61, (dh / dt) * 2.5));
+          const dt = Math.max(0.016, (now - _swPrevTime) / 1000);
+          const targetHeading = -stateHolder.headingRad;
+
+          let targetPitch = 0;
+          if (_swPrevPosCart) {
+            const prev = Cesium.Cartographic.fromCartesian(_swPrevPosCart);
+            const curr = Cesium.Cartographic.fromCartesian(cart);
+            const dAlt = curr.height - prev.height;
+            const meanLat = (curr.latitude + prev.latitude) / 2;
+            const R = 6371000;
+            const dNorth = (curr.latitude  - prev.latitude)  * R;
+            const dEast  = (curr.longitude - prev.longitude) * R * Math.cos(meanLat);
+            const dHoriz = Math.sqrt(dNorth * dNorth + dEast * dEast);
+            if (dHoriz > 0.1) {
+              targetPitch = Math.atan2(dAlt, dHoriz);
+              if (targetPitch >  pitchClamp) targetPitch =  pitchClamp;
+              if (targetPitch < -pitchClamp) targetPitch = -pitchClamp;
+            }
           }
-          _swSmoothedRoll = 0.90 * _swSmoothedRoll + 0.10 * roll;
-          _swPrevHeadingRad = currHeading;
-          _swPrevHeadingTime = now;
-          const hpr = new Cesium.HeadingPitchRoll(currHeading, 0, _swSmoothedRoll);
+
+          let targetRoll = 0;
+          if (_swPrevHeadingRad !== null) {
+            let dh = targetHeading - _swPrevHeadingRad;
+            while (dh >  Math.PI) dh -= 2 * Math.PI;
+            while (dh < -Math.PI) dh += 2 * Math.PI;
+            const yawRate = dh / dt;
+            targetRoll = yawRate * bankFactor;
+            if (targetRoll >  bankClamp) targetRoll =  bankClamp;
+            if (targetRoll < -bankClamp) targetRoll = -bankClamp;
+          }
+
+          if (_swSmoothedHeading === null) _swSmoothedHeading = targetHeading;
+          else {
+            let dh = targetHeading - _swSmoothedHeading;
+            while (dh >  Math.PI) dh -= 2 * Math.PI;
+            while (dh < -Math.PI) dh += 2 * Math.PI;
+            _swSmoothedHeading += dh * headingSmooth;
+          }
+          _swSmoothedPitch += (targetPitch - _swSmoothedPitch) * pitchSmooth;
+          _swSmoothedRoll  += (targetRoll  - _swSmoothedRoll)  * rollSmooth;
+
+          _swPrevHeadingRad = targetHeading;
+          _swPrevPosCart = Cesium.Cartesian3.clone(cart);
+          _swPrevTime = now;
+
+          const hpr = new Cesium.HeadingPitchRoll(
+            _swSmoothedHeading + headingOffset,
+            _swSmoothedPitch + pitchOffset,
+            _swSmoothedRoll,
+          );
           return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
         };
 
