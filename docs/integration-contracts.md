@@ -751,5 +751,466 @@ sequenceDiagram
 
 ---
 
-<!-- Phase B contracts (5, 6, 7) land next. -->
+# 5. Receiver adapter
+
+## Purpose
+
+The ISR C2 platform has a 386-agency receiver registry. When a cascade is sent, each recipient is notified through a per-role adapter that translates the platform's canonical escalation shape into whatever the receiving agency's real API expects. This contract specifies how any agency (Politi Kbh, BRS, Trafikstyrelsen, kommune SOC, hospital, NATO liaison, EU agency, kbr fire brigade, etc.) plugs a real API into the platform.
+
+## Actors
+
+- **Caller:** ISR C2 escalation dispatcher (server-side, per-tenant)
+- **Receiver:** custom adapter registered for a specific receiver role id (from `src/roles.js` RECEIVERS)
+
+## Wire format
+
+Each receiver adapter implements 5 methods against a stable interface. Every method is idempotent (retries safe with the same escalation_id + version).
+
+### Adapter interface
+
+```typescript
+interface ReceiverAdapter {
+  /**
+   * Send a fresh cascade to this receiver. Called once per new
+   * escalation. Adapter translates the assessmentPackage into the
+   * receiver's real API shape.
+   */
+  sendEscalation(input: {
+    escalation_id: string;      // stable id — same across retries
+    event: EventSnapshot;       // minimal event context (see below)
+    assessmentPackage: {
+      operatorAssessment: string;
+      agenticAssessment: { narrative, recommendation, model, generatedAt } | null;
+      responseHistoryAtCascade: Array<DispatchSnapshot>;
+      cascadeReason: string;
+      priority: 'critical' | 'urgent' | 'standard';
+      requesterRoleId: string;
+    };
+    initiatedBy: string;        // human display name of the sender
+    initiatedAt: string;        // ISO 8601 UTC
+    correlationId: string;      // propagates for tracing
+  }): Promise<{
+    receiverAcknowledged: boolean;  // did the receiver's system 200-ack
+    receiverTicketId?: string;      // receiver's internal ticket if returned
+    receiverMessage?: string;       // any human-readable response
+  }>;
+
+  /**
+   * Withdraw a previously-sent escalation. Called when the sender
+   * revokes the cascade before it's acted on. Idempotent: repeat
+   * calls with the same escalation_id are no-ops.
+   */
+  withdrawEscalation(input: {
+    escalation_id: string;
+    reason: string;
+    withdrawnBy: string;
+    withdrawnAt: string;
+    correlationId: string;
+  }): Promise<void>;
+
+  /**
+   * Update the sender's assessment on an existing escalation without
+   * withdrawing it. Used when the situation evolves (e.g. threat
+   * downgraded, new agentic take, additional dispatches fired).
+   */
+  updateAssessment(input: {
+    escalation_id: string;
+    text: string;
+    priority?: 'critical' | 'urgent' | 'standard';
+    updatedBy: string;
+    updatedAt: string;
+    correlationId: string;
+  }): Promise<void>;
+
+  /**
+   * Called when the receiver themselves acknowledges receipt. The
+   * receiver's real system posts back to a webhook; this method is
+   * how the adapter propagates that ack into the platform.
+   * (Inbound webhook, not outbound call.)
+   */
+  onReceiverAcknowledge?(input: {
+    escalation_id: string;
+    acknowledgedBy: string;
+    acknowledgedAt: string;
+    correlationId: string;
+  }): void;
+
+  /**
+   * Called when the receiver posts a reply (threaded response to the
+   * sender). Same webhook pattern as onReceiverAcknowledge.
+   */
+  onReceiverReply?(input: {
+    escalation_id: string;
+    text: string;
+    respondedBy: string;
+    respondedAt: string;
+    correlationId: string;
+  }): void;
+}
+```
+
+### Registration
+
+Every adapter registers per-role at boot in `src/escalation_source.js`:
+
+```js
+import { registerEscalationAdapter } from './escalation_source.js';
+import { PolitiKbhAdapter } from './adapters/politi-kbh.js';
+
+registerEscalationAdapter('politi-kbh', new PolitiKbhAdapter({
+  baseUrl: process.env.POLITI_KBH_API_URL,
+  clientCert: process.env.POLITI_KBH_MTLS_CERT,
+  // ... adapter-specific config
+}));
+```
+
+Unregistered roles fall through to the default mock adapter (`src/adapters/escalation_mock.js`) which logs to the platform's event.interactions[] and returns a synthetic ack.
+
+## Auth model
+
+- Adapter-specific. Some receivers use mTLS (defence + intel), some OAuth 2.0 client credentials (regulators + agencies), some IP-allowlisted API keys (legacy systems), some AS4 message-signed (EU agencies per eDelivery standard).
+- Every adapter carries its own credential store. Platform never sees raw credentials — they live in Azure Key Vault, adapter reads at instantiation.
+
+## Error semantics
+
+- Adapter methods throw on unrecoverable failure. Platform retries `sendEscalation` up to 3 times with exponential backoff (1s, 5s, 25s).
+- After 3 failures, escalation is marked `blocked` with `blockedReason` set. Operator sees the block in Mission Console and can retry manually or route to a backup receiver.
+- `withdrawEscalation` and `updateAssessment` are best-effort — failure logs a warning but doesn't block the platform (the underlying record is already in the audit trail).
+
+## Sequence diagram
+
+```mermaid
+sequenceDiagram
+  participant OP as Operator
+  participant PL as Platform
+  participant ADP as Receiver Adapter
+  participant SYS as Receiver's Real System
+  OP->>PL: cascade to politi-kbh
+  PL->>ADP: sendEscalation({escalation_id, event, assessmentPackage})
+  ADP->>ADP: translate to receiver's API shape
+  ADP->>SYS: POST /incidents (mTLS)
+  SYS-->>ADP: 200 + ticket_id
+  ADP-->>PL: {receiverAcknowledged: true, receiverTicketId}
+  PL->>PL: mark escalation delivered
+  Note over SYS,PL: later — receiver acks in their system
+  SYS->>ADP: POST webhook /platform/ack
+  ADP->>PL: onReceiverAcknowledge()
+  PL->>PL: statusHistory: acknowledged
+```
+
+## Example implementation stub
+
+```js
+// src/adapters/politi-kbh.js
+export class PolitiKbhAdapter {
+  constructor(config) {
+    this.baseUrl = config.baseUrl;
+    this.mtlsCert = config.clientCert;
+    // ... init HTTP client with mTLS
+  }
+
+  async sendEscalation({ escalation_id, event, assessmentPackage, initiatedBy, correlationId }) {
+    // Translate ISR canonical shape → Politi Kbh's real POLIS incident format.
+    const politiIncident = {
+      external_ref: escalation_id,
+      site_code: event.siteId,
+      severity: this._mapPriorityToPolisSeverity(assessmentPackage.priority),
+      narrative: assessmentPackage.operatorAssessment,
+      classification: this._mapClassification(event.classification, event.threat),
+      requesting_officer: initiatedBy,
+      // ... other Politi-specific fields
+    };
+    const response = await this._httpPost('/incidents', politiIncident, {
+      headers: { 'X-Correlation-ID': correlationId },
+    });
+    return {
+      receiverAcknowledged: response.status === 200,
+      receiverTicketId: response.body?.polis_incident_id,
+      receiverMessage: response.body?.desk_officer_notes,
+    };
+  }
+
+  async withdrawEscalation({ escalation_id, reason, correlationId }) {
+    await this._httpPost(`/incidents/${escalation_id}/withdraw`, { reason },
+      { headers: { 'X-Correlation-ID': correlationId } });
+  }
+
+  async updateAssessment({ escalation_id, text, priority, correlationId }) {
+    await this._httpPatch(`/incidents/${escalation_id}`, {
+      narrative_update: text,
+      severity: priority ? this._mapPriorityToPolisSeverity(priority) : undefined,
+    }, { headers: { 'X-Correlation-ID': correlationId } });
+  }
+
+  // Called by the webhook handler when Politi Kbh POSTs back.
+  onReceiverAcknowledge({ escalation_id, acknowledgedBy, acknowledgedAt, correlationId }) {
+    // Delegated to platform's escalation lifecycle — this adapter just
+    // forwards. Actual state mutation happens in events.js.
+    this._platformCallbacks.onReceiverAck(escalation_id, {
+      by: acknowledgedBy, at: acknowledgedAt, correlationId,
+    });
+  }
+}
+```
+
+## Reference implementation
+
+- **Mock adapter (default):** `src/adapters/escalation_mock.js` — accepts everything, logs to `event.interactions[]`, returns synthetic ack. Byte-for-byte matches pre-adapter behaviour.
+- **Adapter registration:** `src/escalation_source.js` `registerEscalationAdapter(roleId, adapter)`
+- **Per-adapter dir:** `src/adapters/*.js` — one file per real receiver adapter as they land
+
+## Open questions
+
+- **Webhook receiver security:** every real receiver's webhook needs to authenticate BACK to the platform. Shared secret? Signed JWT? Per-adapter TBD.
+- **Bulk withdraw:** if an entire chain is withdrawn (e.g. false-alarm event), do we call `withdrawEscalation` N times or add a batch endpoint? Current design: N calls. Batch is optional optimisation.
+- **Adapter versioning:** if Politi Kbh changes their API, how do we deploy a new adapter version without downtime? Blue-green per adapter, or feature flag on the registration?
+
+---
+
+# 6. Dispatch adapter
+
+## Purpose
+
+When a receiver dispatches a real asset (patrol car, helicopter, drone-counter unit, army C-UAS team, NOTAM issuance), the platform routes the command through a per-role dispatch adapter to the receiver's real asset-command API. This contract specifies the shape.
+
+Detection-only invariant: the platform NEVER issues a raw asset command. Every dispatch requires an operator confirmation payload (signed by the operator's session) before it reaches this contract.
+
+## Actors
+
+- **Caller:** ISR C2 dispatch dispatcher (server-side, per-tenant)
+- **Receiver:** per-role dispatch adapter registered in `src/dispatch_source.js`
+- **Downstream:** real customer asset-command API (Politi POLIS dispatch, BRS mobilisation, Trafikstyrelsen NOTAM issuance, etc.)
+
+## Wire format
+
+### Adapter interface
+
+```typescript
+interface DispatchAdapter {
+  /**
+   * Fire a dispatch to this receiver's real asset-command system.
+   * Called once per dispatch. Includes the signed operator
+   * confirmation payload proving the human authorised the action.
+   */
+  fireDispatch(input: {
+    dispatch_id: string;
+    role_id: string;              // owner role (from RECEIVERS)
+    dispatch_kind: string;        // from DISPATCH_KIND_ARCHETYPES in archetypes.js
+    asset_id?: string;            // specific asset if selected (else adapter picks from pool)
+    event: EventSnapshot;
+    operator_confirmation: {
+      operator_id: string;
+      operator_role_id: string;
+      signed_at: string;          // ISO 8601 UTC
+      signature: string;          // JWT signed with operator's session key
+    };
+    correlationId: string;
+  }): Promise<{
+    accepted: boolean;
+    dispatched_asset: { id, name, kind, eta_sec?, position? } | null;
+    receiver_reference?: string;   // receiver's own dispatch ticket
+    rejection_reason?: string;
+  }>;
+
+  /**
+   * Update dispatch state as it evolves. Called when the receiver's
+   * system pushes back progress (e.g. asset en route, arrived,
+   * engaging, complete, RTB).
+   * Inbound webhook — adapter forwards to platform via callback.
+   */
+  onDispatchStateUpdate?(input: {
+    dispatch_id: string;
+    state: 'dispatched' | 'en-route' | 'arrived' | 'engaging' | 'complete' | 'rtb-started' | 'rtb-complete' | 'aborted';
+    timestamp: string;
+    metadata?: object;            // adapter-specific extras
+    correlationId: string;
+  }): void;
+
+  /**
+   * Attempt to abort an in-flight dispatch. Idempotent — repeat
+   * calls with the same dispatch_id are no-ops.
+   */
+  abortDispatch(input: {
+    dispatch_id: string;
+    reason: string;
+    requestedBy: string;
+    correlationId: string;
+  }): Promise<{
+    aborted: boolean;             // false when the asset is past the abort window
+    reason?: string;
+  }>;
+}
+```
+
+### Registration
+
+```js
+import { registerDispatchAdapter } from './dispatch_source.js';
+import { BRSAdapter } from './adapters/brs.js';
+
+registerDispatchAdapter('brs-hovedstaden', new BRSAdapter({
+  baseUrl: process.env.BRS_MOBILISATION_URL,
+  apiKey: process.env.BRS_API_KEY,
+  // ...
+}));
+```
+
+Unregistered roles use `src/adapters/dispatch_mock.js` which logs to console + feedback log + returns synthetic ack.
+
+## Auth model
+
+- Adapter-specific (same as receiver adapters).
+- Additionally, the `operator_confirmation.signature` is verified BEFORE the adapter is called. Platform middleware ensures no dispatch reaches an adapter without a valid, signed, unexpired operator confirmation. This is the detection-only invariant enforced at the wire.
+
+## Error semantics
+
+- Adapter throws on unrecoverable transport failure. Platform retries once (1s backoff), then marks dispatch `failed` with reason.
+- Adapter returns `{accepted: false, rejection_reason}` when the receiver's system explicitly rejects (asset unavailable, out of jurisdiction, wrong authority). Platform surfaces the rejection in Mission Console.
+- `abortDispatch` returns `{aborted: false}` when the asset is past the abort window. Reason MUST be human-readable (e.g. "asset already engaged, cannot recall").
+
+## Sequence diagram
+
+```mermaid
+sequenceDiagram
+  participant OP as Operator
+  participant UI as Mission Console
+  participant PL as Platform
+  participant SIG as Signing Middleware
+  participant ADP as Dispatch Adapter
+  participant SYS as Real Asset System
+  OP->>UI: click "Dispatch army C-UAS team"
+  UI->>UI: prompt confirmation modal
+  OP->>UI: confirm
+  UI->>SIG: request operator signature
+  SIG-->>UI: JWT signed with session key
+  UI->>PL: POST /v1/dispatches with signed payload
+  PL->>PL: verify signature + fresh, not expired
+  PL->>ADP: fireDispatch({dispatch_id, operator_confirmation, ...})
+  ADP->>ADP: translate to receiver's API
+  ADP->>SYS: POST /mobilise (mTLS)
+  SYS-->>ADP: 200 + asset_ref
+  ADP-->>PL: {accepted, dispatched_asset}
+  Note over SYS,PL: later — asset state changes
+  SYS->>ADP: webhook /platform/state
+  ADP->>PL: onDispatchStateUpdate()
+  PL->>UI: state transition in real-time
+```
+
+## Reference implementation
+
+- **Mock adapter (default):** `src/adapters/dispatch_mock.js` — preserves pre-adapter push shape byte-for-byte, logs to feedback log
+- **Adapter registration:** `src/dispatch_source.js` `registerDispatchAdapter(roleId, adapter)`
+- **Signature verification middleware:** planned as Azure Function pre-handler. Rejects any dispatch missing a valid operator confirmation JWT.
+
+## Open questions
+
+- **Multi-asset dispatch:** if a rule dispatches N assets in one call (swarm engagement), do we call `fireDispatch` N times or extend interface to accept `assets: []`? Current design: N calls (one adapter call per asset, easier to track independently).
+- **Cross-role dispatch:** what if a dispatch spans multiple roles (joint operation)? Current design: split into N per-role dispatches, correlate via `event.id` + `parent_dispatch_id`.
+- **Real-time asset telemetry:** should adapters stream position updates for in-flight assets, or is periodic webhook enough? Current design: webhook every state change; periodic position updates optional per adapter (Mission Console renders best-effort).
+
+---
+
+# 7. Server-side visibility
+
+## Purpose
+
+`src/visibility.js` implements client-side visibility as defence-in-depth (INTEL/FORENSIC chapters redact to SUMMARY for non-cleared viewers, etc). The REAL access gate belongs at the API layer so a viewer with browser dev tools cannot bypass. This contract specifies the server-side visibility middleware — every read endpoint that returns event data passes through it.
+
+## Actors
+
+- **Caller:** any authenticated user reading event data (PIR viewer, cascade picker, chain view, etc.)
+- **Enforcer:** server-side visibility middleware (Azure Function pre-handler + per-route enforcement)
+
+## Wire format
+
+The middleware is not a separate wire contract — it's a policy applied to every API response that contains event or chapter data. The BEHAVIOUR is what's contracted here.
+
+### Visibility levels
+
+Applied per-chapter per-viewer. Same three-level model as `visibility.js`:
+
+- `FULL` — every field renders as authored
+- `SUMMARY` — nameplate + involvement counts only; situation, timeline, sub-sections replaced with redaction placeholder
+- `HIDDEN` — chapter dropped from the response entirely; response includes `X-Redactions-Applied` header with a count
+
+### Rules
+
+Server-side rules MUST mirror `src/visibility.js` rules exactly (see `chapterVisibilityFor()` and Section 7 "Visibility scoping" of cross-agency-flows.md). Divergence between client + server would produce split-brain redaction: viewer sees FULL client-side but the API refuses to serve the fields. Reconciled by:
+
+- **Single source of truth:** the rule table lives in `src/visibility.js`. Server middleware imports the SAME module.
+- **Compile-time check:** CI test asserts that server middleware and client renderer produce identical redaction output for a canonical corpus of (viewer, chapterRole, event) triples.
+
+### Response shape
+
+Every response that carries event data includes:
+
+```
+X-Redactions-Applied: 2
+X-Redactions-Detail: [
+  {"role_id": "pet", "level": "summary", "reason": "INTEL compartmented from viewer archetype 'kinetic-response'"},
+  {"role_id": "fe",  "level": "summary", "reason": "INTEL compartmented from viewer archetype 'kinetic-response'"}
+]
+```
+
+Redacted fields in the body are either:
+- Replaced with `null` + `_redacted: true` marker at the field level, OR
+- Chapter entirely omitted from an array (HIDDEN case)
+
+### Enforcement points
+
+Every endpoint that returns event or chapter data MUST pass through the visibility middleware:
+
+- `GET /v1/events/{event_id}` — full event with chapters
+- `GET /v1/events/{event_id}/chapters/{role_id}` — single chapter
+- `GET /v1/pir/{event_id}/export` — PIR export (Section 4)
+- `GET /v1/chains/{chain_id}` — cross-event chain data
+- `GET /v1/events?...` — event list (per-summary + involvement chips only, redacted per viewer)
+
+Endpoints that return NON-event data (e.g. `GET /v1/receivers` for the picker) don't go through this middleware — they have their own tenant-scoped filters.
+
+## Auth model
+
+- Middleware reads the viewer's tenant + role claims from the OAuth 2.0 access token (issued per Section 12).
+- Admin bypass tokens are marked with a `bypass_visibility: true` claim. Only issued to Admin tenant sessions after explicit MFA re-auth for the read operation.
+
+## Error semantics
+
+- **200 OK with redactions** — normal case, viewer sees what they're cleared for.
+- **403 Forbidden** — viewer has no access to ANY chapter of the event. Response body contains a Problem Details explaining the tenant boundary.
+- **404 Not Found** — event doesn't exist. Deliberately indistinguishable from 403 to avoid leaking event existence to unauthorised viewers.
+
+## Sequence diagram
+
+```mermaid
+sequenceDiagram
+  participant U as Viewer
+  participant API as API Endpoint
+  participant AUTH as Auth Middleware
+  participant VIS as Visibility Middleware
+  participant STORE as Event Store
+  U->>API: GET /v1/events/{id}
+  API->>AUTH: validate token
+  AUTH-->>API: viewer role + tenant + claims
+  API->>STORE: fetch full event
+  STORE-->>API: raw event with all chapters
+  API->>VIS: apply chapterVisibilityFor per chapter
+  VIS-->>API: redacted chapter tree + redaction log
+  API-->>U: 200 + body (with _redacted markers)<br/>+ X-Redactions-Applied headers
+  Note over API: redaction log written to feedback log
+```
+
+## Reference implementation
+
+- **Client library:** `src/visibility.js` (LANDED, phase 6 of report shape)
+- **Server middleware:** planned as Azure Function pre-handler `functions/middleware/apply-visibility.js` — imports the same `chapterVisibilityFor` function from `src/visibility.js` (shared source of truth).
+- **CI parity test:** planned as `tests/visibility-parity.test.js` — generates canonical (viewer, chapterRole, event) triples + asserts client + server produce identical redaction output.
+
+## Open questions
+
+- **Legal hold / eDiscovery:** does an authorised court order allow full-visibility retrieval bypassing normal rules? Yes, via admin bypass token + special audit trail. Formalise the workflow.
+- **Redaction proof:** should the server publish a cryptographic proof (hash chain) of redactions applied, so an auditor can verify the redaction pattern without seeing the redacted content? Consider for regulator conversations.
+- **Cache invalidation:** if a viewer's role changes mid-session (promotion, demotion, revocation), does their cached data get purged? Session refresh with role check every 5 min; hard revocation propagates via WebSocket push.
+
+---
+
 <!-- Phase C contracts (8, 9, 10, 11, 12) land after Phase B. -->
