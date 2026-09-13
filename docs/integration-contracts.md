@@ -1365,7 +1365,12 @@ Two-agent strategy: Agent A defines site context (offline, cached per site). Age
 - **429 Too Many Requests** — Mistral upstream rate limit hit. Platform queues the request with 60s backoff, retries once, then falls back to template.
 - **502/503** — inference service unavailable. Platform falls back immediately + writes a warning to the event record. User sees "AI narrative unavailable — deterministic summary" in the case-file.
 
-**Detection-only invariant enforced at prompt layer.** The system prompt to Agent B explicitly forbids recommending dispatch actions. Any response that includes dispatch-action language triggers a content-filter reject + fallback to template. Prevents the LLM from proposing kinetic action even if the operator asks.
+**Detection-only invariant enforced at three layers:**
+1. **System prompt** (LANDED) — `DEBRIEF_WRITING_RULES_BASE` in `src/agents/agent_b_debrief.js` instructs Agent B never to recommend dispatch actions. Only observation / coordination / notification suggestions are permitted.
+2. **Prompt-output validator** (planned) — regex + dispatch-verb dictionary that rejects any generation containing dispatch action verbs against a known list.
+3. **Fallback** (LANDED) — on validator failure OR timeout OR error, fall back to `_defaultSummary` in `post_incident_report.js`.
+
+Layers 1 and 3 are enforced today. Layer 2 is planned; until it lands, the invariant relies on the system prompt discipline + operator review of Agent B output in the case-file.
 
 ## Sequence diagram
 
@@ -1390,10 +1395,15 @@ sequenceDiagram
 
 ## Reference implementation
 
+Agent B is already LANDED across two per-mode modules on the platform side. The wire contract above describes the FUTURE hosted-service shape (Mistral endpoint reached over HTTP with the request/response schema); today the same call happens in-process via the internal streaming client:
+
+- **Agent B post-incident (LANDED):** `src/agents/agent_b_debrief.js` — `streamDebriefNarrative` produces the narrative + recommendation at closeEvent. Includes `writeNarrativeCache` / `readNarrativeCache` for reuse in the PIR panel.
+- **Agent B live-briefing (LANDED):** `src/agents/agent_case_file.js` — `streamCaseFileNarrative` for Mission Console live context. Imported at `main.js:570`, invoked at `main.js:20206`.
+- **Transport (LANDED):** `src/mistral_client.js` — shared Mistral SDK wrapper used by both agents. Handles retry, backoff, streaming.
+- **Deterministic fallback (LANDED):** `post_incident_report.js` `_defaultSummary` — template output when Agent B times out or errors.
 - **Agent A cache spec:** `docs/agentic-signature-bridge-architecture.md` (existing, references two-agent strategy)
-- **Agent B client stub:** planned as `src/agentic/agent_b.js` — wraps Mistral SDK, handles retry + fallback, records synthesis metadata to feedback log
-- **Prompt library:** planned as `src/agentic/prompts/` — versioned prompt templates per (mode, language)
-- **Deterministic fallback:** `post_incident_report.js` `_defaultSummary` (existing, LANDED)
+- **Prompt library:** planned as `src/agents/prompts/` — versioned prompt templates per (mode, language). Currently prompts live inline in each agent module (`DEBRIEF_WRITING_RULES_BASE` in agent_b_debrief.js, etc); factor out when the second language lands.
+- **Hosted-service migration:** the wire contract above becomes real when Agent B moves from in-process to a hosted Mistral endpoint on Scaleway / OVH. Endpoint schema is what the migration writes against.
 
 ## Open questions
 
@@ -1673,10 +1683,14 @@ flowchart TD
 
 ## Reference implementation
 
-- **Client-side (localStorage today):** `src/feedback_log.js` (LANDED)
-- **Azure writer:** planned as `src/feedback_log_azure.js` — swap-boundary at existing `_writeAll` function
-- **Immutability policy setup:** documented in `docs/ops/azure-blob-worm-setup.md` (planned)
-- **Integrity job:** planned as an Azure Function running nightly, computing per-day hashes + publishing chain root
+The swap boundary is an adapter registry, not a single function. Real files:
+
+- **Adapter registry (LANDED):** `src/feedback_log_store.js` — `registerFeedbackStore(key, adapter)` + `setActiveFeedbackStore(key)`. Every store implements the same interface; boot code picks one via the active key.
+- **localStorage adapter (LANDED, dev default):** `src/adapters/feedback_log_localstorage.js` — implements the store interface via localStorage `_writeAll` + reads. Bounded size, auto-rotation when full.
+- **Azure Blob WORM adapter (planned):** `src/adapters/feedback_log_azure_blob_worm.js` — implements the same interface against Azure Blob append + immutability policy. Registered at boot under a new key (`azure-blob-worm`); production tenants boot with `setActiveFeedbackStore('azure-blob-worm')`. Dev + local test keep the localStorage default.
+- **Client-side write API (LANDED):** `src/feedback_log.js` — `writeAgentRecommendation`, `writeOperatorAction`, `writeEventOutcome`. Delegates to the active store via the registry.
+- **Immutability policy setup:** planned doc `docs/ops/azure-blob-worm-setup.md` — Terraform + Azure IAM configuration.
+- **Integrity job:** planned as an Azure Function running nightly, computing per-day hashes + publishing chain root.
 
 ## Open questions
 
@@ -1765,30 +1779,52 @@ This contract specifies how a cooperative-traffic feed plugs into the platform t
 }
 ```
 
-### Fusion logic
+### Fusion logic (MVP · signal-block path)
 
-The platform's event fabric queries this endpoint on EVERY new detection. For each detection:
+The platform's event fabric queries this endpoint on every new detection. For each detection:
 
-1. Query cooperative-traffic in a 500m × 300m volume around the detection position + ±10 sec time window.
-2. If a cooperative track matches within (150m horizontal, 100m vertical, 5s temporal): mark the detection as `cooperative_match` and enrich the event with track metadata.
-3. If NO match: the detection stays classified per NN output + signature bridge. This is the "non-cooperative traffic" case — worth investigating.
+1. Query cooperative-traffic in a volume around the detection position + time window (defaults below).
+2. Score each candidate cooperative track by (spatial distance × temporal proximity × track quality). Best score above threshold = match.
+3. If a cooperative track matches: reconciler emits a `formatted_block` for Agent B's prompt context + records match metadata on the event.
+4. If NO match: the detection stays classified per NN output + signature bridge. This is the "non-cooperative traffic" case — worth investigating.
 
-### Enrichment write-back
+**Real matching defaults** (from `src/cooperative_traffic_reconciler.js` header comments):
 
-When a match is found, the event record gets:
+| Parameter | Default |
+|---|---|
+| `match_radius_m` | 800 |
+| `match_time_window_s` | 4 |
+| `match_score_threshold` | 0.75 |
+
+Per-site tunable if a site's typical GPS accuracy differs.
+
+### Enrichment write-back (MVP shape)
+
+When a match is found, the event record receives:
 
 ```json
 {
   "cooperative_match": {
-    "matched_track": { ... },
-    "match_confidence": 0.92,
-    "matched_at": "2026-09-13T10:30:00.100Z",
-    "explain_away": true    // detection is a known cooperative aircraft; downgrade threat
+    "match_count": 1,
+    "matches": [
+      {
+        "track_id": "adsb-4B0D19",
+        "callsign": "SAS1234",
+        "score": 0.92,
+        "matched_at": "2026-09-13T10:30:00.100Z"
+      }
+    ],
+    "feed_status": "healthy",
+    "formatted_block": "Cooperative traffic match: SAS1234 (A320, IFR EKCH→ESSA) at 3500 ft, ..."
   }
 }
 ```
 
-`explain_away: true` triggers auto-classification `friendly` + threat `low`. Operator can override.
+`formatted_block` gets injected into Agent B's context so the narrative can reference the cooperative track directly ("detection correlates with scheduled SAS1234 arrival").
+
+**Explicit MVP scope:** **auto-classification collapse (detection → friendly + threat=low) is OUT of MVP scope.** Even a high-confidence cooperative match does NOT auto-downgrade the event's classification. Rationale: auto-classification would bypass the operator-override chain and undermine the detection-only stance (operator sees an already-classified event instead of an unclassified detection with cooperative evidence attached). Post-MVP: consider a "signal-block" path where the reconciler suppresses NEW event creation for cooperative-matched detections, but leaves existing events alone. See `cooperative_traffic_reconciler.js` header comment for design rationale.
+
+Operator sees the `formatted_block` in the case-file + Agent B narrative + can manually reclassify to `friendly` after review. Every reclassification is written to the feedback log per Section 10.
 
 ## Auth model
 
@@ -1830,9 +1866,9 @@ sequenceDiagram
 
 ## Reference implementation
 
-- **Existing spec:** `docs/agentic-cooperative-traffic-fusion-architecture.md` (LANDED, planning stage)
-- **Adapter stubs:** planned per source type — `src/adapters/cooperative-adsb.js`, `src/adapters/cooperative-naviair.js`
-- **Fusion module:** planned as `src/cooperative_fusion.js` — pure matching logic
+- **Reconciler module (LANDED, MVP):** `src/cooperative_traffic_reconciler.js` — pure matching logic + formatted_block generator. Header comment explicitly scopes auto-classification-collapse out of MVP.
+- **Existing spec:** `docs/agentic-cooperative-traffic-fusion-architecture.md` (planning + rationale)
+- **Adapter stubs:** planned per source type — `src/adapters/cooperative-adsb.js`, `src/adapters/cooperative-naviair.js`, `src/adapters/cooperative-ais.js` for maritime. Each pulls from its real source + normalises into the response shape above.
 
 ## Open questions
 
@@ -1866,7 +1902,7 @@ Three tenant types, matching `src/roles.js` ACCOUNTS:
 
 ## Claims model
 
-Every OAuth 2.0 access token carries these claims:
+Every OAuth 2.0 access token carries these claims. Example is a RECEIVER-tenant token (Politi Kbh officer session):
 
 ```json
 {
@@ -1875,17 +1911,21 @@ Every OAuth 2.0 access token carries these claims:
   "aud": "https://api.isr-systems.dk",
   "exp": 1726263600,
   "iat": 1726220400,
-  "tenant_id": "op-cph-airports",
-  "tenant_type": "operator",
-  "role_id": "op-cph-airports",         // matches src/roles.js RECEIVERS or OPERATORS id
-  "role_archetype": "public-safety-communication",
-  "scopes": ["events:read", "events:cascade", "dispatch:confirm", "pir:export"],
+  "tenant_id": "politi-kbh",
+  "tenant_type": "receiver",
+  "role_id": "politi-kbh",              // matches src/roles.js RECEIVERS id
+  "role_archetype": "kinetic-response",  // primary archetype from role's .archetype field
+  "scopes": ["events:read", "cascades:respond", "dispatch:confirm", "pir:export"],
   "mfa_completed_at": "2026-09-13T08:00:00Z",
   "compartment_clearance": [],           // e.g. ["intel", "forensic"] for cleared reviewers
   "bypass_visibility": false,            // admin-only, requires explicit MFA re-auth
-  "correlation_id_prefix": "cph-airports"
+  "correlation_id_prefix": "politi-kbh"
 }
 ```
+
+An OPERATOR tenant token (CPH Airports session) carries `tenant_type: "operator"`, `tenant_id: "op-cph-airports"`, `role_id: "op-cph-airports"`, `role_archetype: "coordination-command"` (operators are coordination-role by default). Scopes differ: operators have `events:write`, `cascades:initiate`, `dispatch:confirm`.
+
+**Azure AD B2C claim naming:** custom claims are declared as `extension_<name>` in the B2C custom policy XML (e.g. `extension_bypass_visibility`, `extension_compartment_clearance`) and rewritten to the token names above via a claims transformation. Saves an implementer a debug cycle when tracing why a claim didn't propagate.
 
 ## Endpoints
 
