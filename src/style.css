@@ -7821,6 +7821,14 @@ body.view-fleet #fleet-view { display: block; }
 .chapter-situation-line:last-child { border-bottom: none; }
 .chapter-situation-line-secondary { color: var(--text-dim); }
 .chapter-situation-line-empty     { color: var(--text-mute); font-style: italic; }
+.chapter-situation-line-rejected {
+  color: var(--warn);
+  border-left: 2px solid var(--warn);
+  padding-left: 6px;
+  margin-left: -6px;
+  background: rgba(255, 165, 0, 0.04);
+}
+.chapter-timeline-row-status-rejected .chapter-timeline-kind { color: var(--warn); }
 .chapter-situation-ts {
   font-family: var(--font-mono);
   font-size: var(--fs-2xs);

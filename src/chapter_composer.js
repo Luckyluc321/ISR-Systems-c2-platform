@@ -208,6 +208,22 @@ function _blockSituationReceived(role, event) {
           <span>${inbound.length - 1} follow-up cascade${inbound.length - 1 === 1 ? '' : 's'} stacked on the same case.</span>
         </li>`);
     }
+    // Rejection surface — any inbound cascade this role rejected
+    // (declined to act on) gets its own line with the reason.
+    // Suggests backup routes if the receiver named any.
+    const rejected = inbound.filter(r => r.status === 'rejected');
+    for (const r of rejected) {
+      const rts = _fmtTime(r.rejectedAt);
+      const reason = esc(r.rejectedReason || 'no reason recorded');
+      const backups = Array.isArray(r.rejectedBackupSuggestions) && r.rejectedBackupSuggestions.length
+        ? ` Suggested backup: <b>${r.rejectedBackupSuggestions.map(esc).join(', ')}</b>.`
+        : '';
+      lines.push(`
+        <li class="chapter-situation-line chapter-situation-line-rejected">
+          <span class="chapter-situation-ts">${rts}</span>
+          <span>Declined the cascade. Reason: "<i>${reason}</i>".${backups}</span>
+        </li>`);
+    }
   }
 
   if (outbound.length) {
@@ -338,10 +354,16 @@ function _blockTimelineSlice(role, event) {
         if (Array.isArray(r.statusHistory)) {
           for (const h of r.statusHistory) {
             if (h?.timestamp && h.status && h.status !== 'sent') {
+              // Rejection status gets extra detail: the reason surfaces
+              // inline so the timeline reader sees WHY without needing
+              // to expand the situation block.
+              const detail = h.status === 'rejected' && h.reason
+                ? `Cascade rejected. Reason: "${esc(h.reason)}"`
+                : `Cascade status ${esc(h.status)}`;
               rows.push({
                 ts: h.timestamp,
                 kind: `status-${h.status}`,
-                detail: `Cascade status ${esc(h.status)}`,
+                detail,
               });
             }
           }

@@ -91,6 +91,15 @@ export function listEscalationAdapters() {
 //     async acknowledgeEscalation?({
 //       eventId, escalationId, actorRole,
 //     }) → Promise<AdapterResult>
+//
+//     async rejectEscalation?({
+//       eventId, escalationId, reason, backupRoleIds, actorRole,
+//     }) → Promise<AdapterResult>
+//       // Receiver-side declination: recipient can't or won't act on
+//       // the cascade (wrong jurisdiction, no capacity, out-of-scope).
+//       // reason is required; backupRoleIds is optional suggestion for
+//       // where sender could re-route. Idempotent: repeat calls with
+//       // same escalationId no-op.
 //   }
 //
 // AdapterResult:

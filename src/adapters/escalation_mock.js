@@ -94,6 +94,15 @@ const mockEscalationAdapter = {
     });
     return _successEnvelope();
   },
+
+  async rejectEscalation({ event, escalationId, reason, backupRoleIds, actorRole }) {
+    _stampInteraction(event, actorRole, 'escalation-rejected', {
+      escalation_id: escalationId,
+      reason: (reason || '').slice(0, 240),
+      backup_role_ids: Array.isArray(backupRoleIds) ? backupRoleIds : [],
+    });
+    return _successEnvelope();
+  },
 };
 
 registerEscalationAdapter(DEFAULT_ESCALATION_ADAPTER_KEY, mockEscalationAdapter);

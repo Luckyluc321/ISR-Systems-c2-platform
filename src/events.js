@@ -537,6 +537,61 @@ export function withdrawEscalation(eventId, escalationId, { by = 'unknown', reas
   return rec;
 }
 
+// Reject a cascade from the RECEIVER side. Different from
+// withdrawEscalation (which is sender-side revocation before the
+// recipient acts). Reject is what a recipient does when they can't
+// or won't act on the cascade — wrong jurisdiction, no capacity,
+// out-of-scope for their role, etc. Reason is mandatory.
+//
+// Optional backupRoleIds carries the receiver's suggestion for where
+// to route instead ("we can't take this, try X"). Doesn't itself
+// re-cascade; sender sees the suggestion in their case-file and can
+// choose to cascade to the backup manually.
+//
+// Idempotent: repeat calls with the same escalationId are no-ops.
+// Append-only: statusHistory records the rejection; original
+// assessment + response history preserved for audit.
+//
+// Detection-only invariant preserved. No new escalation is created
+// automatically from a rejection; sender always chooses whether to
+// route to a backup.
+export function rejectEscalation(eventId, escalationId, { by = 'unknown', byRoleId = null, reason, backupRoleIds = [] } = {}) {
+  const e = EVENTS.find(x => x.id === eventId);
+  if (!e || !e.escalations) return null;
+  const rec = e.escalations.find(r => r.id === escalationId);
+  if (!rec) return null;
+  if (rec.status === 'rejected') return rec;   // idempotent
+  const trimmed = (reason || '').trim();
+  if (!trimmed) return null;                    // reason required
+  const now = new Date().toISOString();
+  rec.status = 'rejected';
+  rec.statusHistory.push({
+    timestamp: now,
+    status: 'rejected',
+    by,
+    byRoleId: byRoleId || null,
+    reason: trimmed,
+    backupRoleIds: Array.isArray(backupRoleIds) ? backupRoleIds.slice() : [],
+  });
+  rec.rejectedAt = now;
+  rec.rejectedBy = by;
+  rec.rejectedByRoleId = byRoleId || null;
+  rec.rejectedReason = trimmed;
+  rec.rejectedBackupSuggestions = Array.isArray(backupRoleIds) ? backupRoleIds.slice() : [];
+  e.notes = e.notes || [];
+  const backupNote = rec.rejectedBackupSuggestions.length
+    ? ` Suggested backup: ${rec.rejectedBackupSuggestions.join(', ')}.`
+    : '';
+  e.notes.push({
+    timestamp: now,
+    author: by,
+    text: `Rejected escalation to ${rec.destinationId}. Reason: "${trimmed}".${backupNote}`,
+    type: 'escalation-reject',
+  });
+  _listeners.forEach(fn => fn(eventId));
+  return rec;
+}
+
 // Post an update to an existing cascade. Situation evolved (new
 // intel, new dispatch, priority changed) and the requester wants
 // the recipient to see the update without creating a fresh

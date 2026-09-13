@@ -129,7 +129,7 @@ import {
   resolvePostIncidentChainEntry, postIncidentChainAllLeavesResolved,
   postIncidentChainLeaves, unionLinkedEventDomains,
   registerPostIncidentReportGenerator,
-  withdrawEscalation, updateEscalationAssessment,
+  withdrawEscalation, updateEscalationAssessment, rejectEscalation,
 } from './events.js';
 import { buildPostIncidentReport, emphasisForBranch } from './post_incident_report.js';
 import { evaluateClassificationPipeline, evaluateAttackProfileDetector } from './classification_pipeline.js';
@@ -20875,6 +20875,19 @@ async function main() {
         category: 'case',
         tooltip: 'Sets the progress state on this case. Blocked requires a reason. Visible in the operator log.',
       });
+      // Reject cascade — receiver declines to act on this cascade
+      // (wrong jurisdiction, no capacity, out-of-scope for their
+      // role). Requires a reason. Optional backup suggestion.
+      // Idempotent per events.js rejectEscalation. Only offered when
+      // the cascade isn't already rejected / withdrawn / closed.
+      if (rec.status !== 'rejected' && rec.status !== 'withdrawn') {
+        ctas.push({
+          label: 'Decline cascade', sub: 'Wrong jurisdiction / no capacity / out-of-scope', icon: '⊘', tone: 'warn',
+          action: 'cascade-reject', esc: rec.id,
+          category: 'case',
+          tooltip: `Declines this cascade with a reason visible to ${_senderLabel}. Sender can then route to a suggested backup or another agency.`,
+        });
+      }
     }
     ctas.push({
       label: 'Add note', sub: 'Append to audit trail', icon: '✎', tone: 'neutral',
@@ -22317,6 +22330,42 @@ async function main() {
               actorRole: getActiveRole(),
             });
             toast('Cascade withdrawn.', 'ok');
+            _lastConsoleSig = null;
+            renderReceiverView({ immediate: true });
+          },
+        });
+      }
+      else if (action === 'cascade-reject') {
+        // Receiver declines to act on this cascade. Reason required.
+        // Optional backup suggestion(s) — sender sees these in their
+        // case-file + can manually cascade to the backup if they
+        // agree. rejectEscalation is append-only + idempotent.
+        // Adapter mock stamps event.interactions[] for audit.
+        const evtId = _workspaceEventId || _selectedReceiverEventId;
+        if (!evtId || !escId) { toast('No cascade context', 'err'); return; }
+        _openTextPromptModal({
+          title: 'Decline cascade',
+          hint: 'Explain why you can\'t act on this. Sender sees the reason in their case-file. Optionally suggest a backup role id in the reason ("try politi-kbh").',
+          placeholder: 'Out of jurisdiction, this falls under Politi Kbh.',
+          submitLabel: 'Decline',
+          minChars: 5,
+          onSubmit: (reason) => {
+            const rec = rejectEscalation(evtId, escId, {
+              by: getActiveRole()?.id || 'receiver',
+              byRoleId: getActiveRole()?.id || null,
+              reason,
+              backupRoleIds: [],   // TODO: dedicated backup picker CTA in Phase D+
+            });
+            if (!rec) { toast('Decline failed. Reason required.', 'err'); return; }
+            fireEscalationAdapter('rejectEscalation', {
+              eventId: evtId,
+              event: getEvent(evtId),
+              escalationId: escId,
+              reason,
+              backupRoleIds: [],
+              actorRole: getActiveRole(),
+            });
+            toast('Cascade declined.', 'ok');
             _lastConsoleSig = null;
             renderReceiverView({ immediate: true });
           },
