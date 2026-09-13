@@ -1,0 +1,71 @@
+# Hovegård Substation — Energinet 400/132 kV transmission hub, Zealand
+# Wire contract: docs/integration-contracts.md Section 3 "Site definition"
+
+site_id: energinet_hovegaard
+label: Hovegård Substation
+code: HVG
+subtitle: 400/132 kV transmission hub, Zealand
+tenant: op-energinet
+site_type: energy
+mode: live
+
+coordinates:
+  lat: 55.73231
+  lon: 12.23379
+
+domain_scope:
+  - energy
+  - ground
+
+# Perimeter traced by Lucas in geojson.io — actual substation footprint.
+boundary:
+  - [12.2343942, 55.7341137]
+  - [12.2334633, 55.7339922]
+  - [12.2325459, 55.7332934]
+  - [12.2318309, 55.7331414]
+  - [12.2327888, 55.7309309]
+  - [12.2330327, 55.7308788]
+  - [12.2334478, 55.7309231]
+  - [12.2335327, 55.7308080]
+  - [12.2336648, 55.7308151]
+  - [12.2338440, 55.7306911]
+  - [12.2349652, 55.7308321]
+  - [12.2349567, 55.7309926]
+  - [12.2356579, 55.7311017]
+  - [12.2349179, 55.7330142]
+  - [12.2345738, 55.7340195]
+  - [12.2343942, 55.7341137]
+
+# 6 perimeter inner nodes + 1 core (HackRF) at centroid.
+sensors:
+  - { sensor_id: HVG-N01, label: "Hovegård Node 01",        position: { lat: 55.73147, lon: 12.23463 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: HVG-N02, label: "Hovegård Node 02",        position: { lat: 55.73253, lon: 12.23461 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: HVG-N03, label: "Hovegård Node 03",        position: { lat: 55.73347, lon: 12.23410 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 1, issues: null }
+  - { sensor_id: HVG-N04, label: "Hovegård Node 04",        position: { lat: 55.73302, lon: 12.23308 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: HVG-N05, label: "Hovegård Node 05",        position: { lat: 55.73206, lon: 12.23286 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: HVG-N06, label: "Hovegård Node 06",        position: { lat: 55.73141, lon: 12.23355 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: HVG-N07, label: "Hovegård Node 07 (Core)", position: { lat: 55.73231, lon: 12.23379 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE + HackRF", detectionsLast24h: 1, issues: null, isCore: true }
+
+sensorsOnline: 7
+sensorsTotal: 7
+stats:
+  flaggedEvents24h: 0
+  hostileEvents24h: 0
+  falseAlarms24h: 0
+
+# Energinet common receivers + regional politi/BRS/region overlay.
+receivers:
+  - { id: op-energinet,       mode: actor,    role: site-owner,          tier: 1 }
+  - { id: brs,                mode: actor,    role: emergency-response,  tier: 2 }
+  - { id: agency-ener,        mode: observer }
+  - { id: min-klim,           mode: observer }
+  - { id: forsvarskmd,        mode: observer }
+  - { id: fe,                 mode: observer }
+  - { id: agency-cfcs,        mode: observer }
+  - { id: pet,                mode: observer }
+  - { id: min-fors,           mode: observer }
+  - { id: brs-kemisk,         mode: observer, condition: cbrn-threat }
+  - { id: brs-nukleart,       mode: observer, condition: nuclear-threat }
+  - { id: politi-nordsj,      mode: actor,    role: primary-response,    tier: 1 }
+  - { id: brs-hedehusene,     mode: actor,    role: emergency-response,  tier: 2 }
+  - { id: region-hst,         mode: observer, condition: casualty-scenario }

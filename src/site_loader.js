@@ -51,6 +51,7 @@ const MANIFEST_SCHEMA = {
     code:         { type: 'string' },
     tenant:       { type: 'string', pattern: '^[a-z0-9][a-z0-9-]*$' },
     site_type:    { type: 'string', enum: ['airport', 'port', 'energy', 'government', 'data', 'gov-facility', 'other'] },
+    subtitle:     { type: 'string' },
     coordinates: {
       type: 'object',
       required: ['lat', 'lon'],
@@ -251,6 +252,7 @@ export function normalizeManifest(manifest) {
     id: manifest.site_id,
     name: manifest.label,
     code: manifest.code || '',
+    subtitle: manifest.subtitle || '',
     coordinates: {
       lat: manifest.coordinates?.lat,
       lon: manifest.coordinates?.lon,

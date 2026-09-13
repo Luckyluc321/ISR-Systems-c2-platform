@@ -1,0 +1,167 @@
+# Copenhagen Airport (CPH / EKCH) site manifest
+# Wire contract: docs/integration-contracts.md Section 3 "Site definition"
+# Flow doc:      docs/sites/cph-airport.md
+
+site_id: cph
+label: Copenhagen Airport
+code: CPH
+tenant: op-cph-airport
+site_type: airport
+mode: live
+
+coordinates:
+  lat: 55.618
+  lon: 12.647
+
+domain_scope:
+  - aviation
+  - ground
+
+# Real CPH aerodrome polygon, OSM way 12786040 (Københavns Lufthavn).
+# Full 290-vertex outline simplified to 74 for render performance.
+# Actual area 10.44 km² (previously used convex hull was 15.41 km², included non-airport land).
+boundary:
+  - [12.67490, 55.62447]
+  - [12.67412, 55.62634]
+  - [12.67338, 55.62768]
+  - [12.67195, 55.62858]
+  - [12.66974, 55.62920]
+  - [12.66552, 55.63139]
+  - [12.66382, 55.63217]
+  - [12.66285, 55.63232]
+  - [12.66163, 55.63228]
+  - [12.66034, 55.63206]
+  - [12.65830, 55.63120]
+  - [12.65731, 55.63065]
+  - [12.65683, 55.62923]
+  - [12.65590, 55.62869]
+  - [12.65450, 55.62819]
+  - [12.64626, 55.62930]
+  - [12.64254, 55.62964]
+  - [12.64224, 55.62954]
+  - [12.63782, 55.62962]
+  - [12.63281, 55.62932]
+  - [12.63239, 55.62904]
+  - [12.63002, 55.62893]
+  - [12.62791, 55.62888]
+  - [12.62636, 55.62971]
+  - [12.62714, 55.62690]
+  - [12.62747, 55.62245]
+  - [12.62781, 55.62089]
+  - [12.62812, 55.62050]
+  - [12.63082, 55.62025]
+  - [12.63202, 55.61915]
+  - [12.63107, 55.61806]
+  - [12.63068, 55.61614]
+  - [12.63091, 55.61399]
+  - [12.63015, 55.61350]
+  - [12.62499, 55.61146]
+  - [12.61818, 55.60578]
+  - [12.61176, 55.60225]
+  - [12.60488, 55.59736]
+  - [12.59874, 55.59575]
+  - [12.59756, 55.59373]
+  - [12.59754, 55.59352]
+  - [12.59903, 55.59327]
+  - [12.59647, 55.59117]
+  - [12.59674, 55.58893]
+  - [12.59729, 55.58827]
+  - [12.59825, 55.58777]
+  - [12.59924, 55.58674]
+  - [12.60396, 55.58635]
+  - [12.60765, 55.58751]
+  - [12.60829, 55.58884]
+  - [12.61476, 55.59460]
+  - [12.62190, 55.59801]
+  - [12.62341, 55.59951]
+  - [12.62285, 55.60065]
+  - [12.62778, 55.60030]
+  - [12.63377, 55.60119]
+  - [12.63549, 55.60139]
+  - [12.63619, 55.60172]
+  - [12.63641, 55.60189]
+  - [12.63633, 55.60237]
+  - [12.64233, 55.60461]
+  - [12.64514, 55.60437]
+  - [12.65438, 55.60650]
+  - [12.65963, 55.60671]
+  - [12.66179, 55.60682]
+  - [12.66226, 55.60692]
+  - [12.66994, 55.60682]
+  - [12.67443, 55.60692]
+  - [12.67670, 55.60789]
+  - [12.67948, 55.60994]
+  - [12.67962, 55.61119]
+  - [12.67901, 55.61283]
+  - [12.67753, 55.61679]
+  - [12.67490, 55.62447]
+
+# 22-sensor mesh: 6 OSM-verified rooftop anchors + 16 hex-grid fill.
+# Coverage radius 1000m, hex spacing 800m → 95.4% min-2 coverage across
+# the real 10.44 km² aerodrome polygon (not the earlier convex hull).
+# Hex-fill sensors mounted on nearest airside infrastructure (poles,
+# ILS cabinets, fire towers, perimeter towers).
+sensors:
+  # ── OSM-verified rooftop anchors ──
+  - { sensor_id: N01, label: "Pier A Rooftop",              position: { lat: 55.62928, lon: 12.64203 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 6,  issues: null }
+  - { sensor_id: N02, label: "Terminal 2 Rooftop",          position: { lat: 55.62911, lon: 12.64531 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 4,  issues: null }
+  - { sensor_id: N03, label: "Tower Syd, ATC Core",         position: { lat: 55.61180, lon: 12.65760 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE + HackRF", detectionsLast24h: 12, issues: null, isCore: true }
+  - { sensor_id: N04, label: "SAS Hangar 141",              position: { lat: 55.61289, lon: 12.65980 }, coverage_radius_m: 1000, modalities: [RF, Acoustic],         status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 3,  issues: null }
+  - { sensor_id: N05, label: "Hangar 3, N Maintenance",     position: { lat: 55.62946, lon: 12.65673 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: degraded, hardware: "Radxa Rock 4SE",          detectionsLast24h: 1,  issues: "Acoustic sensor return anomaly, investigation flagged 2h ago" }
+  - { sensor_id: N06, label: "Pier E Rooftop",              position: { lat: 55.62796, lon: 12.65426 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 5,  issues: null }
+  # ── Hex-grid fill (16 sensors) ──
+  - { sensor_id: N07, label: "SW Runway Approach",          position: { lat: 55.59289, lon: 12.59871 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE + HackRF", detectionsLast24h: 6,  issues: null }
+  - { sensor_id: N08, label: "S W Airside",                 position: { lat: 55.59858, lon: 12.60673 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 3,  issues: null }
+  - { sensor_id: N09, label: "S W Airside",                 position: { lat: 55.60064, lon: 12.62650 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 4,  issues: null }
+  - { sensor_id: N10, label: "S Central Airside",           position: { lat: 55.60402, lon: 12.63999 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 5,  issues: null }
+  - { sensor_id: N11, label: "S Central Airside",           position: { lat: 55.60487, lon: 12.64219 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: offline,  hardware: "Radxa Rock 4SE",          detectionsLast24h: 0,  issues: "Power fault reported 47 min ago, field replacement scheduled" }
+  - { sensor_id: N12, label: "Central W Airside",           position: { lat: 55.61324, lon: 12.63008 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 2,  issues: null }
+  - { sensor_id: N13, label: "Central Airside",             position: { lat: 55.61019, lon: 12.64620 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 3,  issues: null }
+  - { sensor_id: N14, label: "Central E Airside",           position: { lat: 55.60694, lon: 12.67149 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 4,  issues: null }
+  - { sensor_id: N15, label: "Runway 04R Central",          position: { lat: 55.61643, lon: 12.63982 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE + HackRF", detectionsLast24h: 11, issues: null }
+  - { sensor_id: N16, label: "Central Apron",               position: { lat: 55.61643, lon: 12.65258 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 6,  issues: null }
+  - { sensor_id: N17, label: "Central E Airside",           position: { lat: 55.61643, lon: 12.66534 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 2,  issues: null }
+  - { sensor_id: N18, label: "NW Perimeter",                position: { lat: 55.62001, lon: 12.63104 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 3,  issues: null }
+  - { sensor_id: N19, label: "N Central Airside",           position: { lat: 55.62267, lon: 12.64620 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 4,  issues: null }
+  - { sensor_id: N20, label: "N Central Airside",           position: { lat: 55.62267, lon: 12.65896 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 5,  issues: null }
+  - { sensor_id: N21, label: "NE Perimeter",                position: { lat: 55.62295, lon: 12.67495 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 6,  issues: null }
+  - { sensor_id: N22, label: "NW Perimeter",                position: { lat: 55.62863, lon: 12.62677 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 2,  issues: null }
+  - { sensor_id: N23, label: "N Perimeter Bulge",           position: { lat: 55.63030, lon: 12.65800 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0,  issues: null }
+  - { sensor_id: N24, label: "NE Perimeter Corner",         position: { lat: 55.63170, lon: 12.66250 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0,  issues: null }
+
+sensorsOnline: 22
+sensorsTotal: 24
+stats:
+  flaggedEvents24h: 11
+  hostileEvents24h: 1
+  falseAlarms24h: 4
+
+# CPH receivers — largest scenario surface area.
+receivers:
+  # Actors
+  - { id: politi-kbh,              mode: actor,    role: primary-response,    tier: 1 }
+  - { id: politi-vestegn,          mode: actor,    role: primary-response,    tier: 1 }
+  - { id: brs-hedehusene,          mode: actor,    role: emergency-response,  tier: 2 }
+  - { id: flv-skrydstrup,          mode: actor,    role: air-response,        tier: 3 }
+  - { id: flv-karup,               mode: actor,    role: air-response,        tier: 3 }
+  - { id: agency-traf,             mode: actor,    role: regulator,           tier: 4 }
+  - { id: kom-taarnby,             mode: actor,    role: municipal-crisis,    tier: 4 }
+  # Observers
+  - { id: rigspoliti,              mode: observer }
+  - { id: pet,                     mode: observer }
+  - { id: politi-nsk,              mode: observer }
+  - { id: forsvaret,               mode: observer }
+  - { id: forsvarskmd,             mode: observer }
+  - { id: fe,                      mode: observer }
+  - { id: agency-cfcs,             mode: observer }
+  - { id: min-just,                mode: observer }
+  - { id: min-fors,                mode: observer }
+  - { id: min-erhverv,             mode: observer }
+  # Conditional observers
+  - { id: region-hst,              mode: observer, condition: casualty-scenario }
+  - { id: hospital-rigshospitalet, mode: observer, condition: mass-casualty }
+  - { id: brs-kemisk,              mode: observer, condition: cbrn-threat }
+  - { id: brs-nukleart,            mode: observer, condition: nuclear-threat }
+  - { id: hjv-distrikt-kbh,        mode: observer, condition: sustained-incident }
+
+flow_doc: docs/sites/cph-airport.md

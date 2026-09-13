@@ -1,0 +1,64 @@
+# Kassø Substation — Energinet 400 kV DE border interconnector, South Jutland
+# Wire contract: docs/integration-contracts.md Section 3 "Site definition"
+
+site_id: energinet_kassoe
+label: Kassø Substation
+code: KAS
+subtitle: 400 kV DE border interconnector, South Jutland
+tenant: op-energinet
+site_type: energy
+mode: live
+
+coordinates:
+  lat: 55.03682
+  lon: 9.26960
+
+domain_scope:
+  - energy
+  - ground
+
+# Perimeter traced by Lucas in geojson.io — reordered counterclockwise
+# from centroid (Lucas's click order zigzagged and would have self-intersected).
+boundary:
+  - [9.2659134, 55.0362367]
+  - [9.2658854, 55.0352927]
+  - [9.2703221, 55.0354002]
+  - [9.2733099, 55.0356456]
+  - [9.2725845, 55.0386613]
+  - [9.2709039, 55.0385173]
+  - [9.2700660, 55.0382310]
+  - [9.2673590, 55.0382310]
+  - [9.2660873, 55.0373785]
+  - [9.2659134, 55.0362367]
+
+sensors:
+  - { sensor_id: KAS-N01, label: "Kassø Node 01",        position: { lat: 55.03593, lon: 9.27049 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: KAS-N02, label: "Kassø Node 02",        position: { lat: 55.03738, lon: 9.27169 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: KAS-N03, label: "Kassø Node 03",        position: { lat: 55.03774, lon: 9.26984 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 1, issues: null }
+  - { sensor_id: KAS-N04, label: "Kassø Node 04",        position: { lat: 55.03774, lon: 9.26868 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: KAS-N05, label: "Kassø Node 05",        position: { lat: 55.03618, lon: 9.26719 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: KAS-N06, label: "Kassø Node 06",        position: { lat: 55.03588, lon: 9.26935 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: KAS-N07, label: "Kassø Node 07 (Core)", position: { lat: 55.03682, lon: 9.26960 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE + HackRF", detectionsLast24h: 1, issues: null, isCore: true }
+
+sensorsOnline: 7
+sensorsTotal: 7
+stats:
+  flaggedEvents24h: 0
+  hostileEvents24h: 0
+  falseAlarms24h: 0
+
+receivers:
+  - { id: op-energinet,         mode: actor,    role: site-owner,          tier: 1 }
+  - { id: brs,                  mode: actor,    role: emergency-response,  tier: 2 }
+  - { id: agency-ener,          mode: observer }
+  - { id: min-klim,             mode: observer }
+  - { id: forsvarskmd,          mode: observer }
+  - { id: fe,                   mode: observer }
+  - { id: agency-cfcs,          mode: observer }
+  - { id: pet,                  mode: observer }
+  - { id: min-fors,             mode: observer }
+  - { id: brs-kemisk,           mode: observer, condition: cbrn-threat }
+  - { id: brs-nukleart,         mode: observer, condition: nuclear-threat }
+  - { id: politi-sydsonderjyl,  mode: actor,    role: primary-response,    tier: 1 }
+  - { id: brs-haderslev,        mode: actor,    role: emergency-response,  tier: 2 }
+  - { id: region-syd,           mode: observer, condition: casualty-scenario }

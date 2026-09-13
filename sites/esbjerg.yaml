@@ -1,0 +1,97 @@
+# Esbjerg Harbour site manifest
+# Wire contract: docs/integration-contracts.md Section 3 "Site definition"
+
+site_id: esbjerg
+label: Esbjerg Harbour
+code: EBJ
+tenant: op-esbjerg-havn
+site_type: port
+mode: live
+
+coordinates:
+  lat: 55.467
+  lon: 8.450
+
+domain_scope:
+  - maritime
+  - ground
+
+# Outer site boundary, traced by Lucas in geojson.io.
+boundary:
+  - [8.5006587, 55.4530946]
+  - [8.4508048, 55.4620246]
+  - [8.4463858, 55.4633778]
+  - [8.4425311, 55.4645631]
+  - [8.4375317, 55.4666022]
+  - [8.4301762, 55.4722759]
+  - [8.4182553, 55.4839584]
+  - [8.4135281, 55.4861711]
+  - [8.4038221, 55.4831762]
+  - [8.4308157, 55.4588721]
+  - [8.4707841, 55.4487676]
+  - [8.4749522, 55.4440868]
+  - [8.4828716, 55.4427532]
+  - [8.5024227, 55.4525786]
+  - [8.5006719, 55.4530695]
+
+# Sub-area lines — hand-traced quay / kaj edges from geojson.io.
+# Segmented by click-gap (>250m breaks a segment) so each entry is one
+# continuous edge trace, not spaghetti across the harbour.
+subLines:
+  - [[8.5007073, 55.4530594], [8.5006254, 55.4522692], [8.4986447, 55.4519318], [8.4975929, 55.4511417], [8.4970875, 55.450367]]
+  - [[8.4832682, 55.4442812], [8.4822744, 55.4439331], [8.481004, 55.4437085]]
+  - [[8.4771519, 55.4449171], [8.4766329, 55.4448707], [8.4754444, 55.4452348], [8.475704, 55.4454672], [8.475581, 55.4456067], [8.4754035, 55.4460018]]
+  - [[8.480362, 55.4471175], [8.4806233, 55.4475663]]
+  - [[8.4758287, 55.4486897], [8.4758833, 55.4487749], [8.4767985, 55.4485502]]
+  - [[8.4831301, 55.450068], [8.4834235, 55.4504091], [8.4838333, 55.4505795], [8.4821121, 55.4520978]]
+  - [[8.4787024, 55.4508073], [8.4785809, 55.4508711], [8.4801055, 55.4514905], [8.4813858, 55.4519606], [8.4793416, 55.4537331]]
+  - [[8.4751996, 55.4522037], [8.4721267, 55.4510503], [8.4712505, 55.4497901], [8.4710398, 55.4497382], [8.4698626, 55.4500148]]
+
+# 18 sensors, positions provided by Lucas via geojson.io. No repositioning,
+# no OSM snapping. Coordinates are exact from his GeoJSON output.
+sensors:
+  - { sensor_id: N01, label: "Esbjerg Node 01",        position: { lat: 55.48297, lon: 8.41404 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 1, issues: null }
+  - { sensor_id: N02, label: "Esbjerg Node 02",        position: { lat: 55.48435, lon: 8.40937 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N03, label: "Esbjerg Node 03",        position: { lat: 55.47793, lon: 8.41101 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 2, issues: null }
+  - { sensor_id: N04, label: "Esbjerg Node 04",        position: { lat: 55.47541, lon: 8.41733 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 1, issues: null }
+  - { sensor_id: N05, label: "Esbjerg Node 05",        position: { lat: 55.47523, lon: 8.42507 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 3, issues: null }
+  - { sensor_id: N06, label: "Esbjerg Node 06",        position: { lat: 55.47058, lon: 8.42319 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: degraded, hardware: "Radxa Rock 4SE",          detectionsLast24h: 1, issues: "RF grid interference, calibration scheduled 08:00Z" }
+  - { sensor_id: N07, label: "Esbjerg Node 07",        position: { lat: 55.47209, lon: 8.42827 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 2, issues: null }
+  - { sensor_id: N08, label: "Esbjerg Node 08 (Core)", position: { lat: 55.46934, lon: 8.43264 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE + HackRF", detectionsLast24h: 6, issues: null, isCore: true }
+  - { sensor_id: N09, label: "Esbjerg Node 09",        position: { lat: 55.46564, lon: 8.43071 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 3, issues: null }
+  - { sensor_id: N10, label: "Esbjerg Node 10",        position: { lat: 55.46496, lon: 8.43878 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 4, issues: null }
+  - { sensor_id: N11, label: "Esbjerg Node 11",        position: { lat: 55.45964, lon: 8.43269 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: offline,  hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: "Power fault reported 1h ago, field replacement in progress" }
+  - { sensor_id: N12, label: "Esbjerg Node 12",        position: { lat: 55.46248, lon: 8.43628 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 2, issues: null }
+  - { sensor_id: N13, label: "Esbjerg Node 13",        position: { lat: 55.46097, lon: 8.44113 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 3, issues: null }
+  - { sensor_id: N14, label: "Esbjerg Node 14",        position: { lat: 55.46248, lon: 8.44956 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 2, issues: null }
+  - { sensor_id: N15, label: "Esbjerg Node 15",        position: { lat: 55.45674, lon: 8.44451 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 1, issues: null }
+  - { sensor_id: N16, label: "Esbjerg Node 16",        position: { lat: 55.46073, lon: 8.45670 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 2, issues: null }
+  - { sensor_id: N17, label: "Esbjerg Node 17",        position: { lat: 55.45244, lon: 8.46083 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 1, issues: null }
+  - { sensor_id: N18, label: "Esbjerg Node 18",        position: { lat: 55.45725, lon: 8.47638 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 2, issues: null }
+
+sensorsOnline: 16
+sensorsTotal: 18
+stats:
+  flaggedEvents24h: 4
+  hostileEvents24h: 0
+  falseAlarms24h: 2
+
+# Esbjerg falls within Politi Sydvestjylland (per politi.dk district map);
+# Syd- og Sønderjyllands covers Aabenraa + Sønderborg further south.
+receivers:
+  # Actors (maritime + industrial)
+  - { id: politi-sydvest,         mode: actor,    role: primary-response,    tier: 1 }
+  - { id: brs-haderslev,          mode: actor,    role: emergency-response,  tier: 2 }
+  - { id: sov-frederikshavn,      mode: actor,    role: maritime-response,   tier: 3 }
+  - { id: agency-sof,             mode: actor,    role: regulator,           tier: 3 }
+  - { id: kom-esbjerg,            mode: actor,    role: municipal-crisis,    tier: 4 }
+  # Observers (in the loop, no CTAs)
+  - { id: rigspoliti,             mode: observer }
+  - { id: pet,                    mode: observer }
+  - { id: forsvaret,              mode: observer }
+  - { id: fe,                     mode: observer }
+  - { id: min-just,               mode: observer }
+  - { id: min-fors,               mode: observer }
+  # Conditional observers (auto-added only on matching condition)
+  - { id: region-syd,             mode: observer, condition: casualty-scenario }
+  - { id: brs-kemisk,             mode: observer, condition: cbrn-threat }

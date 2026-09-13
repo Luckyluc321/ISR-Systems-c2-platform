@@ -1,0 +1,76 @@
+# Landerupgård Substation — Energinet 400/150 kV transmission node, Fredericia
+# Wire contract: docs/integration-contracts.md Section 3 "Site definition"
+
+site_id: energinet_landerupgaard
+label: Landerupgård Substation
+code: LDG
+subtitle: 400/150 kV transmission node, Fredericia
+tenant: op-energinet
+site_type: energy
+mode: live
+
+coordinates:
+  lat: 55.56398
+  lon: 9.54762
+
+domain_scope:
+  - energy
+  - ground
+
+# Perimeter traced by Lucas in geojson.io — actual substation footprint.
+boundary:
+  - [9.5488024, 55.5621141]
+  - [9.5479337, 55.5614888]
+  - [9.5474968, 55.5615323]
+  - [9.5468167, 55.5617476]
+  - [9.5463110, 55.5620587]
+  - [9.5462083, 55.5621333]
+  - [9.5457829, 55.5623221]
+  - [9.5438513, 55.5628478]
+  - [9.5434814, 55.5629119]
+  - [9.5438700, 55.5633083]
+  - [9.5441950, 55.5632686]
+  - [9.5443352, 55.5632939]
+  - [9.5447175, 55.5635137]
+  - [9.5449164, 55.5640043]
+  - [9.5451395, 55.5642385]
+  - [9.5452261, 55.5646780]
+  - [9.5452063, 55.5650710]
+  - [9.5465219, 55.5664578]
+  - [9.5516053, 55.5649691]
+  - [9.5504208, 55.5636279]
+  - [9.5493415, 55.5624740]
+  - [9.5488776, 55.5622150]
+  - [9.5488024, 55.5621141]
+
+sensors:
+  - { sensor_id: LDG-N01, label: "Landerupgård Node 01",        position: { lat: 55.56295, lon: 9.54864 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: LDG-N02, label: "Landerupgård Node 02",        position: { lat: 55.56465, lon: 9.55012 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: LDG-N03, label: "Landerupgård Node 03",        position: { lat: 55.56528, lon: 9.54797 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 1, issues: null }
+  - { sensor_id: LDG-N04, label: "Landerupgård Node 04",        position: { lat: 55.56513, lon: 9.54647 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: LDG-N05, label: "Landerupgård Node 05",        position: { lat: 55.56327, lon: 9.54499 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: LDG-N06, label: "Landerupgård Node 06",        position: { lat: 55.56249, lon: 9.54722 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: LDG-N07, label: "Landerupgård Node 07 (Core)", position: { lat: 55.56398, lon: 9.54762 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE + HackRF", detectionsLast24h: 1, issues: null, isCore: true }
+
+sensorsOnline: 7
+sensorsTotal: 7
+stats:
+  flaggedEvents24h: 0
+  hostileEvents24h: 0
+  falseAlarms24h: 0
+
+receivers:
+  - { id: op-energinet,       mode: actor,    role: site-owner,          tier: 1 }
+  - { id: brs,                mode: actor,    role: emergency-response,  tier: 2 }
+  - { id: agency-ener,        mode: observer }
+  - { id: min-klim,           mode: observer }
+  - { id: forsvarskmd,        mode: observer }
+  - { id: fe,                 mode: observer }
+  - { id: agency-cfcs,        mode: observer }
+  - { id: pet,                mode: observer }
+  - { id: min-fors,           mode: observer }
+  - { id: brs-kemisk,         mode: observer, condition: cbrn-threat }
+  - { id: brs-nukleart,       mode: observer, condition: nuclear-threat }
+  - { id: politi-sydostjyl,   mode: actor,    role: primary-response,    tier: 1 }
+  - { id: brs-haderslev,      mode: actor,    role: emergency-response,  tier: 2 }
+  - { id: region-syd,         mode: observer, condition: casualty-scenario }

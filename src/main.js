@@ -1,32 +1,22 @@
 import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import './style.css';
-import { SITES as SITES_CORE } from './sites.js';
-import { ENERGINET_SITES } from './sites_energinet.js';
-import { loadSitesFromGlob, mergeSites, siteLoaderCoverage } from './site_loader.js';
+import { siteLoaderCoverage } from './site_loader.js';
+import { SITES, SITE_LOAD_ERRORS as _siteLoaderErrors } from './sites_registry.js';
 
-// Manifest-driven sites (sites/*.yaml) per docs/integration-contracts.md
-// Section 3. Vite's import.meta.glob pulls YAML contents at bundle time
-// so no runtime filesystem access is needed. Loader parses + validates +
-// normalises to the runtime SITES shape existing consumers already read.
-const _yamlManifests = import.meta.glob('/sites/*.yaml', { query: '?raw', import: 'default', eager: true });
-const { sites: SITES_FROM_MANIFESTS, errors: _siteLoaderErrors } = loadSitesFromGlob(_yamlManifests);
+// Every site (airport, port, Energinet substation) is a YAML manifest under
+// sites/. sites_registry.js is the single point that runs the loader and
+// exports the merged SITES object every consumer (main.js, events.js,
+// nn_source.js, ...) imports. No inline hardcoded site definitions anywhere.
+// New site = drop a YAML into sites/ and rebuild.
 if (_siteLoaderErrors.length) {
   for (const e of _siteLoaderErrors) console.warn(`[site_loader] ${e.file}: ${e.error}`);
 }
 
-// Merge order: manifest-loaded sites first, then inline SITES_CORE +
-// ENERGINET_SITES overlay. Inline entries take precedence for any id
-// collision during the migration window — safer default (existing
-// runtime behaviour preserved). Once a site is migrated to a manifest,
-// delete its inline entry and the manifest becomes the sole source.
-const SITES = mergeSites(SITES_FROM_MANIFESTS, { ...SITES_CORE, ...ENERGINET_SITES });
-
 if (typeof window !== 'undefined') {
   window.__isr_sites = {
-    coverage: () => siteLoaderCoverage(SITES_FROM_MANIFESTS, { ...SITES_CORE, ...ENERGINET_SITES }),
-    manifests: () => SITES_FROM_MANIFESTS,
-    inline: () => ({ ...SITES_CORE, ...ENERGINET_SITES }),
+    coverage: () => siteLoaderCoverage(SITES, {}),
+    manifests: () => SITES,
     merged: () => SITES,
     errors: () => _siteLoaderErrors,
   };
@@ -115,8 +105,10 @@ import {
   TEMPLATES, addLiveTrack, markTrackClosed, removeLiveTrack, anyTrackLive,
   onDroneUpdate, distanceToPerimeter, pointInPolygon, makeSubstationThreats,
 } from './drones.js';
-// Register substation threat templates for each Energinet site (module init side effect)
-Object.values(ENERGINET_SITES).forEach(site => {
+// Register substation threat templates for every energy-typed site (module
+// init side effect). Filters SITES by site_type: energy so future Energinet
+// substations added purely via a YAML manifest pick this up automatically.
+Object.values(SITES).filter(s => s.siteType === 'energy').forEach(site => {
   const sensorIds = site.sensors.map(s => s.id);
   const threats = makeSubstationThreats(site.id, site.name, site.coordinates.lat, site.coordinates.lon, sensorIds);
   Object.assign(TEMPLATES, threats);
@@ -1151,7 +1143,7 @@ async function main() {
             const activeOp = (typeof getActiveRole === 'function') ? getActiveRole() : null;
             const opSiteId = activeOp?.siteIds?.[0];
             let ref;
-            if (opSiteId && SITES_CORE[opSiteId]?.coordinates) ref = SITES_CORE[opSiteId].coordinates;
+            if (opSiteId && SITES[opSiteId]?.coordinates) ref = SITES[opSiteId].coordinates;
             else if (typeof _cameraCenterLatLon === 'function') ref = _cameraCenterLatLon(viewer);
             if (!ref || ref.lat == null) throw new Error('No site or camera center for GDK fetch');
             const features = await fetchGeoDanmarkFeatures(layer, ref, { bboxKm: 3, credsToken: _datafordelerCreds });
@@ -13481,8 +13473,10 @@ async function main() {
       { key: 'billund_lego_recon', label: 'LEGO adjacency recon (transits BLL → LEGO HQ)', cls: 'recon' },
     ],
   };
-  // Auto-generate for Energinet sites (3 threats each)
-  Object.keys(ENERGINET_SITES).forEach(sid => {
+  // Auto-generate for every energy-typed site (3 threats each). Filters
+  // SITES by siteType so new Energinet substations added as YAML manifests
+  // pick this up automatically.
+  Object.keys(SITES).filter(sid => SITES[sid].siteType === 'energy').forEach(sid => {
     THREAT_MENU[sid] = [
       { key: `${sid}_quad_hostile`, label: 'Quadcopter, hostile' },
       { key: `${sid}_fixedwing_hostile`, label: 'Fixed wing reconnaissance, hostile' },

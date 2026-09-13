@@ -1,0 +1,66 @@
+# Bjæverskov HVDC Kontek — Energinet 400 kV HVDC interconnector to Germany
+# Wire contract: docs/integration-contracts.md Section 3 "Site definition"
+
+site_id: energinet_bjaeverskov
+label: Bjæverskov HVDC Kontek
+code: BJK
+subtitle: 400 kV HVDC interconnector to Germany
+tenant: op-energinet
+site_type: energy
+mode: live
+
+coordinates:
+  lat: 55.45151
+  lon: 12.00729
+
+domain_scope:
+  - energy
+  - ground
+
+# Perimeter traced by Lucas in geojson.io — actual substation footprint.
+boundary:
+  - [12.0088147, 55.4495915]
+  - [12.0109284, 55.4516768]
+  - [12.0104211, 55.4524399]
+  - [12.0099309, 55.4528970]
+  - [12.0097655, 55.4530528]
+  - [12.0047915, 55.4531037]
+  - [12.0043970, 55.4528783]
+  - [12.0041263, 55.4522751]
+  - [12.0039797, 55.4507731]
+  - [12.0042079, 55.4505144]
+  - [12.0070781, 55.4496646]
+  - [12.0079582, 55.4496180]
+  - [12.0088147, 55.4495915]
+
+sensors:
+  - { sensor_id: BJK-N01, label: "Bjæverskov Node 01",        position: { lat: 55.45039, lon: 12.00841 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: BJK-N02, label: "Bjæverskov Node 02",        position: { lat: 55.45206, lon: 12.00936 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: BJK-N03, label: "Bjæverskov Node 03",        position: { lat: 55.45253, lon: 12.00756 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 1, issues: null }
+  - { sensor_id: BJK-N04, label: "Bjæverskov Node 04",        position: { lat: 55.45254, lon: 12.00626 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: BJK-N05, label: "Bjæverskov Node 05",        position: { lat: 55.45095, lon: 12.00521 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: BJK-N06, label: "Bjæverskov Node 06",        position: { lat: 55.45036, lon: 12.00698 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: BJK-N07, label: "Bjæverskov Node 07 (Core)", position: { lat: 55.45151, lon: 12.00729 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE + HackRF", detectionsLast24h: 1, issues: null, isCore: true }
+
+sensorsOnline: 7
+sensorsTotal: 7
+stats:
+  flaggedEvents24h: 0
+  hostileEvents24h: 0
+  falseAlarms24h: 0
+
+receivers:
+  - { id: op-energinet,         mode: actor,    role: site-owner,          tier: 1 }
+  - { id: brs,                  mode: actor,    role: emergency-response,  tier: 2 }
+  - { id: agency-ener,          mode: observer }
+  - { id: min-klim,             mode: observer }
+  - { id: forsvarskmd,          mode: observer }
+  - { id: fe,                   mode: observer }
+  - { id: agency-cfcs,          mode: observer }
+  - { id: pet,                  mode: observer }
+  - { id: min-fors,             mode: observer }
+  - { id: brs-kemisk,           mode: observer, condition: cbrn-threat }
+  - { id: brs-nukleart,         mode: observer, condition: nuclear-threat }
+  - { id: politi-sydsjaelland,  mode: actor,    role: primary-response,    tier: 1 }
+  - { id: brs-hedehusene,       mode: actor,    role: emergency-response,  tier: 2 }
+  - { id: region-sjl,           mode: observer, condition: casualty-scenario }

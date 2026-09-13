@@ -1,0 +1,70 @@
+# Ferslev Substation — Energinet 400/150 kV transmission node, North Jutland
+# Wire contract: docs/integration-contracts.md Section 3 "Site definition"
+
+site_id: energinet_ferslev
+label: Ferslev Substation
+code: FRV
+subtitle: 400/150 kV transmission node, North Jutland
+tenant: op-energinet
+site_type: energy
+mode: live
+
+coordinates:
+  lat: 56.95653
+  lon: 9.87912
+
+domain_scope:
+  - energy
+  - ground
+
+boundary:
+  - [9.8792539, 56.9559466]
+  - [9.8804182, 56.9556759]
+  - [9.8808422, 56.9558067]
+  - [9.8815782, 56.9566966]
+  - [9.8816662, 56.9569932]
+  - [9.8795222, 56.9575516]
+  - [9.8792262, 56.9575385]
+  - [9.8791382, 56.9574687]
+  - [9.8782045, 56.9576856]
+  - [9.8774047, 56.9569674]
+  - [9.8766029, 56.9559776]
+  - [9.8776881, 56.9556971]
+  - [9.8776840, 56.9555613]
+  - [9.8776954, 56.9555051]
+  - [9.8784692, 56.9553201]
+  - [9.8786675, 56.9555405]
+  - [9.8788924, 56.9555072]
+  - [9.8792539, 56.9559466]
+
+sensors:
+  - { sensor_id: FRV-N01, label: "Ferslev Node 01",        position: { lat: 56.95606, lon: 9.87959 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: FRV-N02, label: "Ferslev Node 02",        position: { lat: 56.95690, lon: 9.88050 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: FRV-N03, label: "Ferslev Node 03",        position: { lat: 56.95719, lon: 9.87929 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 1, issues: null }
+  - { sensor_id: FRV-N04, label: "Ferslev Node 04",        position: { lat: 56.95721, lon: 9.87844 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: FRV-N05, label: "Ferslev Node 05",        position: { lat: 56.95613, lon: 9.87763 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: FRV-N06, label: "Ferslev Node 06",        position: { lat: 56.95587, lon: 9.87894 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: FRV-N07, label: "Ferslev Node 07 (Core)", position: { lat: 56.95653, lon: 9.87912 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE + HackRF", detectionsLast24h: 1, issues: null, isCore: true }
+
+sensorsOnline: 7
+sensorsTotal: 7
+stats:
+  flaggedEvents24h: 0
+  hostileEvents24h: 0
+  falseAlarms24h: 0
+
+receivers:
+  - { id: op-energinet,       mode: actor,    role: site-owner,          tier: 1 }
+  - { id: brs,                mode: actor,    role: emergency-response,  tier: 2 }
+  - { id: agency-ener,        mode: observer }
+  - { id: min-klim,           mode: observer }
+  - { id: forsvarskmd,        mode: observer }
+  - { id: fe,                 mode: observer }
+  - { id: agency-cfcs,        mode: observer }
+  - { id: pet,                mode: observer }
+  - { id: min-fors,           mode: observer }
+  - { id: brs-kemisk,         mode: observer, condition: cbrn-threat }
+  - { id: brs-nukleart,       mode: observer, condition: nuclear-threat }
+  - { id: politi-nordjyl,     mode: actor,    role: primary-response,    tier: 1 }
+  - { id: brs-thisted,        mode: actor,    role: emergency-response,  tier: 2 }
+  - { id: region-nord,        mode: observer, condition: casualty-scenario }

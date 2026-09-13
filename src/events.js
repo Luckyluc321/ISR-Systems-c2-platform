@@ -10,7 +10,7 @@
 // surfaces populated in parallel — swap consumers to event.subject at your
 // own pace. New agents MUST read event.subject.
 import { syncEventSubject, applyNnTickToSubject } from './detection_subject.js';
-import { SITES } from './sites.js';
+import { SITES } from './sites_registry.js';
 
 // Schema version stamps. Every escalation record + assessment package
 // gets its version stamped at write time so future consumers can gate

@@ -1,0 +1,67 @@
+# Amager Koblingsstation — Energinet 132 kV switching station, Copenhagen
+# Wire contract: docs/integration-contracts.md Section 3 "Site definition"
+# Location: Irlandsvej 95
+
+site_id: energinet_amager_koblingsstation
+label: Amager Koblingsstation
+code: AMK
+subtitle: "132 kV switching station, Copenhagen (Irlandsvej 95)"
+tenant: op-energinet
+site_type: energy
+mode: live
+
+coordinates:
+  lat: 55.6410
+  lon: 12.6088
+
+domain_scope:
+  - energy
+  - ground
+
+# Perimeter traced by Lucas in geojson.io — reordered counterclockwise from centroid.
+boundary:
+  - [12.6096577, 55.6411289]
+  - [12.6094475, 55.6415060]
+  - [12.6074161, 55.6412688]
+  - [12.6078148, 55.6404295]
+  - [12.6097547, 55.6406515]
+  - [12.6096577, 55.6411289]
+
+sensors:
+  - { sensor_id: AMK-N01, label: "Amager Node 01",        position: { lat: 55.64070, lon: 12.60820 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: AMK-N02, label: "Amager Node 02",        position: { lat: 55.64100, lon: 12.60790 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 1, issues: null }
+  - { sensor_id: AMK-N03, label: "Amager Node 03",        position: { lat: 55.64130, lon: 12.60820 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: AMK-N04, label: "Amager Node 04",        position: { lat: 55.64140, lon: 12.60880 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 2, issues: null }
+  - { sensor_id: AMK-N05, label: "Amager Node 05",        position: { lat: 55.64130, lon: 12.60940 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: AMK-N06, label: "Amager Node 06",        position: { lat: 55.64080, lon: 12.60940 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE",          detectionsLast24h: 1, issues: null }
+  - { sensor_id: AMK-N07, label: "Amager Node 07 (Core)", position: { lat: 55.64100, lon: 12.60880 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE + HackRF", detectionsLast24h: 3, issues: null, isCore: true }
+
+sensorsOnline: 7
+sensorsTotal: 7
+stats:
+  flaggedEvents24h: 2
+  hostileEvents24h: 0
+  falseAlarms24h: 1
+
+# AMK on Amager, same jurisdiction as CPH. Vestegn police + BRS
+# Hedehusene + Region Hovedstaden. Adds Politi København as a peer
+# actor since incidents this close to central Copenhagen bleed
+# across district boundaries.
+receivers:
+  - { id: op-energinet,         mode: actor,    role: site-owner,          tier: 1 }
+  - { id: brs,                  mode: actor,    role: emergency-response,  tier: 2 }
+  - { id: agency-ener,          mode: observer }
+  - { id: min-klim,             mode: observer }
+  - { id: forsvarskmd,          mode: observer }
+  - { id: fe,                   mode: observer }
+  - { id: agency-cfcs,          mode: observer }
+  - { id: pet,                  mode: observer }
+  - { id: min-fors,             mode: observer }
+  - { id: brs-kemisk,           mode: observer, condition: cbrn-threat }
+  - { id: brs-nukleart,         mode: observer, condition: nuclear-threat }
+  - { id: politi-vestegn,       mode: actor,    role: primary-response,    tier: 1 }
+  - { id: politi-kbh,           mode: actor,    role: primary-response,    tier: 1 }
+  - { id: brs-hedehusene,       mode: actor,    role: emergency-response,  tier: 2 }
+  - { id: kom-taarnby,          mode: actor,    role: municipal-crisis,    tier: 4 }
+  - { id: region-hst,           mode: observer, condition: casualty-scenario }
+  - { id: hjv-distrikt-kbh,     mode: observer, condition: sustained-incident }

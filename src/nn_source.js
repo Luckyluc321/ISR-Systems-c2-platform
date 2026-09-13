@@ -8,12 +8,12 @@
 //
 // See docs/interface-design-document.md IF-1 for the full contract.
 
-import { SITES } from './sites.js';
-import { ENERGINET_SITES } from './sites_energinet.js';
+import { SITES } from './sites_registry.js';
 
-// Unified site lookup — sites are declared in two files today. Kept
-// internal so the sources don't need to know about the split.
-const _ALL_SITES = { ...SITES, ...ENERGINET_SITES };
+// Site lookup for source implementations. sites_registry.js loads every
+// sites/*.yaml manifest so the source doesn't need to know about site
+// definitions being sharded across files.
+const _ALL_SITES = SITES;
 
 // Haversine distance in metres. Duplicated locally so this module stays
 // dependency-free from main.js (main.js's own helper is not exported).
