@@ -118,6 +118,126 @@ export function buildPostIncidentReport(event, { getDestination = null } = {}) {
   };
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// Chain PIR builder — cross-site combined evidence report
+// ───────────────────────────────────────────────────────────────────
+// Implements docs/integration-contracts.md Section 4 chain-scope
+// export. Bundles every PIR in a multi-event chain into one
+// coherent envelope so a receiver / operator / auditor can pull
+// the full campaign record instead of one event at a time.
+//
+// Reads from xlink_graph.chainFor() to enumerate chain members,
+// builds per-event PIR via buildPostIncidentReport() (already
+// cached on event.postIncidentReport for closed events; live-build
+// as fallback for events that closed pre-PIR-generator hookup),
+// then aggregates chain-level metadata (narrative, cross-event
+// contributor presence, unified timeline).
+//
+// Consumers:
+//   - PIR export endpoint (Section 4) when scope=chain
+//   - Cross-site combined evidence UI in PIR panel (planned)
+//   - Machine-readable JSON downloads for external audit
+//
+// Detection-only invariant preserved. Chain bundler is read-only;
+// no writes, no dispatch, no state mutation.
+export function buildChainPostIncidentReport(events, chainSummary, { getDestination = null } = {}) {
+  if (!Array.isArray(events) || !events.length || !chainSummary) return null;
+
+  // Sort events chronologically for a coherent report reading order.
+  const orderedEvents = events.slice().sort((a, b) => {
+    const ta = a.startTime || '';
+    const tb = b.startTime || '';
+    return ta.localeCompare(tb);
+  });
+
+  // Per-event PIR — use cached postIncidentReport when present
+  // (populated by closeEvent hookup); live-build for any event
+  // without a cached record.
+  const events_pir = orderedEvents.map(ev => {
+    if (ev.postIncidentReport) return ev.postIncidentReport;
+    return buildPostIncidentReport(ev, { getDestination });
+  }).filter(Boolean);
+
+  // Cross-event contributor presence: which role touched which events.
+  // Aggregates from every event's escalations + counterDispatches +
+  // catalog authorship. Lets the reader see "Politi Kbh was involved
+  // in events 1, 2, 4 of this 4-event chain" at a glance.
+  const contributorPresence = new Map();
+  for (const ev of orderedEvents) {
+    const seenThisEvent = new Set();
+    const noteRole = (rid) => {
+      if (!rid || seenThisEvent.has(rid)) return;
+      seenThisEvent.add(rid);
+      if (!contributorPresence.has(rid)) contributorPresence.set(rid, []);
+      contributorPresence.get(rid).push(ev.id);
+    };
+    for (const r of (ev.escalations || [])) {
+      noteRole(r.initiatedByRoleId);
+      // destinationId is a destination id, not a role id — resolver
+      // handles the destination → owner-role map if provided
+      if (r.destinationId && getDestination) {
+        const dest = getDestination(r.destinationId);
+        if (dest?.ownerRoleId) noteRole(dest.ownerRoleId);
+      }
+    }
+    for (const cd of (ev.counterDispatches || [])) {
+      noteRole(cd.ownerRoleId);
+    }
+    if (ev.catalog && typeof ev.catalog === 'object') {
+      for (const key of Object.keys(ev.catalog)) {
+        const arr = ev.catalog[key];
+        if (!Array.isArray(arr)) continue;
+        for (const entry of arr) noteRole(entry?.authorRoleId);
+      }
+    }
+  }
+
+  const contributors = Array.from(contributorPresence.entries()).map(([roleId, eventIds]) => ({
+    role_id:       roleId,
+    events:        eventIds,
+    event_count:   eventIds.length,
+    span_percent:  Math.round(100 * eventIds.length / orderedEvents.length),
+  }));
+  // Sort by event count descending — most-involved contributors first.
+  contributors.sort((a, b) => b.event_count - a.event_count);
+
+  // Unified timeline across every event in the chain.
+  const unifiedTimeline = [];
+  for (const pir of events_pir) {
+    for (const t of (pir.timeline || [])) {
+      unifiedTimeline.push({
+        event_id: pir.event_snapshot?.id || null,
+        ts: t.ts,
+        kind: t.kind,
+        detail: t.detail,
+      });
+    }
+  }
+  unifiedTimeline.sort((a, b) => (a.ts || '').localeCompare(b.ts || ''));
+
+  // Sites touched across the chain.
+  const sites = Array.from(new Set(orderedEvents.map(e => e.siteId).filter(Boolean)));
+
+  return {
+    id: `PIR-CHAIN-${chainSummary.id}`,
+    version: 1,
+    generatedAt: new Date().toISOString(),
+    generatedBy: 'system',
+    chain: {
+      id:            chainSummary.id,
+      size:          chainSummary.size,
+      first_at:      chainSummary.firstAt,
+      last_at:       chainSummary.lastAt,
+      span_minutes:  chainSummary.spanMinutes,
+      sites,
+    },
+    events_pir,   // full per-event PIR list, chronological
+    contributors, // aggregated cross-event presence
+    unified_timeline: unifiedTimeline,
+    event_count: orderedEvents.length,
+  };
+}
+
 // Section-emphasis header text tailored to receiver branch. Reads the
 // domain the receiver's role cares about most and surfaces that first.
 // Same PIR data underneath — this is a lens, not a mutation.

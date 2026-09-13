@@ -131,7 +131,7 @@ import {
   registerPostIncidentReportGenerator,
   withdrawEscalation, updateEscalationAssessment, rejectEscalation,
 } from './events.js';
-import { buildPostIncidentReport, emphasisForBranch } from './post_incident_report.js';
+import { buildPostIncidentReport, buildChainPostIncidentReport, emphasisForBranch } from './post_incident_report.js';
 import { evaluateClassificationPipeline, evaluateAttackProfileDetector } from './classification_pipeline.js';
 import { RECEIVER_BASES, baseForReceiverRole } from './receiver_bases.js';
 import { RECEIVER_ASSETS, assetsForReceiverRole, getReceiverDirectAsset, getReceiverRequestAsset } from './receiver_assets.js';
@@ -352,6 +352,34 @@ if (typeof window !== 'undefined') {
     threatFor:  threatProfileFor,
     candidates: candidateModelsBySignature,
     coverage:   taxonomyCoverage,
+  };
+  // Chain PIR dev handle. Bundles per-event PIR into a chain-scope
+  // envelope per docs/integration-contracts.md Section 4 scope=chain.
+  // Usage: window.__isr_chain_pir.build(eventId) → chain PIR object
+  //        window.__isr_chain_pir.download(eventId) → triggers JSON blob download
+  window.__isr_chain_pir = {
+    build: (eventId) => {
+      const chain = chainFor(eventId, EVENTS);
+      if (!chain) return null;
+      return buildChainPostIncidentReport(chain.events, chain, { getDestination });
+    },
+    download: (eventId) => {
+      const chain = chainFor(eventId, EVENTS);
+      if (!chain) { console.warn('[chain_pir] event not part of a chain'); return null; }
+      const bundle = buildChainPostIncidentReport(chain.events, chain, { getDestination });
+      if (!bundle) return null;
+      const json = JSON.stringify(bundle, null, 2);
+      const blob = new Blob([json], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${bundle.id}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      return bundle;
+    },
   };
   // Phase 7 dev handle for spot-checking xlink graph + chain data.
   // Usage: window.__isr_xlink.graph()               → full graph over EVENTS
@@ -19309,6 +19337,9 @@ async function main() {
         <ol class="pir-chain-list">
           ${rows}
         </ol>
+        <div class="pir-chain-actions" style="margin-top: var(--space-2); display: flex; justify-content: flex-end; gap: var(--space-2);">
+          <button class="c-btn compact" data-rcv="chain-export-json" data-id="${event.id}" title="Download combined chain evidence report as JSON">Export chain report (JSON)</button>
+        </div>
       </div>`;
   }
 
@@ -22223,6 +22254,32 @@ async function main() {
           toast('Incident report downloaded.', 'ok');
         } catch (err) {
           toast(`Download failed: ${err.message || 'unknown'}`, 'err');
+        }
+      }
+      else if (action === 'chain-export-json') {
+        // Chain-scope export per Section 4. Bundles every PIR in the
+        // xlink chain into one JSON envelope with unified timeline +
+        // cross-event contributor presence. Follows the same shape as
+        // pir-download but for the chain-scope surface.
+        const eventId = id;
+        const chain = chainFor(eventId, EVENTS);
+        if (!chain || chain.size <= 1) { toast('Event is not part of a multi-event chain.', 'err'); return; }
+        try {
+          const bundle = buildChainPostIncidentReport(chain.events, chain, { getDestination });
+          if (!bundle) { toast('Chain report build failed.', 'err'); return; }
+          const json = JSON.stringify(bundle, null, 2);
+          const blob = new Blob([json], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `${bundle.id}.json`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          toast(`Chain report downloaded — ${bundle.event_count} events, ${bundle.contributors.length} contributors.`, 'ok');
+        } catch (err) {
+          toast(`Chain export failed: ${err.message || 'unknown'}`, 'err');
         }
       }
       else if (action === 'chain-handoff') {
