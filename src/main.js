@@ -219,6 +219,16 @@ import {
   candidateModelsBySignature,
   taxonomyCoverage,
 } from './threat_taxonomy.js';
+// Signature bridge · deterministic raw signature → family + narrative
+// per docs/integration-contracts.md Section 9. Pure module. Consumers:
+// NN adapter downstream of threat routing (enriches Agent B prompt
+// context), chapter attribution sub-section, precedent retrieval.
+import {
+  bridgeSignature,
+  explainSignature,
+  signatureBridgeCoverage,
+} from './signature_bridge.js';
+
 // Threat routing matrix · auto-observer selection per event shape.
 // Pure lookup keyed on (domain, family, classification, threat).
 // Detection-only: returns observer SUGGESTIONS; the event lifecycle
@@ -271,6 +281,15 @@ if (typeof window !== 'undefined') {
     render:    renderSubsection,
     populated: subsectionsForContributor,
     all:       renderAllSubsections,
+  };
+  // Signature bridge dev handle. Usage:
+  //   window.__isr_signature.bridge({modality:'acoustic', raw_signature:{acoustic:{profile:'moped-buzz', fundamental_hz:78}}})
+  //   window.__isr_signature.explain({raw_signature:{...}})
+  //   window.__isr_signature.coverage()
+  window.__isr_signature = {
+    bridge:   bridgeSignature,
+    explain:  explainSignature,
+    coverage: signatureBridgeCoverage,
   };
   // Threat routing dev handle for spot-checking auto-observer output.
   // Usage: window.__isr_routing.route({domain:'aviation', family:'cruise-missile', classification:'hostile', threat:'high'})
