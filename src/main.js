@@ -772,11 +772,11 @@ async function main() {
     pitchOffsetDeg: 0,
     // Scale — the GLB reads LARGE at 1:1 (much bigger than a real
     // 40-60cm quadcopter). Real ratio: a quadcopter should be
-    // ~1/4 to 1/6 the visual size of a Shahed. If the Shahed
-    // renders at scale 1.3, quad at 0.35 gives roughly the right
-    // real-world size ratio. Dial via window.__isr_quad_tuning.scale
-    // if it reads too large or too small.
-    scale: 0.35,
+    // ~1/3 to 1/6 the visual size of a Shahed. 0.5 sits at the
+    // upper end of that range — visually distinct from the Shahed
+    // at 1.3 but still readable at close range. Dial via
+    // window.__isr_quad_tuning.scale if it reads too large or small.
+    scale: 0.5,
     minimumPixelSize: 14,      // floor so the model stays visible when zoomed
     headingSmoothing: 0.22,    // quads yaw fast — snap follow direction of travel
     pitchSmoothing:   0.16,    // pitch follows accel envelope
@@ -4566,7 +4566,7 @@ async function main() {
       const _qT = window.__isr_quad_tuning || {};
       _entitySpec.model = {
         uri: '/aircraft/assault_drone_concept.glb',
-        scale: _qT.scale ?? 0.35,
+        scale: _qT.scale ?? 0.5,
         minimumPixelSize: _qT.minimumPixelSize ?? 20,
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, _INT_MODEL_SWAP_M),
         shadows: Cesium.ShadowMode.DISABLED,
@@ -11103,7 +11103,7 @@ async function main() {
         // Shahed uses 1:1 world scale for the ~3m wingspan. The
         // assault-drone GLB reads small at 1:1 — quad tuning object
         // exposes the scale factor.
-        scale: isLoiterMun ? 1.3 : (_qT.scale ?? 0.35),
+        scale: isLoiterMun ? 1.3 : (_qT.scale ?? 0.5),
         minimumPixelSize: isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20),
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
         shadows: Cesium.ShadowMode.DISABLED,
@@ -11326,7 +11326,7 @@ async function main() {
           const _qT = window.__isr_quad_tuning || {};
           _swEntitySpec.model = {
             uri: _modelUri,
-            scale: isLoiterMun ? 1.3 : (_qT.scale ?? 0.35),
+            scale: isLoiterMun ? 1.3 : (_qT.scale ?? 0.5),
             minimumPixelSize: isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20),
             distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
             shadows: Cesium.ShadowMode.DISABLED,
