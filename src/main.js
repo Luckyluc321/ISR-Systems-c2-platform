@@ -764,18 +764,28 @@ async function main() {
   // frozen props anyway. Swap to a GLB with embedded prop animation
   // clips OR separately-named rotor nodes to add spinning.
   window.__isr_quad_tuning = window.__isr_quad_tuning || {
-    headingOffsetDeg: 90,      // start with Shahed's working value; try 0/180/270 if nose points wrong
-    pitchOffsetDeg: 0,         // additional pitch bias (usually 0)
-    scale: 4.0,                // quadcopter GLB is compact; scale up for legibility at close range
-    minimumPixelSize: 20,      // floor so the model stays visible when zoomed
-    headingSmoothing: 0.20,    // quads yaw quickly — slightly faster than fixed-wing
-    pitchSmoothing:   0.15,    // pitch follows accel envelope
-    rollSmoothing:    0.12,    // bank into turns
-    bankFactor:       3.0,     // radians of roll per rad/s yaw rate (higher = more aggressive bank on turns)
-    forwardPitchDeg:  15,      // extra nose-down pitch at cruise forward speed (thrust-vector tilt)
+    // Model orientation — the assault_drone_concept GLB's authored
+    // forward axis is not 90°-rotated like the Shahed. Default 0
+    // means "trust the GLB's own forward". Dial 90/180/270 if the
+    // nose still points wrong direction after the fix.
+    headingOffsetDeg: 0,
+    pitchOffsetDeg: 0,
+    // Scale — the GLB reads LARGE at 1:1 (much bigger than a real
+    // 40-60cm quadcopter). Real ratio: a quadcopter should be
+    // ~1/4 to 1/6 the visual size of a Shahed. If the Shahed
+    // renders at scale 1.3, quad at 0.35 gives roughly the right
+    // real-world size ratio. Dial via window.__isr_quad_tuning.scale
+    // if it reads too large or too small.
+    scale: 0.35,
+    minimumPixelSize: 14,      // floor so the model stays visible when zoomed
+    headingSmoothing: 0.22,    // quads yaw fast — snap follow direction of travel
+    pitchSmoothing:   0.16,    // pitch follows accel envelope
+    rollSmoothing:    0.14,    // bank into turns
+    bankFactor:       4.0,     // radians of roll per rad/s yaw rate. Bumped from 3.0 for a more visible turn-bank.
+    forwardPitchDeg:  15,      // extra nose-down pitch at cruise forward speed
     cruiseMs:         15,      // reference cruise speed for forward-pitch scaling
-    bankClampDeg:     30,      // ±maximum bank angle
-    pitchClampDeg:    30,      // ±maximum pitch angle
+    bankClampDeg:     35,      // ±maximum bank angle (bumped from 30 for clearer visual on hard turns)
+    pitchClampDeg:    30,
   };
 
   // ── Bing Maps Aerial (asset 2) ──
@@ -4556,7 +4566,7 @@ async function main() {
       const _qT = window.__isr_quad_tuning || {};
       _entitySpec.model = {
         uri: '/aircraft/assault_drone_concept.glb',
-        scale: _qT.scale ?? 4.0,
+        scale: _qT.scale ?? 0.35,
         minimumPixelSize: _qT.minimumPixelSize ?? 20,
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, _INT_MODEL_SWAP_M),
         shadows: Cesium.ShadowMode.DISABLED,
@@ -11093,7 +11103,7 @@ async function main() {
         // Shahed uses 1:1 world scale for the ~3m wingspan. The
         // assault-drone GLB reads small at 1:1 — quad tuning object
         // exposes the scale factor.
-        scale: isLoiterMun ? 1.0 : (_qT.scale ?? 4.0),
+        scale: isLoiterMun ? 1.3 : (_qT.scale ?? 0.35),
         minimumPixelSize: isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20),
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
         shadows: Cesium.ShadowMode.DISABLED,
@@ -11316,7 +11326,7 @@ async function main() {
           const _qT = window.__isr_quad_tuning || {};
           _swEntitySpec.model = {
             uri: _modelUri,
-            scale: isLoiterMun ? 1.0 : (_qT.scale ?? 4.0),
+            scale: isLoiterMun ? 1.3 : (_qT.scale ?? 0.35),
             minimumPixelSize: isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20),
             distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
             shadows: Cesium.ShadowMode.DISABLED,
