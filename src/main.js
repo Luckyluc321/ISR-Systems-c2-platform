@@ -20496,6 +20496,11 @@ async function main() {
   // clean). Nothing on the lens completion path invokes dispatch or
   // cascade.
   const _lensInFlight = new Map();   // key = eventId + '::' + archetype
+  // Fallback-hit counter — increments each time a lens is served from
+  // the deterministic fallback instead of Mistral. Keyed by archetype
+  // so the boot audit can point at which archetype's Mistral path
+  // degraded. Cleared per session; not persisted.
+  const _lensFallbackHits = new Map();   // archetype → count
   function _ensureLensForEvent(event, role) {
     if (!event || !role) return null;
     if (!isMistralConfigured()) return null;
@@ -20527,6 +20532,9 @@ async function main() {
             computedAt: new Date().toISOString(),
             source: (result?.model_version || '').includes('fallback') ? 'fallback' : 'mistral',
           };
+          if (lensObj.source === 'fallback') {
+            _lensFallbackHits.set(archetype, (_lensFallbackHits.get(archetype) || 0) + 1);
+          }
           setEventObjectKey(event.id, 'narrativeLenses', archetype, lensObj);
           _lensWriteCache(event, archetype, lensObj);   // localStorage LRU
           _lensInFlight.delete(key);
@@ -20545,11 +20553,46 @@ async function main() {
     return promise;
   }
 
+  // Rehydrate lenses from localStorage on boot. For each event that
+  // has a narrativeCache body, look up any archetype variants stashed
+  // in the LRU. Only backfill if the cached baseHash matches the
+  // event's current signalHash — mismatched (stale) lenses stay in
+  // LRU but don't get surfaced. Runs once at module init.
+  //
+  // Cost: N events × 8 archetypes reads from localStorage. Small
+  // (each read is a JSON.parse of a ~1 KB string). Bounded by the
+  // seed EVENTS count + closed events restored from prior sessions.
+  function _rehydrateLensesFromCache() {
+    let rehydrated = 0;
+    let stale = 0;
+    for (const ev of EVENTS) {
+      if (!ev?.narrativeCache?.body) continue;
+      const currentBaseHash = ev.narrativeCache.signalHash || ev.narrativeCache.model_version || 'no-hash';
+      for (const archetype of _lensKnownArchetypes()) {
+        // Skip if already populated in-memory this session.
+        if (ev.narrativeLenses?.[archetype]) continue;
+        const cached = _lensReadCache(ev, archetype);
+        if (!cached) continue;
+        if (cached.baseHash !== currentBaseHash) { stale++; continue; }
+        setEventObjectKey(ev.id, 'narrativeLenses', archetype, cached);
+        rehydrated++;
+      }
+    }
+    if (rehydrated > 0 || stale > 0) {
+      console.info(`[lens] rehydrated ${rehydrated} cached lens(es) from localStorage${stale ? `; skipped ${stale} stale (baseHash mismatch)` : ''}`);
+    }
+    return { rehydrated, stale };
+  }
+  // Fire once at boot. Wrapped so a corrupted LRU entry can't kill main.
+  try { _rehydrateLensesFromCache(); } catch (err) { console.warn('[lens] rehydrate failed:', err?.message || err); }
+
   // Dev handle for manual verification. Console usage:
   //   window.__isr_lens.available()
   //   window.__isr_lens.generate(eventId, 'kinetic-response')
   //   window.__isr_lens.read(eventId, 'kinetic-response')
   //   window.__isr_lens.archetypes()
+  //   window.__isr_lens.fallbackHits()   → { kinetic-response: 2, ... }
+  //   window.__isr_lens.rehydrate()      → force re-run of the boot rehydrator
   if (typeof window !== 'undefined') {
     window.__isr_lens = {
       archetypes: () => _lensKnownArchetypes(),
@@ -20567,6 +20610,8 @@ async function main() {
         const ev = getEvent(eventId);
         return ev?.narrativeLenses || {};
       },
+      fallbackHits: () => Object.fromEntries(_lensFallbackHits),
+      rehydrate: () => _rehydrateLensesFromCache(),
     };
   }
 
