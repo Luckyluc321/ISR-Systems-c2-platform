@@ -13,6 +13,7 @@ import { contextForSite } from './site_context.js';
 import { sanitizePartnerString, siteVersionStamp, hashContent } from './mistral_client.js';
 import { fallbackRankHighlights } from './agents/agent_a2_highlights.js';
 import { ensureSiteContextDigest } from './agents/agent_a_digest.js';
+import { setPreprocessedCache, clearPreprocessedCache } from './events.js';
 
 // ═══════════════════════════════════════════════════════════════════
 // STAGE 1 — Highlight Resolver
@@ -824,7 +825,7 @@ export function rehydratePreprocessed(event, samples) {
     // fingerprint match; drop the stale copy so the caller recomputes.
     if (samples && event._preprocessed.sampleFingerprint
         && event._preprocessed.sampleFingerprint !== _sampleFingerprint(samples)) {
-      event._preprocessed = null;
+      clearPreprocessedCache(event.id);
     } else {
       return event._preprocessed;
     }
@@ -837,7 +838,7 @@ export function rehydratePreprocessed(event, samples) {
     invalidatePreprocessed(event);
     return null;
   }
-  event._preprocessed = persisted;
+  setPreprocessedCache(event.id, persisted);
   return event._preprocessed;
 }
 

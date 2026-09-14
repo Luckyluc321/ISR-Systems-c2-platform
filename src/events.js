@@ -1036,3 +1036,198 @@ export function formatDuration(sec) {
   if (h) return `${h}h ${String(m).padStart(2,'0')}m`;
   return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
 }
+
+// ═══════════════════════════════════════════════════════════════════
+// Event mutation API (Phase 1 of the state-consolidation refactor)
+// ───────────────────────────────────────────────────────────────────
+// POLICY: events.js is the ONLY module that writes to event objects.
+// Every other module reads events + calls one of the mutators below.
+// The static check at scripts/check-event-mutations.mjs enforces this
+// via grep at build time.
+//
+// Two tiers of mutators:
+//
+//   Primitives      — generic write helpers (mutateEvent / appendEvent
+//                     Array / addToEventSet / setEventMapKey). Use for
+//                     scalar or single-field updates.
+//
+//   Semantic        — named functions that update several fields
+//                     together as one lifecycle transition (linkEvents,
+//                     markNeutralised, attachPostIncidentReport, etc).
+//                     Use these when the update is a meaningful event
+//                     rather than a raw field change.
+//
+// All mutators return the mutated event (or null if id not found) and
+// fire the standard _listeners fanout so UI re-renders happen. Callsite
+// code stays roughly the same length but every write is now visible in
+// events.js grep-history and every write goes through the same seam
+// (which is where Azure server-side persistence will attach later).
+// ═══════════════════════════════════════════════════════════════════
+
+// ── Primitives ────────────────────────────────────────────────────
+//
+// Primitives are SILENT by default. Many writes happen in the tick
+// loop at 60Hz (lastPosition, _droneCovState, _siteAgg etc). Firing
+// _listeners on every one would cause a re-render storm. The tick
+// loop already orchestrates its own render at the end of each tick.
+// Callers that want a listener fire pass { notify: true }.
+//
+// Semantic mutators (below) fire listeners by default — they represent
+// meaningful lifecycle transitions where a UI update is expected.
+
+// Merge scalar / object fields into an event. Object.assign semantics —
+// arrays should use appendEventArray, Sets should use addToEventSet.
+export function mutateEvent(id, patch, { notify = false } = {}) {
+  const e = EVENTS.find(x => x.id === id);
+  if (!e || !patch || typeof patch !== 'object') return null;
+  Object.assign(e, patch);
+  if (notify) _listeners.forEach(fn => fn(id));
+  return e;
+}
+
+// Append to an array field on an event. Lazily creates the array if
+// missing (so callers don't need an "if (!e.foo) e.foo = []" preamble).
+export function appendEventArray(id, field, item, { notify = false } = {}) {
+  const e = EVENTS.find(x => x.id === id);
+  if (!e || !field) return null;
+  if (!Array.isArray(e[field])) e[field] = [];
+  e[field].push(item);
+  if (notify) _listeners.forEach(fn => fn(id));
+  return e;
+}
+
+// Add to a Set field on an event. Lazily creates the Set if missing.
+// Used for de-duped membership tracking (e.g. _reacquiredSites,
+// _interceptorGroupsCompleted).
+export function addToEventSet(id, field, item, { notify = false } = {}) {
+  const e = EVENTS.find(x => x.id === id);
+  if (!e || !field) return null;
+  if (!(e[field] instanceof Set)) e[field] = new Set();
+  e[field].add(item);
+  if (notify) _listeners.forEach(fn => fn(id));
+  return e;
+}
+
+// Set a key on a Map field on an event. Lazily creates the Map.
+// Used for per-drone state maps kept on the event (_droneCovState,
+// _droneInsideState, participants).
+export function setEventMapKey(id, field, key, value, { notify = false } = {}) {
+  const e = EVENTS.find(x => x.id === id);
+  if (!e || !field) return null;
+  if (!(e[field] instanceof Map)) e[field] = new Map();
+  e[field].set(key, value);
+  if (notify) _listeners.forEach(fn => fn(id));
+  return e;
+}
+
+// ── Semantic mutators ────────────────────────────────────────────
+
+// Link two events bidirectionally + record correlation score. Replaces
+// the three-line "eventA.linkedEventIds.push(idB); eventB.linkedEventIds
+// .push(idA); eventA.correlationScore = s" pattern at every callsite.
+export function linkEvents(idA, idB, correlationScore = null) {
+  const a = EVENTS.find(x => x.id === idA);
+  const b = EVENTS.find(x => x.id === idB);
+  if (!a || !b || idA === idB) return null;
+  if (!Array.isArray(a.linkedEventIds)) a.linkedEventIds = [];
+  if (!Array.isArray(b.linkedEventIds)) b.linkedEventIds = [];
+  if (!a.linkedEventIds.includes(idB)) a.linkedEventIds.push(idB);
+  if (!b.linkedEventIds.includes(idA)) b.linkedEventIds.push(idA);
+  if (correlationScore != null) {
+    a.correlationScore = correlationScore;
+    b.correlationScore = correlationScore;
+  }
+  _listeners.forEach(fn => fn(idA));
+  _listeners.forEach(fn => fn(idB));
+  return { a, b };
+}
+
+// Stamp neutralisation lifecycle. Bundles 4-5 fields that were
+// previously written on separate lines: outcome, neutralisedAt (also
+// legacy neutralizedAt spelling — both preserved for now), the
+// dispatch responsible, and the actor that pulled the trigger. Also
+// sets the needsPostIncident flag if requested by the caller.
+export function markNeutralised(id, { outcome = 'neutralised', at = null, byDispatchId = null, by = null, needsPostIncident = true } = {}) {
+  const e = EVENTS.find(x => x.id === id);
+  if (!e) return null;
+  const stampIso = at || new Date().toISOString();
+  e.outcome = outcome;
+  e.neutralisedAt = stampIso;
+  e.neutralizedAt = stampIso;   // legacy alias, kept until every reader migrates
+  if (byDispatchId != null) e.neutralisedByDispatchId = byDispatchId;
+  if (by != null) e.neutralizedBy = by;
+  if (needsPostIncident) e.needsPostIncident = true;
+  e.projectedPath = null;   // projected path no longer meaningful post-neutralisation
+  _listeners.forEach(fn => fn(id));
+  return e;
+}
+
+// Adapter-facing: record an interaction. Used by escalation_mock,
+// dispatch_mock, and any real adapter that lands later. Keeps
+// interactions[] lifecycle in one place so the Azure Blob WORM swap
+// only needs to hook this one function.
+export function recordInteraction(id, interaction) {
+  const e = EVENTS.find(x => x.id === id);
+  if (!e || !interaction) return null;
+  if (!Array.isArray(e.interactions)) e.interactions = [];
+  e.interactions.push(interaction);
+  _listeners.forEach(fn => fn(id));
+  return e;
+}
+
+// Classification pipeline attaches the fused DetectionSubject.
+// Replaces detection_subject.js:243 direct write. Also invalidates the
+// narrative cache since the subject changed.
+export function updateEventSubject(id, subject) {
+  const e = EVENTS.find(x => x.id === id);
+  if (!e || !subject) return null;
+  e.subject = subject;
+  e.narrativeCache = null;
+  _listeners.forEach(fn => fn(id));
+  return e;
+}
+
+// Attach a post-incident report to an event. Replaces the multiple PIR
+// write sites (initial creation at closeEvent, live update as linked
+// events arrive, chain resolution). Single seam for anything that
+// stamps a PIR onto an event.
+export function attachPostIncidentReport(id, pir) {
+  const e = EVENTS.find(x => x.id === id);
+  if (!e) return null;
+  e.postIncidentReport = pir;
+  _listeners.forEach(fn => fn(id));
+  return e;
+}
+
+// Narrative + preprocessing cache management. Callers previously wrote
+// null directly to invalidate. Named functions make the intent obvious
+// at the callsite ("invalidateNarrativeCache(id)" reads better than
+// "e.narrativeCache = null").
+export function clearNarrativeCache(id) {
+  const e = EVENTS.find(x => x.id === id);
+  if (!e) return null;
+  e.narrativeCache = null;
+  _listeners.forEach(fn => fn(id));
+  return e;
+}
+export function setNarrativeCache(id, cache) {
+  const e = EVENTS.find(x => x.id === id);
+  if (!e) return null;
+  e.narrativeCache = cache;
+  _listeners.forEach(fn => fn(id));
+  return e;
+}
+export function clearPreprocessedCache(id) {
+  const e = EVENTS.find(x => x.id === id);
+  if (!e) return null;
+  e._preprocessed = null;
+  _listeners.forEach(fn => fn(id));
+  return e;
+}
+export function setPreprocessedCache(id, preprocessed) {
+  const e = EVENTS.find(x => x.id === id);
+  if (!e) return null;
+  e._preprocessed = preprocessed;
+  _listeners.forEach(fn => fn(id));
+  return e;
+}

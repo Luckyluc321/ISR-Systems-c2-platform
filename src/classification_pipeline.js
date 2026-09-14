@@ -25,7 +25,7 @@
 // audit-logged), pushes toasts, sets advisory flags. Never triggers
 // dispatch, escalation, or agent invocation.
 
-import { reclassifyEvent } from './events.js';
+import { reclassifyEvent, mutateEvent } from './events.js';
 
 // Classes that read as "commercial identifiable rotary or fixed-wing"
 // — the platforms where a confident NN classification means "hobbyist
@@ -89,12 +89,14 @@ export function evaluateClassificationPipeline(event, ctx = {}) {
   if (!event || event.status !== 'active') return null;
   if (!event.dynamicClassification) return null;   // opt-in per template
   if (!event._pipelineState) {
-    event._pipelineState = {
-      mode: 'unknown',
-      lastTransitionAt: null,
-      transitions: [],
-      attackAdvisoryFiredAt: null,
-    };
+    mutateEvent(event.id, {
+      _pipelineState: {
+        mode: 'unknown',
+        lastTransitionAt: null,
+        transitions: [],
+        attackAdvisoryFiredAt: null,
+      },
+    });
   }
 
   const state = event._pipelineState;
@@ -113,7 +115,7 @@ export function evaluateClassificationPipeline(event, ctx = {}) {
     );
     // Mirror to event.confidence so any UI still reading the flat
     // field stays consistent with the subject's canonical value.
-    event.confidence = subject.class_confidence;
+    mutateEvent(event.id, { confidence: subject.class_confidence });
   }
 
   // ── State machine ──
@@ -188,12 +190,14 @@ export function evaluateAttackProfileDetector(event, ctx = {}, hooks = {}) {
 
   if (!rules.length) return false;
 
-  event._attackProfileAdvisory = {
-    firedAt: new Date().toISOString(),
-    rules,
-    proposedClassification: 'hostile',
-    proposedThreat: 'high',
-  };
+  mutateEvent(event.id, {
+    _attackProfileAdvisory: {
+      firedAt: new Date().toISOString(),
+      rules,
+      proposedClassification: 'hostile',
+      proposedThreat: 'high',
+    },
+  });
   hooks.onAdvisory?.(event, rules);
   return true;
 }

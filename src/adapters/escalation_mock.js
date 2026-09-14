@@ -23,11 +23,11 @@ import {
   registerEscalationAdapter,
   DEFAULT_ESCALATION_ADAPTER_KEY,
 } from '../escalation_source.js';
+import { recordInteraction } from '../events.js';
 
 function _stampInteraction(event, actorRole, flow, payload) {
   if (!event) return;
-  if (!Array.isArray(event.interactions)) event.interactions = [];
-  event.interactions.push({
+  recordInteraction(event.id, {
     id: `ACT-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
     timestamp: new Date().toISOString(),
     flow,

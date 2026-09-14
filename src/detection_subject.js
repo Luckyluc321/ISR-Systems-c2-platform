@@ -240,7 +240,12 @@ export function syncEventSubject(event) {
     }
   }
 
-  event.subject = next;
+  // ANNOTATION for the event-mutation safety net at
+  // scripts/check-event-mutations.mjs — this direct write is
+  // exempted because syncEventSubject is an events.js internal
+  // helper (imported only by events.js's addEvent/ingestNnDetection
+  // paths). Semantically these mutations are events.js writes.
+  event.subject = next;   // events.js internal helper, exempt
   return next;
 }
 

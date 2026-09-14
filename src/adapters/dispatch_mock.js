@@ -26,6 +26,7 @@
 // ═══════════════════════════════════════════════════════════════════
 
 import { registerDispatchAdapter, DEFAULT_DISPATCH_ADAPTER_KEY } from '../dispatch_source.js';
+import { recordInteraction } from '../events.js';
 
 function _newInteractionId() {
   return `ACT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -49,8 +50,7 @@ const mockDispatchAdapter = {
     // Byte-for-byte match with the pre-adapter inline stub push at
     // the old main.js:16997-17010. Any change here shifts an audit
     // shape that Phase 3+ readers may already be coded against.
-    if (!Array.isArray(event.interactions)) event.interactions = [];
-    event.interactions.push({
+    recordInteraction(event.id, {
       id: _newInteractionId(),
       timestamp,
       flow: 'action-dispatched',

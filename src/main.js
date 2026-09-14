@@ -122,6 +122,13 @@ import {
   postIncidentChainLeaves, unionLinkedEventDomains,
   registerPostIncidentReportGenerator,
   withdrawEscalation, updateEscalationAssessment, rejectEscalation,
+  // Event mutation API (Phase 1 state-consolidation). Every event
+  // field write anywhere in this file goes through one of these.
+  mutateEvent, appendEventArray, addToEventSet, setEventMapKey,
+  linkEvents, markNeutralised, recordInteraction,
+  attachPostIncidentReport,
+  clearNarrativeCache, setNarrativeCache,
+  clearPreprocessedCache, setPreprocessedCache,
 } from './events.js';
 import { buildPostIncidentReport, buildChainPostIncidentReport, emphasisForBranch } from './post_incident_report.js';
 import { evaluateClassificationPipeline, evaluateAttackProfileDetector } from './classification_pipeline.js';
@@ -3559,7 +3566,7 @@ async function main() {
   function triggerQraIntercept(eventId) {
     const event = getEvent(eventId);
     if (!event) return;
-    event.awaitingNeutralization = true;
+    mutateEvent(event.id, { awaitingNeutralization: true });
     if (_f35.airborne) return;
 
     // Project the missile forward from the last known point along its
@@ -4364,9 +4371,8 @@ async function main() {
     // generators read the shared event object rather than the
     // browser-local _counterDispatches Map. Tick loop's
     // _syncDispatchToEvent keeps this fresh on every state change.
-    if (!Array.isArray(event.counterDispatches)) event.counterDispatches = [];
     const _spawnAt = new Date().toISOString();
-    event.counterDispatches.push({
+    appendEventArray(event.id, 'counterDispatches', {
       dispatchId, groupId, memberIndex, memberCount, variantId,
       assetId: asset.id, assetName: d.assetName, groupName: asset.name,
       kind: asset.kind, dispatchedTs: d.dispatchedTs,
@@ -4681,8 +4687,7 @@ async function main() {
   function _syncDispatchToEvent(d) {
     const event = getEvent(d.eventId);
     if (!event) return;
-    if (!Array.isArray(event.counterDispatches)) event.counterDispatches = [];
-    let entry = event.counterDispatches.find(x => x.dispatchId === d.id);
+    let entry = (event.counterDispatches || []).find(x => x.dispatchId === d.id);
     if (!entry) {
       // Spawn-time entry pushed by _spawnDispatchInstance is minimal;
       // if a dispatch predates the persistence hook (upgrade path) or
@@ -4699,7 +4704,7 @@ async function main() {
         kind: d.kind,
         dispatchedTs: d.dispatchedTs,
       };
-      event.counterDispatches.push(entry);
+      appendEventArray(event.id, 'counterDispatches', entry);
     }
     // Mirror mutable fields. Coord + alt let the render show live
     // asset position without touching _counterDispatches from any
@@ -5448,7 +5453,7 @@ async function main() {
           toast(`${d.assetName} at last known location. Signal not reacquired. Perimeter established.`, 'info');
           // Stash last-spotted for Phase G perimeter cordon
           if (event) {
-            event.lastSpottedLocation = { lat: d.rtbTargetLat, lon: d.rtbTargetLon, at: new Date().toISOString() };
+            mutateEvent(event.id, { lastSpottedLocation: { lat: d.rtbTargetLat, lon: d.rtbTargetLon, at: new Date().toISOString() } });
           }
         }
         // Brief orbit at last-known (4s)
@@ -5478,7 +5483,7 @@ async function main() {
         d.rtbCompleted = true;
         // Auto-record outcome as target evaded before arrival
         if (event) {
-          if (!event.dispatchOutcomes) event.dispatchOutcomes = {};
+          if (!event.dispatchOutcomes) mutateEvent(event.id, { dispatchOutcomes: {} });
           event.dispatchOutcomes[d.id] = {
             outcomeId: 'target_evaded_before_arrival',
             outcomeLabel: 'Target evaded before arrival',
@@ -6026,11 +6031,10 @@ async function main() {
           // for legacy callers (bestTargetForDispatch first-priority
           // for cars that dispatched before any kill happened).
           const nowIso = new Date().toISOString();
-          if (!Array.isArray(event.wreckages)) event.wreckages = [];
-          const wreckId = `wr-${event.id}-${event.wreckages.length + 1}`;
+          const wreckId = `wr-${event.id}-${(event.wreckages?.length || 0) + 1}`;
           const wreck = { id: wreckId, lat: dropLat, lon: dropLon, at: nowIso, downedBy: d.id };
-          event.wreckages.push(wreck);
-          event.wreckageLocation = { lat: dropLat, lon: dropLon, at: nowIso };
+          appendEventArray(event.id, 'wreckages', wreck);
+          mutateEvent(event.id, { wreckageLocation: { lat: dropLat, lon: dropLon, at: nowIso } });
           // Build cordon + rebalance patrol assignments. Fire-and-
           // forget — perimeter render + reroute both happen when the
           // promise resolves. Compass fallback ensures a polygon
@@ -6096,15 +6100,14 @@ async function main() {
         return;   // Skip group-outcome + fade/RTB. Chase continues.
       }
       // Group-level outcome — set on last group member complete
-      if (!event._interceptorGroupsCompleted) event._interceptorGroupsCompleted = new Set();
       const state = droneState.get(d.eventId);
       const groupMembers = (event.counterDispatches || []).filter(cd => cd.groupId === d.groupId);
       const groupCompletedCount = groupMembers.filter(cd => {
         const s = counterDispatchStateFor(d.eventId, cd.assetId);
         return s === 'complete' || cd.dispatchId === d.id;   // include this one which just completed
       }).length;
-      if (groupCompletedCount >= groupMembers.length && !event._interceptorGroupsCompleted.has(d.groupId)) {
-        event._interceptorGroupsCompleted.add(d.groupId);
+      if (groupCompletedCount >= groupMembers.length && !event._interceptorGroupsCompleted?.has(d.groupId)) {
+        addToEventSet(event.id, '_interceptorGroupsCompleted', d.groupId);
         let downedCount = 0;
         let overwatchSurvived = false;
         // Count LEAD + swarm members. Overwatch is now a valid target,
@@ -6123,7 +6126,7 @@ async function main() {
           }
         }
         // Auto-outcome on the dispatch group
-        if (!event.dispatchOutcomes) event.dispatchOutcomes = {};
+        if (!event.dispatchOutcomes) mutateEvent(event.id, { dispatchOutcomes: {} });
         const outcomeId = overwatchSurvived ? 'partial_neutralisation' : 'neutralised';
         const outcomeLabel = overwatchSurvived
           ? `Partial neutralisation. ${downedCount} hostile drones downed. Overwatch airframe escaped over Øresund.`
@@ -6137,16 +6140,14 @@ async function main() {
           confirmedAt: new Date().toISOString(),
           confirmedBy: 'system_auto',
         };
-        event.outcome = overwatchSurvived ? 'partial_neutralisation' : 'neutralized';
+        mutateEvent(event.id, { outcome: overwatchSurvived ? 'partial_neutralisation' : 'neutralized' });
         toast(overwatchSurvived
           ? `Partial neutralisation. ${downedCount} downed. Overwatch escaped.`
           : `Threat neutralised. ${downedCount} downed.`, 'ok');
       }
     } else if (event && !d.profile.visualVerifyOnly && !d.rtbCompleted) {
       if (!event.outcome || event.outcome === 'awaiting_neutralization') {
-        event.outcome = 'neutralized';
-        event.neutralisedByDispatchId = d.id;
-        event.neutralisedAt = new Date().toISOString();
+        markNeutralised(event.id, { outcome: 'neutralized', byDispatchId: d.id, needsPostIncident: false });
         toast(`Threat neutralised. ${d.assetName} confirmed disruption.`, 'ok');
       }
     } else if (d.profile.visualVerifyOnly) {
@@ -6294,9 +6295,8 @@ async function main() {
     if (event.outcome !== 'neutralized' && !outcomeConfirmed) return;
     const dest = getDestination(destId);
     if (!dest) return;
-    if (!Array.isArray(event.postIncidentDispatched)) event.postIncidentDispatched = [];
-    if (event.postIncidentDispatched.includes(destId)) return;
-    event.postIncidentDispatched.push(destId);
+    if (event.postIncidentDispatched?.includes(destId)) return;
+    appendEventArray(event.id, 'postIncidentDispatched', destId);
     // Add a root entry to the post-incident chain so downstream handoffs
     // + resolve state hang off it. Root parent is null.
     addPostIncidentChainRoot(eventId, destId, getActiveRole()?.id || 'operator');
@@ -6306,8 +6306,7 @@ async function main() {
   function closePostIncidentEvent(eventId) {
     const event = getEvent(eventId);
     if (!event) return;
-    event.outcome = 'closed';
-    event.closedAt = new Date().toISOString();
+    mutateEvent(event.id, { outcome: 'closed', closedAt: new Date().toISOString() });
     toast('Event closed. Full incident record archived to history.', 'ok');
     _selectedReceiverEventId = null;
   }
@@ -6322,9 +6321,8 @@ async function main() {
     // is now visible on any closed event (see the closed-panel render).
     // Silently-returning here made every click a no-op for non-
     // neutralized outcomes. Ungated to match the button visibility.
-    if (!Array.isArray(event.postIncidentDispatched)) event.postIncidentDispatched = [];
-    if (event.postIncidentDispatched.includes(tag)) return;
-    event.postIncidentDispatched.push(tag);
+    if (event.postIncidentDispatched?.includes(tag)) return;
+    appendEventArray(event.id, 'postIncidentDispatched', tag);
     const msg = tag === 'vera'
       ? 'Full incident package dispatched to Verá command layer. Cross platform handoff acknowledged.'
       : tag === 'cordon'
@@ -6343,9 +6341,8 @@ async function main() {
   function sendBriefToIntelligence(eventId) {
     const event = getEvent(eventId);
     if (!event) return;
-    if (!Array.isArray(event.postIncidentDispatched)) event.postIncidentDispatched = [];
-    if (event.postIncidentDispatched.includes('intel-brief')) return;
-    event.postIncidentDispatched.push('intel-brief');
+    if (event.postIncidentDispatched?.includes('intel-brief')) return;
+    appendEventArray(event.id, 'postIncidentDispatched', 'intel-brief');
     toast('Brief incident summary dispatched to PET · FE · Rigspoliti for downstream operations.', 'ok');
     renderDetailPanel();
   }
@@ -6469,7 +6466,7 @@ async function main() {
     // (includes startTime — prevents cross-session eventId collisions
     // from surfacing yesterday's narrative in a fresh event).
     const persisted = readNarrativeCache(event);
-    if (persisted) event.narrativeCache = persisted;
+    if (persisted) setNarrativeCache(event.id, persisted);
   }
 
   function generatePirReport(eventId) {
@@ -6849,8 +6846,7 @@ async function main() {
   const _reacquiredMarkers = new Map();
   function _fireReacquisition(event, siteId) {
     if (event._reacquiredSites && event._reacquiredSites.has(siteId)) return;
-    event._reacquiredSites = event._reacquiredSites || new Set();
-    event._reacquiredSites.add(siteId);
+    addToEventSet(event.id, '_reacquiredSites', siteId);
     const site = SITES[siteId];
     // Auto-escalate to the re-acquiring site's national tier destinations so
     // their receivers' advisory strip upgrades to a full escalation card.
@@ -7071,11 +7067,11 @@ async function main() {
     // A central burst puffs briefly (scale 0 → 1 → 0). No sudden pop.
     _spawnNeutralisationBurst(p.lat, p.lon, eventId);
     // Update event record
-    event.outcome = 'neutralized';
-    event.neutralizedAt = new Date().toISOString();
-    event.neutralizedBy = 'Flyvevåbnet Fighter Response, Skrydstrup';
-    event.projectedPath = null;
-    event.needsPostIncident = true;   // triggers post incident action panel
+    markNeutralised(event.id, {
+      outcome: 'neutralized',
+      by: 'Flyvevåbnet Fighter Response, Skrydstrup',
+      needsPostIncident: true,
+    });
     // Dissolve F-35 + friendly missile — mission complete
     _removeF35Entities();
     _removeFriendlyMissile();
@@ -7292,22 +7288,25 @@ async function main() {
 
   function processDroneSiteMarkers(event, state, droneKey, curPos, prevPos, droneLabel = null) {
     if (!event || !curPos) return;
-    if (!event.perSiteCrossings) event.perSiteCrossings = [];
-    if (!event._droneCovState) event._droneCovState = new Map();
-    if (!event._droneInsideState) event._droneInsideState = new Map();
-    if (!event._siteAgg) event._siteAgg = {};
-    if (!event._droneTransitionLog) event._droneTransitionLog = [];
+    // Lazily initialise tick-loop internal state via mutators. Silent
+    // (no listener fire) because these init writes shouldn't provoke
+    // a UI render — the tick loop's own render happens at end of tick.
+    if (!event.perSiteCrossings) mutateEvent(event.id, { perSiteCrossings: [] });
+    if (!event._droneCovState) mutateEvent(event.id, { _droneCovState: new Map() });
+    if (!event._droneInsideState) mutateEvent(event.id, { _droneInsideState: new Map() });
+    if (!event._siteAgg) mutateEvent(event.id, { _siteAgg: {} });
+    if (!event._droneTransitionLog) mutateEvent(event.id, { _droneTransitionLog: [] });
 
     let droneCov = event._droneCovState.get(droneKey);
-    if (!droneCov) { droneCov = new Map(); event._droneCovState.set(droneKey, droneCov); }
+    if (!droneCov) { droneCov = new Map(); setEventMapKey(event.id, '_droneCovState', droneKey, droneCov); }
     let droneInside = event._droneInsideState.get(droneKey);
-    if (!droneInside) { droneInside = new Map(); event._droneInsideState.set(droneKey, droneInside); }
+    if (!droneInside) { droneInside = new Map(); setEventMapKey(event.id, '_droneInsideState', droneKey, droneInside); }
 
     const _persist = (kind, lat, lon, color, label) => {
-      event.perSiteCrossings.push({ kind, lat, lon, color, label, timestamp: new Date().toISOString() });
+      appendEventArray(event.id, 'perSiteCrossings', { kind, lat, lon, color, label, timestamp: new Date().toISOString() });
     };
     const _log = (siteId, kind, lat, lon) => {
-      event._droneTransitionLog.push({
+      appendEventArray(event.id, '_droneTransitionLog', {
         droneKey, droneLabel: droneLabel || droneKey,
         siteId, kind, lat, lon,
         timestamp: new Date().toISOString(),
@@ -7573,8 +7572,7 @@ async function main() {
       const suffix = agg.oorCount > 1 ? ` #${agg.oorCount}` : '';
       const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site?.code || site?.name || sid} signal lost`;
       _dropMarker(pos.lat, pos.lon, '#ff5a5a', lbl, event.id);
-      if (!event.perSiteCrossings) event.perSiteCrossings = [];
-      event.perSiteCrossings.push({ kind: 'oor', lat: pos.lat, lon: pos.lon, color: '#ff5a5a', label: lbl, timestamp: now });
+      appendEventArray(event.id, 'perSiteCrossings', { kind: 'oor', lat: pos.lat, lon: pos.lon, color: '#ff5a5a', label: lbl, timestamp: now });
       agg._oorFiredThisCycle = true;
       agg._pendingOorPos = null;
       toast(`OUT OF RANGE · ${event.droneType || 'track'} left ${site?.name || site?.code || sid} sensor coverage.`, 'warn');
@@ -8394,7 +8392,7 @@ async function main() {
       addNote(event.id,
         `Correlator ${best.score >= _CORRELATION_THRESHOLD ? 'confirmed' : 'weak-signal on'} manual link to ${best.prior.id} (composite ${pctStr(best.score)}: RF ${pctStr(best.rf)}, kinematic ${pctStr(best.kin)}, temporal ${pctStr(best.tmp)}).`,
         'AUTO-CORRELATOR');
-      event.correlationScore = +best.score.toFixed(3);
+      mutateEvent(event.id, { correlationScore: +best.score.toFixed(3) });
       return best;
     }
     // AUTO-LINK GATE — kinematic continuity is REQUIRED. Two same-type
@@ -8402,12 +8400,8 @@ async function main() {
     // will match on RF alone but must not auto-link — they're two separate
     // pilots, not the same threat continuing. Kinematic >= 0.3 filters this.
     if (best.score < _CORRELATION_THRESHOLD || best.kin < 0.3) return null;
-    // Auto-link bidirectionally
-    if (!event.linkedEventIds) event.linkedEventIds = [];
-    if (!event.linkedEventIds.includes(best.prior.id)) event.linkedEventIds.push(best.prior.id);
-    if (!best.prior.linkedEventIds) best.prior.linkedEventIds = [];
-    if (!best.prior.linkedEventIds.includes(event.id)) best.prior.linkedEventIds.push(event.id);
-    event.correlationScore = +best.score.toFixed(3);
+    // Auto-link bidirectionally + record correlation score in one call.
+    linkEvents(event.id, best.prior.id, +best.score.toFixed(3));
     // Union domain scope across the auto-linked pair. Ensures cross-site
     // continuations (drone crossing land/sea/inland boundary) surface the
     // right destinations at both ends. Idempotent per events.js.
@@ -9896,15 +9890,17 @@ async function main() {
       invalidateFallbackHighlights(event.siteId);
       // Pass full event so cache key matches the write path (per FIX-9
       // cross-session collision fix — key includes startTime).
-      invalidateNarrativeCache(event);
-      invalidatePreprocessed(event);
-      event.narrativeCache = null;
-      event._preprocessed = null;
+      invalidateNarrativeCache(event);   // mistral.js: clear persisted cache
+      invalidatePreprocessed(event);     // preprocessing.js: clear persisted preprocessed
+      clearNarrativeCache(event.id);     // events.js: null the in-memory field
+      clearPreprocessedCache(event.id);  // events.js: null the in-memory field
       const samples = window.__isr_getRecording?.(event.id)?.timeseries || [];
       const analysis = _debriefAnalyzeAssets(event, samples);
-      event._regenInFlight = _fireMistralDebrief(event, samples, analysis).finally(() => {
-        event._regenInFlight = null;
-        if (btn) { btn.disabled = false; btn.textContent = 'Regenerate narrative'; }
+      mutateEvent(event.id, {
+        _regenInFlight: _fireMistralDebrief(event, samples, analysis).finally(() => {
+          mutateEvent(event.id, { _regenInFlight: null });
+          if (btn) { btn.disabled = false; btn.textContent = 'Regenerate narrative'; }
+        }),
       });
     });
     // Chip clicks in the debrief header — same handler as detail panel.
@@ -10102,7 +10098,7 @@ async function main() {
     let ranked = rehydratePreprocessed(event, samples);
     if (!ranked) {
       ranked = extractAndRankSignals(event, samples, { ctx: siteCtx, highlights: highlightsRes });
-      event._preprocessed = ranked;
+      setPreprocessedCache(event.id, ranked);
       writePreprocessed(event, ranked);
     }
     const promptBlock = buildAgentBPromptBlock(ranked, highlightsRes);
@@ -10121,7 +10117,7 @@ async function main() {
         at: new Date().toISOString(),
         signalHash: currentSignalHash,
       };
-      event.narrativeCache = detCache;
+      setNarrativeCache(event.id, detCache);
       writeNarrativeCache(event, detCache);
       if (bodyEl) {
         const bodyHtml = `<p>${detCache.body}</p>`;
@@ -10137,7 +10133,7 @@ async function main() {
     // one, reuse it — free.
     const cached = readNarrativeCacheIfSignalMatch(event, currentSignalHash);
     if (cached) {
-      event.narrativeCache = cached;
+      setNarrativeCache(event.id, cached);
       if (bodyEl) {
         const bodyHtml = `<p>${(cached.body || '').trim()}</p>`;
         const recoHtml = cached.recommendation ? `<p class="dbn-analyst-take" style="margin-top:12px;padding-left:10px;border-left:2px solid var(--accent);color:var(--text-primary);font-weight:500;">${cached.recommendation.trim()}</p>` : '';
@@ -10201,13 +10197,13 @@ async function main() {
         // signalHash captures the preprocessing signal set that fed
         // this run — Phase 4 FIX-9 uses it to short-circuit Agent B
         // when the operator re-opens a debrief and signals are unchanged.
-        event.narrativeCache = {
+        setNarrativeCache(event.id, {
           body: result.body || latestBody,
           recommendation: result.recommendation || latestReco,
           model_version: result.model_version,
           at: new Date().toISOString(),
           signalHash: currentSignalHash,
-        };
+        });
         // Persist to localStorage so a page reload keeps the narrative
         // available to PDF export, closed-panel render, and reopen
         // debrief flows (FIX-1 per architecture review).
@@ -11261,16 +11257,18 @@ async function main() {
           // Freeze a snapshot of live telemetry each tick we're in
           // coverage — the detail panel shows THIS when the missile
           // subsequently drops out of range (no fabricated live coords).
-          event.lastKnownPosition = {
-            lat: p.lat, lon: p.lon, alt: Math.round(p.alt),
-            speed: p.speed, heading: Math.round(p.heading),
-            siteId: bestSid, timestamp: new Date().toISOString(),
-          };
+          mutateEvent(event.id, {
+            lastKnownPosition: {
+              lat: p.lat, lon: p.lon, alt: Math.round(p.alt),
+              speed: p.speed, heading: Math.round(p.heading),
+              siteId: bestSid, timestamp: new Date().toISOString(),
+            },
+          });
           // First ever entry into any sensor coverage → this is THE
           // detection moment. Promote event from pre-detection to detected
           // so the receiver inbox + alert strip surface it.
           if (event.detected === false) {
-            event.detected = true;
+            mutateEvent(event.id, { detected: true });
             const site = SITES[bestSid];
             toast(`DETECTED · ${event.droneType} within ${site?.name || bestSid} sensor range.`, 'warn');
             renderAlertStrip();
@@ -11282,9 +11280,9 @@ async function main() {
           ) {
             _fireReacquisition(event, bestSid);
           }
-          event._prevCoverageSite = bestSid;
+          mutateEvent(event.id, { _prevCoverageSite: bestSid });
         }
-        event._prevInCoverage = inAnyCoverage;
+        mutateEvent(event.id, { _prevInCoverage: inAnyCoverage });
         // Event-level currentlyInCoverage uses the LIVE-drones check
         // (any live drone in any sensor cov at any site), NOT just
         // the LEAD's position. Without this the "SIGNAL LOST" panel
@@ -11303,7 +11301,7 @@ async function main() {
             if (_shouldAutoDetect(sw.stats.lat, sw.stats.lon, sw.stats.alt)) { anyLiveInCov = true; break; }
           }
         }
-        event.currentlyInCoverage = anyLiveInCov;
+        mutateEvent(event.id, { currentlyInCoverage: anyLiveInCov });
 
         // ── Multi-site auto-close ──
         // Terminal close for multi-site / cross-cued tracks that leave
@@ -11359,16 +11357,18 @@ async function main() {
             if (!state._outOfAllCoverageSinceMs) {
               state._outOfAllCoverageSinceMs = performance.now();
               const loss = _classifyDetectionLoss(event);
-              event.temporaryLoss = {
-                firstAt: new Date().toISOString(),
-                classification: loss.classification,
-                graceMs: loss.graceMs,
-                reason: loss.reason,
-                distanceM: loss.distanceM ?? null,
-                lastSpeed: loss.lastSpeed ?? null,
-                lastHeading: loss.lastHeading ?? null,
-                graceSeconds: loss.graceSeconds ?? Math.round(loss.graceMs / 1000),
-              };
+              mutateEvent(event.id, {
+                temporaryLoss: {
+                  firstAt: new Date().toISOString(),
+                  classification: loss.classification,
+                  graceMs: loss.graceMs,
+                  reason: loss.reason,
+                  distanceM: loss.distanceM ?? null,
+                  lastSpeed: loss.lastSpeed ?? null,
+                  lastHeading: loss.lastHeading ?? null,
+                  graceSeconds: loss.graceSeconds ?? Math.round(loss.graceMs / 1000),
+                },
+              });
             }
             const activeGraceMs = event.temporaryLoss?.graceMs || 12000;
             if (performance.now() - state._outOfAllCoverageSinceMs >= activeGraceMs) {
@@ -11378,7 +11378,7 @@ async function main() {
                     alt: event.lastKnownPosition.alt, timestamp: new Date().toISOString(),
                     heading: event.lastKnownPosition.heading, leftCoverageOf: 'all-sites-auto' }
                 : (event.exit || null);
-              event.exit = exitPoint;
+              mutateEvent(event.id, { exit: exitPoint });
               markTrackClosed(p.eventId);
               closeEvent(p.eventId, exitPoint);
               toast(`Sim auto-ended · ${event.droneType || 'track'} left all sensor coverage with no active pursuit.`, 'info');
@@ -11393,7 +11393,7 @@ async function main() {
             // object flees again. Panel will drop the Temporary
             // detection loss section on next render.
             state._outOfAllCoverageSinceMs = null;
-            if (event.temporaryLoss) event.temporaryLoss = null;
+            if (event.temporaryLoss) mutateEvent(event.id, { temporaryLoss: null });
           }
         }
       }
@@ -11573,12 +11573,14 @@ async function main() {
         const rangeM = perim ? distanceToPerimeter(p.lat, p.lon, perim) : null;
         const isInside = perim ? pointInPolygon(p.lat, p.lon, perim) : false;
 
-        event.lastPosition = {
-          lat: p.lat, lon: p.lon, alt: Math.round(p.alt),
-          speed: p.speed, heading: Math.round(p.heading),
-          rangeToPerim: rangeM, eta: null,
-        };
-        event.duration = Math.round(p.tSec);
+        mutateEvent(event.id, {
+          lastPosition: {
+            lat: p.lat, lon: p.lon, alt: Math.round(p.alt),
+            speed: p.speed, heading: Math.round(p.heading),
+            rangeToPerim: rangeM, eta: null,
+          },
+          duration: Math.round(p.tSec),
+        });
 
         // ── Cross cueing: project trajectory forward, find impacted infra.
         // Snapshot the projection input (lat/lon/heading/speed) each time
@@ -11592,14 +11594,14 @@ async function main() {
         const hasLiveContact = inAnyCoverage === null ? true : inAnyCoverage;
         if (event.classification === 'hostile' && event.status === 'active' && p.speed > 0) {
           if (hasLiveContact) {
-            event.projectionSnapshot = { lat: p.lat, lon: p.lon, heading: p.heading, speed: p.speed };
+            mutateEvent(event.id, { projectionSnapshot: { lat: p.lat, lon: p.lon, heading: p.heading, speed: p.speed } });
           }
           if (event.projectionSnapshot) {
-            event.projectedPath = projectImpacts(event.projectionSnapshot, event.siteId);
+            mutateEvent(event.id, { projectedPath: projectImpacts(event.projectionSnapshot, event.siteId) });
             updateProjectedTrajectoryEntity(event);
           }
         } else {
-          event.projectedPath = null;
+          mutateEvent(event.id, { projectedPath: null });
           removeProjectedTrajectoryEntity(event.id);
         }
 
@@ -11611,7 +11613,7 @@ async function main() {
           state.entryDropped = true;
           state.wasInside = true;
           const entryTime = new Date().toISOString().slice(11, 19);
-          event.entry = { lat: p.lat, lon: p.lon, alt: Math.round(p.alt), timestamp: new Date().toISOString(), heading: Math.round(p.heading), sensorIds: event.contributingSensors.map(s => s.id) };
+          mutateEvent(event.id, { entry: { lat: p.lat, lon: p.lon, alt: Math.round(p.alt), timestamp: new Date().toISOString(), heading: Math.round(p.heading), sensorIds: event.contributingSensors.map(s => s.id) } });
           // Route via _dropMarker so it lands in _perEventMarkers for
           // selection-driven hide/show (matches multi-site marker path).
           state.entryMarker = _dropMarker(p.lat, p.lon, '#4dd2ff', `ENTRY ${entryTime}Z`, event.id);
@@ -11632,7 +11634,7 @@ async function main() {
           const exitLabel = coverageExit && lastSensor ? `EXIT ${exitTime}Z · cleared ${lastSensor}` : `EXIT ${exitTime}Z`;
           const exitPoint = { lat: p.lat, lon: p.lon, alt: Math.round(p.alt), timestamp: new Date().toISOString(), heading: Math.round(p.heading), leftCoverageOf: coverageExit ? lastSensor : null };
           state.exitMarker = _dropMarker(p.lat, p.lon, '#ffb84d', exitLabel, event.id);
-          event.exit = exitPoint;
+          mutateEvent(event.id, { exit: exitPoint });
           // If intercept is pending, don't force-close on coverage exit — let
           // the missile keep playing until QRA neutralizes it.
           if (event.awaitingNeutralization) {
@@ -11649,7 +11651,7 @@ async function main() {
             state.outOfRangeDropped = true;
             const oorTime = new Date().toISOString().slice(11, 19);
             state.outOfRangeMarker = _dropMarker(p.lat, p.lon, '#ff5a5a', `OUT OF RANGE ${oorTime}Z · signal lost`, event.id);
-            event.outOfRange = { lat: p.lat, lon: p.lon, alt: Math.round(p.alt), timestamp: new Date().toISOString() };
+            mutateEvent(event.id, { outOfRange: { lat: p.lat, lon: p.lon, alt: Math.round(p.alt), timestamp: new Date().toISOString() } });
             if (!state.closedAt && !event.awaitingNeutralization && !event.multiSiteTrack) {
               state.closedAt = performance.now();
               markTrackClosed(p.eventId);
@@ -12358,7 +12360,7 @@ async function main() {
     for (const eventId of droneStateIds) {
       const event = getEvent(eventId);
       if (event && event.status === 'active') closeEvent(eventId, event.exit || null);
-      if (event) event.projectedPath = null;
+      if (event) mutateEvent(event.id, { projectedPath: null });
       markTrackClosed(eventId);
       removeLiveTrack(eventId);
       removeDroneEntities(eventId);   // handles primary + swarm + markers + projections
@@ -13594,7 +13596,6 @@ async function main() {
     if (!event) return null;
     const nowIso = new Date().toISOString();
     // Interaction record (audit)
-    if (!Array.isArray(event.interactions)) event.interactions = [];
     const interaction = {
       id: `NTF-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
       timestamp: nowIso,
@@ -13606,10 +13607,9 @@ async function main() {
       ackedAt: null,
       ackedBy: null,
     };
-    event.interactions.push(interaction);
+    recordInteraction(event.id, interaction);
     // Routing history (per-recipient delivery journal)
-    if (!Array.isArray(event.routingHistory)) event.routingHistory = [];
-    event.routingHistory.push({
+    appendEventArray(event.id, 'routingHistory', {
       role_id: roleId,
       notification_kind: kind,
       deliveredAt: nowIso,
@@ -13630,8 +13630,7 @@ async function main() {
   function pushObserver(event_id, roleId, { addedBy = 'system', reason = 'auto-scoped', mode = 'observer' } = {}) {
     const event = getEvent(event_id);
     if (!event) return null;
-    if (!(event.participants instanceof Map)) event.participants = new Map();
-    if (event.participants.has(roleId)) return event.participants.get(roleId);
+    if (event.participants?.has(roleId)) return event.participants.get(roleId);
     const entry = {
       mode,
       addedAt: new Date().toISOString(),
@@ -13641,7 +13640,7 @@ async function main() {
       ackedAt: null,
       ackedBy: null,
     };
-    event.participants.set(roleId, entry);
+    setEventMapKey(event.id, 'participants', roleId, entry);
     return entry;
   }
 
@@ -17621,7 +17620,7 @@ async function main() {
   // event._markerFilters. Master "All" chip clears/sets all categories.
   function _renderMarkerFilterChips(event) {
     if (!event) return '';
-    if (!event._markerFilters) event._markerFilters = _defaultMarkerFilters();
+    if (!event._markerFilters) mutateEvent(event.id, { _markerFilters: _defaultMarkerFilters() });
     const f = event._markerFilters;
     const allOn = f.kills && f.entryExit && f.oorReacq && f.detected;
     const chipStyle = (on, color) => `padding: 4px 10px; border-radius: 12px; font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.10em; text-transform: uppercase; cursor: pointer; user-select: none; ${on ? `background: rgba(${color}, 0.14); border: 1px solid rgba(${color}, 0.55); color: rgb(${color});` : 'background: transparent; border: 1px solid #1e2530; color: var(--text-dim);'}`;
@@ -17650,7 +17649,7 @@ async function main() {
   // provides the outer wrapper + caret).
   function _renderMarkerFilterChipsBody(event) {
     if (!event) return '';
-    if (!event._markerFilters) event._markerFilters = _defaultMarkerFilters();
+    if (!event._markerFilters) mutateEvent(event.id, { _markerFilters: _defaultMarkerFilters() });
     const f = event._markerFilters;
     const allOn = f.kills && f.entryExit && f.oorReacq && f.detected;
     const chipStyle = (on, color) => `padding: 4px 10px; border-radius: 12px; font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.10em; text-transform: uppercase; cursor: pointer; user-select: none; ${on ? `background: rgba(${color}, 0.14); border: 1px solid rgba(${color}, 0.55); color: rgb(${color});` : 'background: transparent; border: 1px solid #1e2530; color: var(--text-dim);'}`;
