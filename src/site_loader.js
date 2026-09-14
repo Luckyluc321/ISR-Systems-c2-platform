@@ -46,10 +46,16 @@ const MANIFEST_SCHEMA = {
     },
   ],
   properties: {
-    site_id:      { type: 'string', pattern: '^[a-z0-9][a-z0-9-]*$' },
+    // site_id + tenant patterns allow both `-` and `_` in identifiers.
+    // Every existing Energinet site id uses underscores
+    // (energinet_amager_koblingsstation etc). Rejecting them silently
+    // failed validation for 6 of 9 manifests — root cause of the
+    // "Energinet sites missing from map + threat menu + config list"
+    // regression discovered 2026-09-14.
+    site_id:      { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]*$' },
     label:        { type: 'string', minLength: 1 },
     code:         { type: 'string' },
-    tenant:       { type: 'string', pattern: '^[a-z0-9][a-z0-9-]*$' },
+    tenant:       { type: 'string', pattern: '^[a-z0-9][a-z0-9_-]*$' },
     site_type:    { type: 'string', enum: ['airport', 'port', 'energy', 'government', 'data', 'gov-facility', 'other'] },
     subtitle:     { type: 'string' },
     coordinates: {
