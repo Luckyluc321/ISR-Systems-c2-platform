@@ -321,10 +321,13 @@ if (typeof window !== 'undefined') {
     populated: subsectionsForContributor,
     all:       renderAllSubsections,
   };
-  // Signature bridge dev handle. Usage:
-  //   window.__isr_signature.bridge({modality:'acoustic', raw_signature:{acoustic:{profile:'moped-buzz', fundamental_hz:78}}})
-  //   window.__isr_signature.explain({raw_signature:{...}})
-  //   window.__isr_signature.coverage()
+  // Signature bridge dev handle. RESHAPED 2026-09-14: the bridge is
+  // now a pure NN-output → family-library lookup (see feedback_c2_not
+  // _classifier). It no longer classifies raw signatures; it enriches
+  // the label the NN already produced. Usage:
+  //   window.__isr_signature.bridge({nn_family:'shahed-loitering-munition', nn_confidence:0.87, raw_signature:{...}})
+  //   window.__isr_signature.explain({nn_family:'dji-quadcopter', nn_confidence:0.92})
+  //   window.__isr_signature.coverage()                                            → known families + threat levels
   window.__isr_signature = {
     bridge:   bridgeSignature,
     explain:  explainSignature,

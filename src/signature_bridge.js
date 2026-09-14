@@ -1,336 +1,175 @@
 // ═══════════════════════════════════════════════════════════════════
-// Signature bridge — raw NN signature → family-labelled narrative
+// Signature bridge — NN output → reference library adapter
 // ───────────────────────────────────────────────────────────────────
-// Implements docs/integration-contracts.md Section 9. Deterministic
-// preprocessing that translates a raw sensor signature slice (RF band,
-// acoustic profile, visual silhouette) into a family label + narrative
-// text + attribution hints + candidate model refinement. Rules-driven,
-// same shape as `src/threat_routing.js` RULES table. Pure module — no
-// external calls, no writes.
+// SCOPE (per feedback_c2_not_classifier): the C2 platform does NOT
+// classify signatures. The neural network is the classifier. This
+// module reads what the NN already labeled and looks up that label
+// in the family reference library (src/families.js) to attach the
+// response profile, precedent-context stubs, and attribution
+// elaboration that C2 owns.
 //
-// Consumers:
-//   - NN adapter downstream of `src/threat_routing.js` for enriching
-//     event.narrativeCache before Agent B (Section 8) prompts
-//   - Chapter renderers (Phase 2 report shape) for the attribution
-//     sub-section
-//   - Precedent retrieval — signature_hash groups similar past events
+// The historical rule-based implementation (10 raw-signature rules
+// with family voting) is archived at src/_legacySignatureBridgeRules.js.
+// It was wrong scope — classifier work that duplicated the NN's job.
+// Kept in the tree as reference material for the NN training team;
+// not imported anywhere.
 //
-// Detection-only invariant preserved. Bridge returns labels + narrative
-// text; no dispatch, no escalation, no state mutation.
+// Input:  NN output for a single detection
+// Output: same NN classification passthrough, enriched with C2's
+//         reference-library metadata for that family
 //
-// See docs/integration-contracts.md Section 9 for the full contract.
+// Wire contract: docs/integration-contracts.md §9.
+// Design rationale: docs/agentic-signature-bridge-architecture.md.
 // ═══════════════════════════════════════════════════════════════════
 
-import { FAMILIES, MODELS, ACOUSTIC, VISUAL, RF_BANDS } from './threat_taxonomy.js';
-
-// ── Rules table ────────────────────────────────────────────────
-//
-// Each rule matches against the raw signature slice + optional NN
-// classification and produces a narrative label + attribution hints.
-// Multiple rules can match; rationales concatenate, attributions
-// dedupe. Rules fire in order but order does NOT determine priority
-// — every matching rule contributes.
-
-const RULES = [
-  {
-    tag: 'shahed-rotary-acoustic',
-    when: (sig) => sig.acoustic
-                && sig.acoustic.profile === ACOUSTIC.MOPED_BUZZ
-                && sig.acoustic.fundamental_hz >= 70
-                && sig.acoustic.fundamental_hz <= 90,
-    narrative: 'Distinctive Shahed-class rotary-engine acoustic signature detected (moped-buzz profile, 70-90Hz fundamental).',
-    attribution: ['origin:IR', 'kinetic-capable', 'one-way-attack-UAV', 'family-loitering-munition'],
-    modelFilterFamily: FAMILIES.LOITERING_MUNITION,
-  },
-  {
-    tag: 'dji-ocusync-rf',
-    when: (sig) => sig.rf
-                && (sig.rf.band === RF_BANDS.BAND_2_4_GHZ || sig.rf.band === RF_BANDS.BAND_5_8_GHZ)
-                && sig.rf.modulation_hint === 'ofdm',
-    narrative: 'DJI OcuSync-family link pattern (OFDM on 2.4/5.8 GHz consumer bands).',
-    attribution: ['origin:CN', 'consumer-drone', 'family-commercial-quadcopter'],
-    modelFilterFamily: FAMILIES.COMMERCIAL_QUADCOPTER,
-  },
-  {
-    tag: 'fpv-analog-video-rf',
-    when: (sig) => sig.rf
-                && sig.rf.band === RF_BANDS.BAND_5_8_GHZ
-                // Accept `null` (explicit absence) and `undefined`
-                // (field omitted by sensor). Real sensor payloads
-                // frequently omit modulation_hint entirely.
-                && (sig.rf.modulation_hint === 'analog' || sig.rf.modulation_hint == null)
-                && sig.rf.bandwidth_hz != null
-                && sig.rf.bandwidth_hz >= 15000000,
-    narrative: 'Wideband 5.8 GHz analog video pattern consistent with FPV racing / kamikaze quadcopter.',
-    attribution: ['fpv-frame', 'kinetic-capable', 'family-fpv-quadcopter'],
-    modelFilterFamily: FAMILIES.FPV_QUADCOPTER,
-  },
-  {
-    tag: 'stealth-autonomous-signature',
-    when: (sig) => sig.rf
-                && sig.rf.band === RF_BANDS.SILENT
-                && sig.visual
-                && sig.visual.silhouette === VISUAL.DELTA_WING,
-    narrative: 'Silent RF + delta-wing silhouette. Autonomous loitering munition or cruise-missile cruise phase.',
-    attribution: ['autonomous', 'kinetic-capable', 'delta-wing'],
-    modelFilterFamily: null,   // ambiguous between LOITERING_MUNITION + CRUISE_MISSILE
-  },
-  {
-    tag: 'cruise-missile-jet-scream',
-    when: (sig) => sig.acoustic
-                && sig.acoustic.profile === ACOUSTIC.JET_SCREAM
-                && sig.visual
-                && sig.visual.silhouette === VISUAL.CRUISE_MISSILE,
-    narrative: 'Jet-scream acoustic + cruise-missile silhouette. High-speed cruise munition.',
-    attribution: ['kinetic-capable', 'high-speed', 'family-cruise-missile'],
-    modelFilterFamily: FAMILIES.CRUISE_MISSILE,
-  },
-  {
-    tag: 'strategic-uav-satcom-rf',
-    when: (sig) => sig.rf
-                && (sig.rf.band === RF_BANDS.BAND_KU || sig.rf.band === RF_BANDS.BAND_KA)
-                && sig.visual
-                && (sig.visual.silhouette === VISUAL.STRAIGHT_WING || sig.visual.silhouette === VISUAL.DELTA_WING),
-    narrative: 'Ku/Ka-band SATCOM datalink + high-altitude airframe silhouette. Strategic ISR UAV likely.',
-    attribution: ['satcom-controlled', 'high-altitude', 'ISR-capable', 'family-strategic-uav'],
-    modelFilterFamily: FAMILIES.STRATEGIC_UAV,
-  },
-  {
-    tag: 'helicopter-rotor-thump',
-    when: (sig) => sig.acoustic
-                && sig.acoustic.profile === ACOUSTIC.ROTOR_THUMP,
-    narrative: 'Main + tail rotor acoustic thump. Conventional helicopter platform.',
-    attribution: ['manned-likely', 'rotorcraft'],
-    modelFilterFamily: null,   // helicopter-civilian or helicopter-military — needs visual/RF for split
-  },
-  {
-    tag: 'small-quadcopter-high-whine',
-    when: (sig) => sig.acoustic
-                && sig.acoustic.profile === ACOUSTIC.HIGH_WHINE
-                && sig.visual
-                && sig.visual.silhouette === VISUAL.QUADCOPTER_SMALL,
-    narrative: 'High-whine electric motors + small quadcopter silhouette. Consumer or prosumer platform.',
-    attribution: ['electric', 'consumer-tier', 'family-commercial-quadcopter'],
-    modelFilterFamily: FAMILIES.COMMERCIAL_QUADCOPTER,
-  },
-  {
-    tag: 'swarm-acoustic-chorus',
-    when: (sig) => sig.acoustic
-                && sig.acoustic.profile === ACOUSTIC.SWARM_CHORUS,
-    narrative: 'Multi-source acoustic chorus. Coordinated drone swarm signature.',
-    attribution: ['coordinated', 'multi-drone', 'family-drone-swarm'],
-    modelFilterFamily: FAMILIES.DRONE_SWARM,
-  },
-  {
-    tag: 'balloon-tethered',
-    when: (sig) => sig.visual && sig.visual.silhouette === VISUAL.BALLOON,
-    narrative: 'Balloon or aerostat silhouette. Persistent surveillance platform likely.',
-    attribution: ['low-mobility', 'family-tethered-platform'],
-    modelFilterFamily: FAMILIES.TETHERED_PLATFORM,
-  },
-];
+import { FAMILIES, familyMetadata, familyLibraryCoverage } from './families.js';
 
 // ── Public API ─────────────────────────────────────────────────
 
-/**
- * Bridge a raw signature slice into a family-labelled narrative.
- * Idempotent + pure. Returns a fresh object every call.
- *
- * Input shape (per Section 9 contract):
- *   {
- *     detection_id: string,
- *     modality: 'rf' | 'acoustic' | 'visual' | 'radar' | 'cooperative-traffic',
- *     raw_signature: { rf?, acoustic?, visual?, radar? },
- *     nn_classification?: {
- *       family: FAMILIES value,
- *       candidate_models: [{id, score}],
- *       family_confidence: number [0, 1]
- *     }
- *   }
- *
- * Output shape:
- *   {
- *     family_label: FAMILIES value,
- *     family_confidence: number [0, 1],
- *     candidate_models: [{id, score, signature_match_reasoning}],
- *     narrative_label: string,
- *     attribution_hints: string[],
- *     signature_hash: string,
- *     fired_rules: string[]  // audit trail
- *   }
- */
+// bridgeSignature(input) — main adapter.
+//
+// Input shape (all fields except nn_family + nn_confidence optional):
+//   {
+//     detection_id: string,           // opaque id; passthrough
+//     nn_family: string,              // e.g. 'shahed-loitering-munition'
+//     nn_confidence: number [0, 1],
+//     candidate_models?: [{id, score, ...}],   // NN's model shortlist
+//     raw_signature?: {               // used for signature_hash + optional elaboration
+//       rf?: { carrier_hz, bandwidth_hz, modulation, ... },
+//       acoustic?: { fundamental_hz, profile, ... },
+//       visual?: { silhouette, ... },
+//     },
+//   }
+//
+// Output shape:
+//   {
+//     detection_id, family_label, family_confidence,   // passthrough from NN
+//     family_metadata,                                 // from FAMILY_LIBRARY
+//     candidate_models,                                // passthrough (may be [])
+//     attribution_hints,                               // = family_metadata.attribution_elaboration
+//     signature_hash,                                  // FNV-1a over sig; null if no raw_signature
+//     source: 'nn',                                    // always 'nn' — C2 no longer classifies
+//   }
+//
+// Off-list family label OR missing family → returns UNKNOWN metadata
+// with source: 'nn-off-list'. Callers should surface this as
+// "operator manual reclassify required" rather than fabricating.
 export function bridgeSignature(input) {
-  const empty = {
-    family_label:      FAMILIES.UNKNOWN_SIGNATURE,
-    family_confidence: 0,
-    candidate_models:  [],
-    narrative_label:   'Signature could not be parsed.',
-    attribution_hints: [],
-    signature_hash:    'sig-invalid',
-    fired_rules:       [],
-  };
-  if (!input || typeof input !== 'object') return empty;
-  // Missing raw_signature counts as malformed per Section 9 contract
-  // (the "no rules match" state is reserved for present-but-unrecognised
-  // signatures; absent signature is a different failure class).
-  const sig = input.raw_signature;
-  if (!sig || typeof sig !== 'object') return empty;
+  if (!input || typeof input !== 'object') return _malformed('input must be an object');
 
-  const firedRules = [];
-  const narrativeParts = [];
-  const attributionSet = new Set();
-  const familyVotes = new Map();   // family → total vote weight
+  const nn_family     = _normalizeFamily(input.nn_family);
+  const nn_confidence = _coerceConfidence(input.nn_confidence);
+  const candidateModels = Array.isArray(input.candidate_models) ? input.candidate_models : [];
 
-  for (const rule of RULES) {
-    let matched = false;
-    try { matched = rule.when(sig) === true; } catch (_) { matched = false; }
-    if (!matched) continue;
-    firedRules.push(rule.tag);
-    if (rule.narrative) narrativeParts.push(rule.narrative);
-    for (const hint of rule.attribution || []) attributionSet.add(hint);
-    if (rule.modelFilterFamily) {
-      familyVotes.set(rule.modelFilterFamily, (familyVotes.get(rule.modelFilterFamily) || 0) + 1);
-    }
-  }
-
-  // NN classification vote weight: worth 2x a single rule (external
-  // signal). If NN family disagrees with rule-inferred family, higher
-  // rule-vote count wins; ties break in favour of NN.
-  const nn = input.nn_classification || null;
-  if (nn && nn.family) {
-    const nnWeight = 2 * (nn.family_confidence != null ? Math.max(0.1, nn.family_confidence) : 1);
-    familyVotes.set(nn.family, (familyVotes.get(nn.family) || 0) + nnWeight);
-  }
-
-  // Winning family = max-vote entry; fall back to unknown when no
-  // votes and no NN classification.
-  let bestFamily = FAMILIES.UNKNOWN_SIGNATURE;
-  let bestScore = 0;
-  for (const [family, score] of familyVotes) {
-    if (score > bestScore) {
-      bestFamily = family;
-      bestScore = score;
-    }
-  }
-
-  // family_confidence normalised: bounded [0, 1] via a soft
-  // rule-count → confidence mapping. NN confidence dominates when
-  // present; rule-only confidence caps at 0.85 (never assert
-  // certainty from signature-side rules alone).
-  //
-  // Note: bestScore counts FAMILY VOTES, not fired rules. Rules with
-  // `modelFilterFamily: null` (stealth-autonomous, helicopter-thump)
-  // fire narrative + attributions but cast no family vote. Floor
-  // confidence off firedRules.length when at least one rule matched
-  // so those rules produce a coherent confidence signal alongside the
-  // narrative they emit.
-  let familyConfidence;
-  if (nn && nn.family === bestFamily) {
-    familyConfidence = nn.family_confidence != null ? nn.family_confidence : 0.75;
-  } else if (bestScore >= 3) {
-    familyConfidence = 0.85;
-  } else if (bestScore >= 2) {
-    familyConfidence = 0.70;
-  } else if (bestScore >= 1) {
-    familyConfidence = 0.55;
-  } else if (firedRules.length >= 1) {
-    familyConfidence = 0.40;   // rules fired but no family vote — soft signal
-  } else {
-    familyConfidence = 0.20;
-  }
-
-  // Candidate models: start from NN's candidate list (if any), filter
-  // by winning family, then annotate each with signature-match
-  // reasoning derived from the fired rules.
-  const nnCandidates = Array.isArray(nn?.candidate_models) ? nn.candidate_models : [];
-  const familyModels = MODELS.filter(m => m.family === bestFamily).map(m => m.id);
-  const familyModelSet = new Set(familyModels);
-  let candidates = nnCandidates.filter(c => familyModelSet.has(c.id));
-  // If NN gave no in-family candidates, fall back to the top 3 of the
-  // family by model position (alphabetical stability).
-  if (!candidates.length && bestFamily !== FAMILIES.UNKNOWN_SIGNATURE) {
-    candidates = familyModels
-      .sort((a, b) => a.localeCompare(b))
-      .slice(0, 3)
-      .map(id => ({ id, score: 0.33 }));
-  }
-  // Annotate every candidate with match reasoning.
-  const matchReasoning = narrativeParts.length
-    ? narrativeParts.join(' · ')
-    : 'No rule-derived reasoning; inference from NN classification only.';
-  candidates = candidates.map(c => ({
-    id:    c.id,
-    score: c.score,
-    signature_match_reasoning: matchReasoning,
-  }));
-
-  // Narrative label — first fired rule wins as primary sentence,
-  // subsequent rules append as context. Empty → deterministic
-  // fallback per Section 9.
-  const narrativeLabel = narrativeParts.length
-    ? narrativeParts[0]
-    : (bestFamily !== FAMILIES.UNKNOWN_SIGNATURE
-         ? `Signature consistent with ${bestFamily} family (NN classification, no distinctive rule matched).`
-         : 'Unrecognised signature pattern.');
+  const metadata = familyMetadata(nn_family);
+  const resolvedFamily = metadata === familyMetadata(null) && nn_family !== FAMILIES.UNKNOWN
+    ? FAMILIES.UNKNOWN
+    : nn_family;
+  const isOffList = resolvedFamily === FAMILIES.UNKNOWN && input.nn_family && input.nn_family !== FAMILIES.UNKNOWN;
 
   return {
-    family_label:      bestFamily,
-    family_confidence: familyConfidence,
-    candidate_models:  candidates,
-    narrative_label:   narrativeLabel,
-    attribution_hints: Array.from(attributionSet),
-    signature_hash:    _signatureHash(sig),
-    fired_rules:       firedRules,
+    detection_id:     input.detection_id || null,
+    family_label:     resolvedFamily,
+    family_confidence: nn_confidence,
+    family_metadata:  metadata,
+    candidate_models: candidateModels.map(_annotateCandidate.bind(null, metadata)),
+    attribution_hints: metadata.attribution_elaboration || [],
+    signature_hash:   input.raw_signature ? _fnv1aHash(_canonicalize(input.raw_signature)) : null,
+    source:           isOffList ? 'nn-off-list' : 'nn',
   };
 }
 
-// Debug helper — returns per-rule match outcome for a given signature.
+// explainSignature(input) — same shape as bridgeSignature but adds a
+// debug envelope explaining why UNKNOWN fired (off-list, missing
+// nn_family, malformed). Used by the browser-console dev handle.
 export function explainSignature(input) {
-  const sig = input?.raw_signature || {};
-  return RULES.map(rule => {
-    let matched = false;
-    try { matched = rule.when(sig) === true; } catch (_) {}
-    return {
-      tag: rule.tag,
-      matched,
-      narrative: rule.narrative,
-      attribution: rule.attribution,
-      family: rule.modelFilterFamily,
-    };
-  });
+  const result = bridgeSignature(input);
+  const notes = [];
+  if (!input) notes.push('input was null / undefined');
+  else {
+    if (!input.nn_family) notes.push('no nn_family provided — defaulted to UNKNOWN');
+    else if (result.source === 'nn-off-list') notes.push(`nn_family '${input.nn_family}' not in FAMILIES enum — treated as UNKNOWN`);
+    if (input.nn_confidence == null) notes.push('no nn_confidence provided — coerced to 0');
+    if (!input.raw_signature) notes.push('no raw_signature provided — signature_hash is null (precedent retrieval will not group this detection)');
+  }
+  return { ...result, _debug: { notes } };
 }
 
-// Coverage snapshot for dev handle
+// signatureBridgeCoverage() — introspection. Returns the family enum
+// + counts + threat-level buckets. Wired to the dev handle for
+// coverage debugging + partner audit ("show me every family the C2
+// knows how to enrich").
 export function signatureBridgeCoverage() {
+  return familyLibraryCoverage();
+}
+
+// ── Internals ─────────────────────────────────────────────────
+
+// Normalise the NN's family label to our enum. Case-insensitive so
+// a partner NN emitting 'DJI-QUADCOPTER' still resolves. Trims
+// whitespace. Returns null when input is empty (caller downstream
+// converts to UNKNOWN).
+function _normalizeFamily(f) {
+  if (!f || typeof f !== 'string') return null;
+  return f.trim().toLowerCase();
+}
+
+// Coerce nn_confidence into [0, 1]. Anything invalid → 0.
+function _coerceConfidence(c) {
+  if (typeof c !== 'number' || Number.isNaN(c)) return 0;
+  if (c < 0) return 0;
+  if (c > 1) return 1;
+  return c;
+}
+
+// Annotate an NN candidate model with a family_context string derived
+// from the enriched metadata. Non-invasive — never overwrites fields
+// the NN sent; only adds family_context if absent.
+function _annotateCandidate(metadata, candidate) {
+  if (!candidate || typeof candidate !== 'object') return candidate;
+  if (candidate.family_context) return candidate;
   return {
-    ruleCount: RULES.length,
-    tags: RULES.map(r => r.tag),
-    modelCount: MODELS.length,
+    ...candidate,
+    family_context: metadata?.display_name || null,
   };
 }
 
-// ── Internals ──────────────────────────────────────────────────
-
-// Stable hash over the raw signature bytes for precedent retrieval.
-// Deterministic; same input → same hash. Not cryptographic — a fast
-// hash suffices since the platform's usage is grouping, not security.
-function _signatureHash(sig) {
-  const canonical = JSON.stringify(_canonicalise(sig));
-  let h = 0x811c9dc5;   // FNV-1a offset basis
-  for (let i = 0; i < canonical.length; i++) {
-    h = (h ^ canonical.charCodeAt(i)) >>> 0;
-    h = (h * 0x01000193) >>> 0;
-  }
-  return `sig-${h.toString(16).padStart(8, '0')}`;
+// Malformed-input envelope. Never throws — signature_bridge must
+// remain non-blocking for the downstream event pipeline.
+function _malformed(reason) {
+  const unknown = familyMetadata(null);
+  return {
+    detection_id: null,
+    family_label: FAMILIES.UNKNOWN,
+    family_confidence: 0,
+    family_metadata: unknown,
+    candidate_models: [],
+    attribution_hints: unknown.attribution_elaboration || [],
+    signature_hash: null,
+    source: 'malformed',
+    _malformed_reason: reason,
+  };
 }
 
-// Sort object keys recursively so `_signatureHash` is invariant to
-// key ordering in the caller's input object.
-function _canonicalise(v) {
-  if (v == null) return v;
-  if (Array.isArray(v)) return v.map(_canonicalise);
-  if (typeof v !== 'object') return v;
-  const out = {};
-  for (const k of Object.keys(v).sort()) out[k] = _canonicalise(v[k]);
-  return out;
+// ── Signature hash (unchanged from legacy) ───────────────────
+//
+// FNV-1a 32-bit over a canonicalised JSON representation of the raw
+// signature. Deterministic across sessions so precedent retrieval
+// can group identical signatures without relying on the NN's own
+// candidate id output.
+
+function _canonicalize(obj) {
+  if (obj === null || typeof obj !== 'object') return JSON.stringify(obj);
+  if (Array.isArray(obj)) return '[' + obj.map(_canonicalize).join(',') + ']';
+  const keys = Object.keys(obj).sort();
+  return '{' + keys.map(k => JSON.stringify(k) + ':' + _canonicalize(obj[k])).join(',') + '}';
+}
+
+function _fnv1aHash(str) {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+  }
+  return h.toString(16).padStart(8, '0');
 }
