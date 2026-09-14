@@ -257,6 +257,15 @@ export function addEvent(event) {
   // "no narrative yet" from "field missing entirely."
   event.narrativeCache = event.narrativeCache || null;
   event._preprocessed = event._preprocessed || null;
+  // Phase 4 · receiver-lens narratives keyed by archetype
+  //   (kinetic / coordination / intel / forensic / medical / regulatory
+  //    / public / liaison — see src/archetypes.js).
+  //   Shape per archetype: { body, key_terms[], chapter_hooks{...},
+  //     baseHash, model_version, computedAt, source: 'mistral'|'fallback' }
+  //   Empty object at creation. Lenses populate lazily on case-file
+  //   panel open. Invalidated when narrativeCache invalidates because
+  //   the lens is a reframing of the base narrative — no base, no lens.
+  event.narrativeLenses = event.narrativeLenses || {};
   // Phase 1 · Shared data catalog for the contributor-chapter model.
   // 13 typed sub-arrays hold single-copy facts that overlap across
   // chapters (subject bundle, detection recording, response history,
@@ -838,6 +847,12 @@ EVENTS.forEach(e => { e.notes = e.notes || []; });
 EVENTS.forEach(e => {
   if (e.tenantId === undefined) e.tenantId = tenantForSite(e.siteId);
 });
+// Phase 4 backfill — seed EVENTS also predate the receiver-lens layer.
+// Stamp an empty narrativeLenses object so downstream readers can
+// safely access event.narrativeLenses[archetype] without a null guard.
+EVENTS.forEach(e => {
+  if (!e.narrativeLenses) e.narrativeLenses = {};
+});
 
 // Seed a couple of demo notes so the section renders non-empty for demo events
 const _seedNote = (id, ts, author, text) => {
@@ -1404,6 +1419,25 @@ export function clearNarrativeCache(id) {
   const e = EVENTS.find(x => x.id === id);
   if (!e) return null;
   e.narrativeCache = null;
+  // Cascade: lenses derive from the base narrative, so any base
+  // invalidation also drops the archetype reframings. Prevents a
+  // stale lens from being served after Agent B regenerates.
+  e.narrativeLenses = {};
+  _listeners.forEach(fn => fn(id));
+  return e;
+}
+// Explicit lens-only invalidation. Used when a specific archetype
+// lens needs re-generation (e.g. archetype directive updated) without
+// dropping the base narrative. Called by main.js if we ever expose a
+// "regenerate lens" affordance in the UI.
+export function clearNarrativeLenses(id, archetype = null) {
+  const e = EVENTS.find(x => x.id === id);
+  if (!e) return null;
+  if (archetype) {
+    if (e.narrativeLenses) delete e.narrativeLenses[archetype];
+  } else {
+    e.narrativeLenses = {};
+  }
   _listeners.forEach(fn => fn(id));
   return e;
 }
