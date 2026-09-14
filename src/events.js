@@ -1044,10 +1044,21 @@ export function _visibleToActor(event, actor) {
     return event.tenantId === actor.tenantId;
   }
   if (actor.kind === 'receiver') {
-    // Receivers see events cascaded to any of their destinations. This
-    // is the ONE tenant surface that already worked pre-Phase-3 via
-    // eventsForDestinations() — preserved verbatim here.
-    return (event.escalations || []).some(r => actor.destinationIds.includes(r.destinationId));
+    // Receivers see events they are ON — three ways to be on an event:
+    //   1. Direct escalation recipient (destinationId match). Pre-
+    //      Phase-3 this was the only path — via eventsForDestinations.
+    //   2. Participant (actor or observer) on the event. Cross-agency
+    //      advisories, cascade picker recipients, and any role that
+    //      called pushObserver ends up here. Without this the receiver
+    //      views the case file (rendered because they're in
+    //      participants) but every click handler that re-fetches via
+    //      getEvent(id) hits a null and the button silently no-ops.
+    //   3. Their own roleId matches an escalation recipient (e.g. some
+    //      surfaces attribute an escalation to a role id directly).
+    if ((event.escalations || []).some(r => actor.destinationIds.includes(r.destinationId))) return true;
+    if (event.participants instanceof Map && event.participants.has(actor.roleId)) return true;
+    if ((event.escalations || []).some(r => r.destinationId === actor.roleId)) return true;
+    return false;
   }
   return false;                                           // unknown actor kind = deny
 }
