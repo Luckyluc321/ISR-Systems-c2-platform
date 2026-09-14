@@ -409,10 +409,95 @@ export function subsectionsForContributor(role, event) {
 // concatenated HTML string of every populated sub-section, in
 // canonical archetype order. Empty string when the role populated
 // nothing (contributor produced no chapter content on this event).
+//
+// The receiver-lens narrative sub-section (Phase 4) renders FIRST,
+// above the 8 structural sub-sections, so the archetype-shaped
+// framing sets the tone for what follows.
 export function renderAllSubsections(role, event) {
   if (!role || !event) return '';
-  return Object.values(ARCHETYPES)
-    .map(a => renderSubsection(a, role, event))
+  return [
+    renderNarrativeLensSubsection(role, event),
+    ...Object.values(ARCHETYPES)
+      .map(a => renderSubsection(a, role, event)),
+  ].filter(Boolean).join('');
+}
+
+// ── Sub-section 9 · Receiver-lens narrative (Phase 4) ───────────
+//
+// Reads event.narrativeLenses[archetype] where archetype is the
+// role's action archetype (kinetic / coordination / intel / ...).
+// Renders three distinct states:
+//
+//   1. Lens present → body prose + comma-separated key_terms chip
+//      strip + subtle audit footer (model_version + source).
+//   2. Lens absent but base narrativeCache exists → thin "generating
+//      archetype framing..." placeholder. main.js fires the lens
+//      stream on case-file open; next render will show the body.
+//   3. Neither present → empty string. Nothing to frame.
+//
+// Role without an archetype (unusual, only if archetypes.js
+// assignArchetypes missed the role) also renders empty.
+export function renderNarrativeLensSubsection(role, event) {
+  if (!role || !event) return '';
+  const archetype = role.archetype || role.primaryArchetype;
+  if (!archetype) return '';
+  const lens = event.narrativeLenses?.[archetype] || null;
+  const hasBase = !!event.narrativeCache?.body;
+
+  // State 3: no lens and no base — nothing to say.
+  if (!lens && !hasBase) return '';
+
+  // Archetype label for the header — matches the label the composer
+  // shows on the chapter's own header, so the reframing reads as
+  // "this event through the lens of your role".
+  const label = ARCHETYPE_LABELS[archetype] || archetype;
+
+  // State 2: base exists, lens still in flight (or failed to write).
+  // Show a subtle placeholder so the reader knows framing is coming.
+  if (!lens) {
+    return _wrapLens(
+      archetype,
+      `${label} framing`,
+      `<p class="chapter-lens-pending" style="color:var(--text-dim);font-style:italic;font-size:var(--fs-sm);">Framing being generated for this receiver archetype...</p>`,
+      null,
+    );
+  }
+
+  // State 1: lens present. Render body + key_terms chip strip.
+  const bodyHtml = String(lens.body || '')
+    .split(/\n{2,}/)
     .filter(Boolean)
+    .map(p => `<p style="margin:0 0 8px 0;">${esc(p.trim())}</p>`)
     .join('');
+  const keyTerms = String(lens.key_terms || '').trim();
+  const chipStrip = keyTerms
+    ? `<div class="chapter-lens-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">
+         ${keyTerms.split(',').map(t => t.trim()).filter(Boolean).map(t =>
+           `<span class="chapter-lens-chip" style="display:inline-flex;align-items:center;padding:2px 8px;background:rgba(77,210,255,0.10);border:1px solid rgba(77,210,255,0.35);border-radius:10px;font-family:var(--font-mono);font-size:var(--fs-2xs);letter-spacing:0.06em;color:#4dd2ff;">${esc(t)}</span>`
+         ).join('')}
+       </div>`
+    : '';
+  const auditFooter = `<div class="chapter-lens-audit" style="margin-top:8px;font-family:var(--font-mono);font-size:var(--fs-2xs);color:var(--text-dim);letter-spacing:0.04em;">Framing · ${esc(lens.model_version || 'unknown')}${lens.source === 'fallback' ? ' · fallback' : ''}</div>`;
+
+  return _wrapLens(archetype, `${label} framing`, bodyHtml + chipStrip + auditFooter, lens.source);
+}
+
+// Wrap for the lens sub-section. Same shape as _wrap but a distinct
+// class name (chapter-subsec-narrative) so the composer's CSS can
+// style it differently — the lens is a framing preamble, not a fact
+// list, and reads better with a slightly different visual weight.
+function _wrapLens(archetype, headerLabel, body, source) {
+  const sourceBadge = source === 'fallback'
+    ? '<span class="chapter-lens-source-badge" style="margin-left:8px;padding:1px 6px;background:rgba(255,184,77,0.10);border:1px solid rgba(255,184,77,0.35);border-radius:8px;font-family:var(--font-mono);font-size:var(--fs-2xs);color:#ffb84d;letter-spacing:0.04em;">FALLBACK</span>'
+    : '';
+  return `
+    <section class="chapter-subsec chapter-subsec-narrative chapter-subsec-narrative-${archetype}" style="background:rgba(77,210,255,0.03);border-left:2px solid rgba(77,210,255,0.4);">
+      <div class="chapter-subsec-hdr">
+        <span class="chapter-subsec-label">${esc(headerLabel)}</span>
+        ${sourceBadge}
+      </div>
+      <div class="chapter-subsec-body">
+        ${body}
+      </div>
+    </section>`;
 }
