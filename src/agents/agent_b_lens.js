@@ -41,8 +41,7 @@ const ARCHETYPE_LABELS = {
 };
 
 // Base writing rules — must match the ISR voice everywhere else in the
-// platform. Extended per-archetype in Step 3 (LENS_ARCHETYPE_DIRECTIVES
-// carries the archetype-specific system message additions).
+// platform. Extended per-archetype below via LENS_ARCHETYPE_DIRECTIVES.
 const LENS_WRITING_RULES = [
   'Write in ENGLISH. Only use Danish characters (æ ø å) for proper nouns.',
   'Declarative voice. No hedging phrases like "may" or "could indicate".',
@@ -50,21 +49,91 @@ const LENS_WRITING_RULES = [
   'Do not use markdown. No bold, italic, headers, or bullets.',
   'You are REFRAMING an existing narrative. Do NOT introduce facts, entities, or claims absent from the base narrative below. If the base does not mention casualties, do not invent them. If the base does not name a suspect, do not name one.',
   'Length must match the base narrative approximately. Do not double it. A reframing is a rewording, not an expansion.',
+  'Never speculate on classified fields. Do not name PET / FE operational methods, base coordinates marked restricted, NATO compartments, or foreign-actor TTPs even if the base narrative alludes to them. If a fact is redacted in the base, leave it redacted.',
 ];
 
-// Placeholder per-archetype directives. Step 3 replaces these with the
-// full archetype-tuned system messages (which facts to lead with,
-// which vocabulary to prefer, how to signal urgency). For Step 2 the
-// placeholders let us ship the module end-to-end.
+// Per-archetype directives. Each directive is a short "system message
+// tail" that tells the model:
+//   (1) LEAD — which facts of the base narrative to open with
+//   (2) VOCABULARY — which words + phrasing bucket this receiver
+//       expects (e.g. medical uses "triage priority" not "response
+//       tier"; kinetic uses "engagement envelope" not "situation")
+//   (3) OMIT — which facts of the base to de-emphasise (a hospital
+//       doesn't need to hear the RF signature; a police tactical
+//       unit doesn't need the compliance ramifications)
+//   (4) KEY_TERMS — an example of the anchor-noun list the reco slot
+//       should carry (so the composer can render them as a badge row)
+//
+// Data availability varies. Some archetypes (kinetic, coordination,
+// forensic, intel, regulatory) have rich underlying context that
+// Agent B's base narrative already surfaces, so their lenses can
+// lean confident. Medical + public-safety currently have data gaps
+// (no hospital bed capacity, no kommune population/shelter data)
+// so their directives stay honestly generic — the "reframing" is
+// vocabulary + emphasis, not deep receiver-scoped insight, until
+// external data lands. See project_medical_public_safety_data_gap
+// in memory for the roadmap on filling those gaps.
 const LENS_ARCHETYPE_DIRECTIVES = {
-  'kinetic-response':               'Reframe for a kinetic-response receiver. Lead with dispatchable-asset relevance and engagement envelope. Keep restraint proportional to actual threat state.',
-  'coordination-command':           'Reframe for a coordination-command receiver. Lead with cross-agency routing implications and escalation-ladder state.',
-  'intelligence-attribution':       'Reframe for an intelligence-attribution receiver. Lead with actor, tradecraft, tempo, tasking indicators. Signature-attribution vocabulary.',
-  'forensic-cyber':                 'Reframe for a forensic-cyber receiver. Lead with evidence chain, digital indicators, post-incident analysis handoff.',
-  'medical-consequence':            'Reframe for a medical-consequence receiver. Lead with casualty exposure vector, triage priority, hospital-load impact.',
-  'regulatory-advisory':            'Reframe for a regulatory-advisory receiver. Lead with airspace / maritime / energy compliance implications, NOTAM authority, restriction duration.',
-  'public-safety-communication':    'Reframe for a public-safety-communication receiver. Lead with affected population, shelter window, message half-life, public-messaging vocabulary.',
-  'international-liaison':          'Reframe for an international-liaison receiver. Lead with cross-border implications, information-sharing pathways, allied-notification tempo.',
+
+  'kinetic-response': [
+    'LEAD with the threat state, dispatchable-asset relevance, and engagement envelope. Frame the incident as a tactical picture: what is airborne, where is it going, what response has been ordered, what remains open.',
+    'VOCABULARY: engagement envelope, dispatchable asset, cordon, intercept vector, ROE, standoff, terminal phase, denial, seizure.',
+    'OMIT compliance framing, hospital load, public messaging tone — a kinetic-response receiver needs to make a dispatch call, not draft a press release.',
+    'KEY_TERMS example: "engagement envelope, cordon, intercept vector, denial"',
+  ].join(' '),
+
+  'coordination-command': [
+    'LEAD with the cross-agency picture: which contributors are engaged, which are pending, which escalation tier the event sits at, and what national-tier decisions are outstanding.',
+    'VOCABULARY: escalation tier, SITREP, precedence, contributor status, resource allocation, briefing threshold, national response.',
+    'OMIT tactical-envelope detail (that is for kinetic receivers) and forensic chain-of-custody detail (that is for forensic receivers). Coordination cares about who owns what next, not how the intercept was flown.',
+    'KEY_TERMS example: "escalation tier, contributor status, resource allocation, briefing threshold"',
+  ].join(' '),
+
+  'intelligence-attribution': [
+    'LEAD with the attribution picture: platform class, signature indicators, operator tradecraft cues, temporal pattern relative to prior events at this or adjacent sites, and any state-actor signature the base narrative already noted.',
+    'VOCABULARY: attribution, tradecraft, signature, tasking, tempo, pattern-of-life, precedent, operator profile, control-link.',
+    'OMIT tactical engagement details and public-safety impact — intelligence cares about who and why, not how the response was executed.',
+    'CRITICAL: If the base narrative marked a fact as classified or redacted (state-actor speculation, cleared compartments, foreign methods), keep the redaction. Do NOT infer beyond what the base explicitly asserts.',
+    'KEY_TERMS example: "attribution, tradecraft, tasking, pattern-of-life, control-link"',
+  ].join(' '),
+
+  'forensic-cyber': [
+    'LEAD with the evidence surface: what artifacts exist (recovered airframe, RF captures, sensor logs, control-link intercepts), chain-of-custody state, and the analysis handoff most relevant to a cyber-forensic reader.',
+    'VOCABULARY: evidence, artifact, chain of custody, IoC, control-link forensics, RF capture, malware indicator, digital forensics, sandbox, admissibility.',
+    'OMIT medical impact and public messaging. Forensic reads for what can be recovered and preserved.',
+    'KEY_TERMS example: "artifact, chain of custody, control-link forensics, admissibility"',
+  ].join(' '),
+
+  'medical-consequence': [
+    'LEAD with casualty exposure risk if the base narrative supports it: proximity to populated areas, altitude and speed profile, payload category if named, blast or debris radius if inferrable from the base without invention.',
+    'VOCABULARY: casualty risk, exposure vector, triage priority, hospital-load impact, decontamination window, mass-casualty threshold.',
+    'OMIT tactical and forensic detail. Medical readers need to know: is there a triage call to make, when do I make it, what is the likely case load.',
+    'DATA GAP: This platform does not yet carry hospital bed capacity or ambulance fleet manifests, so avoid asserting specific facility capacities. Frame in categorical language ("elevated casualty risk", "trauma-relevant profile") rather than numeric.',
+    'KEY_TERMS example: "casualty risk, exposure vector, triage priority, mass-casualty threshold"',
+  ].join(' '),
+
+  'regulatory-advisory': [
+    'LEAD with the compliance and airspace / maritime / energy authority implications: NOTAM necessity and duration, restriction radius, coordination with the operating authority (Trafikstyrelsen for aviation, Søfartsstyrelsen for maritime, Energistyrelsen for energy).',
+    'VOCABULARY: NOTAM, airspace restriction, class-D controlled, coordination requirement, compliance threshold, regulator escalation, temporary flight restriction.',
+    'OMIT tactical response detail. A regulatory receiver decides on restrictions and compliance framing, not intercepts.',
+    'KEY_TERMS example: "NOTAM, airspace restriction, coordination requirement, temporary flight restriction"',
+  ].join(' '),
+
+  'public-safety-communication': [
+    'LEAD with the affected-population picture: proximity to residential areas, schools, transit hubs, commercial centres named in the base narrative. Message-window language for a kommune crisis staff or 1-1-2 alarm central.',
+    'VOCABULARY: affected population, shelter window, evacuation zone, public-messaging tone, incident tempo, community-safety threshold, kommune coordination.',
+    'OMIT tactical engagement detail and forensic detail. Public-safety readers need to know what to tell residents and when.',
+    'DATA GAP: This platform does not yet carry kommune population totals, shelter capacity, or evacuation route data, so avoid asserting specific numbers or routes. Frame in categorical language ("dense-residential adjacency", "elevated public-safety concern") until that data lands.',
+    'KEY_TERMS example: "affected population, shelter window, public-messaging tone, kommune coordination"',
+  ].join(' '),
+
+  'international-liaison': [
+    'LEAD with cross-border and allied-notification implications: origin-of-flight if traced across border, standing information-sharing pathways (NATO, Nordic, EU, Europol), and any tier-5 destinations the base narrative already implicates.',
+    'VOCABULARY: cross-border, allied notification, information-sharing pathway, standing coordination, partner briefing, cooperative response.',
+    'OMIT tactical engagement detail. Liaison readers relay and coordinate, they do not intercept.',
+    'CRITICAL: Never name NATO compartments, allied classified sharing agreements, or specific bilateral MOUs. If the base narrative did not name them, they stay unnamed.',
+    'KEY_TERMS example: "cross-border, allied notification, standing coordination, partner briefing"',
+  ].join(' '),
 };
 
 // Validator caps. A lens is a REFRAMING, not an expansion — cap
