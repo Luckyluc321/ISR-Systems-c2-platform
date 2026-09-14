@@ -26,101 +26,93 @@ Mistral narrative
 
 The bridge is a peer of `preprocessing.js`, sitting one stage upstream. Both are deterministic. The LLM sees the output of both, never raw NN floats.
 
-## Three-stage transformation
+## The adapter
 
-### Stage 1: Signature → family classification
+`bridgeSignature(input)` — single entry point. Given the NN's classification output for one detection, it looks up the family in the reference library and returns an enrichment envelope.
 
-Input: `{ modality, signature_vector, nn_confidence }` per detection.
-Output: `{ family, family_confidence, alternates: [{family, confidence}] }`.
-
-Classification is a lookup against a **signature library** — a partner-curated (or vendor-supplied) mapping from signature clusters to human-labelled drone families. Libraries evolve over time; the bridge treats them as versioned data.
-
-**Signature library layout (proposed):**
-
-```
-conf/signatures/
-  rf/
-    library.json               # frequency + hop patterns → family label
-    version.txt                # SIGNATURE_LIBRARY_VERSION for cache invalidation
-  acoustic/
-    library.json               # RPM band + harmonic profile → family label
-    version.txt
-  visual/
-    library.json               # visual embedding cluster → family label
-    version.txt
-```
-
-Version bumps invalidate any cached classifications the way `DIGEST_VERSION` bumps invalidate Agent A digests. Partners can update libraries without code deploy.
-
-**Family taxonomy:** family, not model. `"commercial FHSS quadcopter"` beats `"DJI Mavic 3"` when the NN can only distinguish family-level clusters. Model-level identification is a future capability.
-
-### Stage 2: Per-modality narrative synthesis
-
-Rules engine (not LLM) writes structured English per modality contribution. Deterministic templates keyed on family + measured parameters.
-
-Example outputs:
-
-- **RF:** `"Frequency-hopping spread spectrum in the 2.4 GHz ISM band. Dwell pattern consistent with commercial FHSS quadcopter class. Signal strength -68 dBm, direction-of-arrival stable at 145 degrees."`
-- **Acoustic:** `"Four-rotor signature detected. RPM band 5-8 kHz, harmonic profile consistent with sub-2kg airframe. Confidence 0.71."`
-- **Visual:** `"Quadcopter silhouette, wingspan estimate 40-60 cm. Camera pointing anomaly not detected."`
-
-Rules live in `src/signature_bridge.js` as pure functions keyed on `(family, modality, measurements) → narrative string`. New families ship as new template entries plus library additions.
-
-### Stage 3: Confidence-tiered language wrapper
-
-Consistent phrasing for uncertainty so Agent B doesn't invent certainty the signals don't support.
-
-| Confidence | Phrasing |
-|---|---|
-| `>= 0.85` | "identified as X" |
-| `0.55 - 0.85` | "consistent with X family" |
-| `0.30 - 0.55` | "closest match X, weak signal, alternates present" |
-| `< 0.30` | "unclassified, [top 3 candidates listed]" |
-
-Same wrapper regardless of modality. Confidence values come from Stage 1's `family_confidence`.
-
-## Contract with downstream
-
-`signature_bridge.js` emits a **SignatureBridgeOutput** consumed by `preprocessing.js`:
+### Input (from the NN adapter)
 
 ```
 {
-  detectionId: string,
-  perModality: {
-    rf?:       { family, family_confidence, alternates, narrative },
-    acoustic?: { family, family_confidence, alternates, narrative },
-    visual?:   { family, family_confidence, alternates, narrative },
-  },
-  fused: {                        // cross-modality reconciliation
-    family: string,               // consensus family, or "conflicting"
-    family_confidence: number,    // fused confidence
-    dissent: string[],            // modalities that disagree with the consensus
-  },
-  library_versions: {             // stamped so downstream cache keys stay stable
-    rf: string, acoustic: string, visual: string,
+  detection_id?: string,
+  nn_family: string,               // e.g. 'shahed-loitering-munition'
+  nn_confidence: number,           // [0, 1]
+  candidate_models?: [{ id, score }],
+  raw_signature?: {                // optional; used for signature_hash + future elaboration
+    rf?:       { carrier_hz?, bandwidth_hz?, modulation? },
+    acoustic?: { fundamental_hz?, profile? },
+    visual?:   { silhouette? },
+    radar?:    { ... },
   },
 }
 ```
 
-`preprocessing.js` then folds this into the `STRUCTURED SIGNAL BLOCK` and `INTERPRETED SIGNAL PROSE` that Agent B already consumes today.
+### Output (enrichment envelope)
+
+```
+{
+  detection_id,
+  family_label,                    // NN passthrough
+  family_confidence,               // NN passthrough
+  family_metadata: {               // lookup from FAMILY_LIBRARY[family_label]
+    display_name,
+    threat_level,                  // 'low' | 'medium' | 'high' | 'critical'
+    escalation_posture,            // e.g. 'immediate-national-tier'
+    response_time_secs,
+    recommended_observers: [...],
+    dispatch_hint,
+    attribution_elaboration: [...],
+    typical_kinematics: { cruise_speed_ms, cruise_altitude_m, endurance_min } | null,
+  },
+  candidate_models,                // NN passthrough + family_context annotation
+  attribution_hints,               // = family_metadata.attribution_elaboration
+  signature_hash,                  // FNV-1a over canonicalised raw_signature, or null
+  source: 'nn' | 'nn-off-list' | 'malformed',
+}
+```
+
+### Family reference library (`src/families.js`)
+
+12 canonical families. Each carries the metadata bundle above. The library is intentionally decoupled from the adapter — new drone families ship as pure data edits, no code deploy. Partner-editable path.
+
+**Off-list handling:** if the NN emits a family label the library doesn't know, the adapter returns `UNKNOWN` metadata with `source: 'nn-off-list'`. Never fabricates a family. Operator manual reclassification is the path forward — the NN is the classifier and it hit a gap in the library.
+
+**Malformed / missing input:** returns `UNKNOWN` with `source: 'malformed'` or `'nn'`. Never throws. The adapter is non-blocking for the downstream event pipeline.
+
+**No rule-based fallback.** If the NN doesn't classify, C2 does not guess. This is the whole point of the reshape.
+
+### Signature hash
+
+Deterministic FNV-1a 32-bit over a canonicalised (key-sorted JSON) serialisation of `raw_signature`. Precedent retrieval groups detections by hash to find historical repeats. If `raw_signature` is absent, the hash is `null` and precedent retrieval skips grouping for that detection but enrichment still lands.
+
+## What Agent B and the receiver lens consume
+
+`bridgeSignature`'s output feeds three downstream consumers:
+
+1. **`preprocessing.js` → Agent B debrief narrative** — reads `family_metadata` to shape doctrine references, `attribution_elaboration` to seed the "what platform is this" prose, and `signature_hash` to key the debrief-narrative cache alongside the signal hash.
+2. **`agent_b_lens.js` receiver-lens narratives** — reads `family_metadata.recommended_observers` for cascade suggestions per archetype, and `attribution_elaboration` to enrich the intelligence-attribution lens.
+3. **Chapter attribution sub-section** (`report_subsections.js` intel archetype) — reads `attribution_hints` verbatim as bullet points under the intelligence-attribution renderer.
+
+None of these consumers see the NN's raw signature floats. They see the enriched envelope, keyed by the family label the NN chose.
 
 ## Why this shape
 
-- **Partner-updatable libraries** — new drones ship as data, not code deploys.
-- **Version stamping** — cache invalidation is deterministic. Same data → same output → same cached narrative.
-- **Family, not model** — matches what the NN can actually output, avoids overclaiming.
-- **Confidence-tiered phrasing** — Agent B never sees a raw float that lets it invent false precision.
-- **Per-modality dissent surfaced** — cross-modality contradictions (RF says quadcopter, visual says fixed-wing) become visible to the LLM instead of silently averaged into confusion.
-- **Deterministic** — every field is testable in the eval harness (see `docs/agentic-eval-architecture.md`).
+- **NN owns classification, C2 owns enrichment.** No overlap, no rule-based fallback pretending to classify.
+- **Partner-editable library.** Threat level per family or a new family entry ships as a data edit — governance without code deploy.
+- **Non-blocking.** Adapter never throws; malformed input returns UNKNOWN. The event pipeline can't stall on a signature-bridge failure.
+- **Cacheable.** Every enrichment result is a deterministic function of `(nn_family, nn_confidence, raw_signature)`. Precedent retrieval indexes by `signature_hash` for repeat detections.
+- **Auditable off-list rate.** When live-wired, a boot audit will surface how many detections hit `nn-off-list` in the previous session — the signal for "NN is emitting labels the library doesn't yet know."
 
-## When to build
+## When to wire into the live path
 
-Trigger: first field-hardware NN starts emitting real signature vectors that a customer or partner needs the platform to reason about. Until then, the mock NN source in `src/nn_source.js` produces family-labelled synthetic detections directly (no bridge needed).
+The adapter is dev-handle only today (`window.__isr_signature`). Live-path integration fires when the first field-hardware NN starts emitting real classification output that a customer or partner needs the platform to enrich. Until then, the mock NN source in `src/nn_source.js` emits family-labelled synthetic detections that don't need the enrichment loop.
 
-At build time, the library JSON files come from one of:
-- Partner delivery (Netcompany, DTU, vendor-supplied)
-- Field-data self-supervised clustering (later, when there's enough data)
+Family metadata (in `src/families.js`) grows from one of:
+- Partner delivery (Netcompany, DTU, vendor-supplied family definitions)
+- Field-data self-supervised clustering (later, when there's enough real detections to cluster)
 - Third-party threat intelligence subscription (paid)
+
+The library is deliberately versionable as data (not code). Partners can update `threat_level` for a family, or add a new family entry, without touching the adapter logic. When Azure infra is provisioned, the library moves to Azure Blob / Cosmos and is refreshed via a governed pull (versioned, signed).
 
 ## Related
 

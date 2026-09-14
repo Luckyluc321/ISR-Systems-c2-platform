@@ -39,7 +39,7 @@ Every contract section follows the same shape:
 ### Phase C · Advanced contracts
 
 - [8. Agent B (Mistral)](#8-agent-b-mistral) — narrative synthesis
-- [9. Signature bridge](#9-signature-bridge) — raw NN signature → family label + candidate models
+- [9. Signature bridge](#9-signature-bridge) — NN family label → C2 reference-library enrichment (metadata / attribution / precedent hash)
 - [10. Feedback log WORM](#10-feedback-log-worm) — Azure Blob write-once audit sink
 - [11. Cooperative traffic fusion](#11-cooperative-traffic-fusion) — ADS-B / Naviair reconciliation
 - [12. Auth + IAM](#12-auth--iam) — tenant provisioning + session management
@@ -1427,30 +1427,41 @@ Agent B is already LANDED across two per-mode modules on the platform side. The 
 
 ## Purpose
 
-Raw NN classifier output (Section 2) emits family + candidate models. The signature bridge translates the sensor-side signature slice (RF band, acoustic profile, visual silhouette) into a family-labelled NARRATIVE that Agent B (Section 8) can reason over WITHOUT seeing raw numbers. Deterministic preprocessing, not a second LLM call.
+Enriches the neural network's classification output with the C2's family reference library. **The NN is the classifier. This module is a lookup adapter.** It reads the family label the NN already produced (from Section 2's `NnDetectionBatch`) and attaches:
 
-This is the module that turns "78 Hz fundamental, 0.42 harmonic ratio, moped-buzz profile" into "distinctive Shahed-class rotary-engine acoustic signature." Every sensor observation gets a signature-bridge label so downstream consumers work in domain language, not signal-processing language.
+- **Response profile** — threat level, escalation posture, response time, recommended observer roles per family
+- **Attribution elaboration** — extra language the narrative layer (Section 8 Agent B, Section 10 Receiver Lens) uses when discussing this family
+- **Precedent context stubs** — hooks the precedent retrieval layer fills with historical numbers
+- **Stable `signature_hash`** — deterministic hash over the raw signature slice, used by precedent retrieval to group repeat signatures across events
+
+Scope correction landed 2026-09-14: the previous rule-based classifier ("10 raw-signature rules with family voting") was wrong C2 scope — it duplicated the NN's job. The classifier lives in the NN training pipeline. C2 owns enrichment, not classification.
 
 ## Actors
 
-- **Caller:** Event fabric (server-side, per-detection after NN classification)
-- **Implementation:** pure JavaScript module — no external service call
+- **Caller:** event fabric (server-side, per-detection after NN classification arrives from Section 2)
+- **Implementation:** pure JavaScript module — no external service call, no LLM call
+- **Data source:** `src/families.js` reference library (partner-editable data, not code)
 
 ## Wire format
 
-Not a network contract — a JavaScript API. Called synchronously on every detection during event ingest.
+Not a network contract — a JavaScript API. Called synchronously on every detection during event ingest, after the NN adapter has attached its classification output.
 
 ### Input
 
 ```typescript
 interface SignatureBridgeInput {
-  detection_id: string;
-  modality: 'rf' | 'acoustic' | 'visual' | 'radar' | 'cooperative-traffic';
-  raw_signature: RFSignature | AcousticSignature | VisualSignature | RadarSignature;
-  nn_classification?: {  // from NN classifier if it ran
-    family: string;
-    candidate_models: Array<{id: string, score: number}>;
-    family_confidence: number;
+  detection_id?: string;               // opaque id, passthrough
+  nn_family: string;                   // NN's classification, e.g. 'shahed-loitering-munition'
+  nn_confidence: number;               // [0, 1] — passthrough from NN
+  candidate_models?: Array<{           // NN's model shortlist for the family
+    id: string;
+    score: number;
+  }>;
+  raw_signature?: {                    // optional; used for signature_hash + future elaboration
+    rf?:       { carrier_hz?: number, bandwidth_hz?: number, modulation?: string };
+    acoustic?: { fundamental_hz?: number, profile?: string };
+    visual?:   { silhouette?: string };
+    radar?:    Record<string, unknown>;
   };
 }
 ```
@@ -1459,16 +1470,31 @@ interface SignatureBridgeInput {
 
 ```typescript
 interface SignatureBridgeOutput {
-  family_label: string;                    // e.g. "loitering-munition"
-  family_confidence: number;               // [0.0, 1.0]
-  candidate_models: Array<{                // possibly refined from NN input via signature filter
-    id: string;                            // must exist in threat_taxonomy MODELS
+  detection_id: string | null;
+  family_label: string;                // passthrough from nn_family (normalised)
+  family_confidence: number;           // passthrough from nn_confidence
+  family_metadata: {                   // from FAMILY_LIBRARY[family_label]
+    display_name: string;
+    threat_level: 'low' | 'medium' | 'high' | 'critical';
+    escalation_posture: string;        // e.g. 'immediate-national-tier'
+    response_time_secs: number;
+    recommended_observers: string[];   // role ids
+    dispatch_hint: string;
+    attribution_elaboration: string[]; // narrative lines
+    typical_kinematics: {
+      cruise_speed_ms: number;
+      cruise_altitude_m: number;
+      endurance_min: number;
+    } | null;
+  };
+  candidate_models: Array<{            // passthrough with family_context annotation
+    id: string;
     score: number;
-    signature_match_reasoning: string;     // "RF: silent + L-band GPS; Acoustic: moped-buzz at 78Hz fundamental"
+    family_context?: string;           // added by adapter, non-destructive
   }>;
-  narrative_label: string;                 // human-readable one-line description Agent B can quote
-  attribution_hints: Array<string>;        // e.g. ["origin:IR", "operator:RU", "kinetic-capable"]
-  signature_hash: string;                  // stable hash for precedent retrieval
+  attribution_hints: string[];         // = family_metadata.attribution_elaboration
+  signature_hash: string | null;       // FNV-1a over canonicalised raw_signature, or null
+  source: 'nn' | 'nn-off-list' | 'malformed';
 }
 ```
 
@@ -1478,20 +1504,14 @@ interface SignatureBridgeOutput {
 ```json
 {
   "detection_id": "det-1726220000-def",
-  "modality": "acoustic",
+  "nn_family": "shahed-loitering-munition",
+  "nn_confidence": 0.87,
+  "candidate_models": [
+    { "id": "shahed-238", "score": 0.71 },
+    { "id": "shahed-136", "score": 0.22 }
+  ],
   "raw_signature": {
-    "profile": "moped-buzz",
-    "fundamental_hz": 78.0,
-    "harmonic_ratio": 0.42,
-    "spl_db": 54.3
-  },
-  "nn_classification": {
-    "family": "loitering-munition",
-    "candidate_models": [
-      { "id": "shahed-136", "score": 0.71 },
-      { "id": "shahed-131", "score": 0.19 }
-    ],
-    "family_confidence": 0.94
+    "acoustic": { "fundamental_hz": 78.0, "profile": "moped-buzz" }
   }
 }
 ```
@@ -1499,46 +1519,40 @@ interface SignatureBridgeOutput {
 **Output:**
 ```json
 {
-  "family_label": "loitering-munition",
-  "family_confidence": 0.94,
+  "detection_id": "det-1726220000-def",
+  "family_label": "shahed-loitering-munition",
+  "family_confidence": 0.87,
+  "family_metadata": {
+    "display_name": "Shahed-class loitering munition",
+    "threat_level": "critical",
+    "escalation_posture": "immediate-national-tier",
+    "response_time_secs": 60,
+    "recommended_observers": ["pet", "fe", "forsvarskmd", "flv-skrydstrup", "flv-karup", "rigspoliti", "min-fors", "min-just", "nato-caoc-uedem"],
+    "dispatch_hint": "F-35 QRA priority. Ground evacuation of impact-radius sites. No visual-verify assets — this class is confirmed hostile on family label alone.",
+    "attribution_elaboration": [
+      "Iranian-manufactured Shahed-136 / Shahed-238 class. Widely fielded by state and non-state actors since 2022.",
+      "Rotary-engine acoustic signature (70-90 Hz fundamental) is diagnostic; RF silent in cruise phase."
+    ],
+    "typical_kinematics": { "cruise_speed_ms": 55, "cruise_altitude_m": 1500, "endurance_min": 300 }
+  },
   "candidate_models": [
-    {
-      "id": "shahed-136",
-      "score": 0.71,
-      "signature_match_reasoning": "Acoustic: moped-buzz at 78Hz fundamental (0.42 harmonic ratio) is a Shahed rotary-engine tell. Not visible in signature: RF (autonomous per Shahed-136 profile) or visual (out of EO coverage)."
-    },
-    {
-      "id": "shahed-131",
-      "score": 0.19,
-      "signature_match_reasoning": "Same acoustic signature as -136 but smaller airframe. Distinguisher would require visual confirmation."
-    }
+    { "id": "shahed-238", "score": 0.71, "family_context": "Shahed-class loitering munition" },
+    { "id": "shahed-136", "score": 0.22, "family_context": "Shahed-class loitering munition" }
   ],
-  "narrative_label": "Distinctive Shahed-class rotary-engine acoustic signature detected.",
-  "attribution_hints": ["origin:IR", "operator:RU-known", "kinetic-capable", "one-way-attack-UAV"],
-  "signature_hash": "sig-a3f9b2c1d8e7"
+  "attribution_hints": [
+    "Iranian-manufactured Shahed-136 / Shahed-238 class. Widely fielded by state and non-state actors since 2022.",
+    "Rotary-engine acoustic signature (70-90 Hz fundamental) is diagnostic; RF silent in cruise phase."
+  ],
+  "signature_hash": "a3f9b2c1",
+  "source": "nn"
 }
 ```
 
-## Rules-driven approach
+## Family reference library
 
-Signature bridge uses a rules table (similar to the threat routing matrix). Each rule:
+Metadata lives in `src/families.js` as a data table, deliberately decoupled from the adapter logic. Partners (Sydøstjyllands Politi, Trafikstyrelsen, PET) can revise the response posture for a family (threat_level, response_time_secs, recommended_observers) without a code deploy — pure data edit.
 
-```typescript
-interface SignatureRule {
-  tag: string;
-  when: (input: SignatureBridgeInput) => boolean;
-  narrative: string;                  // human-readable label
-  attribution: string[];              // hints
-  model_filter?: (candidate: {id, score}) => boolean;  // optional
-}
-```
-
-Rules fire in order; multiple can match. Attributions dedupe. Narrative labels concatenate.
-
-**Example rules:**
-- `shahed-acoustic` — when acoustic.profile === 'moped-buzz' AND 70 <= fundamental_hz <= 90 → narrative "Distinctive Shahed-class rotary-engine acoustic signature detected." + attributions [origin:IR, kinetic-capable, one-way-attack-UAV]
-- `dji-rf-ocusync` — when rf.band in [2.4-GHz, 5.8-GHz] AND modulation_hint === 'ofdm' → narrative "DJI OcuSync 2.0 link pattern." + attributions [origin:CN, consumer-drone]
-- `stealth-signature` — when rf.band === 'silent' AND visual.silhouette === 'delta-wing' → narrative "Silent + delta-wing profile suggests loitering munition in autonomous cruise." + attributions [kinetic-capable, autonomous]
+The library ships with 12 canonical family entries: `shahed-loitering-munition`, `cruise-missile`, `strategic-uav`, `loitering-munition` (generic), `dji-quadcopter`, `fpv-quadcopter`, `small-quadcopter`, `drone-swarm`, `helicopter`, `fixed-wing`, `balloon-tethered`, `unknown`. If the NN emits a label not in this set, the adapter returns UNKNOWN metadata with `source: 'nn-off-list'` — never fabricates.
 
 ## Auth model
 
@@ -1546,37 +1560,44 @@ Module-local. No external auth.
 
 ## Error semantics
 
-- Malformed input → returns `{family_label: 'unknown-signature', family_confidence: 0, narrative_label: 'Signature could not be parsed.'}`. Never throws.
-- No rules match → returns `{family_label: nn_input.family || 'unknown-signature', narrative_label: 'Unrecognised signature pattern.'}`.
-- Signature hash always computed even on error (stable hash over the raw signature bytes) — enables precedent retrieval regardless of classification.
+- **Missing `nn_family` or `nn_confidence`** → returns UNKNOWN metadata with `source: 'nn'` (defensive default). Operator manual reclassify path.
+- **Off-list `nn_family`** → returns UNKNOWN metadata with `source: 'nn-off-list'`. Never fabricates a family the library doesn't know.
+- **Malformed input** (null / non-object) → returns UNKNOWN metadata with `source: 'malformed'` + `_malformed_reason` field. Never throws — the adapter stays non-blocking for the downstream event pipeline.
+- **NN offline entirely** → no `nn_family` reaches this module. The detection has no family until a human labels it or the NN comes back online. **No rule-based fallback.**
+- **`signature_hash` is null** when no `raw_signature` was provided. Precedent retrieval will not group the detection but the enrichment still lands.
 
 ## Sequence diagram
 
 ```mermaid
 flowchart LR
-  DET[Detection with raw signature]
-  NN[NN classifier output]
-  DET --> SB[Signature Bridge]
-  NN --> SB
-  SB --> RULES[Rules table]
-  RULES --> OUT[family + narrative + attribution + hash]
-  OUT --> AB[Agent B prompt context]
+  DET[Detection]
+  NN[NN classifier]
+  DET --> NN
+  NN --> SB[Signature Bridge Adapter]
+  LIB[(src/families.js<br/>reference library)]
+  LIB --> SB
+  SB --> OUT[NN passthrough + family_metadata + attribution + signature_hash]
+  OUT --> AB[Agent B narrative prompt]
+  OUT --> LENS[Receiver-lens agent]
   OUT --> CHAP[Chapter attribution sub-section]
   OUT --> PREC[Precedent retrieval index]
   style SB fill:#0d1a26,stroke:#4dd2ff,color:#fff
+  style LIB fill:#141a24,stroke:#ffb84d,color:#fff
 ```
 
 ## Reference implementation
 
-- **Existing spec:** `docs/agentic-signature-bridge-architecture.md` (LANDED, planning stage)
-- **Module stub:** planned as `src/signature_bridge.js`
-- **Rules table:** planned inside the same module, same shape as `threat_routing.js` RULES
+- **Adapter:** `src/signature_bridge.js` (LANDED 2026-09-14)
+- **Reference library:** `src/families.js` (LANDED 2026-09-14)
+- **Legacy rule module:** `src/_legacySignatureBridgeRules.js` — archived for reference by the NN training team. Not imported anywhere in the runtime.
+- **Design doc:** `docs/agentic-signature-bridge-architecture.md`
+- **Dev handle:** `window.__isr_signature.bridge({nn_family, nn_confidence, ...})` in the browser console
 
 ## Open questions
 
-- **Sub-family discrimination:** how much can the bridge disambiguate Shahed-136 vs Shahed-131 from acoustics alone? Probably not; visual or RF gives the answer. Should the bridge downgrade `candidate_models` scores when only one modality supports the discrimination?
-- **Attribution hint provenance:** should attribution hints carry a confidence + source-rule tag so an auditor can trace WHY the platform inferred "origin:IR"? Yes — add `attribution: [{hint, confidence, source_rule_tag}]` in v2 of the wire format.
-- **Rule authoring workflow:** who writes new rules when a new adversary signature emerges (e.g. new Russian FPV variant)? Ops team or analysts? Track via signed rule additions to the rules table + audit log.
+- **Live-path wiring:** the adapter is dev-handle only today. The live NN → event → signature_bridge integration lands when the real NN adapter is stood up per `docs/nn-adapter-explainer.md`.
+- **Family library governance:** who commits changes to `families.js`? For now, ISR internal review + partner sign-off per family. Once we have Politi / Trafikstyrelsen partner tenants, extend to a governed change process (proposal → review → merge).
+- **Off-list rate monitoring:** should a boot audit surface how many `nn-off-list` results were served in the last session (mirroring the receiver-lens fallback counter)? Yes when the live path is wired — signal for "NN is emitting labels the library doesn't yet know."
 
 ---
 
