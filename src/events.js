@@ -1019,6 +1019,20 @@ export function actorFromRole(role) {
   return null;
 }
 
+// Return the flat EVENTS array filtered against the ambient actor.
+// Callers that need to iterate events themselves (xlink chain builder,
+// cross-event correlator, dev-handle diagnostics) must use this
+// instead of the raw EVENTS array so cross-tenant leaks stay
+// impossible at the data layer.
+//
+// New callsites that iterate events externally must call this, NOT
+// touch EVENTS directly. The safety-net grep at
+// scripts/check-events-raw-iteration.mjs enforces this rule.
+export function visibleEvents() {
+  if (!_currentActor) return EVENTS.slice();
+  return EVENTS.filter(e => _visibleToActor(e, _currentActor));
+}
+
 // Core visibility check. Applied by every read function in this module
 // before returning event data. Also exported for internal callers that
 // need to check membership without fetching (e.g. xlink graph pruning).

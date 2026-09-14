@@ -140,6 +140,11 @@ import {
   // in events.js scopes every read against operator tenant. Wired to
   // getActiveRole() at boot + onRoleChange below.
   setCurrentActor, actorFromRole, registerActorAdminBypass,
+  // visibleEvents() returns the actor-filtered EVENTS array. Every
+  // callsite that iterates events externally (xlink chain builder,
+  // dev diagnostics, cross-event correlator) must use this so cross-
+  // tenant leaks can't happen at the iteration layer.
+  visibleEvents,
 } from './events.js';
 import { buildPostIncidentReport, buildChainPostIncidentReport, emphasisForBranch } from './post_incident_report.js';
 import { evaluateClassificationPipeline, evaluateAttackProfileDetector } from './classification_pipeline.js';
@@ -379,12 +384,12 @@ if (typeof window !== 'undefined') {
   //        window.__isr_chain_pir.download(eventId) → triggers JSON blob download
   window.__isr_chain_pir = {
     build: (eventId) => {
-      const chain = chainFor(eventId, EVENTS);
+      const chain = chainFor(eventId, visibleEvents());
       if (!chain) return null;
       return buildChainPostIncidentReport(chain.events, chain, { getDestination });
     },
     download: (eventId) => {
-      const chain = chainFor(eventId, EVENTS);
+      const chain = chainFor(eventId, visibleEvents());
       if (!chain) { console.warn('[chain_pir] event not part of a chain'); return null; }
       const bundle = buildChainPostIncidentReport(chain.events, chain, { getDestination });
       if (!bundle) return null;
@@ -408,11 +413,11 @@ if (typeof window !== 'undefined') {
   //        window.__isr_xlink.narrative(chainId?)   → one-line chain description
   //        window.__isr_xlink.rolePresence(eventId, roleId)
   window.__isr_xlink = {
-    graph:      () => buildXlinkGraph(EVENTS),
-    chainFor:   (id) => chainFor(id, EVENTS),
-    chainMates: (id) => eventsInSameChainAs(id, EVENTS),
-    narrative:  (id) => chainNarrative(chainFor(id, EVENTS)),
-    rolePresence: (id, roleId) => rolePresenceInChain(chainFor(id, EVENTS), roleId),
+    graph:      () => buildXlinkGraph(visibleEvents()),
+    chainFor:   (id) => chainFor(id, visibleEvents()),
+    chainMates: (id) => eventsInSameChainAs(id, visibleEvents()),
+    narrative:  (id) => chainNarrative(chainFor(id, visibleEvents())),
+    rolePresence: (id, roleId) => rolePresenceInChain(chainFor(id, visibleEvents()), roleId),
   };
   // Phase 6 dev handle for spot-checking visibility policy output.
   // Usage: window.__isr_visibility.level(viewerRole, chapterRole, event)
@@ -2425,7 +2430,10 @@ async function main() {
   // ── Multi-site rollup markers (visible at country zoom, click to fly-in) ──
   const rollupEntities = new Map();
   function rollupState(siteId) {
-    const active = EVENTS.filter(e => e.siteId === siteId && e.status === 'active');
+    // Actor-scoped. Site→tenant is 1:1 today so filtering by siteId
+    // is already implicitly tenant-safe, but visibleEvents() adds
+    // belt-and-suspenders for any future shared-site scheme.
+    const active = visibleEvents().filter(e => e.siteId === siteId && e.status === 'active');
     const hasHostile = active.some(e => e.classification === 'hostile');
     const color = hasHostile ? '#ff3838' : active.length ? '#ffb84d' : '#4dff9c';
     return { count: active.length, color, hasHostile };
@@ -19266,7 +19274,12 @@ async function main() {
   //
   // Detection-only invariant preserved. Chain view is read-only.
   function _renderPirEventChain(event, activeRole) {
-    const chain = chainFor(event.id, EVENTS);
+    // Actor-scoped: chain construction runs against visibleEvents()
+    // so an operator only sees events on their own tenant. Cross-
+    // tenant links are simply invisible in the chain builder's input
+    // set — the xlink graph drops edges to missing events per
+    // xlink_graph.js addEdge guard.
+    const chain = chainFor(event.id, visibleEvents());
     if (!chain || chain.size <= 1) return '';   // single-event → no chain view
 
     const _e = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -20155,7 +20168,10 @@ async function main() {
     const D90 = 90 * 86400 * 1000;
     const startMs = (e) => { try { return new Date(e.startTime).getTime(); } catch { return 0; } };
     let samePlatform30d = 0, sameSite90d = 0, sameBoth90d = 0;
-    for (const e of EVENTS) {
+    // Actor-scoped so pattern-of-life counts don't leak cross-tenant
+    // aggregate metadata (a CPH operator shouldn't be able to infer
+    // "N events with this platform at Energinet" from a count field).
+    for (const e of visibleEvents()) {
       if (e.id === event.id) continue;
       const ageMs = nowMs - startMs(e);
       if (ageMs < 0) continue;
@@ -22151,9 +22167,11 @@ async function main() {
         // Chain-scope export per Section 4. Bundles every PIR in the
         // xlink chain into one JSON envelope with unified timeline +
         // cross-event contributor presence. Follows the same shape as
-        // pir-download but for the chain-scope surface.
+        // pir-download but for the chain-scope surface. Actor-scoped
+        // via visibleEvents() so a cross-tenant chain never exports
+        // events outside the current operator's tenant.
         const eventId = id;
-        const chain = chainFor(eventId, EVENTS);
+        const chain = chainFor(eventId, visibleEvents());
         if (!chain || chain.size <= 1) { toast('Event is not part of a multi-event chain.', 'err'); return; }
         try {
           const bundle = buildChainPostIncidentReport(chain.events, chain, { getDestination });
