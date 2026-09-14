@@ -719,6 +719,12 @@ async function main() {
     fetch('/aircraft/shahed_238_drone.glb', { cache: 'force-cache' })
       .catch(() => {});
   } catch (_) {}
+  // Same treatment for the assault-drone quadcopter GLB — used for
+  // hostile quadcopter swarms + counter-dispatch interceptor drones.
+  try {
+    fetch('/aircraft/assault_drone_concept.glb', { cache: 'force-cache' })
+      .catch(() => {});
+  } catch (_) {}
 
   // Live-tunable Shahed model rig. Every field is read per-frame by
   // the orientation callback so you can adjust from the browser
@@ -737,6 +743,33 @@ async function main() {
     bankFactor:       2.5,     // radians of roll per rad/s yaw rate
     bankClampDeg:     35,      // ±maximum bank angle (delta-wing realistic ceiling)
     pitchClampDeg:    30,      // ±maximum pitch angle
+  };
+
+  // Live-tunable quadcopter model rig. Quadcopters kinematically differ
+  // from fixed-wing: they PITCH FORWARD in the direction of travel (nose-
+  // down when accelerating forward, nose-up when decelerating) and don't
+  // roll on turns like a delta-wing. Console handle mirrors the Shahed
+  // pattern so you can dial by eye:
+  //   window.__isr_quad_tuning.headingOffsetDeg = 90
+  //   window.__isr_quad_tuning.forwardPitchDeg = 20
+  //
+  // The model's static geometry means propellers won't spin visually.
+  // Real drones photographed at high shutter speed show frozen props
+  // too, so this reads correctly at close range. If we later add per-
+  // frame prop rotation (via named node lookups or shader effect),
+  // extend this tuning object with propRPM / propAxis fields.
+  window.__isr_quad_tuning = window.__isr_quad_tuning || {
+    headingOffsetDeg: 0,       // rotate model forward axis. Adjust if nose points wrong direction.
+    pitchOffsetDeg: 0,         // additional pitch bias (usually 0)
+    scale: 4.0,                // quadcopter GLB is compact; scale up for legibility at close range
+    minimumPixelSize: 20,      // floor so the model stays visible when zoomed
+    headingSmoothing: 0.20,    // quads yaw quickly — slightly faster than fixed-wing
+    pitchSmoothing:   0.15,    // pitch follows accel envelope
+    rollSmoothing:    0.10,    // small side-lean on lateral maneuvers
+    forwardPitchDeg:  15,      // maximum nose-down pitch when at cruise forward speed
+    lateralRollDeg:   10,      // maximum side-roll on lateral drift
+    pitchClampDeg:    25,      // ±clamp
+    rollClampDeg:     20,      // ±clamp
   };
 
   // ── Bing Maps Aerial (asset 2) ──
@@ -4473,22 +4506,22 @@ async function main() {
     const iconCanvas = _counterDispatchIcon(d.profile.icon);
     if (!iconCanvas) return;
     const iconUrl = iconCanvas.toDataURL();
-    d.entity = viewer.entities.add({
-      position: new Cesium.CallbackProperty(() => (
-        // Airborne interceptors render at their tracked altitude
-        // (d.curAlt) so climbing/descending to match an enemy drone
-        // reads properly in 3D. Absolute ellipsoid height = terrain +
-        // curAlt so the drone position matches tracer origins (which
-        // also sample terrain). Previously used RELATIVE_TO_GROUND on
-        // the billboard which put the drone at terrain+curAlt visually
-        // while tracers fired from ellipsoid=curAlt, i.e. terrain metres
-        // below the drone (50m gap over CPH terminal roofs).
-        // Ground vehicles stay at 0 and use CLAMP_TO_GROUND below.
-        Cesium.Cartesian3.fromDegrees(
-          d.curLon, d.curLat,
-          d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0
-        )
-      ), false),
+    // Airborne quadcopter-shaped interceptors get the assault-drone GLB
+    // rendered under 500m (same billboard→model swap as Shahed/hostile
+    // quad entities). Only these two icons qualify — 'sof' and
+    // 'fighter' style interceptors have their own airframe class.
+    const _INT_MODEL_SWAP_M = 500;
+    const _isQuadInterceptor = d.profile.airborne
+      && (d.profile.icon === 'quadcopter' || d.profile.icon === 'counter-drone-interceptor');
+    // Position callback captured once so both billboard + model share it.
+    const _positionCb = new Cesium.CallbackProperty(() => (
+      Cesium.Cartesian3.fromDegrees(
+        d.curLon, d.curLat,
+        d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0
+      )
+    ), false);
+    const _entitySpec = {
+      position: _positionCb,
       billboard: {
         image: iconUrl,
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
@@ -4500,6 +4533,11 @@ async function main() {
         scale: d.profile.billboardScale ?? 0.85,
         scaleByDistance: new Cesium.NearFarScalar(1000, 1.4, 500000, 0.7),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        // Quadcopter interceptors hide their billboard under 500m so
+        // the 3D GLB takes over. Other dispatch icons stay billboard.
+        distanceDisplayCondition: _isQuadInterceptor
+          ? new Cesium.DistanceDisplayCondition(_INT_MODEL_SWAP_M, Number.POSITIVE_INFINITY)
+          : undefined,
       },
       // No default label — icon alone. Click the icon to open the
       // dispatch popup (unit name, state, ETA, payload). Constant
@@ -4507,7 +4545,37 @@ async function main() {
       // where three "Unit N/3 · engaging" pills stacked on top of
       // each other.
       properties: { type: 'dispatch', dispatchId: d.id },
-    });
+    };
+    if (_isQuadInterceptor) {
+      const _qT = window.__isr_quad_tuning || {};
+      _entitySpec.model = {
+        uri: '/aircraft/assault_drone_concept.glb',
+        scale: _qT.scale ?? 4.0,
+        minimumPixelSize: _qT.minimumPixelSize ?? 20,
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, _INT_MODEL_SWAP_M),
+        shadows: Cesium.ShadowMode.DISABLED,
+      };
+      // Dispatch orientation is simpler than swarm — we already track
+      // d.heading (bearing rad) as it chases the target. Small nose-
+      // down pitch proportional to cruise speed. No lateral roll needed.
+      _entitySpec.orientation = new Cesium.CallbackProperty(() => {
+        const cart = _positionCb.getValue?.(Cesium.JulianDate.now());
+        if (!cart) return undefined;
+        const T = window.__isr_quad_tuning || {};
+        const headingOffset = ((T.headingOffsetDeg || 0) * Math.PI) / 180;
+        const pitchOffset   = ((T.pitchOffsetDeg   || 0) * Math.PI) / 180;
+        const forwardPitch  = ((T.forwardPitchDeg || 15) * Math.PI) / 180;
+        // d.heading is bearing radians from _bearingRad(). Cesium's
+        // HeadingPitchRoll expects the same convention (CW from N).
+        const heading = d.heading + headingOffset;
+        // Cruise-scaled forward pitch. cruiseKmh → m/s.
+        const cruiseMs = (d.profile.cruiseKmh || 60) / 3.6;
+        const pitch = -forwardPitch * Math.min(1, cruiseMs / 15) + pitchOffset;
+        const hpr = new Cesium.HeadingPitchRoll(heading, pitch, 0);
+        return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
+      }, false);
+    }
+    d.entity = viewer.entities.add(_entitySpec);
 
     if (d.profile.trail) {
       d.trail = viewer.entities.add({
@@ -10779,7 +10847,15 @@ async function main() {
     // is oriented per-frame from the current heading with a low-pass
     // roll bank that visibly banks the airframe as it maneuvers.
     const isLoiterMun = platform === 'loitering-munition' || platform === 'loitering_munition';
+    // Quadcopters (hostile swarms + own counter-dispatch interceptors)
+    // get the assault-drone GLB with a forward-pitch orientation rig
+    // (they nose down when accelerating forward, unlike delta-wings).
+    const isQuadcopter = platform === 'quadcopter' || platform === 'quad';
     const MODEL_SWAP_M = 500;
+    const _modelUri = isLoiterMun
+      ? '/aircraft/shahed_238_drone.glb'
+      : (isQuadcopter ? '/aircraft/assault_drone_concept.glb' : null);
+    const _shouldSwapModel = isLoiterMun || isQuadcopter;
 
     // Flight rig — closure-captured per entity so each Shahed has
     // independent orientation smoothing. Reads live from
@@ -10876,6 +10952,84 @@ async function main() {
       return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
     };
 
+    // Quadcopter orientation rig — same shape as _bankedOrientation but
+    // the pitch/roll semantics are DIFFERENT: a quadcopter pitches nose-
+    // down when accelerating forward (thrust vector tilt) and side-rolls
+    // slightly on lateral drift. It does NOT bank on yaw turns like a
+    // fixed-wing airframe. Reads live from window.__isr_quad_tuning per
+    // frame so console tweaks apply without rebuild.
+    let _qSmoothedHeading = null;
+    let _qSmoothedPitch = 0;
+    let _qSmoothedRoll = 0;
+    let _qPrevSpeedMs = 0;
+    let _qPrevPosCart = null;
+    let _qPrevTime = performance.now();
+    const _quadOrientation = () => {
+      const cart = _billboardRef?.position?.getValue?.(Cesium.JulianDate.now());
+      if (!cart) return undefined;
+      const T = window.__isr_quad_tuning || {};
+      const headingOffset  = ((T.headingOffsetDeg || 0) * Math.PI) / 180;
+      const pitchOffset    = ((T.pitchOffsetDeg   || 0) * Math.PI) / 180;
+      const headingSmooth  = T.headingSmoothing   ?? 0.20;
+      const pitchSmooth    = T.pitchSmoothing     ?? 0.15;
+      const rollSmooth     = T.rollSmoothing      ?? 0.10;
+      const forwardPitch   = ((T.forwardPitchDeg || 15) * Math.PI) / 180;
+      const lateralRoll    = ((T.lateralRollDeg  || 10) * Math.PI) / 180;
+      const pitchClamp     = ((T.pitchClampDeg   || 25) * Math.PI) / 180;
+      const rollClamp      = ((T.rollClampDeg    || 20) * Math.PI) / 180;
+
+      const now = performance.now();
+      const dt = Math.max(0.016, (now - _qPrevTime) / 1000);
+      const targetHeading = -stateHolder.headingRad;
+
+      // Horizontal speed (m/s) derived from position delta. Quads pitch
+      // proportional to forward speed / typical cruise (10-15 m/s).
+      let speedMs = 0;
+      if (_qPrevPosCart) {
+        const prev = Cesium.Cartographic.fromCartesian(_qPrevPosCart);
+        const curr = Cesium.Cartographic.fromCartesian(cart);
+        const meanLat = (curr.latitude + prev.latitude) / 2;
+        const R = 6371000;
+        const dNorth = (curr.latitude  - prev.latitude)  * R;
+        const dEast  = (curr.longitude - prev.longitude) * R * Math.cos(meanLat);
+        speedMs = Math.sqrt(dNorth * dNorth + dEast * dEast) / dt;
+      }
+      // Nose-down pitch = -forwardPitch * (speed / 15 m/s cruise), clamped.
+      const cruiseMs = 15;
+      let targetPitch = -forwardPitch * Math.min(1, speedMs / cruiseMs);
+      if (targetPitch >  pitchClamp) targetPitch =  pitchClamp;
+      if (targetPitch < -pitchClamp) targetPitch = -pitchClamp;
+
+      // Lateral roll — proportional to change in speed (acceleration
+      // proxy). Cheap and visually plausible without needing a full
+      // acceleration vector decomposition.
+      const dSpeed = speedMs - _qPrevSpeedMs;
+      let targetRoll = (dSpeed / cruiseMs) * lateralRoll;
+      if (targetRoll >  rollClamp) targetRoll =  rollClamp;
+      if (targetRoll < -rollClamp) targetRoll = -rollClamp;
+
+      if (_qSmoothedHeading === null) _qSmoothedHeading = targetHeading;
+      else {
+        let dh = targetHeading - _qSmoothedHeading;
+        while (dh >  Math.PI) dh -= 2 * Math.PI;
+        while (dh < -Math.PI) dh += 2 * Math.PI;
+        _qSmoothedHeading += dh * headingSmooth;
+      }
+      _qSmoothedPitch += (targetPitch - _qSmoothedPitch) * pitchSmooth;
+      _qSmoothedRoll  += (targetRoll  - _qSmoothedRoll)  * rollSmooth;
+
+      _qPrevSpeedMs = speedMs;
+      _qPrevPosCart = Cesium.Cartesian3.clone(cart);
+      _qPrevTime = now;
+
+      const hpr = new Cesium.HeadingPitchRoll(
+        _qSmoothedHeading + headingOffset,
+        _qSmoothedPitch + pitchOffset,
+        _qSmoothedRoll,
+      );
+      return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
+    };
+
     const _droneEntitySpec = {
       id: `drone-${event.id}`,
       position: Cesium.Cartesian3.fromDegrees(...startPos),
@@ -10894,9 +11048,10 @@ async function main() {
             }, false)
           : Cesium.Color.WHITE,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        // Loitering-munition: billboard hides under 500m so the 3D
-        // model takes over. Every other platform: no distance gate.
-        distanceDisplayCondition: isLoiterMun
+        // Model-swap platforms (Shahed loitering-munition + assault-drone
+        // quadcopter): billboard hides under 500m so the 3D model takes
+        // over. Every other platform: no distance gate.
+        distanceDisplayCondition: _shouldSwapModel
           ? new Cesium.DistanceDisplayCondition(MODEL_SWAP_M, Number.POSITIVE_INFINITY)
           : undefined,
       },
@@ -10915,20 +11070,22 @@ async function main() {
       },
       properties: { type: 'drone', eventId: event.id },
     };
-    if (isLoiterMun) {
+    if (_shouldSwapModel) {
+      const _qT = window.__isr_quad_tuning || {};
       _droneEntitySpec.model = {
-        uri: '/aircraft/shahed_238_drone.glb',
-        // 1:1 world units so the ~3m wingspan reads at true scale
-        // against Cesium's height-above-terrain.
-        scale: 1.0,
-        // Floor so the model never disappears when zoomed in.
-        minimumPixelSize: 24,
-        // Reciprocal of the billboard's distance gate.
+        uri: _modelUri,
+        // Shahed uses 1:1 world scale for the ~3m wingspan. The
+        // assault-drone GLB reads small at 1:1 — quad tuning object
+        // exposes the scale factor.
+        scale: isLoiterMun ? 1.0 : (_qT.scale ?? 4.0),
+        minimumPixelSize: isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20),
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
-        // Shadows off — cheap default, revisit if visual QA calls for them.
         shadows: Cesium.ShadowMode.DISABLED,
       };
-      _droneEntitySpec.orientation = new Cesium.CallbackProperty(() => _bankedOrientation(), false);
+      _droneEntitySpec.orientation = new Cesium.CallbackProperty(
+        () => (isLoiterMun ? _bankedOrientation() : _quadOrientation()),
+        false,
+      );
     }
     const billboard = viewer.entities.add(_droneEntitySpec);
     _billboardRef = billboard;
@@ -11036,6 +11193,76 @@ async function main() {
           return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
         };
 
+        // Swarm-member quadcopter orientation rig. Same shape as
+        // _quadOrientation but with its own smoothing state so each
+        // member drifts independently. Reads live from
+        // window.__isr_quad_tuning per frame.
+        let _swQSmoothedHeading = null;
+        let _swQSmoothedPitch = 0;
+        let _swQSmoothedRoll = 0;
+        let _swQPrevSpeedMs = 0;
+        let _swQPrevPosCart = null;
+        let _swQPrevTime = performance.now();
+        const _swQuadOrientation = () => {
+          const cart = _swBbRef?.position?.getValue?.(Cesium.JulianDate.now());
+          if (!cart) return undefined;
+          const T = window.__isr_quad_tuning || {};
+          const headingOffset  = ((T.headingOffsetDeg || 0) * Math.PI) / 180;
+          const pitchOffset    = ((T.pitchOffsetDeg   || 0) * Math.PI) / 180;
+          const headingSmooth  = T.headingSmoothing   ?? 0.20;
+          const pitchSmooth    = T.pitchSmoothing     ?? 0.15;
+          const rollSmooth     = T.rollSmoothing      ?? 0.10;
+          const forwardPitch   = ((T.forwardPitchDeg || 15) * Math.PI) / 180;
+          const lateralRoll    = ((T.lateralRollDeg  || 10) * Math.PI) / 180;
+          const pitchClamp     = ((T.pitchClampDeg   || 25) * Math.PI) / 180;
+          const rollClamp      = ((T.rollClampDeg    || 20) * Math.PI) / 180;
+
+          const now = performance.now();
+          const dt = Math.max(0.016, (now - _swQPrevTime) / 1000);
+          const targetHeading = -stateHolder.headingRad;
+
+          let speedMs = 0;
+          if (_swQPrevPosCart) {
+            const prev = Cesium.Cartographic.fromCartesian(_swQPrevPosCart);
+            const curr = Cesium.Cartographic.fromCartesian(cart);
+            const meanLat = (curr.latitude + prev.latitude) / 2;
+            const R = 6371000;
+            const dNorth = (curr.latitude  - prev.latitude)  * R;
+            const dEast  = (curr.longitude - prev.longitude) * R * Math.cos(meanLat);
+            speedMs = Math.sqrt(dNorth * dNorth + dEast * dEast) / dt;
+          }
+          const cruiseMs = 15;
+          let targetPitch = -forwardPitch * Math.min(1, speedMs / cruiseMs);
+          if (targetPitch >  pitchClamp) targetPitch =  pitchClamp;
+          if (targetPitch < -pitchClamp) targetPitch = -pitchClamp;
+
+          const dSpeed = speedMs - _swQPrevSpeedMs;
+          let targetRoll = (dSpeed / cruiseMs) * lateralRoll;
+          if (targetRoll >  rollClamp) targetRoll =  rollClamp;
+          if (targetRoll < -rollClamp) targetRoll = -rollClamp;
+
+          if (_swQSmoothedHeading === null) _swQSmoothedHeading = targetHeading;
+          else {
+            let dh = targetHeading - _swQSmoothedHeading;
+            while (dh >  Math.PI) dh -= 2 * Math.PI;
+            while (dh < -Math.PI) dh += 2 * Math.PI;
+            _swQSmoothedHeading += dh * headingSmooth;
+          }
+          _swQSmoothedPitch += (targetPitch - _swQSmoothedPitch) * pitchSmooth;
+          _swQSmoothedRoll  += (targetRoll  - _swQSmoothedRoll)  * rollSmooth;
+
+          _swQPrevSpeedMs = speedMs;
+          _swQPrevPosCart = Cesium.Cartesian3.clone(cart);
+          _swQPrevTime = now;
+
+          const hpr = new Cesium.HeadingPitchRoll(
+            _swQSmoothedHeading + headingOffset,
+            _swQSmoothedPitch + pitchOffset,
+            _swQSmoothedRoll,
+          );
+          return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
+        };
+
         const _swEntitySpec = {
           id: `drone-${event.id}-swarm-${i}`,
           position: Cesium.Cartesian3.fromDegrees(...startPos),
@@ -11051,22 +11278,27 @@ async function main() {
                 }, false)
               : Cesium.Color.WHITE,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
-            // Loitering-munition: billboard hides under 500m so 3D model takes over.
-            distanceDisplayCondition: isLoiterMun
+            // Model-swap platforms hide their billboard under 500m so
+            // the 3D GLB takes over. Every other platform: no gate.
+            distanceDisplayCondition: _shouldSwapModel
               ? new Cesium.DistanceDisplayCondition(MODEL_SWAP_M, Number.POSITIVE_INFINITY)
               : undefined,
           },
           properties: { type: 'drone', eventId: event.id, swarmIndex: i, swarmRole: slot.role },
         };
-        if (isLoiterMun) {
+        if (_shouldSwapModel) {
+          const _qT = window.__isr_quad_tuning || {};
           _swEntitySpec.model = {
-            uri: '/aircraft/shahed_238_drone.glb',
-            scale: 1.0,
-            minimumPixelSize: 24,
+            uri: _modelUri,
+            scale: isLoiterMun ? 1.0 : (_qT.scale ?? 4.0),
+            minimumPixelSize: isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20),
             distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
             shadows: Cesium.ShadowMode.DISABLED,
           };
-          _swEntitySpec.orientation = new Cesium.CallbackProperty(() => _swBankedOrientation(), false);
+          _swEntitySpec.orientation = new Cesium.CallbackProperty(
+            () => (isLoiterMun ? _swBankedOrientation() : _swQuadOrientation()),
+            false,
+          );
         }
         const swarmBb = viewer.entities.add(_swEntitySpec);
         _swBbRef = swarmBb;
