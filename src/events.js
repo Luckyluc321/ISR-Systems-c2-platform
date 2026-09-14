@@ -1261,6 +1261,22 @@ export function setEventMapKey(id, field, key, value, { notify = false } = {}) {
   return e;
 }
 
+// Set a key on a plain-object field on an event. Sibling of
+// setEventMapKey for cases where the sub-field is a regular {} rather
+// than a real Map (bracket-key writes like event._siteAgg[siteId] = agg,
+// event.dispatchOutcomes[dispatchId] = outcome). Lazily creates the
+// object if missing.
+export function setEventObjectKey(id, field, key, value, { notify = false } = {}) {
+  const e = EVENTS.find(x => x.id === id);
+  if (!e || !field) return null;
+  if (!e[field] || typeof e[field] !== 'object' || Array.isArray(e[field]) || e[field] instanceof Map || e[field] instanceof Set) {
+    e[field] = {};
+  }
+  e[field][key] = value;
+  if (notify) _listeners.forEach(fn => fn(id));
+  return e;
+}
+
 // ── Semantic mutators ────────────────────────────────────────────
 
 // Link two events bidirectionally + record correlation score. Replaces
@@ -1325,6 +1341,21 @@ export function updateEventSubject(id, subject) {
   e.subject = subject;
   e.narrativeCache = null;
   _listeners.forEach(fn => fn(id));
+  return e;
+}
+
+// Record a dispatch outcome on an event. Bracket-based write on
+// event.dispatchOutcomes[dispatchId] previously escaped the Phase 1
+// grep (nested write on an event-owned object). Semantic mutator
+// gives it a first-class name and keeps the mutation inside events.js.
+export function setDispatchOutcome(eventId, dispatchId, outcome) {
+  const e = EVENTS.find(x => x.id === eventId);
+  if (!e || !dispatchId || !outcome) return null;
+  if (!e.dispatchOutcomes || typeof e.dispatchOutcomes !== 'object') {
+    e.dispatchOutcomes = {};
+  }
+  e.dispatchOutcomes[dispatchId] = outcome;
+  _listeners.forEach(fn => fn(eventId));
   return e;
 }
 

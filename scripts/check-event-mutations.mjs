@@ -35,13 +35,16 @@ const EXEMPT_FILES = new Set([
 ]);
 
 // Patterns that indicate a direct mutation of an event field:
-//   event.foo = ...      (assignment)
-//   event.foo.push(...)  (array push)
-//   event.foo.add(...)   (Set add)
-//   event.foo.set(...)   (Map set)
-// Also caught: the `ev.` alias, since main.js uses that shorthand
-// inside forEach/for-of loops over EVENTS. Extended after Phase 1
-// audit missed 5 sites using the shorter name.
+//   event.foo = ...          (assignment)
+//   event.foo[key] = ...     (nested bracket write, e.g. dispatchOutcomes)
+//   event.foo.push(...)      (array push)
+//   event.foo.add(...)       (Set add)
+//   event.foo.set(...)       (Map set)
+//
+// Whitelisted event variable aliases (all discovered by successive
+// audit passes over main.js — do NOT match arbitrary identifiers, or
+// unrelated code like `_ensure(role).escalations.push(x)` fires false
+// positives): event, ev, targetEv, primary, selectedEv.
 // Comparison operators (== != === !==) and arrow bodies (=>) filtered
 // out separately.
 // (Kept as a comment only — the actual match logic lives inline below.)
@@ -57,16 +60,23 @@ for (const file of files) {
   if (EXEMPT_FILES.has(file)) continue;
   const content = readFileSync(resolve(REPO, file), 'utf8');
   const lines = content.split('\n');
+  // Whitelisted event variable aliases. Match starts with `\b` so
+  // suffixed identifiers like `myEvent` or `preview.event` don't count.
+  const ALIASES = '(event|ev|targetEv|primary|selectedEv)';
+  const cmpPatterns = new RegExp(`\\b${ALIASES}\\.\\w+\\s*(==|!=|=>)`);
+  const writePatterns = new RegExp(
+    `\\b${ALIASES}\\.\\w+\\s*=[^=]` +                        // top-level assignment
+    `|\\b${ALIASES}\\.\\w+\\[[^\\]]+\\]\\s*=[^=]` +         // nested bracket write
+    `|\\b${ALIASES}\\.\\w+\\.push\\(` +
+    `|\\b${ALIASES}\\.\\w+\\.add\\(` +
+    `|\\b${ALIASES}\\.\\w+\\.set\\(`
+  );
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     // Skip comparison operators and arrow bodies (false positives).
-    if (/\b(event|ev)\.\w+\s*==/.test(line))  continue;
-    if (/\b(event|ev)\.\w+\s*!=/.test(line))  continue;
-    if (/\b(event|ev)\.\w+\s*=>/.test(line))  continue;
-    // Check for assignment or push/add/set. Matches both `event.` and
-    // `ev.` prefixes (both are used across the codebase as event
-    // variable names).
-    if (!/\b(event|ev)\.\w+\s*=[^=]|\b(event|ev)\.\w+\.push\(|\b(event|ev)\.\w+\.add\(|\b(event|ev)\.\w+\.set\(/.test(line)) continue;
+    if (cmpPatterns.test(line))    continue;
+    // Check for direct write to an event field.
+    if (!writePatterns.test(line)) continue;
     // Line-level "exempt" annotation — used for narrow, justified
     // exceptions (documented at the callsite).
     if (line.includes('// events.js internal helper, exempt')) continue;

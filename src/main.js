@@ -131,9 +131,9 @@ import {
   withdrawEscalation, updateEscalationAssessment, rejectEscalation,
   // Event mutation API (Phase 1 state-consolidation). Every event
   // field write anywhere in this file goes through one of these.
-  mutateEvent, appendEventArray, addToEventSet, setEventMapKey,
+  mutateEvent, appendEventArray, addToEventSet, setEventMapKey, setEventObjectKey,
   linkEvents, markNeutralised, recordInteraction,
-  attachPostIncidentReport,
+  setDispatchOutcome, attachPostIncidentReport,
   clearNarrativeCache, setNarrativeCache,
   clearPreprocessedCache, setPreprocessedCache,
   // Actor / tenant context (Phase 3 tenant isolation). Ambient actor
@@ -5258,25 +5258,29 @@ async function main() {
               const killLive = _liveTargetPositionFor(d);
               const killLat = killLive?.lat ?? d.curLat;
               const killLon = killLive?.lon ?? d.curLon;
-              targetEv.outcome = 'neutralized';
-              targetEv.neutralizedAt = new Date().toISOString();
-              targetEv.neutralizedBy = d.assetName;
-              targetEv.exit = {
-                lat: killLat,
-                lon: killLon,
-                alt: Math.round(killLive?.alt || 0),
-                timestamp: new Date().toISOString(),
-                heading: 0,
-                leftCoverageOf: 'interceptor-neutralised',
-              };
-              // Perimeter-cordon coordinate. Same field the swarm
-              // scenario writes so the post-incident Politi cordon
-              // dispatch has a real location to route to.
-              targetEv.lastSpottedLocation = {
-                lat: killLat,
-                lon: killLon,
-                at: new Date().toISOString(),
-              };
+              markNeutralised(targetEv.id, {
+                outcome: 'neutralized',
+                by: d.assetName,
+                needsPostIncident: false,
+              });
+              mutateEvent(targetEv.id, {
+                exit: {
+                  lat: killLat,
+                  lon: killLon,
+                  alt: Math.round(killLive?.alt || 0),
+                  timestamp: new Date().toISOString(),
+                  heading: 0,
+                  leftCoverageOf: 'interceptor-neutralised',
+                },
+                // Perimeter-cordon coordinate. Same field the swarm
+                // scenario writes so the post-incident Politi cordon
+                // dispatch has a real location to route to.
+                lastSpottedLocation: {
+                  lat: killLat,
+                  lon: killLon,
+                  at: new Date().toISOString(),
+                },
+              });
               // Route the kill through the neutralisation policy so
               // heavy damage explodes in air and light damage falls
               // ballistically to the ground. Both paths converge on
@@ -5335,8 +5339,7 @@ async function main() {
               // where the drone actually hits ground (not where it was
               // hit in mid-air). Same code path swarm scenario uses.
               setTimeout(() => {
-                if (!Array.isArray(targetEv.wreckages)) targetEv.wreckages = [];
-                const wreckId = `wr-${targetEv.id}-${targetEv.wreckages.length + 1}`;
+                const wreckId = `wr-${targetEv.id}-${(targetEv.wreckages?.length || 0) + 1}`;
                 const wreck = {
                   id: wreckId,
                   lat: wreckLat,
@@ -5345,9 +5348,11 @@ async function main() {
                   downedBy: d.id,
                   mode,
                 };
-                targetEv.wreckages.push(wreck);
-                targetEv.wreckageLocation = { lat: wreckLat, lon: wreckLon, at: wreck.at };
-                targetEv.lastSpottedLocation = { lat: wreckLat, lon: wreckLon, at: wreck.at };
+                appendEventArray(targetEv.id, 'wreckages', wreck);
+                mutateEvent(targetEv.id, {
+                  wreckageLocation: { lat: wreckLat, lon: wreckLon, at: wreck.at },
+                  lastSpottedLocation: { lat: wreckLat, lon: wreckLon, at: wreck.at },
+                });
                 // DOWNED marker at the wreckage location — labelled by
                 // mode so the operator can tell "exploded in air" from
                 // "fell to ground" from the map alone.
@@ -5423,8 +5428,7 @@ async function main() {
             const reasonText = reasonLabelMap[outcome.reason] || 'Engagement failed.';
             toast(`${d.assetName} miss. ${reasonText}`, 'warn');
             if (targetEv) {
-              targetEv.notes = targetEv.notes || [];
-              targetEv.notes.push({
+              appendEventArray(targetEv.id, 'notes', {
                 timestamp: new Date().toISOString(),
                 author: 'Interceptor telemetry',
                 text: `${d.assetName} engagement failed. Reason: ${reasonText} Engagement quality score ${(outcome.quality * 100).toFixed(0)} percent.`,
@@ -5504,14 +5508,13 @@ async function main() {
         d.rtbCompleted = true;
         // Auto-record outcome as target evaded before arrival
         if (event) {
-          if (!event.dispatchOutcomes) mutateEvent(event.id, { dispatchOutcomes: {} });
-          event.dispatchOutcomes[d.id] = {
+          setDispatchOutcome(event.id, d.id, {
             outcomeId: 'target_evaded_before_arrival',
             outcomeLabel: 'Target evaded before arrival',
             notes: 'Interceptor lost signal on target before intercept. Patrolled last known area then returned to base.',
             confirmedAt: new Date().toISOString(),
             confirmedBy: 'system_auto',
-          };
+          });
         }
         toast(`${d.assetName} back at base. Target signal not reacquired.`, 'info');
         _resolveEngagement(d);
@@ -6147,12 +6150,11 @@ async function main() {
           }
         }
         // Auto-outcome on the dispatch group
-        if (!event.dispatchOutcomes) mutateEvent(event.id, { dispatchOutcomes: {} });
         const outcomeId = overwatchSurvived ? 'partial_neutralisation' : 'neutralised';
         const outcomeLabel = overwatchSurvived
           ? `Partial neutralisation. ${downedCount} hostile drones downed. Overwatch airframe escaped over Øresund.`
           : `Hostile drones neutralised. ${downedCount} downed.`;
-        event.dispatchOutcomes[d.id] = {
+        setDispatchOutcome(event.id, d.id, {
           outcomeId,
           outcomeLabel,
           notes: overwatchSurvived
@@ -6160,7 +6162,7 @@ async function main() {
             : 'Interceptor swarm engaged the hostile pack over Amager. All targets confirmed down. Wreckage location logged for perimeter response.',
           confirmedAt: new Date().toISOString(),
           confirmedBy: 'system_auto',
-        };
+        });
         mutateEvent(event.id, { outcome: overwatchSurvived ? 'partial_neutralisation' : 'neutralized' });
         toast(overwatchSurvived
           ? `Partial neutralisation. ${downedCount} downed. Overwatch escaped.`
@@ -7371,7 +7373,7 @@ async function main() {
           droneEntryCount: new Map(), droneExitCount: new Map(),
           droneDetectCount: new Map(), droneOorCount: new Map(),
         };
-        event._siteAgg[sid] = agg;
+        setEventObjectKey(event.id, '_siteAgg', sid, agg);
       }
 
       const bisectPoly = (direction) => {
@@ -7995,8 +7997,9 @@ async function main() {
       linkedEventIds: [primary.id],
     };
     addEvent(spawned);
-    if (!primary.linkedEventIds) primary.linkedEventIds = [];
-    primary.linkedEventIds.push(spawnedId);
+    // Spawned event was created with linkedEventIds: [primary.id]. Push
+    // the reciprocal link onto the primary via the mutator seam.
+    appendEventArray(primary.id, 'linkedEventIds', spawnedId);
     // Union domain scope across the freshly-linked pair so a drone that
     // starts inland (ground) and cross-cues to a maritime site pulls
     // maritime into scope for the parent event too, and vice versa.
@@ -21548,14 +21551,13 @@ async function main() {
         const cd = (ev.counterDispatches || []).find(c => c.dispatchId === dispatchId);
         const outcomes = outcomesForKind(cd?.kind || '');
         const outcomeDef = outcomes.find(o => o.id === outcomeId);
-        if (!ev.dispatchOutcomes) mutateEvent(ev.id, { dispatchOutcomes: {} });
-        ev.dispatchOutcomes[dispatchId] = {
+        setDispatchOutcome(ev.id, dispatchId, {
           outcomeId,
           outcomeLabel: outcomeDef?.label || outcomeId,
           notes: notesEl?.value || '',
           confirmedAt: new Date().toISOString(),
           confirmedBy: getActiveRole()?.id || 'unknown',
-        };
+        });
         toast(`Outcome confirmed: ${outcomeDef?.label || outcomeId}`, 'ok');
         _lastConsoleSig = null;   // console-only re-render so Step 5 unlocks
         renderReceiverView({ immediate: true });
