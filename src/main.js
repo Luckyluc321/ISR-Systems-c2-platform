@@ -13529,12 +13529,17 @@ async function main() {
       { key: `${sid}_missile_hostile`, label: 'Cruise missile, critical', cls: 'critical' },
     ];
   });
-  // Two-tier scenario option — appears on Kassø as the origin site
-  THREAT_MENU['energinet_kassoe'].push({
-    key: 'cruise_missile_to_amalienborg',
-    label: 'TWO-TIER · Cruise missile → Amalienborg',
-    cls: 'critical',
-  });
+  // Two-tier scenario option — appears on Kassø as the origin site.
+  // Guarded: if the Kassø manifest ever fails to load, this line was
+  // reaching into undefined and crashing the entire boot. Now it's a
+  // no-op if the entry doesn't exist.
+  if (Array.isArray(THREAT_MENU['energinet_kassoe'])) {
+    THREAT_MENU['energinet_kassoe'].push({
+      key: 'cruise_missile_to_amalienborg',
+      label: 'TWO-TIER · Cruise missile → Amalienborg',
+      cls: 'critical',
+    });
+  }
   function renderSimPanel() {
     if (!simSelect || !simPanel) return;
     const site = simSelect.value;
