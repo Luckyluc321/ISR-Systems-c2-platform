@@ -172,8 +172,19 @@ import { ADMIN, OPERATORS, RECEIVERS, ACCOUNTS, getActiveRole, setActiveRole, on
 // this actor. Boot-time initial actor set BEFORE any event-reading
 // code runs, then re-derived on every role switch via onRoleChange
 // (wired further down where the role dropdown lives).
-registerActorAdminBypass(ADMIN.id);
-setCurrentActor(actorFromRole(getActiveRole()));
+//
+// Try/catch wrap: if actor derivation ever throws at boot, we do NOT
+// want to kill the entire app (clock, dropdown, event listeners are
+// all downstream of this in the module). Fall back to null actor
+// (visibleEvents defaults to unfiltered under null actor) and log
+// loudly so the failure is observable in the console.
+try {
+  registerActorAdminBypass(ADMIN.id);
+  setCurrentActor(actorFromRole(getActiveRole()));
+} catch (err) {
+  console.error('[boot] Phase 3 actor init failed, falling back to unfiltered:', err);
+  setCurrentActor(null);
+}
 // Phase 1 · assign action-archetype tags to every RECEIVERS entry at
 // boot via prefix rules. Every role gets .archetype (primary) +
 // .secondaryArchetypes (array). Consumers include the future
@@ -22477,7 +22488,15 @@ async function main() {
   onRoleChange(() => {
     // Phase 3 — re-scope the ambient actor to the newly active role.
     // events.js read functions immediately return the new tenant view.
-    setCurrentActor(actorFromRole(getActiveRole()));
+    // Try/catch: an actor-derivation failure must not break the role
+    // switch path (dropdown state, panel reset, re-render below all
+    // depend on this handler completing).
+    try {
+      setCurrentActor(actorFromRole(getActiveRole()));
+    } catch (err) {
+      console.error('[roleChange] actor re-scope failed:', err);
+      setCurrentActor(null);
+    }
     updateOperatorChip();
     _selectedReceiverEventId = null;
     _respondingEscId = null;
