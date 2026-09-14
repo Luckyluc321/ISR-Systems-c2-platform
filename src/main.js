@@ -745,31 +745,33 @@ async function main() {
     pitchClampDeg:    30,      // ±maximum pitch angle
   };
 
-  // Live-tunable quadcopter model rig. Quadcopters kinematically differ
-  // from fixed-wing: they PITCH FORWARD in the direction of travel (nose-
-  // down when accelerating forward, nose-up when decelerating) and don't
-  // roll on turns like a delta-wing. Console handle mirrors the Shahed
-  // pattern so you can dial by eye:
-  //   window.__isr_quad_tuning.headingOffsetDeg = 90
-  //   window.__isr_quad_tuning.forwardPitchDeg = 20
+  // Live-tunable quadcopter model rig. Quadcopters DO bank into turns
+  // — real physics: to turn left the drone rolls left (left rotor low)
+  // so lift vector's horizontal component pulls it into the turn. Same
+  // shape as the Shahed rig, PLUS an additive forward-pitch bias
+  // proportional to horizontal speed (thrust-vector tilt when
+  // accelerating forward). Console handle for live tweaks:
+  //   window.__isr_quad_tuning.headingOffsetDeg = 90    // try 0/90/180/270 if nose points wrong
+  //   window.__isr_quad_tuning.bankFactor = 3.0         // more bank on turns
+  //   window.__isr_quad_tuning.forwardPitchDeg = 20     // more nose-down on cruise
   //
-  // The model's static geometry means propellers won't spin visually.
-  // Real drones photographed at high shutter speed show frozen props
-  // too, so this reads correctly at close range. If we later add per-
-  // frame prop rotation (via named node lookups or shader effect),
-  // extend this tuning object with propRPM / propAxis fields.
+  // Static geometry means propellers won't spin visually (this GLB
+  // merges body + rotors). Real drones at high shutter speed show
+  // frozen props anyway. Swap to a GLB with embedded prop animation
+  // clips OR separately-named rotor nodes to add spinning.
   window.__isr_quad_tuning = window.__isr_quad_tuning || {
-    headingOffsetDeg: 0,       // rotate model forward axis. Adjust if nose points wrong direction.
+    headingOffsetDeg: 90,      // start with Shahed's working value; try 0/180/270 if nose points wrong
     pitchOffsetDeg: 0,         // additional pitch bias (usually 0)
     scale: 4.0,                // quadcopter GLB is compact; scale up for legibility at close range
     minimumPixelSize: 20,      // floor so the model stays visible when zoomed
     headingSmoothing: 0.20,    // quads yaw quickly — slightly faster than fixed-wing
     pitchSmoothing:   0.15,    // pitch follows accel envelope
-    rollSmoothing:    0.10,    // small side-lean on lateral maneuvers
-    forwardPitchDeg:  15,      // maximum nose-down pitch when at cruise forward speed
-    lateralRollDeg:   10,      // maximum side-roll on lateral drift
-    pitchClampDeg:    25,      // ±clamp
-    rollClampDeg:     20,      // ±clamp
+    rollSmoothing:    0.12,    // bank into turns
+    bankFactor:       3.0,     // radians of roll per rad/s yaw rate (higher = more aggressive bank on turns)
+    forwardPitchDeg:  15,      // extra nose-down pitch at cruise forward speed (thrust-vector tilt)
+    cruiseMs:         15,      // reference cruise speed for forward-pitch scaling
+    bankClampDeg:     30,      // ±maximum bank angle
+    pitchClampDeg:    30,      // ±maximum pitch angle
   };
 
   // ── Bing Maps Aerial (asset 2) ──
@@ -10952,16 +10954,16 @@ async function main() {
       return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
     };
 
-    // Quadcopter orientation rig — same shape as _bankedOrientation but
-    // the pitch/roll semantics are DIFFERENT: a quadcopter pitches nose-
-    // down when accelerating forward (thrust vector tilt) and side-rolls
-    // slightly on lateral drift. It does NOT bank on yaw turns like a
-    // fixed-wing airframe. Reads live from window.__isr_quad_tuning per
-    // frame so console tweaks apply without rebuild.
+    // Quadcopter orientation rig — same physics shape as _bankedOrientation
+    // (bank-on-yaw for real banked turns, pitch from vertical velocity for
+    // climb/descent) PLUS an additive forward-pitch bias proportional to
+    // horizontal speed (thrust-vector tilt when the quad accelerates
+    // forward). Reads live from window.__isr_quad_tuning per frame so
+    // console tweaks apply without rebuild.
     let _qSmoothedHeading = null;
     let _qSmoothedPitch = 0;
     let _qSmoothedRoll = 0;
-    let _qPrevSpeedMs = 0;
+    let _qPrevHeadingRad = null;
     let _qPrevPosCart = null;
     let _qPrevTime = performance.now();
     const _quadOrientation = () => {
@@ -10972,41 +10974,51 @@ async function main() {
       const pitchOffset    = ((T.pitchOffsetDeg   || 0) * Math.PI) / 180;
       const headingSmooth  = T.headingSmoothing   ?? 0.20;
       const pitchSmooth    = T.pitchSmoothing     ?? 0.15;
-      const rollSmooth     = T.rollSmoothing      ?? 0.10;
+      const rollSmooth     = T.rollSmoothing      ?? 0.12;
+      const bankFactor     = T.bankFactor         ?? 3.0;
+      const bankClamp      = ((T.bankClampDeg  || 30) * Math.PI) / 180;
+      const pitchClamp     = ((T.pitchClampDeg || 30) * Math.PI) / 180;
       const forwardPitch   = ((T.forwardPitchDeg || 15) * Math.PI) / 180;
-      const lateralRoll    = ((T.lateralRollDeg  || 10) * Math.PI) / 180;
-      const pitchClamp     = ((T.pitchClampDeg   || 25) * Math.PI) / 180;
-      const rollClamp      = ((T.rollClampDeg    || 20) * Math.PI) / 180;
+      const cruiseMs       = T.cruiseMs           ?? 15;
 
       const now = performance.now();
       const dt = Math.max(0.016, (now - _qPrevTime) / 1000);
       const targetHeading = -stateHolder.headingRad;
 
-      // Horizontal speed (m/s) derived from position delta. Quads pitch
-      // proportional to forward speed / typical cruise (10-15 m/s).
+      // Pitch A: climb/descent from vertical velocity + horizontal delta.
+      let climbPitch = 0;
       let speedMs = 0;
       if (_qPrevPosCart) {
         const prev = Cesium.Cartographic.fromCartesian(_qPrevPosCart);
         const curr = Cesium.Cartographic.fromCartesian(cart);
+        const dAlt = curr.height - prev.height;
         const meanLat = (curr.latitude + prev.latitude) / 2;
         const R = 6371000;
         const dNorth = (curr.latitude  - prev.latitude)  * R;
         const dEast  = (curr.longitude - prev.longitude) * R * Math.cos(meanLat);
-        speedMs = Math.sqrt(dNorth * dNorth + dEast * dEast) / dt;
+        const dHoriz = Math.sqrt(dNorth * dNorth + dEast * dEast);
+        speedMs = dHoriz / dt;
+        if (dHoriz > 0.1) climbPitch = Math.atan2(dAlt, dHoriz);
       }
-      // Nose-down pitch = -forwardPitch * (speed / 15 m/s cruise), clamped.
-      const cruiseMs = 15;
-      let targetPitch = -forwardPitch * Math.min(1, speedMs / cruiseMs);
+      // Pitch B: forward thrust-vector tilt (nose-down at cruise speed).
+      const thrustPitch = -forwardPitch * Math.min(1, speedMs / cruiseMs);
+      // Combined pitch = climb angle + forward thrust bias, clamped.
+      let targetPitch = climbPitch + thrustPitch;
       if (targetPitch >  pitchClamp) targetPitch =  pitchClamp;
       if (targetPitch < -pitchClamp) targetPitch = -pitchClamp;
 
-      // Lateral roll — proportional to change in speed (acceleration
-      // proxy). Cheap and visually plausible without needing a full
-      // acceleration vector decomposition.
-      const dSpeed = speedMs - _qPrevSpeedMs;
-      let targetRoll = (dSpeed / cruiseMs) * lateralRoll;
-      if (targetRoll >  rollClamp) targetRoll =  rollClamp;
-      if (targetRoll < -rollClamp) targetRoll = -rollClamp;
+      // Roll: bank into turns from yaw rate. Same physics as fixed-wing
+      // — turning right (+ yaw rate) rolls right rotor down (+ roll).
+      let targetRoll = 0;
+      if (_qPrevHeadingRad !== null) {
+        let dh = targetHeading - _qPrevHeadingRad;
+        while (dh >  Math.PI) dh -= 2 * Math.PI;
+        while (dh < -Math.PI) dh += 2 * Math.PI;
+        const yawRate = dh / dt;
+        targetRoll = yawRate * bankFactor;
+        if (targetRoll >  bankClamp) targetRoll =  bankClamp;
+        if (targetRoll < -bankClamp) targetRoll = -bankClamp;
+      }
 
       if (_qSmoothedHeading === null) _qSmoothedHeading = targetHeading;
       else {
@@ -11018,7 +11030,7 @@ async function main() {
       _qSmoothedPitch += (targetPitch - _qSmoothedPitch) * pitchSmooth;
       _qSmoothedRoll  += (targetRoll  - _qSmoothedRoll)  * rollSmooth;
 
-      _qPrevSpeedMs = speedMs;
+      _qPrevHeadingRad = targetHeading;
       _qPrevPosCart = Cesium.Cartesian3.clone(cart);
       _qPrevTime = now;
 
@@ -11193,14 +11205,13 @@ async function main() {
           return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
         };
 
-        // Swarm-member quadcopter orientation rig. Same shape as
-        // _quadOrientation but with its own smoothing state so each
-        // member drifts independently. Reads live from
-        // window.__isr_quad_tuning per frame.
+        // Swarm-member quadcopter orientation rig. Same physics as
+        // _quadOrientation (bank on turns + climb pitch + forward
+        // thrust bias) with independent smoothing state per member.
         let _swQSmoothedHeading = null;
         let _swQSmoothedPitch = 0;
         let _swQSmoothedRoll = 0;
-        let _swQPrevSpeedMs = 0;
+        let _swQPrevHeadingRad = null;
         let _swQPrevPosCart = null;
         let _swQPrevTime = performance.now();
         const _swQuadOrientation = () => {
@@ -11211,35 +11222,46 @@ async function main() {
           const pitchOffset    = ((T.pitchOffsetDeg   || 0) * Math.PI) / 180;
           const headingSmooth  = T.headingSmoothing   ?? 0.20;
           const pitchSmooth    = T.pitchSmoothing     ?? 0.15;
-          const rollSmooth     = T.rollSmoothing      ?? 0.10;
+          const rollSmooth     = T.rollSmoothing      ?? 0.12;
+          const bankFactor     = T.bankFactor         ?? 3.0;
+          const bankClamp      = ((T.bankClampDeg  || 30) * Math.PI) / 180;
+          const pitchClamp     = ((T.pitchClampDeg || 30) * Math.PI) / 180;
           const forwardPitch   = ((T.forwardPitchDeg || 15) * Math.PI) / 180;
-          const lateralRoll    = ((T.lateralRollDeg  || 10) * Math.PI) / 180;
-          const pitchClamp     = ((T.pitchClampDeg   || 25) * Math.PI) / 180;
-          const rollClamp      = ((T.rollClampDeg    || 20) * Math.PI) / 180;
+          const cruiseMs       = T.cruiseMs           ?? 15;
 
           const now = performance.now();
           const dt = Math.max(0.016, (now - _swQPrevTime) / 1000);
           const targetHeading = -stateHolder.headingRad;
 
+          let climbPitch = 0;
           let speedMs = 0;
           if (_swQPrevPosCart) {
             const prev = Cesium.Cartographic.fromCartesian(_swQPrevPosCart);
             const curr = Cesium.Cartographic.fromCartesian(cart);
+            const dAlt = curr.height - prev.height;
             const meanLat = (curr.latitude + prev.latitude) / 2;
             const R = 6371000;
             const dNorth = (curr.latitude  - prev.latitude)  * R;
             const dEast  = (curr.longitude - prev.longitude) * R * Math.cos(meanLat);
-            speedMs = Math.sqrt(dNorth * dNorth + dEast * dEast) / dt;
+            const dHoriz = Math.sqrt(dNorth * dNorth + dEast * dEast);
+            speedMs = dHoriz / dt;
+            if (dHoriz > 0.1) climbPitch = Math.atan2(dAlt, dHoriz);
           }
-          const cruiseMs = 15;
-          let targetPitch = -forwardPitch * Math.min(1, speedMs / cruiseMs);
+          const thrustPitch = -forwardPitch * Math.min(1, speedMs / cruiseMs);
+          let targetPitch = climbPitch + thrustPitch;
           if (targetPitch >  pitchClamp) targetPitch =  pitchClamp;
           if (targetPitch < -pitchClamp) targetPitch = -pitchClamp;
 
-          const dSpeed = speedMs - _swQPrevSpeedMs;
-          let targetRoll = (dSpeed / cruiseMs) * lateralRoll;
-          if (targetRoll >  rollClamp) targetRoll =  rollClamp;
-          if (targetRoll < -rollClamp) targetRoll = -rollClamp;
+          let targetRoll = 0;
+          if (_swQPrevHeadingRad !== null) {
+            let dh = targetHeading - _swQPrevHeadingRad;
+            while (dh >  Math.PI) dh -= 2 * Math.PI;
+            while (dh < -Math.PI) dh += 2 * Math.PI;
+            const yawRate = dh / dt;
+            targetRoll = yawRate * bankFactor;
+            if (targetRoll >  bankClamp) targetRoll =  bankClamp;
+            if (targetRoll < -bankClamp) targetRoll = -bankClamp;
+          }
 
           if (_swQSmoothedHeading === null) _swQSmoothedHeading = targetHeading;
           else {
@@ -11251,7 +11273,7 @@ async function main() {
           _swQSmoothedPitch += (targetPitch - _swQSmoothedPitch) * pitchSmooth;
           _swQSmoothedRoll  += (targetRoll  - _swQSmoothedRoll)  * rollSmooth;
 
-          _swQPrevSpeedMs = speedMs;
+          _swQPrevHeadingRad = targetHeading;
           _swQPrevPosCart = Cesium.Cartesian3.clone(cart);
           _swQPrevTime = now;
 
