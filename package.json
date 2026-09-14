@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check:event-mutations && vite build",
+    "build": "npm run check:event-mutations && npm run check:tenant-stamping && vite build",
     "preview": "vite preview",
     "check:event-mutations": "node scripts/check-event-mutations.mjs",
+    "check:tenant-stamping": "node scripts/check-tenant-stamping.mjs",
     "eval": "node eval/runner.js",
     "eval:json": "node eval/runner.js --json"
   },

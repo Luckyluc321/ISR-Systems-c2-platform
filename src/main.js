@@ -129,6 +129,10 @@ import {
   attachPostIncidentReport,
   clearNarrativeCache, setNarrativeCache,
   clearPreprocessedCache, setPreprocessedCache,
+  // Actor / tenant context (Phase 3 tenant isolation). Ambient actor
+  // in events.js scopes every read against operator tenant. Wired to
+  // getActiveRole() at boot + onRoleChange below.
+  setCurrentActor, actorFromRole, registerActorAdminBypass,
 } from './events.js';
 import { buildPostIncidentReport, buildChainPostIncidentReport, emphasisForBranch } from './post_incident_report.js';
 import { evaluateClassificationPipeline, evaluateAttackProfileDetector } from './classification_pipeline.js';
@@ -148,6 +152,16 @@ import { responseBundle, responseBundleForSubject, RESPONSE_OPTION_DETAILS, outc
 import { AIRCRAFT, aircraftAtBase, aircraftForResponseAsset } from './aircraft.js';
 import { playbookFor } from './response_playbook.js';
 import { ADMIN, OPERATORS, RECEIVERS, ACCOUNTS, getActiveRole, setActiveRole, onRoleChange, getRoleChildren, getRoleDestinationIdsRolledUp, impactedRoles as _impactedRoles, canInitiate as _canInitiate, agencyBranchOf, FLOW_TYPES } from './roles.js';
+
+// Phase 3 tenant isolation — wire the ambient actor context in events.js
+// to the active role. ADMIN sees everything (registered as bypass so
+// future non-admin-kind admin accounts get the same treatment). Every
+// EVENTS read function in events.js applies the tenant filter against
+// this actor. Boot-time initial actor set BEFORE any event-reading
+// code runs, then re-derived on every role switch via onRoleChange
+// (wired further down where the role dropdown lives).
+registerActorAdminBypass(ADMIN.id);
+setCurrentActor(actorFromRole(getActiveRole()));
 // Phase 1 · assign action-archetype tags to every RECEIVERS entry at
 // boot via prefix rules. Every role gets .archetype (primary) +
 // .secondaryArchetypes (array). Consumers include the future
@@ -22559,6 +22573,9 @@ async function main() {
     if (!roleMenu.contains(ev.target) && ev.target !== tbOperator) roleMenu.style.display = 'none';
   });
   onRoleChange(() => {
+    // Phase 3 — re-scope the ambient actor to the newly active role.
+    // events.js read functions immediately return the new tenant view.
+    setCurrentActor(actorFromRole(getActiveRole()));
     updateOperatorChip();
     _selectedReceiverEventId = null;
     _respondingEscId = null;

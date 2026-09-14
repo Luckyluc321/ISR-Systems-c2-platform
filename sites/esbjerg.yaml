@@ -4,7 +4,7 @@
 site_id: esbjerg
 label: Esbjerg Harbour
 code: EBJ
-tenant: op-esbjerg-havn
+tenant: op-esbjerg-port
 site_type: port
 mode: live
 

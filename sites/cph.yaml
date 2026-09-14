@@ -5,7 +5,7 @@
 site_id: cph
 label: Copenhagen Airport
 code: CPH
-tenant: op-cph-airport
+tenant: op-cph-airports
 site_type: airport
 mode: live
 

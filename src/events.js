@@ -226,6 +226,14 @@ export function nextEventId() {
 }
 
 export function addEvent(event) {
+  // Phase 3 tenant stamp — immutable once written. Every downstream
+  // read function filters visibility against this field. Derived from
+  // the site manifest's tenant field via tenantForSite(). If the site
+  // is unknown or has no tenant, tenantId is null and the event stays
+  // invisible to any operator actor (default-deny).
+  if (event.tenantId === undefined) {
+    event.tenantId = tenantForSite(event.siteId);
+  }
   event.notes = event.notes || [];
   event.escalations = event.escalations || [];
   // Phase 1 receiver contract fields (additive, defaults to empty).
@@ -820,6 +828,17 @@ export function eventsForDestinations(destIds) {
 // Add an empty notes array to every event so the render pipeline can rely on it
 EVENTS.forEach(e => { e.notes = e.notes || []; });
 
+// Phase 3 backfill — seed EVENTS defined inline above predate the
+// tenant model. Stamp tenantId on every seed event at module load
+// using the same tenantForSite() resolution addEvent() uses for new
+// events. Once every event has tenantId, the Phase 3 filter has a
+// complete data set to work against. Manifests that don't declare a
+// tenant leave the event with tenantId = null (invisible to operator
+// actors, visible to admin bypass — same as any future orphan).
+EVENTS.forEach(e => {
+  if (e.tenantId === undefined) e.tenantId = tenantForSite(e.siteId);
+});
+
 // Seed a couple of demo notes so the section renders non-empty for demo events
 const _seedNote = (id, ts, author, text) => {
   const e = EVENTS.find(x => x.id === id);
@@ -894,7 +913,10 @@ let _selectedEventId = null;
 const _listeners = new Set();
 
 export function getSelectedEventId() { return _selectedEventId; }
-export function getSelectedEvent() { return _selectedEventId ? EVENTS.find(e => e.id === _selectedEventId) : null; }
+export function getSelectedEvent() {
+  if (!_selectedEventId) return null;
+  return getEvent(_selectedEventId);   // routes through actor filter
+}
 export function selectEvent(id) {
   _selectedEventId = id;
   _listeners.forEach(fn => fn(id));
@@ -904,7 +926,117 @@ export function onSelectionChange(fn) {
   _listeners.add(fn);
   return () => _listeners.delete(fn);
 }
-export function getEvent(id) { return EVENTS.find(e => e.id === id); }
+export function getEvent(id) {
+  const e = EVENTS.find(x => x.id === id);
+  if (!e) return null;
+  return _visibleToActor(e, _currentActor) ? e : null;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// Actor context + tenant scoping (Phase 3 of the state-consolidation
+// refactor). See scripts/check-event-mutations.mjs for the Phase 1
+// safety net + docs/phase3-tenant-isolation-postmortem.pdf for design.
+// ───────────────────────────────────────────────────────────────────
+// Every event carries an immutable `tenantId` stamped at creation from
+// SITES[siteId].operatorAccountId. Every read function in this module
+// filters against the ambient current actor (set from the role
+// dropdown via setCurrentActor). Cross-tenant xlink chains surface
+// only what the active actor is allowed to see — the operator's view
+// of a chain that crossed into another tenant contains only their own
+// tenant's events; the linked-out entries are invisible at the data
+// layer, not just redacted at render time.
+//
+// Ambient actor is the same pattern server-side auth uses: JWT →
+// middleware sets req.user → downstream handlers read it implicitly.
+// Client-side, the dropdown sets it. When Azure auth lands, the boot
+// path swaps from getActiveRole() to a session-fetched claim. Every
+// read-function signature stays identical.
+//
+// Default when _currentActor is null: RAW ACCESS (no filter). Used
+// during boot bootstrap and inside events.js itself. Once main.js
+// finishes boot and calls setCurrentActor(actorFromRole(...)), every
+// subsequent read is scoped. In production this default becomes
+// default-deny once every callsite provably passes through the actor
+// path (dev-mode warning at every unfiltered read will surface any
+// bootstrap paths that leaked through).
+// ═══════════════════════════════════════════════════════════════════
+
+let _currentActor = null;
+const _adminBypassRoleIds = new Set();
+
+export function setCurrentActor(actor) {
+  _currentActor = actor;
+  // Role change is a re-render trigger — every listener re-runs its
+  // filter against the new actor.
+  _listeners.forEach(fn => fn(null));
+}
+export function getCurrentActor() { return _currentActor; }
+
+// Register a role id as admin-bypass. Reads under this role skip the
+// tenant filter entirely. Wired at boot in main.js for the ISR admin
+// account. Explicitly opt-in — no role.kind === 'admin' auto-bypass.
+export function registerActorAdminBypass(roleId) {
+  if (roleId) _adminBypassRoleIds.add(roleId);
+}
+
+// Look up the tenant id for a site. Primary source: SITES manifest
+// `tenant` field (surfaces on the loaded record as operatorAccountId).
+// Returns null if the site is unknown or the manifest is silent.
+export function tenantForSite(siteId) {
+  if (!siteId) return null;
+  return SITES[siteId]?.operatorAccountId || null;
+}
+
+// Convert a role object (from getActiveRole()) into an actor context
+// suitable for tenant-scoped reads. Handles the three tenant kinds:
+// admin (bypass), operator (tenant-scoped), receiver (destination-scoped).
+export function actorFromRole(role) {
+  if (!role) return null;
+  const isBypass = _adminBypassRoleIds.has(role.id) || role.kind === 'admin';
+  if (isBypass) {
+    return { kind: 'admin', roleId: role.id, isAdminBypass: true };
+  }
+  if (role.kind === 'operator') {
+    // Operator tenant = the site.operatorAccountId of any site the role
+    // owns. All sites belonging to one operator share the same tenant
+    // id by construction (site manifests + OPERATORS registry aligned).
+    const siteId = Array.isArray(role.siteIds) ? role.siteIds[0] : null;
+    const tenantId = tenantForSite(siteId) || role.id;
+    return {
+      kind: 'operator',
+      roleId: role.id,
+      tenantId,
+      siteIds: Array.isArray(role.siteIds) ? role.siteIds : [],
+    };
+  }
+  if (role.kind === 'receiver') {
+    return {
+      kind: 'receiver',
+      roleId: role.id,
+      destinationIds: Array.isArray(role.destinationIds) ? role.destinationIds : [],
+    };
+  }
+  return null;
+}
+
+// Core visibility check. Applied by every read function in this module
+// before returning event data. Also exported for internal callers that
+// need to check membership without fetching (e.g. xlink graph pruning).
+export function _visibleToActor(event, actor) {
+  if (!event) return false;
+  if (!actor) return true;                                // pre-boot / no filter
+  if (actor.isAdminBypass || actor.kind === 'admin') return true;
+  if (actor.kind === 'operator') {
+    return event.tenantId === actor.tenantId;
+  }
+  if (actor.kind === 'receiver') {
+    // Receivers see events cascaded to any of their destinations. This
+    // is the ONE tenant surface that already worked pre-Phase-3 via
+    // eventsForDestinations() — preserved verbatim here.
+    return (event.escalations || []).some(r => actor.destinationIds.includes(r.destinationId));
+  }
+  return false;                                           // unknown actor kind = deny
+}
 
 // ── Filter state ──
 let _filter = 'all'; // all | hostile | friendly | resolved
@@ -926,7 +1058,9 @@ export function filteredEvents() {
   // alert strip / receiver inbox don't fabricate a detection ahead of the
   // sensor grid. multiSiteTrack events get gated on `detected === true`
   // (flipped in main.js when the missile first enters coverage).
-  const base = EVENTS.filter(e => e.detected !== false);
+  const base = EVENTS
+    .filter(e => e.detected !== false)
+    .filter(e => _visibleToActor(e, _currentActor));   // Phase 3 tenant scope
   const evs = _filter === 'all' ? base : base.filter(e => e.classification === _filter);
   return [...evs].sort((a, b) => {
     if (a.status === 'active' && b.status !== 'active') return -1;
@@ -1002,13 +1136,20 @@ export function refreshSeedDomainScopes() {
 
 // Union linked events' scopes into this event's scope (shadow-chain
 // merge). Called from main.js when linkedEventIds is populated.
+// Phase 3: operator actors only union domains from same-tenant linked
+// events — cross-tenant xlink metadata is invisible at the data layer.
+// Admin bypass + no-actor bootstrap paths union everything (unchanged).
 export function unionLinkedEventDomains(eventId) {
   const e = EVENTS.find(x => x.id === eventId);
   if (!e || !Array.isArray(e.linkedEventIds) || !e.linkedEventIds.length) return null;
   const scope = new Set(Array.isArray(e.domainScope) ? e.domainScope : _computeInitialDomainScope(e));
+  const actor = _currentActor;
   e.linkedEventIds.forEach(linkedId => {
     const linked = EVENTS.find(x => x.id === linkedId);
-    if (linked && Array.isArray(linked.domainScope)) {
+    if (!linked) return;
+    // Tenant gate: operator actor only unions same-tenant linked events.
+    if (actor?.kind === 'operator' && linked.tenantId !== actor.tenantId) return;
+    if (Array.isArray(linked.domainScope)) {
       linked.domainScope.forEach(d => scope.add(d));
     }
   });
