@@ -3,6 +3,13 @@ import 'cesium/Build/Cesium/Widgets/widgets.css';
 import './style.css';
 import { siteLoaderCoverage } from './site_loader.js';
 import { SITES, SITE_LOAD_ERRORS as _siteLoaderErrors } from './sites_registry.js';
+// Phase 2 rendering carve-out — pure HTML string modules extracted
+// from main.js. Each module exports render functions that take state
+// and return an HTML string. No listeners, no DOM manipulation, no
+// side effects except the lazy mutator stamps documented in each file.
+import { defaultMarkerFilters, renderMarkerFilterChips, renderMarkerFilterChipsBody } from './render/marker_filter_chips.js';
+import { renderProgressBadge } from './render/escalation_progress_badge.js';
+import { REPORTS_FILTER_DEFAULTS, renderReportsFilterChips } from './render/reports_filter_chips.js';
 
 // Every site (airport, port, Energinet substation) is a YAML manifest under
 // sites/. sites_registry.js is the single point that runs the loader and
@@ -95,7 +102,7 @@ if (typeof window !== 'undefined') {
 EVENTS.forEach(ev => {
   if (ev.status === 'closed' && !ev.postIncidentReport) {
     try {
-      ev.postIncidentReport = buildPostIncidentReport(ev, { getDestination });
+      attachPostIncidentReport(ev.id, buildPostIncidentReport(ev, { getDestination }));
     } catch (err) {
       console.warn('[pir] seed backfill failed for', ev.id, err.message);
     }
@@ -7157,9 +7164,10 @@ async function main() {
     oorReacq:  ['oor', 'reacq'],
     detected:  ['detected', 'other'],
   };
-  function _defaultMarkerFilters() {
-    return { kills: true, entryExit: true, oorReacq: true, detected: true, showIcons: true, showLabels: true };
-  }
+  // _defaultMarkerFilters moved to src/render/marker_filter_chips.js
+  // (Phase 2 carve-out). Kept as a thin alias so callsites don't
+  // need to change import paths.
+  const _defaultMarkerFilters = defaultMarkerFilters;
   function _kindCategory(kind) {
     for (const [cat, kinds] of Object.entries(MARKER_CATEGORIES)) {
       if (kinds.includes(kind)) return cat;
@@ -7818,7 +7826,7 @@ async function main() {
         for (const ev of EVENTS) {
           if (ev.status !== 'active') continue;
           if (ev.siteId !== batch.siteId) continue;
-          if (!Array.isArray(ev.contributingSensors)) ev.contributingSensors = [];
+          if (!Array.isArray(ev.contributingSensors)) mutateEvent(ev.id, { contributingSensors: [] });
           try { _applyDetectionBatchToEvent(batch, ev); }
           catch (_) { /* never break the WS message loop */ }
         }
@@ -17632,58 +17640,11 @@ async function main() {
   // chips (kills, entry/exit, oor/reacq, detected) + display style
   // chips (icons, labels). Click toggles per-event state on
   // event._markerFilters. Master "All" chip clears/sets all categories.
-  function _renderMarkerFilterChips(event) {
-    if (!event) return '';
-    if (!event._markerFilters) mutateEvent(event.id, { _markerFilters: _defaultMarkerFilters() });
-    const f = event._markerFilters;
-    const allOn = f.kills && f.entryExit && f.oorReacq && f.detected;
-    const chipStyle = (on, color) => `padding: 4px 10px; border-radius: 12px; font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.10em; text-transform: uppercase; cursor: pointer; user-select: none; ${on ? `background: rgba(${color}, 0.14); border: 1px solid rgba(${color}, 0.55); color: rgb(${color});` : 'background: transparent; border: 1px solid #1e2530; color: var(--text-dim);'}`;
-    const chip = (label, key, color, eventId) => `<span class="dp-mflt-chip" data-mflt="${key}" data-id="${eventId}" style="${chipStyle(f[key], color)}">${label}</span>`;
-    const chipMaster = (label, active, eventId) => `<span class="dp-mflt-chip" data-mflt="all" data-id="${eventId}" style="${chipStyle(active, '160, 200, 220')}">${label}</span>`;
-    return `
-      <div class="dp-section dp-mflt" style="padding: var(--space-2) var(--space-3); border-bottom: 1px solid #131820;">
-        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;">
-          <span style="font-size: var(--fs-2xs); color: var(--text-dim); font-family: var(--font-mono); letter-spacing: 0.10em; text-transform: uppercase; margin-right: 4px;">Subevents:</span>
-          ${chipMaster(allOn ? 'All ✓' : 'All', allOn, event.id)}
-          ${chip(`Kills ${f.kills ? '✓' : ''}`,           'kills',     '255, 90, 90',   event.id)}
-          ${chip(`Entry/Exit ${f.entryExit ? '✓' : ''}`,   'entryExit', '77, 210, 255',  event.id)}
-          ${chip(`Reacquired ${f.oorReacq ? '✓' : ''}`,    'oorReacq',  '77, 255, 156',  event.id)}
-          ${chip(`Detected ${f.detected ? '✓' : ''}`,      'detected',  '77, 210, 255',  event.id)}
-        </div>
-        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-          <span style="font-size: var(--fs-2xs); color: var(--text-dim); font-family: var(--font-mono); letter-spacing: 0.10em; text-transform: uppercase; margin-right: 4px;">Display:</span>
-          ${chip(`Icons ${f.showIcons ? '✓' : ''}`,       'showIcons', '160, 200, 220', event.id)}
-          ${chip(`Labels ${f.showLabels ? '✓' : ''}`,     'showLabels','160, 200, 220', event.id)}
-        </div>
-      </div>`;
-  }
-
-  // Body-only variant of the chip row for use inside a Palantir-style
-  // collapsible section (renderPalantirClosedPanel's sec() helper
-  // provides the outer wrapper + caret).
-  function _renderMarkerFilterChipsBody(event) {
-    if (!event) return '';
-    if (!event._markerFilters) mutateEvent(event.id, { _markerFilters: _defaultMarkerFilters() });
-    const f = event._markerFilters;
-    const allOn = f.kills && f.entryExit && f.oorReacq && f.detected;
-    const chipStyle = (on, color) => `padding: 4px 10px; border-radius: 12px; font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.10em; text-transform: uppercase; cursor: pointer; user-select: none; ${on ? `background: rgba(${color}, 0.14); border: 1px solid rgba(${color}, 0.55); color: rgb(${color});` : 'background: transparent; border: 1px solid #1e2530; color: var(--text-dim);'}`;
-    const chip = (label, key, color, eventId) => `<span class="dp-mflt-chip" data-mflt="${key}" data-id="${eventId}" style="${chipStyle(f[key], color)}">${label}</span>`;
-    const chipMaster = (label, active, eventId) => `<span class="dp-mflt-chip" data-mflt="all" data-id="${eventId}" style="${chipStyle(active, '160, 200, 220')}">${label}</span>`;
-    return `
-      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
-        <span style="font-size: var(--fs-2xs); color: var(--text-dim); font-family: var(--font-mono); letter-spacing: 0.10em; text-transform: uppercase; margin-right: 4px;">Categories:</span>
-        ${chipMaster(allOn ? 'All ✓' : 'All', allOn, event.id)}
-        ${chip(`Kills ${f.kills ? '✓' : ''}`,           'kills',     '255, 90, 90',   event.id)}
-        ${chip(`Entry/Exit ${f.entryExit ? '✓' : ''}`,   'entryExit', '77, 210, 255',  event.id)}
-        ${chip(`Reacquired ${f.oorReacq ? '✓' : ''}`,    'oorReacq',  '77, 255, 156',  event.id)}
-        ${chip(`Detected ${f.detected ? '✓' : ''}`,      'detected',  '77, 210, 255',  event.id)}
-      </div>
-      <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-        <span style="font-size: var(--fs-2xs); color: var(--text-dim); font-family: var(--font-mono); letter-spacing: 0.10em; text-transform: uppercase; margin-right: 4px;">Display:</span>
-        ${chip(`Icons ${f.showIcons ? '✓' : ''}`,       'showIcons', '160, 200, 220', event.id)}
-        ${chip(`Labels ${f.showLabels ? '✓' : ''}`,     'showLabels','160, 200, 220', event.id)}
-      </div>`;
-  }
+  // _renderMarkerFilterChips and _renderMarkerFilterChipsBody moved to
+  // src/render/marker_filter_chips.js (Phase 2 carve-out). Kept as
+  // thin aliases so callsites don't need to change.
+  const _renderMarkerFilterChips = renderMarkerFilterChips;
+  const _renderMarkerFilterChipsBody = renderMarkerFilterChipsBody;
 
   // Resolve the full chain of events linked to an event (primary +
   // shadows + primary if this is a shadow). Used by chain-scoped chip
@@ -17726,7 +17687,7 @@ async function main() {
     const targets = isChainScoped ? _eventChain(eventId) : [getEvent(eventId)].filter(Boolean);
 
     const _flipOne = (ev) => {
-      if (!ev._markerFilters) ev._markerFilters = _defaultMarkerFilters();
+      if (!ev._markerFilters) mutateEvent(ev.id, { _markerFilters: _defaultMarkerFilters() });
       const f = ev._markerFilters;
       if (key === 'all') {
         const allOn = f.kills && f.entryExit && f.oorReacq && f.detected;
@@ -20463,86 +20424,13 @@ async function main() {
     });
   }
 
-  // Render the filter chip strip on top of the Reports box. Each chip
-  // only appears when the unfiltered pool actually has 2+ distinct
-  // values on that dimension — a filter for a dimension with only one
-  // possible value is noise. Chip change fires reports-filter-change
-  // which routes into the handler below and re-renders.
-  function _renderReportsFilterChips(pool, current) {
-    if (!pool?.length) return '';
-    const uniqueSorted = (arr) => [...new Set(arr.filter(Boolean))].sort();
-    const sites = uniqueSorted(pool.map(e => e.siteId));
-    const kommuner = uniqueSorted(pool.map(e => e.geoContext?.kommune));
-    const politikredse = uniqueSorted(pool.map(e => e.geoContext?.politikreds));
-    const regioner = uniqueSorted(pool.map(e => e.geoContext?.region));
-    const classifications = uniqueSorted(pool.map(e => e.classification));
-    const domains = uniqueSorted(pool.flatMap(e => Array.isArray(e.domainScope) ? e.domainScope : []));
+  // _renderReportsFilterChips moved to src/render/reports_filter_chips.js
+  // (Phase 2 carve-out). Kept as a thin alias so callsites don't change.
+  const _renderReportsFilterChips = renderReportsFilterChips;
 
-    const chip = (label, key, options, valueLabelFn = (v) => v) => {
-      if (options.length < 2) return '';   // dimension has no variation — omit chip
-      const opts = ['<option value="all">All ' + label + '</option>']
-        .concat(options.map(v => `<option value="${v}"${current[key] === v ? ' selected' : ''}>${valueLabelFn(v)}</option>`));
-      const dirty = current[key] !== 'all';
-      return `<label style="display:inline-flex;align-items:center;gap:4px;font-size:var(--fs-2xs);color:${dirty ? '#ffb84d' : 'var(--text-dim)'};font-family:var(--font-mono);letter-spacing:0.08em;text-transform:uppercase;">
-        ${label}
-        <select data-rcv="reports-filter-change" data-filter-key="${key}" style="background:${dirty ? 'rgba(255,184,77,0.10)' : 'rgba(255,255,255,0.03)'};border:1px solid ${dirty ? 'rgba(255,184,77,0.4)' : 'rgba(255,255,255,0.08)'};color:var(--text);padding:3px 8px;border-radius:2px;font-family:var(--font-body);font-size:var(--fs-xs);cursor:pointer;">
-          ${opts.join('')}
-        </select>
-      </label>`;
-    };
-
-    const timeChip = (() => {
-      const opts = [
-        { v: 'all',  l: 'Any time' },
-        { v: '7d',   l: 'Last 7 days' },
-        { v: '30d',  l: 'Last 30 days' },
-        { v: '90d',  l: 'Last 90 days' },
-      ];
-      const dirty = current.timeRange !== 'all';
-      return `<label style="display:inline-flex;align-items:center;gap:4px;font-size:var(--fs-2xs);color:${dirty ? '#ffb84d' : 'var(--text-dim)'};font-family:var(--font-mono);letter-spacing:0.08em;text-transform:uppercase;">
-        Time
-        <select data-rcv="reports-filter-change" data-filter-key="timeRange" style="background:${dirty ? 'rgba(255,184,77,0.10)' : 'rgba(255,255,255,0.03)'};border:1px solid ${dirty ? 'rgba(255,184,77,0.4)' : 'rgba(255,255,255,0.08)'};color:var(--text);padding:3px 8px;border-radius:2px;font-family:var(--font-body);font-size:var(--fs-xs);cursor:pointer;">
-          ${opts.map(o => `<option value="${o.v}"${current.timeRange === o.v ? ' selected' : ''}>${o.l}</option>`).join('')}
-        </select>
-      </label>`;
-    })();
-
-    const anyDirty = Object.keys(current).some(k => current[k] !== _REPORTS_FILTER_DEFAULTS[k]);
-    const clearBtn = anyDirty
-      ? `<button data-rcv="reports-filter-clear" style="background:transparent;border:1px solid rgba(255,184,77,0.4);color:#ffb84d;padding:3px 10px;border-radius:2px;cursor:pointer;font-family:var(--font-mono);font-size:var(--fs-2xs);letter-spacing:0.12em;text-transform:uppercase;">Clear</button>`
-      : '';
-
-    const chips = [
-      chip('Site', 'site', sites, (v) => SITES[v]?.name || v),
-      chip('Kommune', 'kommune', kommuner),
-      chip('Politikreds', 'politikreds', politikredse),
-      chip('Region', 'region', regioner),
-      chip('Class', 'classification', classifications, (v) => v.charAt(0).toUpperCase() + v.slice(1)),
-      chip('Domain', 'domain', domains, (v) => v.charAt(0).toUpperCase() + v.slice(1)),
-      timeChip,
-    ].filter(Boolean);
-
-    if (!chips.length) return '';
-    return `<div class="rcv-reports-filters" style="display:flex;flex-wrap:wrap;gap:8px;padding:var(--space-2) var(--space-3);align-items:center;border-bottom:1px solid var(--border);">${chips.join('')}${clearBtn}</div>`;
-  }
-
-  // Compact badge for esc.progressStatus (post-ack progress axis).
-  // Empty when no progress state set yet. Used by both operator log
-  // renderers and the receiver inbox card so the state surfaces on
-  // every axis the state is visible.
-  function _renderProgressBadge(esc) {
-    if (!esc || !esc.progressStatus) return '';
-    const cfg = ({
-      'in-progress': { bg: 'rgba(77,210,255,0.10)', border: 'rgba(77,210,255,0.4)', fg: '#4dd2ff', label: 'IN PROGRESS' },
-      'resolved':    { bg: 'rgba(77,255,156,0.10)', border: 'rgba(77,255,156,0.4)', fg: '#4dff9c', label: 'RESOLVED' },
-      'blocked':     { bg: 'rgba(255,184,77,0.12)', border: 'rgba(255,184,77,0.5)', fg: '#ffb84d', label: 'BLOCKED' },
-    })[esc.progressStatus];
-    if (!cfg) return '';
-    const reason = esc.progressStatus === 'blocked' && esc.blockedReason
-      ? ` · ${esc.blockedReason.length > 60 ? esc.blockedReason.slice(0,60) + '…' : esc.blockedReason}`
-      : '';
-    return `<span class="esc-progress-badge" title="${(esc.blockedReason || '').replace(/"/g,'&quot;')}" style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:${cfg.bg};border:1px solid ${cfg.border};border-radius:12px;font-size:var(--fs-2xs);letter-spacing:0.14em;color:${cfg.fg};font-family:var(--font-mono);margin-left:6px;">${cfg.label}${reason}</span>`;
-  }
+  // _renderProgressBadge moved to src/render/escalation_progress_badge.js
+  // (Phase 2 carve-out). Kept as a thin alias so callsites don't change.
+  const _renderProgressBadge = renderProgressBadge;
 
   // Revoke authorization for observers on an event.
   // Rule: original operator (rec.initiatedBy match) + admin can revoke
@@ -21143,15 +21031,9 @@ async function main() {
   // switching to Politi does not inherit PET's filter set. Wide open by
   // default: every past event this role was on with a PIR shows until
   // the receiver narrows. See Phase C of the receiver-flow work.
-  const _REPORTS_FILTER_DEFAULTS = {
-    site: 'all',
-    kommune: 'all',
-    politikreds: 'all',
-    region: 'all',
-    classification: 'all',
-    domain: 'all',
-    timeRange: 'all',
-  };
+  // Defaults moved to src/render/reports_filter_chips.js as
+  // REPORTS_FILTER_DEFAULTS; aliased here for the existing callsites.
+  const _REPORTS_FILTER_DEFAULTS = REPORTS_FILTER_DEFAULTS;
   let _reportsFilter = { ..._REPORTS_FILTER_DEFAULTS };
   // Zone-split render state for the workspace. Full-mount fires when
   // the workspace opens or the event/mode changes. Otherwise only the
@@ -21666,7 +21548,7 @@ async function main() {
         const cd = (ev.counterDispatches || []).find(c => c.dispatchId === dispatchId);
         const outcomes = outcomesForKind(cd?.kind || '');
         const outcomeDef = outcomes.find(o => o.id === outcomeId);
-        if (!ev.dispatchOutcomes) ev.dispatchOutcomes = {};
+        if (!ev.dispatchOutcomes) mutateEvent(ev.id, { dispatchOutcomes: {} });
         ev.dispatchOutcomes[dispatchId] = {
           outcomeId,
           outcomeLabel: outcomeDef?.label || outcomeId,
@@ -22198,10 +22080,10 @@ async function main() {
         const ev = getEvent(eventId);
         const roleId = getActiveRole()?.id;
         if (!ev || !roleId) return;
-        if (!(ev.participants instanceof Map)) ev.participants = new Map();
+        if (!(ev.participants instanceof Map)) mutateEvent(ev.id, { participants: new Map() });
         const cur = ev.participants.get(roleId);
         if (cur) { cur.mode = 'actor'; cur.promotedFromObserver = true; }
-        else ev.participants.set(roleId, { mode: 'actor', addedAt: new Date().toISOString(), addedBy: roleId, addReason: 'self-promoted', promotedFromObserver: true });
+        else setEventMapKey(ev.id, 'participants', roleId, { mode: 'actor', addedAt: new Date().toISOString(), addedBy: roleId, addReason: 'self-promoted', promotedFromObserver: true });
         toast('Promoted to actor. Response CTAs now available.', 'ok');
         _lastConsoleSig = null;
         renderReceiverView({ immediate: true });

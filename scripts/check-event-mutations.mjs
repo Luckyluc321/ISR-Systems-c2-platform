@@ -39,9 +39,12 @@ const EXEMPT_FILES = new Set([
 //   event.foo.push(...)  (array push)
 //   event.foo.add(...)   (Set add)
 //   event.foo.set(...)   (Map set)
+// Also caught: the `ev.` alias, since main.js uses that shorthand
+// inside forEach/for-of loops over EVENTS. Extended after Phase 1
+// audit missed 5 sites using the shorter name.
 // Comparison operators (== != === !==) and arrow bodies (=>) filtered
 // out separately.
-const PATTERN = 'event\\.[A-Za-z_][A-Za-z0-9_]*[[:space:]]*=|event\\.[A-Za-z_][A-Za-z0-9_]*\\.push\\(|event\\.[A-Za-z_][A-Za-z0-9_]*\\.add\\(|event\\.[A-Za-z_][A-Za-z0-9_]*\\.set\\(';
+// (Kept as a comment only — the actual match logic lives inline below.)
 
 // Files to scan.
 const files = execSync(
@@ -57,11 +60,13 @@ for (const file of files) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     // Skip comparison operators and arrow bodies (false positives).
-    if (/\bevent\.\w+\s*==/.test(line))  continue;
-    if (/\bevent\.\w+\s*!=/.test(line))  continue;
-    if (/\bevent\.\w+\s*=>/.test(line))  continue;
-    // Check for assignment or push/add/set.
-    if (!/event\.\w+\s*=|event\.\w+\.push\(|event\.\w+\.add\(|event\.\w+\.set\(/.test(line)) continue;
+    if (/\b(event|ev)\.\w+\s*==/.test(line))  continue;
+    if (/\b(event|ev)\.\w+\s*!=/.test(line))  continue;
+    if (/\b(event|ev)\.\w+\s*=>/.test(line))  continue;
+    // Check for assignment or push/add/set. Matches both `event.` and
+    // `ev.` prefixes (both are used across the codebase as event
+    // variable names).
+    if (!/\b(event|ev)\.\w+\s*=[^=]|\b(event|ev)\.\w+\.push\(|\b(event|ev)\.\w+\.add\(|\b(event|ev)\.\w+\.set\(/.test(line)) continue;
     // Line-level "exempt" annotation — used for narrow, justified
     // exceptions (documented at the callsite).
     if (line.includes('// events.js internal helper, exempt')) continue;
