@@ -683,6 +683,7 @@ import { getRules, onRulesChange, toggleRule, removeRule, upsertRule, resetRules
 import { isMistralConfigured, streamCaseFileNarrative, streamDebriefNarrative, ensureSiteContextDigest, invalidateSiteContextDigest, writeNarrativeCache, readNarrativeCache, readNarrativeCacheIfSignalMatch, invalidateNarrativeCache } from './mistral.js';
 import { resolveHighlightsAsync, extractAndRankSignals, buildAgentBPromptBlock, writePreprocessed, rehydratePreprocessed, invalidatePreprocessed } from './preprocessing.js';
 import { invalidateFallbackHighlights } from './agents/agent_a2_highlights.js';
+import { streamNarrativeLens, knownArchetypes as _lensKnownArchetypes, writeLens as _lensWriteCache, readLens as _lensReadCache } from './agents/agent_b_lens.js';
 import { saveRecording as _idbSaveRecording, loadRecording as _idbLoadRecording, deleteRecording as _idbDeleteRecording, listRecordingIds as _idbListRecordingIds, clearAll as _idbClearAll, migrateFromLocalStorage as _idbMigrateFromLocalStorage } from './recording_store.js';
 import { fetchDrivingRoute, computeSegmentLengths, advanceAlongPolyline } from './routing.js';
 import { buildCordon, assignPatrols, clearCordonCache } from './perimeter.js';
@@ -20472,6 +20473,103 @@ async function main() {
   const _mistralResultCache = new Map();   // event.id -> {body, recommendation, model_version, generated_at}
   const MISTRAL_COOLDOWN_MS = 45 * 1000;   // 45s cooldown on 429
 
+  // ── Receiver-lens fetcher (Phase 4 Step 5) ────────────────────
+  // Fires the archetype-shaped narrative lens on case-file open for
+  // a receiver-role viewer. Dedupes via an in-flight promise Map so
+  // concurrent renders (rapid tick re-renders after ack/cascade) don't
+  // spawn parallel Mistral calls for the same lens.
+  //
+  // Signature: _ensureLensForEvent(event, role) -> Promise|null
+  // Returns null if the event or role are missing an archetype/base
+  // narrative. Otherwise resolves once the lens is cached on
+  // event.narrativeLenses[archetype].
+  //
+  // Cache freshness rule: lens.baseHash === current signalHash of the
+  // base narrativeCache. If narrativeCache updates (Agent B regen),
+  // clearNarrativeCache also drops narrativeLenses (see events.js
+  // Phase 4 Step 1) so the next call rebuilds.
+  //
+  // Detection-only: the lens's onDone writes to event.narrativeLenses
+  // via a direct property write inside the events.js internal-helper
+  // pattern (this is a mutation of an event-owned map field, guarded
+  // by the setEventObjectKey primitive to keep the Phase 1 policy
+  // clean). Nothing on the lens completion path invokes dispatch or
+  // cascade.
+  const _lensInFlight = new Map();   // key = eventId + '::' + archetype
+  function _ensureLensForEvent(event, role) {
+    if (!event || !role) return null;
+    if (!isMistralConfigured()) return null;
+    const archetype = role.archetype || role.primaryArchetype;
+    if (!archetype) return null;
+    if (!event.narrativeCache?.body) return null;
+
+    // Cache-hit path — already have a fresh lens for this archetype.
+    const currentBaseHash = event.narrativeCache.signalHash || event.narrativeCache.model_version || 'no-hash';
+    const existing = event.narrativeLenses?.[archetype];
+    if (existing && existing.baseHash === currentBaseHash) return Promise.resolve(existing);
+
+    // In-flight dedup.
+    const key = `${event.id}::${archetype}`;
+    if (_lensInFlight.has(key)) return _lensInFlight.get(key);
+
+    const promise = new Promise((resolve) => {
+      let latestBody = '';
+      let latestReco = '';
+      streamNarrativeLens(event, archetype, {
+        onBodyDelta: (text) => { latestBody = text; },
+        onRecoDelta: (text) => { latestReco = text; },
+        onDone: (result) => {
+          const lensObj = {
+            body: (result?.body || latestBody || '').trim(),
+            key_terms: (result?.recommendation || latestReco || '').trim(),
+            baseHash: currentBaseHash,
+            model_version: result?.model_version || 'lens',
+            computedAt: new Date().toISOString(),
+            source: (result?.model_version || '').includes('fallback') ? 'fallback' : 'mistral',
+          };
+          setEventObjectKey(event.id, 'narrativeLenses', archetype, lensObj);
+          _lensWriteCache(event, archetype, lensObj);   // localStorage LRU
+          _lensInFlight.delete(key);
+          resolve(lensObj);
+        },
+        onError: (err) => {
+          console.warn(`[lens ${archetype}] stream failed, using fallback:`, err?.message || err);
+          // No lens object stashed — the composer will render the
+          // base narrative unchanged. Next open re-attempts.
+          _lensInFlight.delete(key);
+          resolve(null);
+        },
+      });
+    });
+    _lensInFlight.set(key, promise);
+    return promise;
+  }
+
+  // Dev handle for manual verification. Console usage:
+  //   window.__isr_lens.available()
+  //   window.__isr_lens.generate(eventId, 'kinetic-response')
+  //   window.__isr_lens.read(eventId, 'kinetic-response')
+  //   window.__isr_lens.archetypes()
+  if (typeof window !== 'undefined') {
+    window.__isr_lens = {
+      archetypes: () => _lensKnownArchetypes(),
+      available:  () => isMistralConfigured(),
+      generate: (eventId, archetype) => {
+        const ev = getEvent(eventId);
+        if (!ev) return Promise.reject(new Error('event not found'));
+        return _ensureLensForEvent(ev, { archetype });
+      },
+      read: (eventId, archetype) => {
+        const ev = getEvent(eventId);
+        return ev?.narrativeLenses?.[archetype] || null;
+      },
+      readAll: (eventId) => {
+        const ev = getEvent(eventId);
+        return ev?.narrativeLenses || {};
+      },
+    };
+  }
+
   async function _fireMistralCaseFile(event, opts = {}) {
     if (!isMistralConfigured() || !event) return;
     const { force = false } = opts;
@@ -21475,6 +21573,13 @@ async function main() {
       const wsEvent = receivedEvents.find(e => e.id === _workspaceEventId)
                     || EVENTS.find(e => e.id === _workspaceEventId);
       if (wsEvent) {
+        // Phase 4 Step 5 — fire the receiver-lens fetch on case-file open.
+        // Fire-and-forget: dedup Map inside _ensureLensForEvent skips
+        // when a lens is in flight or already cached. Result stashes on
+        // wsEvent.narrativeLenses[archetype] — Step 6 wires the composer
+        // to actually render it. Wrapped in try/catch so a lens failure
+        // never blocks the workspace render.
+        try { _ensureLensForEvent(wsEvent, role); } catch (err) { console.warn('[lens] fire failed:', err?.message || err); }
         // ZONE-SPLIT RENDER. Full workspace innerHTML replace was the
         // blink Lucas kept seeing — every kill / cascade / outcome
         // transition rebuilt the whole DOM including the streaming
