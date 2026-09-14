@@ -143,15 +143,64 @@ const LENS_ARCHETYPE_DIRECTIVES = {
 // a full sentence, so its cap is smaller too.
 const _LENS_CAPS = { body: 1400, reco: 200 };
 
-// Fallback shape — base narrative unchanged. Used when Mistral is
-// down, two consecutive validations fail, or the caller is offline.
-// The model_version suffix '-lens-fallback-<archetype>' surfaces the
-// substitution in the audit trail so silent degradation is visible.
+// Deterministic fallback lead sentences per archetype. Used when
+// Mistral is unavailable, two validations fail, or the caller is
+// offline. Each lead frames the base narrative for the archetype
+// using categorical, non-numeric language (safe under the data gaps
+// documented in LENS_ARCHETYPE_DIRECTIVES). Kept short + factual —
+// the base narrative body carries the actual facts.
+const LENS_FALLBACK_LEADS = {
+  'kinetic-response':
+    'Kinetic-response framing. Review the base narrative for engagement-relevant detail: threat state, dispatchable-asset relevance, and current cordon or intercept posture.',
+  'coordination-command':
+    'Coordination-command framing. Review the base narrative for contributor status, active escalation tier, and outstanding cross-agency decisions.',
+  'intelligence-attribution':
+    'Intelligence-attribution framing. Review the base narrative for platform-signature, tradecraft cues, and temporal patterning relative to prior events at this or adjacent sites.',
+  'forensic-cyber':
+    'Forensic-cyber framing. Review the base narrative for recoverable artifacts, chain-of-custody state, and control-link forensic indicators worth preserving.',
+  'medical-consequence':
+    'Medical-consequence framing. Review the base narrative for categorical casualty exposure indicators. Specific facility capacity data is not carried by the platform at this time.',
+  'regulatory-advisory':
+    'Regulatory-advisory framing. Review the base narrative for airspace / maritime / energy compliance implications and any restriction-authority coordination the base names.',
+  'public-safety-communication':
+    'Public-safety-communication framing. Review the base narrative for populated-area adjacency and message-tempo cues. Specific kommune population or shelter capacity is not carried by the platform at this time.',
+  'international-liaison':
+    'International-liaison framing. Review the base narrative for cross-border origin cues and any standing information-sharing pathway the base explicitly names.',
+};
+
+// Anchor-noun bundles per archetype — populates the reco slot of a
+// fallback lens so the composer can still render the archetype badge
+// row (key_terms surfaces those nouns as a chip strip in the case-
+// file header). Kept identical to the example KEY_TERMS lines in
+// LENS_ARCHETYPE_DIRECTIVES so a fallback lens is visually consistent
+// with a Mistral-produced lens.
+const LENS_FALLBACK_KEY_TERMS = {
+  'kinetic-response':               'engagement envelope, cordon, intercept vector, denial',
+  'coordination-command':           'escalation tier, contributor status, resource allocation, briefing threshold',
+  'intelligence-attribution':       'attribution, tradecraft, tasking, pattern-of-life, control-link',
+  'forensic-cyber':                 'artifact, chain of custody, control-link forensics, admissibility',
+  'medical-consequence':            'casualty risk, exposure vector, triage priority, mass-casualty threshold',
+  'regulatory-advisory':            'NOTAM, airspace restriction, coordination requirement, temporary flight restriction',
+  'public-safety-communication':    'affected population, shelter window, public-messaging tone, kommune coordination',
+  'international-liaison':          'cross-border, allied notification, standing coordination, partner briefing',
+};
+
+// Deterministic fallback. Used when Mistral is down, two consecutive
+// validations fail, or the caller is offline. The '-lens-fallback-
+// <archetype>' suffix on model_version surfaces the substitution in
+// the audit trail so silent degradation is visible.
+//
+// Shape:
+//   body: archetype lead sentence + '\n\n' + base narrative verbatim
+//   recommendation: comma-separated key_terms for the archetype
 function _lensFallback(event, archetype) {
   const base = event?.narrativeCache?.body || 'No base narrative available.';
+  const lead = LENS_FALLBACK_LEADS[archetype]
+    || `Reframing framing. Review the base narrative for detail relevant to the ${archetype} archetype.`;
+  const keyTerms = LENS_FALLBACK_KEY_TERMS[archetype] || '';
   return {
-    body: base,
-    recommendation: '',
+    body: `${lead}\n\n${base}`,
+    recommendation: keyTerms,
   };
 }
 
