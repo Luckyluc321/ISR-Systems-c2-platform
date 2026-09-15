@@ -19278,6 +19278,18 @@ async function main() {
   // Shown when at least one counter-response dispatch has been fired by
   // this role. Lists every dispatch with its live state chip so the
   // duty officer sees the whole engagement picture at once.
+  // Monitor Engagement bucket ordering. Most-active first so the operator
+  // sees urgent state at the top of the panel. RTB variants and holding-
+  // cordon come after primary active states, complete last.
+  const _MON_ENG_BUCKETS = [
+    { key: 'engaging',          label: 'ENGAGING',              color: '#ffb84d' },
+    { key: 'en_route',          label: 'EN ROUTE',              color: '#4dd2ff' },
+    { key: 'holding-cordon',    label: 'HOLDING CORDON',        color: '#4dd2ff' },
+    { key: 'rtb_via_last_known',label: 'RTB · LAST KNOWN',      color: '#c084fc' },
+    { key: 'rtb_home',          label: 'RTB · HOME',            color: '#c084fc' },
+    { key: 'complete',          label: 'COMPLETE',              color: '#6b7280' },
+  ];
+
   function _renderStep3ActiveEngagement(event, activeRole) {
     const dispatches = (event.counterDispatches || []).filter(cd => {
       // Only show dispatches this role owns (issued from their scope)
@@ -19285,28 +19297,56 @@ async function main() {
       return activeRole?.kind === 'admin' || (scope && scope.has(cd.kind));
     });
     if (!dispatches.length) return '';
-    const rows = dispatches.map(cd => {
+
+    // Bucket dispatches by live state. counterDispatchStateFor returns
+    // the current state or 'complete' if the entity has already retired.
+    const bucketed = new Map(_MON_ENG_BUCKETS.map(b => [b.key, []]));
+    for (const cd of dispatches) {
       const state = counterDispatchStateFor(event.id, cd.assetId) || 'complete';
-      const stateColor = state === 'complete' ? '#6b7280' : state === 'engaging' ? '#ffb84d' : '#4dd2ff';
-      const stateLabel = { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE' }[state] || state.toUpperCase();
-      const elapsedSec = Math.max(0, Math.floor((Date.now() - cd.dispatchedTs) / 1000));
-      const elapsedStr = elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
-      const kindLabel = RESPONSE_OPTION_DETAILS[cd.kind]?.displayName || cd.kind;
+      const bucketKey = bucketed.has(state) ? state : 'complete';
+      bucketed.get(bucketKey).push(cd);
+    }
+
+    const totalActive = dispatches.length - bucketed.get('complete').length;
+    const headerCounts = _MON_ENG_BUCKETS
+      .filter(b => b.key !== 'complete' && bucketed.get(b.key).length > 0)
+      .map(b => `${bucketed.get(b.key).length} ${b.label.toLowerCase()}`)
+      .join(', ');
+    const summary = totalActive > 0
+      ? `${totalActive} unit${totalActive === 1 ? '' : 's'} active${headerCounts ? ' · ' + headerCounts : ''}`
+      : `All ${dispatches.length} dispatch${dispatches.length === 1 ? '' : 'es'} complete`;
+
+    const bucketSections = _MON_ENG_BUCKETS.map(bucket => {
+      const items = bucketed.get(bucket.key);
+      if (!items.length) return '';
+      const rows = items.map(cd => {
+        const elapsedSec = Math.max(0, Math.floor((Date.now() - cd.dispatchedTs) / 1000));
+        const elapsedStr = elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
+        const kindLabel = RESPONSE_OPTION_DETAILS[cd.kind]?.displayName || cd.kind;
+        return `
+          <div style="display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; border-top: 1px solid var(--border);">
+            <div style="flex: 1 1 auto; min-width: 0;">
+              <div style="font-size: var(--fs-sm); color: var(--text); font-weight: 500;">${cd.assetName}</div>
+              <div class="c-label" style="margin-top: 2px; color: var(--text-dim);">${kindLabel} · Elapsed ${elapsedStr}</div>
+            </div>
+          </div>`;
+      }).join('');
       return `
-        <div style="display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; border-top: 1px solid var(--border);">
-          <div style="flex: 1 1 auto; min-width: 0;">
-            <div style="font-size: var(--fs-sm); color: var(--text); font-weight: 500;">${cd.assetName}</div>
-            <div class="c-label" style="margin-top: 2px; color: var(--text-dim);">${kindLabel} · Elapsed ${elapsedStr}</div>
+        <div class="mon-eng-bucket" style="margin-top: var(--space-3);">
+          <div class="mon-eng-bucket-hdr" style="display: flex; align-items: center; gap: var(--space-2); padding: 4px 10px; background: rgba(255,255,255,0.02); border: 1px solid ${bucket.color}66; border-left: 2px solid ${bucket.color}; border-radius: 2px; font-size: var(--fs-2xs); color: ${bucket.color}; font-family: var(--font-mono); letter-spacing: 0.16em; font-weight: 600; text-transform: uppercase;">
+            <span>${bucket.label}</span>
+            <span style="opacity: 0.7;">${items.length} unit${items.length === 1 ? '' : 's'}</span>
           </div>
-          <div style="display: inline-flex; align-items: center; padding: 4px 10px; background: rgba(255,255,255,0.02); border: 1px solid ${stateColor}66; border-left: 2px solid ${stateColor}; border-radius: 2px; font-size: var(--fs-2xs); color: ${stateColor}; font-family: var(--font-mono); letter-spacing: 0.16em; font-weight: 600; text-transform: uppercase;">${stateLabel}</div>
+          ${rows}
         </div>`;
     }).join('');
+
     return `
       <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--accent);">
         <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--accent);">Step 3 · Monitor engagement</div>
         <div class="c-panel-body">
-          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-1);">${dispatches.length} dispatch${dispatches.length === 1 ? '' : 'es'} tracked. Live state above updates as assets progress.</div>
-          ${rows}
+          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-1);">${summary}</div>
+          ${bucketSections}
         </div>
       </div>`;
   }
