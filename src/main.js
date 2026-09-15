@@ -19038,7 +19038,7 @@ async function main() {
           <div class="c-panel-body">
           <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${mineList.length} option${mineList.length === 1 ? '' : 's'} available. Multiple can be dispatched concurrently. Recommended pick is the closest by ETA.</div>
           <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-3);">
-            ${mineList.map((a, i) => `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: ${i === 0 ? 'rgba(77, 210, 255, 0.08)' : 'rgba(255, 255, 255, 0.03)'}; border: 1px solid ${i === 0 ? 'rgba(77, 210, 255, 0.35)' : 'var(--border)'}; border-radius: 2px; font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.10em; text-transform: uppercase; color: ${i === 0 ? 'var(--accent)' : 'var(--text-dim)'};">${i === 0 ? '◆' : '○'} ${(RESPONSE_OPTION_DETAILS[a.kind]?.displayName || a.kind).split(' ').slice(0, 3).join(' ')}</span>`).join('')}
+            ${mineList.map((a) => `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); border-radius: 2px; font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-dim);">○ ${(RESPONSE_OPTION_DETAILS[a.kind]?.displayName || a.kind).split(' ').slice(0, 3).join(' ')}</span>`).join('')}
           </div>
           ${mineList.map((a, i) => dispatchRow(a, i)).join('')}
           </div>
