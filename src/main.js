@@ -19049,9 +19049,9 @@ async function main() {
         </div>`) : ''}
 
       ${_renderStep3ActiveEngagement(event, activeRole)}
-      ${_renderStep4OutcomeConfirm(event, activeRole)}
-      ${_renderStep5PostIncidentHandoff(event, activeRole)}
-      ${_renderStep6CloseEvent(event, activeRole)}
+      ${_renderStepOrPlaceholder(4, 'CONFIRM OUTCOME',        _renderStep4OutcomeConfirm(event, activeRole),    event)}
+      ${_renderStepOrPlaceholder(5, 'POST-INCIDENT HANDOFF',  _renderStep5PostIncidentHandoff(event, activeRole), event)}
+      ${_renderStepOrPlaceholder(6, 'CLOSE EVENT',            _renderStep6CloseEvent(event, activeRole),        event)}
       ${_renderPostIncidentReportPanel(event, activeRole)}
 
       ${_renderAgenciesOnCasePanel(event, activeRole)}
@@ -19234,6 +19234,42 @@ async function main() {
           ${agencyRows.join('')}
         `}
       </div>`;
+  }
+
+  // Placeholder for a step whose active renderer returned empty on a
+  // CLOSED event. Keeps the workflow sequence (1-7) visible so the
+  // reader never wonders "why did we jump from Step 3 to Step 7."
+  // Non-interactive, thin (one line), muted. Shows a status hint on
+  // the right that tells the truth about why the step didn't fire
+  // (Step 6 gets the closedAt timestamp when known; Steps 4/5 get
+  // "not applicable" — nothing was skipped by mistake).
+  //
+  // Only surfaces on closed events. On a live event, an empty step
+  // renderer means "hasn't fired yet" and should stay quiet.
+  function _renderStepPlaceholder(stepNum, titleUpper, statusText) {
+    return `
+      <div class="step-placeholder">
+        <span class="step-placeholder-chevron">▸</span>
+        <span class="step-placeholder-num">STEP ${stepNum}</span>
+        <span class="step-placeholder-sep">·</span>
+        <span class="step-placeholder-title">${titleUpper}</span>
+        <span class="step-placeholder-status">${statusText}</span>
+      </div>`;
+  }
+  function _renderStepOrPlaceholder(stepNum, titleUpper, realOutput, event) {
+    if (realOutput) return realOutput;
+    if (event?.status !== 'closed') return '';
+    // Step 6 gets the actual close timestamp; 4/5 stay "not applicable"
+    // (no outcome to confirm, no responder pending, case closed cleanly).
+    let statusText = 'not applicable';
+    if (stepNum === 6 && event.closedAt) {
+      statusText = 'closed ' + event.closedAt.slice(11, 19) + 'Z';
+    } else if (stepNum === 6 && event.endTime) {
+      statusText = 'closed ' + event.endTime.slice(11, 19) + 'Z';
+    } else if (stepNum === 6) {
+      statusText = 'closed';
+    }
+    return _renderStepPlaceholder(stepNum, titleUpper, statusText);
   }
 
   // ══════════════════════════════════════════════════════════════════

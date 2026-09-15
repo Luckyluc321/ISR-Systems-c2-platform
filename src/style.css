@@ -5396,6 +5396,34 @@ body.mode-receiver #receiver-view { display: flex; }
 .rcv-card.rcv-card-report.resolved { border-left-color: rgba(160, 160, 160, 0.45); }
 .rcv-card.rcv-card-report.unknown { border-left-color: rgba(255, 184, 77, 0.45); }
 .rcv-card.rcv-card-report { background: rgba(255, 255, 255, 0.015); }
+
+/* Step placeholder row — thin non-interactive line rendered in
+   the receiver Case File workflow when a Step's active renderer
+   returned empty on a CLOSED event. Preserves the workflow
+   sequence (1-7) so the reader never wonders "why did we jump
+   from Step 3 to Step 7." Muted throughout so it reads as
+   inert-but-present, not as a missed step. */
+.step-placeholder {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px var(--space-3);
+  margin: 2px 0;
+  border-left: 2px solid rgba(255, 255, 255, 0.06);
+  background: rgba(255, 255, 255, 0.01);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  cursor: default;
+  user-select: none;
+}
+.step-placeholder-chevron { color: var(--text-dimmer, rgba(255,255,255,0.20)); font-size: 12px; }
+.step-placeholder-num     { color: var(--text-dim); font-weight: 600; }
+.step-placeholder-sep     { color: var(--text-dimmer, rgba(255,255,255,0.20)); }
+.step-placeholder-title   { color: var(--text-dim); }
+.step-placeholder-status  { margin-left: auto; color: var(--text-dimmer, rgba(255,255,255,0.30)); text-transform: none; font-family: var(--font-body); letter-spacing: 0; font-size: var(--fs-xs); }
 .rcv-card-hdr {
   display: flex; align-items: center; gap: 8px;
   margin-bottom: 4px;
