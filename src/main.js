@@ -21832,8 +21832,23 @@ async function main() {
       const summaryOneLine = (rpt.summary || '').replace(/\s+/g, ' ').slice(0, 200);
       const kommune = e.geoContext?.kommune || '';
       const metaSuffix = kommune ? `  ·  ${kommune}` : '';
+      // Response summary logic — the card previously only checked
+      // rec?.response (escalation verbal reply) and lied "No response
+      // on file" when the receiver had actually dispatched their own
+      // C-UAS teams during the active phase. Now checks both:
+      //   1. verbal escalation reply
+      //   2. counterDispatches owned by this role
+      // Whichever fired earliest wins the summary line.
+      const roleId = role.id;
+      const ownedDispatches = (e.counterDispatches || []).filter(cd => cd.ownerRoleId === roleId);
+      const dispatchCount = ownedDispatches.length;
+      const responseLabel = rec?.response
+        ? `You responded ${(rec.response.receivedAt || '').slice(11, 19)}Z`
+        : (dispatchCount > 0
+          ? `You dispatched ${dispatchCount} ${dispatchCount === 1 ? 'asset' : 'assets'}`
+          : null);
       return `
-        <div class="rcv-card ${cls}" data-rcv="open-report" data-id="${e.id}" role="button" tabindex="0" title="Open incident report">
+        <div class="rcv-card rcv-card-report ${cls}" data-rcv="open-report" data-id="${e.id}" role="button" tabindex="0" title="Open incident report">
           <div class="rcv-card-hdr">
             <span class="rcv-card-cls rcv-cls-${cls}">${(cls || '').toUpperCase()}</span>
             <span class="rcv-card-conf" style="color:#ffb84d;font-family:var(--font-mono);">REPORT</span>
@@ -21842,7 +21857,9 @@ async function main() {
           <div class="rcv-card-meta">${e.id}  ·  ${site}${metaSuffix}  ·  Closed ${closedAt ? closedAt.slice(0,10) + ' ' + closedAt.slice(11,19) + 'Z' : 'time unknown'}</div>
           <div class="rcv-card-status" style="color: var(--text-dim); line-height: 1.5; margin-top: 4px;">${summaryOneLine}${(rpt.summary || '').length > 200 ? '…' : ''}</div>
           <div class="rcv-card-actions">
-            ${rec?.response ? `<span class="c-label" style="color:#4dff9c;">You responded ${(rec.response.receivedAt || '').slice(11,19)}Z</span>` : `<span class="c-label" style="color:var(--text-dim);">No response on file</span>`}
+            ${responseLabel
+              ? `<span class="c-label" style="color:#4dff9c;">${responseLabel}</span>`
+              : `<span class="c-label" style="color:var(--text-dim);">No response on file</span>`}
           </div>
         </div>`;
     }).join('') : (reportsPool.length

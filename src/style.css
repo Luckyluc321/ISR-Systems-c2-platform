@@ -5386,6 +5386,16 @@ body.mode-receiver #receiver-view { display: flex; }
 .rcv-card.friendly { border-left: 3px solid var(--friendly); }
 .rcv-card.resolved { border-left: 3px solid var(--text-dimmer); }
 .rcv-card.unknown { border-left: 3px solid var(--degraded); }
+/* Closed / historical report variant. Softer red than the live-inbox
+   hostile card so the reader instantly sees "this is a past record,
+   not an active alert". Applied additively via `rcv-card-report` on
+   the reports-tab card. Same rule for every classification — the
+   distinction is about active-vs-closed state, not classification. */
+.rcv-card.rcv-card-report.hostile { border-left-color: rgba(255, 56, 56, 0.45); }
+.rcv-card.rcv-card-report.friendly { border-left-color: rgba(77, 255, 156, 0.45); }
+.rcv-card.rcv-card-report.resolved { border-left-color: rgba(160, 160, 160, 0.45); }
+.rcv-card.rcv-card-report.unknown { border-left-color: rgba(255, 184, 77, 0.45); }
+.rcv-card.rcv-card-report { background: rgba(255, 255, 255, 0.015); }
 .rcv-card-hdr {
   display: flex; align-items: center; gap: 8px;
   margin-bottom: 4px;
