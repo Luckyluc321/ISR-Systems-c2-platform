@@ -19131,8 +19131,14 @@ async function main() {
       const expandKey = `agency-on-case::${event.id}::${roleId}`;
       const isExpanded = _otherAgenciesExpanded.has(expandKey);
       const chevron = isExpanded ? '▾' : '▸';
-      // One-line status summary for the collapsed row.
-      const ackedEscs = ag.escalations.filter(e => e.status === 'acknowledged');
+      // One-line status summary for the collapsed row. Ack counter
+      // reads the per-role response list, NOT the shared escalation
+      // status (which flips whenever ANY recipient acks — was showing
+      // false "1 acked" on receivers who never acted on the case).
+      const ackedEscs = ag.escalations.filter(e =>
+        Array.isArray(e.responses)
+        && e.responses.some(r => r.respondedByRoleId === ag.roleId)
+      );
       const activeDispatches = ag.dispatches.filter(d => d.state !== 'complete' && !d.rtbCompleted);
       const summaryBits = [];
       if (ag.escalations.length) {
@@ -19210,11 +19216,23 @@ async function main() {
           ${bodyHtml}
         </div>`);
     }
+    // Section-level collapse — click the header to fold/unfold the
+    // whole agency list. Default expanded; collapsed state persists
+    // per event.id across re-renders.
+    const panelKey = `agency-panel::${event.id}`;
+    const isPanelCollapsed = _otherAgenciesPanelCollapsed.has(panelKey);
+    const panelChevron = isPanelCollapsed ? '▸' : '▾';
     return `
       <div class="c-panel">
-        <div class="c-panel-title" style="margin-bottom: var(--space-2);">Other agencies on case</div>
-        <div class="c-label" style="margin-bottom: var(--space-2); text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">Agencies that received the case or fired a response. Expand to see their escalation status, dispatches, and any reply back to the sender.</div>
-        ${agencyRows.join('')}
+        <div class="c-panel-title" style="margin-bottom: var(--space-2); display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none;" data-rcv="other-agencies-panel-toggle" data-panel-key="${panelKey}">
+          <span class="agency-oc-chevron" style="font-size: var(--fs-sm); color: var(--text-dim);">${panelChevron}</span>
+          <span>Other agencies on case</span>
+          <span style="margin-left:auto; font-size: var(--fs-2xs); color: var(--text-dim); font-family: var(--font-mono); letter-spacing:0.08em;">${agencies.size}</span>
+        </div>
+        ${isPanelCollapsed ? '' : `
+          <div class="c-label" style="margin-bottom: var(--space-2); text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">Agencies that received the case or fired a response. Expand each to see their escalation status, dispatches, and any reply back to the sender.</div>
+          ${agencyRows.join('')}
+        `}
       </div>`;
   }
 
@@ -21898,6 +21916,10 @@ async function main() {
   // keys. Preserved across re-renders so the operator's expanded
   // dropdowns stay open while telemetry updates fire.
   const _otherAgenciesExpanded = new Set();
+  // Section-level collapse state for the whole "Other agencies on case"
+  // panel. Keyed by event.id so switching cases doesn't inherit stale
+  // collapsed/expanded state. Default: expanded (Set entry absent).
+  const _otherAgenciesPanelCollapsed = new Set();
 
   // ── Collapsible step panels state (per step key) ──
   // Persists across re-renders so a panel Lucas collapsed stays
@@ -22239,6 +22261,17 @@ async function main() {
         if (!kindKey) return;
         if (_otherAgenciesExpanded.has(kindKey)) _otherAgenciesExpanded.delete(kindKey);
         else _otherAgenciesExpanded.add(kindKey);
+        _lastConsoleSig = null;
+        _lastReceiverViewSig = null;
+        renderReceiverView({ immediate: true });
+      }
+      else if (action === 'other-agencies-panel-toggle') {
+        // Section-level collapse for the whole "Other agencies on case"
+        // panel. Toggles a Set entry keyed by event.id.
+        const panelKey = el.dataset.panelKey;
+        if (!panelKey) return;
+        if (_otherAgenciesPanelCollapsed.has(panelKey)) _otherAgenciesPanelCollapsed.delete(panelKey);
+        else _otherAgenciesPanelCollapsed.add(panelKey);
         _lastConsoleSig = null;
         _lastReceiverViewSig = null;
         renderReceiverView({ immediate: true });
