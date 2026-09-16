@@ -79,10 +79,26 @@ function _spatialTier(newEvent, newFields, record) {
 }
 
 // ── Public API ───────────────────────────────────────────────────
-export function retrievePrecedents(newEvent) {
+// opts.includeCrossTenant (default false): tenant isolation is a HARD
+// gate, not a scoring tier. By default a record is only a candidate
+// when it is same-site (a site belongs to exactly one tenant) or
+// provably same-tenant. Records that cannot prove tenant kinship are
+// excluded — secure default over recall. The opt-in flag exists for
+// the consented customer-network correlation feature (receiver-tier
+// roadmap 3.5) and is never set by the Agent B narrative path.
+// Server-side enforcement repeats this gate when Azure lands; this is
+// the client-side query fix, not the final authority.
+export function retrievePrecedents(newEvent, opts = {}) {
   if (!newEvent) return { precedents: [], config: CFG };
+  const includeCrossTenant = !!opts.includeCrossTenant;
   const { vec: newVec, fields: newFields } = computeFeatureVector(newEvent);
-  const records = allRecords().filter(r => r.eventId !== newEvent.id);
+  const records = allRecords().filter(r => {
+    if (r.eventId === newEvent.id) return false;
+    if (includeCrossTenant) return true;
+    const sameSite = r.siteId === newEvent.siteId;
+    const sameTenant = !!(r.tenantId && newEvent.tenantId && r.tenantId === newEvent.tenantId);
+    return sameSite || sameTenant;
+  });
 
   // Score every candidate, drop tier-5 (beyond scope).
   const scored = [];
@@ -147,8 +163,8 @@ export function formatPrecedentBlock(result) {
 }
 
 // ── Convenience: retrieve + format in one call ───────────────────
-export function buildPrecedentBlock(newEvent) {
-  const result = retrievePrecedents(newEvent);
+export function buildPrecedentBlock(newEvent, opts = {}) {
+  const result = retrievePrecedents(newEvent, opts);
   return {
     ...result,
     formatted_block: formatPrecedentBlock(result),
