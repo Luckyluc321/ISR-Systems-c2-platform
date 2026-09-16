@@ -9244,3 +9244,56 @@ body.workspace-map-active #receiver-view {
 /* Step 3 panel muted state once every dispatch is complete */
 .mon-eng-wrapped { border-top-color: #6b7280 !important; }
 .mon-eng-wrapped > .c-panel-title { color: #6b7280 !important; }
+
+/* Historical pattern panel (receiver-tier site intelligence) */
+.hist-pattern-panel { border-top: 3px solid #c084fc; }
+.hist-pattern-panel > .c-panel-title { color: #c084fc; }
+.hist-pattern-lead,
+.hist-pattern-empty {
+  font-size: var(--fs-xs);
+  color: var(--text);
+  line-height: 1.55;
+  margin-bottom: var(--space-2);
+}
+.hist-pattern-empty { color: var(--text-dim); }
+.hist-pattern-row {
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border);
+}
+.hist-pattern-row-main {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.hist-pattern-date {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.10em;
+  color: var(--text);
+}
+.hist-pattern-outcome {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  flex: 1 1 auto;
+}
+.hist-pattern-link {
+  padding: 3px 10px;
+  font-size: var(--fs-2xs);
+  background: rgba(192, 132, 252, 0.08);
+  color: #c084fc;
+  border: 1px solid rgba(192, 132, 252, 0.35);
+  border-radius: 2px;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.hist-pattern-summary {
+  margin-top: 3px;
+  font-size: var(--fs-2xs);
+  color: var(--text-dim);
+  line-height: 1.5;
+}

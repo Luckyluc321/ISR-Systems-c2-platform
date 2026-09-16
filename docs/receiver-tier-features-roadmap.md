@@ -91,15 +91,15 @@ Archetype legend (from the receiver archetype taxonomy):
 
 **Detection-only fit:** yes.
 
-### 3.4 Historical pattern chapter
+### 3.4 Historical pattern chapter — LANDED 2026-09-16
 
-**What:** "this platform family has been detected at this site N times before" surfaced as an event chapter, with the prior events linked. Uses the signature hash to group repeat detections. Feeds the precedent retrieval agentic layer.
+**What:** "this platform family has been detected at this site N times before" surfaced as a case-file panel, with prior events linked where their report exists in the session. Empty state renders "first recorded detection" which is itself intelligence.
 
-**Archetypes:** I, F, C.
+**Archetypes:** I, F, C. Enforced via `canSeeHistoricalPattern(role)` over the archetype assignment rules.
 
-**Data source:** feedback log + signature hash index.
+**Data source (as built):** the precedent index (`src/precedent_index.js`), not the feedback log as originally sketched. The precedent store already persists one record per closed event to IndexedDB with site id, platform family, close time, outcome, and summary. This feature is a pure read-side consumer: `src/historical_pattern.js`. Signature-hash grouping joins later when the NN adapter goes live.
 
-**Cost:** small (1 week). Read-only aggregation over the existing ledger.
+**Honest-data note:** the count covers events closed since the precedent store shipped, on the local browser profile. Cross-device history arrives with the Azure backend swap behind `precedent_store.js`; this module needs no change for that.
 
 **Detection-only fit:** yes.
 

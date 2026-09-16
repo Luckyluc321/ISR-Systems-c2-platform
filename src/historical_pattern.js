@@ -1,0 +1,123 @@
+// ═══════════════════════════════════════════════════════════════════
+// Historical pattern — "prior activity at this site" intelligence
+// ───────────────────────────────────────────────────────────────────
+// First feature of the receiver-tier site intelligence layer (see
+// docs/receiver-tier-features-roadmap.md §3.4). Answers one question
+// on the case-file: has this platform family been detected at this
+// site before, and how did those events end?
+//
+// Data source is the precedent index (src/precedent_index.js), which
+// persists one record per closed event to IndexedDB and hydrates at
+// boot. This module is a pure read-side consumer: no writes, no new
+// persistence, no Cesium entities.
+//
+// Visibility: intel / forensic / coordination archetypes only.
+// Operators never see this surface. Kinetic, medical, regulatory,
+// public safety, liaison archetypes do not render it (roadmap §5
+// access matrix).
+//
+// Detection-only stance: renders context about past observations.
+// Nothing here recommends or triggers action.
+//
+// Honest-data note: the count covers events closed since the
+// precedent store shipped, on this browser profile. Cross-device
+// history arrives with the Azure backend swap behind
+// precedent_store.js — this module needs no change for that.
+// ═══════════════════════════════════════════════════════════════════
+
+import { allRecords, extractFeatureFields } from './precedent_index.js';
+import { ARCHETYPES, archetypeFor } from './archetypes.js';
+
+// Archetypes allowed to see the panel. Primary OR secondary match
+// qualifies (e.g. rigspoliti is COORD primary + INTEL secondary).
+const _VISIBLE_ARCHETYPES = new Set([
+  ARCHETYPES.INTEL,
+  ARCHETYPES.FORENSIC,
+  ARCHETYPES.COORD,
+]);
+
+export function canSeeHistoricalPattern(role) {
+  if (!role?.id) return false;
+  const spec = archetypeFor(role.id);
+  if (!spec) return false;
+  if (_VISIBLE_ARCHETYPES.has(spec.primary)) return true;
+  return (spec.secondary || []).some(a => _VISIBLE_ARCHETYPES.has(a));
+}
+
+// Pure query: prior precedent records at the same site with the same
+// platform family, excluding the event being viewed. Newest first.
+export function getHistoricalPattern(event) {
+  if (!event?.siteId) return { family: null, priors: [] };
+  const family = extractFeatureFields(event).platform_family || 'unknown';
+  const priors = allRecords()
+    .filter(r =>
+      r.eventId !== event.id
+      && r.siteId === event.siteId
+      && r.featureFields?.platform_family === family
+    )
+    .sort((a, b) => (b.closedAt || '').localeCompare(a.closedAt || ''));
+  return { family, priors };
+}
+
+// ── Rendering ─────────────────────────────────────────────────
+
+function _esc(s) {
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function _familyDisplay(family) {
+  if (!family || family === 'unknown') return 'unknown platform family';
+  return family.replace(/[_-]/g, ' ');
+}
+
+function _fmtDate(iso) {
+  return iso ? iso.slice(0, 10) : 'unknown date';
+}
+
+// renderHistoricalPatternPanel(event, activeRole, opts)
+//   opts.hasReportFor(eventId) -> bool — caller supplies the lookup so
+//   this module stays free of main.js / events.js imports. A prior
+//   event from an earlier session has no in-memory report; the row
+//   then renders without a link rather than a dead one.
+export function renderHistoricalPatternPanel(event, activeRole, opts = {}) {
+  if (!canSeeHistoricalPattern(activeRole)) return '';
+  const { family, priors } = getHistoricalPattern(event);
+  const familyLabel = _familyDisplay(family);
+
+  let bodyHtml;
+  if (!priors.length) {
+    bodyHtml = `
+      <div class="hist-pattern-empty">First recorded detection of this platform family (${_esc(familyLabel)}) at this site.</div>`;
+  } else {
+    const rows = priors.map(r => {
+      const linkable = typeof opts.hasReportFor === 'function' && opts.hasReportFor(r.eventId);
+      const outcome = r.outcome || 'outcome unrecorded';
+      return `
+        <div class="hist-pattern-row">
+          <div class="hist-pattern-row-main">
+            <span class="hist-pattern-date">${_esc(_fmtDate(r.closedAt))}</span>
+            <span class="hist-pattern-outcome">${_esc(outcome)}</span>
+            ${linkable ? `<button class="hist-pattern-link" data-rcv="open-report" data-id="${_esc(r.eventId)}">View report</button>` : ''}
+          </div>
+          ${r.summary ? `<div class="hist-pattern-summary">${_esc(r.summary)}</div>` : ''}
+        </div>`;
+    }).join('');
+    bodyHtml = `
+      <div class="hist-pattern-lead">This platform family (${_esc(familyLabel)}) has been detected at this site ${priors.length} time${priors.length === 1 ? '' : 's'} before.</div>
+      ${rows}`;
+  }
+
+  return `
+    <div class="c-panel c-panel-collapsible hist-pattern-panel">
+      <div class="c-panel-title" style="margin-bottom: var(--space-2);">Prior activity at this site</div>
+      <div class="c-panel-body">
+        ${bodyHtml}
+      </div>
+    </div>`;
+}

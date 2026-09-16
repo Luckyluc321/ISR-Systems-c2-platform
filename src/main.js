@@ -192,6 +192,7 @@ try {
 // and per-agency aggregate reports. See src/archetypes.js for the
 // rule table and docs/cross-agency-flows.md Section 7 for the taxonomy.
 import { assignArchetypes, ARCHETYPES, ARCHETYPE_LABELS, archetypeForDispatchKind, archetypeFor, getArchetypeFallbackHits } from './archetypes.js';
+import { renderHistoricalPatternPanel, getHistoricalPattern, canSeeHistoricalPattern } from './historical_pattern.js';
 // Phase 2 · 8 sub-section renderers (kinetic / coord / intel /
 // forensic / medical / regulatory / public / liaison). Pure functions
 // (role, event) → HTMLString. Composed into contributor chapters in
@@ -332,6 +333,13 @@ if (typeof window !== 'undefined') {
     bridge:   bridgeSignature,
     explain:  explainSignature,
     coverage: signatureBridgeCoverage,
+  };
+  // Historical pattern dev handle (receiver-tier site intelligence 3.4).
+  // Usage: window.__isr_history.query(getEvent('ev-001'))   → {family, priors}
+  //        window.__isr_history.canSee(role)                → archetype gate check
+  window.__isr_history = {
+    query:  getHistoricalPattern,
+    canSee: canSeeHistoricalPattern,
   };
   // Threat routing dev handle for spot-checking auto-observer output.
   // Usage: window.__isr_routing.route({domain:'aviation', family:'cruise-missile', classification:'hostile', threat:'high'})
@@ -19053,6 +19061,8 @@ async function main() {
       ${_renderStepOrPlaceholder(5, 'POST-INCIDENT HANDOFF',  _renderStep5PostIncidentHandoff(event, activeRole), event)}
       ${_renderStepOrPlaceholder(6, 'CLOSE EVENT',            _renderStep6CloseEvent(event, activeRole),        event)}
       ${_renderPostIncidentReportPanel(event, activeRole)}
+
+      ${renderHistoricalPatternPanel(event, activeRole, { hasReportFor: (id) => !!getEvent(id)?.postIncidentReport })}
 
       ${_renderAgenciesOnCasePanel(event, activeRole)}
 
