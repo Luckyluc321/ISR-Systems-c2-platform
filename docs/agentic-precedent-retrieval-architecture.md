@@ -51,7 +51,7 @@ The LLM never decides how many precedents to include. Preprocessing decides. Eve
    - Tier 1: same site + same asset targeted
    - Tier 2: same site, any asset
    - Tier 3: same operator (customer tenant)
-   - Tier 4: cross-tenant same platform family (fallback only when tiers 1-3 yield fewer than 2 results)
+   - Tier 4: cross-tenant same platform family — **opt-in only** (2026-09-16). Tenant isolation is a hard candidate gate, not a scoring tier: default retrieval considers only same-site or provably same-tenant records. Tier 4 activates solely via `retrievePrecedents(event, { includeCrossTenant: true })`, reserved for the consented customer-network correlation feature (receiver-tier roadmap 3.5). The Agent B narrative path never sets it. Server-side enforcement repeats the gate when Azure lands.
 
 2. **Semantic similarity (score):** cosine similarity between feature vectors, computed within the spatial tier.
 

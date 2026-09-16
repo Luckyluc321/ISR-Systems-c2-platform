@@ -4,9 +4,18 @@
 
 **Status legend:**
 - HANDLED — current behavior is correct, test exists or is in the test plan
-- GAP-NOW — wrong or missing today, fixable in the current codebase
+- FIXED — was GAP-NOW, closed 2026-09-16 with adversarial verification per fix
 - GAP-LATER — known limitation whose fix belongs to a planned layer (NN adapter, Azure backend)
 - BY-DESIGN — looks surprising but is intentional; do not "fix"
+
+**2026-09-16 fix pass:** all five GAP-NOW items closed in commit chain
+d98e44b (case 13 tenant gate), 2455030 + 7a53761 (case 10 outcome
+stamping + two verify-agent holes), 1520eac (case 9 droneCount),
+28ff333 (case 11 classification split + v2 schema bump), f0ac013
+(case 12 admin annul). Each fix was adversarially verified by a
+dedicated agent; findings that survived were fixed in follow-ups
+(late-kill supersede, reactivation outcome clear, op-energinet AMK
+siteIds drift in 609bc2b).
 
 Companion: docs/testing/historical-pattern-test-plan.md covers the hands-on tests for cases 1-4 and 7-8.
 
@@ -24,11 +33,11 @@ Companion: docs/testing/historical-pattern-test-plan.md covers the hands-on test
 | 6 | Same drone returns days later | GAP-LATER | NN adapter (signature hash) |
 | 7 | Two same-family drones at two sites, unrelated | HANDLED | — |
 | 8 | Concurrent same-family events at one site | HANDLED | — |
-| 9 | Swarm cardinality recorded wrong | GAP-NOW | events.js + precedent_index.js |
-| 10 | Close without outcome pollutes history quality | GAP-NOW | close flow |
-| 11 | Friendly / false-positive events count as "prior activity" | GAP-NOW | historical_pattern.js |
-| 12 | No operator annul path for bogus events | GAP-NOW | events.js + precedent_index.js |
-| 13 | Cross-tenant leakage in Agent B precedent retrieval | GAP-NOW | precedent_retrieval.js |
+| 9 | Swarm cardinality recorded wrong | FIXED | events.js + precedent_index.js |
+| 10 | Close without outcome pollutes history quality | FIXED | close flow |
+| 11 | Friendly / false-positive events count as "prior activity" | FIXED | historical_pattern.js |
+| 12 | No operator annul path for bogus events | FIXED | events.js + precedent_index.js |
+| 13 | Cross-tenant leakage in Agent B precedent retrieval | FIXED | precedent_retrieval.js |
 | 14 | Sensor modality disagreement | GAP-LATER | NN adapter |
 | 15 | History wiped by schema version bump | BY-DESIGN | — |
 | 16 | Per-browser history until backend | GAP-LATER | Azure swap |
@@ -77,7 +86,7 @@ The kinematic ≥ 0.3 hard gate in auto-correlation prevents family-similarity a
 
 Two separate quadcopters at one site are two events with unique ids; no auto-merge, each registers its own history record. Correct: two simultaneous detections ARE two prior-activity data points.
 
-### 9. Swarm cardinality recorded wrong — GAP-NOW
+### 9. Swarm cardinality recorded wrong — FIXED 2026-09-16
 
 A 5-drone swarm is one event (correct) but `event.droneCount` is never populated, so the precedent record's cardinality_bucket registers "1" instead of "4-6" (`precedent_index.js:120`). A swarm incident looks like a single-drone incident in history and in Agent B's precedent block. **Approach:** populate `droneCount` at event creation from the swarm template size (and update on member neutralisation is NOT wanted — record the incident's peak cardinality). One-line fix at the swarm spawn path plus a test. Small.
 
@@ -85,19 +94,19 @@ A 5-drone swarm is one event (correct) but `event.droneCount` is never populated
 
 ## History integrity
 
-### 10. Close without outcome — GAP-NOW
+### 10. Close without outcome — FIXED 2026-09-16
 
 Fled auto-closes and outcome-less manual closes register `outcome: null`; the panel renders "outcome unrecorded". Legal but low-quality intelligence. **Approach:** two parts. (a) Fled auto-closes should stamp a machine outcome ("lost contact / left coverage") at the auto-close call sites — those ARE the outcome, no operator needed. (b) Manual close with unconfirmed dispatch outcomes already nudges via Step 4; keep it a nudge, never a hard block (operator authority wins). Small.
 
-### 11. Friendly and false-positive events count as "prior activity" — GAP-NOW
+### 11. Friendly and false-positive events count as "prior activity" — FIXED 2026-09-16
 
 A friendly inspection drone or a resolved bird-flock event registers like anything else, so the panel can say "detected 3 times before" where 2 were friendly inspections. Technically true, operationally misleading. **Approach:** the precedent record does not carry classification today — add `classification` to the record at register time, then the historical panel splits the count: "2 hostile / 1 friendly prior detections" and badges each row. Do NOT exclude friendly events (a pattern of friendly flights is also intelligence); label them. Requires a schema version bump (see case 15). Small-medium.
 
-### 12. No operator annul path — GAP-NOW
+### 12. No operator annul path — FIXED 2026-09-16
 
 `unregisterEvent()` exists in precedent_index.js but nothing calls it. A confirmed-bogus event (sensor artifact, duplicate) permanently pollutes history. **Approach:** admin-tier-only "annul from history" action on closed events, calling unregisterEvent + audit-logging the annulment to the feedback log (who, when, why). Receiver and operator tiers never get this. Deliberately NOT a delete of the event itself — the event and its PIR remain; only the history index entry is withdrawn. Small-medium.
 
-### 13. Cross-tenant leakage in Agent B precedent retrieval — GAP-NOW
+### 13. Cross-tenant leakage in Agent B precedent retrieval — FIXED 2026-09-16
 
 The historical pattern panel is safe (site-scoped; a site belongs to one tenant). But `retrievePrecedents()` for Agent B's "PRIOR SIMILAR EVENTS" block includes cross-tenant records — tenantId affects scoring tier only, not filtering (`precedent_retrieval.js:72-85`). A receiver's narrative can cite another tenant's site history. **Approach:** hard tenant filter in retrievePrecedents before scoring, with an explicit opt-in parameter for the future customer-network correlation feature (roadmap 3.5) where cross-tenant sharing is consented. This is the "no tenant isolation via client flags" principle applied one layer down: fix now in the query, enforce again server-side when Azure lands. Small, and should ship soon.
 
