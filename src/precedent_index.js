@@ -18,7 +18,11 @@
 
 import { savePrecedent, loadAllPrecedents, deletePrecedent, clearAll as _clearIdb } from './precedent_store.js';
 
-export const PRECEDENT_INDEX_VERSION = 'v1.2026-09-05';
+// v2 2026-09-16: added `classification` to the record (hostile /
+// friendly / resolved split in the historical pattern panel) and
+// droneCount now populates at spawn so cardinality buckets are real.
+// The bump purges v1 records whose cardinality was silently '1'.
+export const PRECEDENT_INDEX_VERSION = 'v2.2026-09-16';
 
 const _index = new Map();   // eventId -> PrecedentRecord
 
@@ -159,6 +163,11 @@ export function registerEvent(event) {
     tenantId: event.tenantId || null,
     closedAt: event.endTime || event.lastUpdated || new Date().toISOString(),
     outcome: event.outcome || null,
+    // Final classification at close. The historical pattern panel
+    // splits its "N times before" count by this — a pattern of
+    // friendly inspection flights is intelligence too, but must never
+    // read as hostile history. Not part of the feature vector.
+    classification: event.classification || null,
     featureVector: vec,
     featureFields: fields,
     summary: buildSummary(event),

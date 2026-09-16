@@ -9297,3 +9297,23 @@ body.workspace-map-active #receiver-view {
   color: var(--text-dim);
   line-height: 1.5;
 }
+
+/* Historical pattern classification badges */
+.hist-pattern-class {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 1px 6px;
+  border-radius: 2px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.hist-pattern-class-hostile {
+  color: #ff8a8a;
+  border-color: rgba(255, 138, 138, 0.4);
+}
+.hist-pattern-class-friendly {
+  color: #4dff9c;
+  border-color: rgba(77, 255, 156, 0.35);
+}

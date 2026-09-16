@@ -95,13 +95,30 @@ export function renderHistoricalPatternPanel(event, activeRole, opts = {}) {
     bodyHtml = `
       <div class="hist-pattern-empty">First recorded detection of this platform family (${_esc(familyLabel)}) at this site.</div>`;
   } else {
+    // Split the count by final classification so friendly inspection
+    // flights never read as hostile history. Order: hostile first
+    // (the count the reader scans for), then friendly, then the rest.
+    const byClass = { hostile: 0, friendly: 0, other: 0 };
+    for (const r of priors) {
+      if (r.classification === 'hostile') byClass.hostile++;
+      else if (r.classification === 'friendly') byClass.friendly++;
+      else byClass.other++;
+    }
+    const splitParts = [];
+    if (byClass.hostile) splitParts.push(`${byClass.hostile} hostile`);
+    if (byClass.friendly) splitParts.push(`${byClass.friendly} friendly`);
+    if (byClass.other) splitParts.push(`${byClass.other} unresolved`);
+    const splitStr = splitParts.length > 1 || byClass.other ? ` (${splitParts.join(', ')})` : '';
+
     const rows = priors.map(r => {
       const linkable = typeof opts.hasReportFor === 'function' && opts.hasReportFor(r.eventId);
       const outcome = r.outcome || 'outcome unrecorded';
+      const cls = r.classification || 'unclassified';
       return `
         <div class="hist-pattern-row">
           <div class="hist-pattern-row-main">
             <span class="hist-pattern-date">${_esc(_fmtDate(r.closedAt))}</span>
+            <span class="hist-pattern-class hist-pattern-class-${_esc(cls)}">${_esc(cls)}</span>
             <span class="hist-pattern-outcome">${_esc(outcome)}</span>
             ${linkable ? `<button class="hist-pattern-link" data-rcv="open-report" data-id="${_esc(r.eventId)}">View report</button>` : ''}
           </div>
@@ -109,7 +126,7 @@ export function renderHistoricalPatternPanel(event, activeRole, opts = {}) {
         </div>`;
     }).join('');
     bodyHtml = `
-      <div class="hist-pattern-lead">This platform family (${_esc(familyLabel)}) has been detected at this site ${priors.length} time${priors.length === 1 ? '' : 's'} before.</div>
+      <div class="hist-pattern-lead">This platform family (${_esc(familyLabel)}) has been detected at this site ${priors.length} time${priors.length === 1 ? '' : 's'} before${splitStr}.</div>
       ${rows}`;
   }
 
