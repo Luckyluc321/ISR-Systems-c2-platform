@@ -333,11 +333,19 @@ export function ingestNnDetection(eventId, nnTick) {
   _listeners.forEach(fn => fn(eventId));
 }
 
-export function closeEvent(id, exitPoint) {
+// opts.autoOutcome: machine-derived outcome for closes where the
+// system, not the operator, knows how the event ended ("left coverage",
+// "lost contact", "cancelled"). Only fills when no outcome is already
+// recorded — an operator-confirmed or neutralisation outcome always
+// wins. Without this, fled auto-closes registered outcome=null in the
+// precedent index and read as "outcome unrecorded" in the historical
+// pattern panel when the outcome was in fact known.
+export function closeEvent(id, exitPoint, { autoOutcome = null } = {}) {
   const e = EVENTS.find(x => x.id === id);
   if (!e) return;
   e.status = 'closed';
   e.endTime = new Date().toISOString();
+  if (autoOutcome && !e.outcome) e.outcome = autoOutcome;
   // Compute duration from real start/end times if the tick-loop didn't set it
   // (shadow / linked events have no independent tick loop, so their
   // event.duration stayed 0 = "00:00" in the panel).

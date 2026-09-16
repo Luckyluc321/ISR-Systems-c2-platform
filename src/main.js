@@ -8050,7 +8050,7 @@ async function main() {
         // listeners fire. Direct field mutation used to leave duration=0
         // and skip the persistence hook — an event that closed on site
         // exit stayed missing its own trajectory recording forever.
-        closeEvent(ev.id, ev.exit || null);
+        closeEvent(ev.id, ev.exit || null, { autoOutcome: 'left coverage' });
         addNote(ev.id, `All tracked drones exited ${SITES[sid]?.name || sid} sensor coverage. Event closed.`, 'AUTO-CORRELATOR');
         // Cross-cued events (e.g. AMK when the CPH primary is still
         // running) have no own tick loop, so their recording is a
@@ -11704,7 +11704,7 @@ async function main() {
                 : (event.exit || null);
               mutateEvent(event.id, { exit: exitPoint });
               markTrackClosed(p.eventId);
-              closeEvent(p.eventId, exitPoint);
+              closeEvent(p.eventId, exitPoint, { autoOutcome: 'left coverage' });
               toast(`Sim auto-ended · ${event.droneType || 'track'} left all sensor coverage with no active pursuit.`, 'info');
               updateContributingRings();
               renderAlertStrip();
@@ -11979,7 +11979,7 @@ async function main() {
             if (!state.closedAt && !event.awaitingNeutralization && !event.multiSiteTrack) {
               state.closedAt = performance.now();
               markTrackClosed(p.eventId);
-              closeEvent(p.eventId, event.exit || null);
+              closeEvent(p.eventId, event.exit || null, { autoOutcome: 'lost contact' });
               updateContributingRings();
               renderAlertStrip();
               if (getSelectedEventId() === p.eventId) renderDetailPanel();
@@ -12495,13 +12495,13 @@ async function main() {
       if (p.completed && !state.closedAt && !event.awaitingNeutralization) {
         state.closedAt = performance.now();
         markTrackClosed(p.eventId);
-        closeEvent(p.eventId, event.exit || null);
+        closeEvent(p.eventId, event.exit || null, { autoOutcome: 'left coverage' });
         // Also close any linked/secondary events (e.g. swarm's shadow
         // event at AMK) so they don't linger as active in the inbox.
         const linkedIds = event.linkedEventIds || [];
         for (const lid of linkedIds) {
           const le = getEvent(lid);
-          if (le && le.status === 'active') closeEvent(lid, le.exit || null);
+          if (le && le.status === 'active') closeEvent(lid, le.exit || null, { autoOutcome: 'left coverage' });
         }
         updateContributingRings();
         renderAlertStrip();
@@ -12683,7 +12683,7 @@ async function main() {
     const droneStateIds = Array.from(droneState.keys());
     for (const eventId of droneStateIds) {
       const event = getEvent(eventId);
-      if (event && event.status === 'active') closeEvent(eventId, event.exit || null);
+      if (event && event.status === 'active') closeEvent(eventId, event.exit || null, { autoOutcome: 'cancelled' });
       if (event) mutateEvent(event.id, { projectedPath: null });
       markTrackClosed(eventId);
       removeLiveTrack(eventId);
@@ -12694,7 +12694,7 @@ async function main() {
     // enters Amager). Without this, AMK stays "active" in the inbox after
     // the user cancels the primary CPH scenario.
     for (const event of EVENTS) {
-      if (event.status === 'active') closeEvent(event.id, event.exit || null);
+      if (event.status === 'active') closeEvent(event.id, event.exit || null, { autoOutcome: 'cancelled' });
     }
     droneState.clear();
     // Sweep any orphaned projection entities
