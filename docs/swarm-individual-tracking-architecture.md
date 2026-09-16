@@ -1,6 +1,6 @@
 # Swarm Individual Tracking Architecture
 
-**Status:** `[planned]` — designed 2026-09-16. This document maps the target architecture for per-drone tracking inside swarm events. Nothing here is built yet; the current swarm implementation (one event, lead billboard + member billboards) ships as-is until this lands.
+**Status:** `[phase 1 in progress]` — designed 2026-09-16, P1.1 landed same day (commits 5809fd6 + 06d602b): `event.memberTracks[]` source of truth, syncMemberTrack/setMemberStatus mutators, tick-loop sync, kill-path status routing, frozen-at-spawn shadow clones. Remaining Phase 1: detail-panel roster reads memberTracks (P1.2). Phase 2 (breakaway promotion) not started.
 
 ## Problem
 
