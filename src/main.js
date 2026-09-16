@@ -337,9 +337,13 @@ if (typeof window !== 'undefined') {
   // Historical pattern dev handle (receiver-tier site intelligence 3.4).
   // Usage: window.__isr_history.query(getEvent('ev-001'))   → {family, priors}
   //        window.__isr_history.canSee(role)                → archetype gate check
+  //        window.__isr_history.all()                       → every precedent record
+  //        window.__isr_history.clear()                     → wipe history (test reset)
   window.__isr_history = {
     query:  getHistoricalPattern,
     canSee: canSeeHistoricalPattern,
+    all:    allPrecedentRecords,
+    clear:  clearPrecedentIndex,
   };
   // Threat routing dev handle for spot-checking auto-observer output.
   // Usage: window.__isr_routing.route({domain:'aviation', family:'cruise-missile', classification:'hostile', threat:'high'})
@@ -636,7 +640,7 @@ import { activateManhattanDemo, deactivateManhattanDemo, setManhattanChase } fro
 import './adapters/cooperative_mock.js';
 import './adapters/cooperative_opensky.js';
 import { checkCooperativeTraffic } from './cooperative_traffic_reconciler.js';
-import { loadFromEvents as loadPrecedentIndex, registerEvent as registerPrecedent, hydrateFromIdb as hydratePrecedentIndex, indexSize as precedentIndexSize, getRecord as getPrecedentRecord } from './precedent_index.js';
+import { loadFromEvents as loadPrecedentIndex, registerEvent as registerPrecedent, hydrateFromIdb as hydratePrecedentIndex, indexSize as precedentIndexSize, getRecord as getPrecedentRecord, allRecords as allPrecedentRecords, clearIndex as clearPrecedentIndex } from './precedent_index.js';
 import { buildPrecedentBlock } from './precedent_retrieval.js';
 import { logOperatorDecision, updateFeedbackOutcome, hydrateFeedbackLog, _installConsoleHelper as _installFeedbackConsole } from './feedback_log.js';
 // Feedback-log adapters self-register on import. localStorage is the
