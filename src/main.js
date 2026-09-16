@@ -12071,7 +12071,11 @@ async function main() {
           };
           // Swarm Phase 1: sync the lead's source-of-truth member
           // track (m0), 1 Hz throttle + immediate on coverage flips.
-          if (state.leadSwarmMember?.memberId) {
+          // Neutralised guard mirrors the recording block below:
+          // drones.js keeps advancing waypoints after a kill (no kill
+          // hook), so an unguarded sync would stream ghost kinematics
+          // into a track whose status is already 'neutralised'.
+          if (state.leadSwarmMember?.memberId && !state.leadSwarmMember.neutralised) {
             const _leadCovNow = _shouldAutoDetect(p.lat, p.lon, p.alt);
             if (!state._leadTrackSyncMs || (nowMs - state._leadTrackSyncMs) >= 1000 || state._leadTrackSyncInCov !== _leadCovNow) {
               syncMemberTrack(event.id, state.leadSwarmMember.memberId, {
