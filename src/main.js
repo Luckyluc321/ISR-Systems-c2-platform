@@ -8098,6 +8098,9 @@ async function main() {
       templateKey: null,
       multiSiteTrack: true,
       detected: true,
+      // Shadow event tracks the SAME physical group as the primary —
+      // its history record carries the same peak cardinality.
+      droneCount: primary.droneCount || 1,
       spawnTs: Date.now(),
       // Both events are FIRST-CLASS. linkedEventId (singular) is a
       // "source-of-recording-data" pointer used by the tick loop to
@@ -12652,6 +12655,13 @@ async function main() {
       // confirms the object has entered a sensor's coverage. Single-site
       // events fire immediately (spawned inside their site's coverage).
       detected: (!!template.multiSite || templateKey === 'cruise_missile_to_amalienborg') ? false : true,
+      // Peak cardinality of the incident. A 5-drone swarm is ONE event
+      // (one lifecycle) but its history record must not read as a
+      // single-drone incident — precedent_index buckets this into
+      // cardinality_bucket. Deliberately NOT decremented when members
+      // are neutralised: history records what showed up, not what was
+      // left at close.
+      droneCount: template.swarm?.formation?.length || template.swarm?.size || 1,
       spawnTs: Date.now(),
     };
     addEvent(event);
