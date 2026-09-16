@@ -19400,9 +19400,34 @@ async function main() {
     const bucketSections = _MON_ENG_BUCKETS.map(bucket => {
       const items = bucketed.get(bucket.key);
       if (!items.length) return '';
-      const rows = items.map(cd =>
-        _monEngUnitRow(cd, bucket.key, _counterDispatches.get(cd.dispatchId))
-      ).join('');
+      // Formation grouping: units dispatched together share a groupId
+      // (stamped at spawn). Multi-unit formations render as one header
+      // row with unit sub-rows behind a toggle; single-unit dispatches
+      // render flat.
+      const groups = new Map();
+      for (const cd of items) {
+        const key = cd.groupId || cd.dispatchId;
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(cd);
+      }
+      const rows = Array.from(groups.entries()).map(([groupKey, members]) => {
+        if (members.length === 1) {
+          return _monEngUnitRow(members[0], bucket.key, _counterDispatches.get(members[0].dispatchId));
+        }
+        const expanded = _monEngExpandedGroups.has(groupKey);
+        const kindLabel = RESPONSE_OPTION_DETAILS[members[0].kind]?.displayName || members[0].kind;
+        const memberRows = expanded
+          ? members.map(cd => _monEngUnitRow(cd, bucket.key, _counterDispatches.get(cd.dispatchId))).join('')
+          : '';
+        return `
+          <div class="mon-eng-unit" data-mon-group-toggle="${groupKey}" style="cursor: pointer;">
+            <div class="mon-eng-unit-main">
+              <div class="mon-eng-unit-name">${expanded ? '▾' : '▸'} ${members[0].groupName || members[0].assetName}</div>
+              <div class="mon-eng-unit-meta">${kindLabel} · ${members.length} units</div>
+            </div>
+          </div>
+          ${expanded ? `<div style="padding-left: var(--space-3); border-left: 1px solid var(--border);">${memberRows}</div>` : ''}`;
+      }).join('');
       return `
         <div class="mon-eng-bucket" style="margin-top: var(--space-3);">
           <div class="mon-eng-bucket-hdr" style="display: flex; align-items: center; gap: var(--space-2); padding: 4px 10px; background: rgba(255,255,255,0.02); border: 1px solid ${bucket.color}66; border-left: 2px solid ${bucket.color}; border-radius: 2px; font-size: var(--fs-2xs); color: ${bucket.color}; font-family: var(--font-mono); letter-spacing: 0.16em; font-weight: 600; text-transform: uppercase;">
@@ -19417,6 +19442,28 @@ async function main() {
       <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-1);">${summary}</div>
       ${bucketSections}`;
   }
+
+  // Expanded formation groups in the Step 3 panel. Keyed by groupId.
+  // Default collapsed (header row only). Document-level delegated
+  // listener because the panel body is replaced every 500ms by the
+  // tick loop — per-element listeners would not survive one tick.
+  const _monEngExpandedGroups = new Set();
+  document.addEventListener('click', (ev) => {
+    const header = ev.target.closest('[data-mon-group-toggle]');
+    if (!header) return;
+    const groupKey = header.dataset.monGroupToggle;
+    if (_monEngExpandedGroups.has(groupKey)) _monEngExpandedGroups.delete(groupKey);
+    else _monEngExpandedGroups.add(groupKey);
+    // Repaint immediately instead of waiting for the next tick.
+    const panel = header.closest('[data-mon-eng]');
+    const ctx = _monEngTickCtx;
+    if (panel && ctx) {
+      const evObj = getEvent(ctx.eventId);
+      const body = panel.querySelector(':scope > .c-panel-body');
+      const html = evObj && _monEngBodyHtml(evObj, ctx.role);
+      if (body && html) body.innerHTML = html;
+    }
+  });
 
   // ── Step 3 live tick ──────────────────────────────────────────
   // Refreshes the Step 3 panel body every 500ms while the panel is in
