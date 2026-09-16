@@ -9202,3 +9202,41 @@ body.workspace-map-active #receiver-view {
   letter-spacing: 0.02em;
   line-height: 1.4;
 }
+
+/* Monitor Engagement (Step 3) per-unit rows */
+.mon-eng-unit {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) 0;
+  border-top: 1px solid var(--border);
+}
+.mon-eng-unit-main { flex: 1 1 auto; min-width: 0; }
+.mon-eng-unit-name {
+  font-size: var(--fs-sm);
+  color: var(--text);
+  font-weight: 500;
+}
+.mon-eng-unit-meta {
+  margin-top: 2px;
+  color: var(--text-dim);
+  font-size: var(--fs-2xs);
+  font-family: var(--font-mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.mon-eng-endurance-warn { color: #ffb84d; }
+.mon-eng-progress {
+  width: 90px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+.mon-eng-progress-bar {
+  height: 100%;
+  background: #4dd2ff;
+  border-radius: 2px;
+  transition: width 400ms linear;
+}

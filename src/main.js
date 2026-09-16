@@ -19290,6 +19290,82 @@ async function main() {
     { key: 'complete',          label: 'COMPLETE',              color: '#6b7280' },
   ];
 
+  // Power source label per profile. Real assets report this via the
+  // dispatch adapter at go-live; the derivation below is the simulation
+  // default. Airborne platforms run batteries, radiating ground kit runs
+  // a generator, mobile ground vehicles run fuel, static cells (cruise
+  // speed 0, no radiation) have no runtime constraint and show nothing.
+  function _monEngPowerSource(profile) {
+    if (!profile) return null;
+    if (profile.airborne) return 'battery';
+    if (profile.radiationCone) return 'generator';
+    if (!profile.cruiseKmh) return null;
+    return 'fuel';
+  }
+
+  // One unit row inside a Step 3 state bucket. `live` is the in-process
+  // dispatch object from _counterDispatches when available (same tab);
+  // falls back to the event-trail mirror for cross-tab renders where
+  // only position + state are synced.
+  function _monEngUnitRow(cd, bucketKey, live) {
+    const elapsedSec = Math.max(0, Math.floor((Date.now() - cd.dispatchedTs) / 1000));
+    const elapsedStr = elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
+    const kindLabel = RESPONSE_OPTION_DETAILS[cd.kind]?.displayName || cd.kind;
+
+    const metaParts = [kindLabel];
+    let progressHtml = '';
+
+    if (bucketKey === 'en_route' && live && live.targetLat != null && live.curLat != null) {
+      const distM = haversineM(live.curLat, live.curLon, live.targetLat, live.targetLon);
+      const speedKmh = live.profile?.cruiseKmh || 0;
+      if (speedKmh > 0) {
+        metaParts.push(`${Math.max(1, Math.round((distM / 1000) / speedKmh * 60))} min ETA`);
+      }
+      metaParts.push(distM < 1000 ? `${Math.round(distM)} m out` : `${(distM / 1000).toFixed(1)} km out`);
+      // Progress = how much of the origin→target leg is behind the
+      // unit. Guard with max() so a target relocating farther away
+      // never renders negative progress.
+      const initialM = haversineM(live.originLat, live.originLon, live.targetLat, live.targetLon);
+      const frac = Math.min(1, Math.max(0, 1 - distM / Math.max(initialM, distM, 1)));
+      progressHtml = `<div class="mon-eng-progress"><div class="mon-eng-progress-bar" style="width: ${Math.round(frac * 100)}%;"></div></div>`;
+    } else if (bucketKey === 'engaging') {
+      metaParts.push('On station');
+      metaParts.push(`Elapsed ${elapsedStr}`);
+    } else if (bucketKey === 'holding-cordon') {
+      metaParts.push('On cordon');
+      metaParts.push(`Elapsed ${elapsedStr}`);
+    } else if (bucketKey === 'rtb_via_last_known' || bucketKey === 'rtb_home') {
+      metaParts.push('Returning to base');
+    } else if (bucketKey === 'complete') {
+      metaParts.push('Complete');
+      if (cd.completedAt) metaParts.push(`at ${cd.completedAt.slice(11, 19)}Z`);
+    }
+    if (bucketKey === 'en_route') metaParts.push(`Elapsed ${elapsedStr}`);
+
+    // Endurance remaining + power source. Only for active states and
+    // only when the live object carries an endurance model.
+    let enduranceHtml = '';
+    if (bucketKey !== 'complete' && live?.enduranceMin) {
+      const source = _monEngPowerSource(live.profile);
+      if (source) {
+        const pct = Math.round(live.batteryPct ?? 100);
+        const minsLeft = Math.max(0, Math.round((live.batteryPct ?? 100) / 100 * live.enduranceMin));
+        const warn = pct < 25 ? ' mon-eng-endurance-warn' : '';
+        enduranceHtml = `<div class="mon-eng-unit-meta${warn}">${minsLeft} min remaining · ${source} ${pct}%</div>`;
+      }
+    }
+
+    return `
+      <div class="mon-eng-unit">
+        <div class="mon-eng-unit-main">
+          <div class="mon-eng-unit-name">${cd.assetName}</div>
+          <div class="mon-eng-unit-meta">${metaParts.join(' · ')}</div>
+          ${enduranceHtml}
+        </div>
+        ${progressHtml}
+      </div>`;
+  }
+
   function _renderStep3ActiveEngagement(event, activeRole) {
     const dispatches = (event.counterDispatches || []).filter(cd => {
       // Only show dispatches this role owns (issued from their scope)
@@ -19319,18 +19395,9 @@ async function main() {
     const bucketSections = _MON_ENG_BUCKETS.map(bucket => {
       const items = bucketed.get(bucket.key);
       if (!items.length) return '';
-      const rows = items.map(cd => {
-        const elapsedSec = Math.max(0, Math.floor((Date.now() - cd.dispatchedTs) / 1000));
-        const elapsedStr = elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
-        const kindLabel = RESPONSE_OPTION_DETAILS[cd.kind]?.displayName || cd.kind;
-        return `
-          <div style="display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; border-top: 1px solid var(--border);">
-            <div style="flex: 1 1 auto; min-width: 0;">
-              <div style="font-size: var(--fs-sm); color: var(--text); font-weight: 500;">${cd.assetName}</div>
-              <div class="c-label" style="margin-top: 2px; color: var(--text-dim);">${kindLabel} · Elapsed ${elapsedStr}</div>
-            </div>
-          </div>`;
-      }).join('');
+      const rows = items.map(cd =>
+        _monEngUnitRow(cd, bucket.key, _counterDispatches.get(cd.dispatchId))
+      ).join('');
       return `
         <div class="mon-eng-bucket" style="margin-top: var(--space-3);">
           <div class="mon-eng-bucket-hdr" style="display: flex; align-items: center; gap: var(--space-2); padding: 4px 10px; background: rgba(255,255,255,0.02); border: 1px solid ${bucket.color}66; border-left: 2px solid ${bucket.color}; border-radius: 2px; font-size: var(--fs-2xs); color: ${bucket.color}; font-family: var(--font-mono); letter-spacing: 0.16em; font-weight: 600; text-transform: uppercase;">
