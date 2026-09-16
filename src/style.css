@@ -9240,3 +9240,7 @@ body.workspace-map-active #receiver-view {
   border-radius: 2px;
   transition: width 400ms linear;
 }
+
+/* Step 3 panel muted state once every dispatch is complete */
+.mon-eng-wrapped { border-top-color: #6b7280 !important; }
+.mon-eng-wrapped > .c-panel-title { color: #6b7280 !important; }

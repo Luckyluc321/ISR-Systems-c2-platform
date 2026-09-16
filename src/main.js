@@ -12964,8 +12964,8 @@ async function main() {
         <div class="pop-k">Elapsed since dispatch</div>
         <div class="pop-v">${elapsedStr}</div>
       </div>
-      ${d.enduranceMin ? `<div class="pop-section">
-        <div class="pop-k">${d.profile.airborne ? 'Battery' : 'Fuel'}</div>
+      ${d.enduranceMin && _monEngPowerSource(d.profile) ? `<div class="pop-section">
+        <div class="pop-k">${{ battery: 'Battery', fuel: 'Fuel', generator: 'Generator' }[_monEngPowerSource(d.profile)]}</div>
         <div class="pop-v ${(d.batteryPct ?? 100) < 25 ? 'warn' : ''}">${Math.round(d.batteryPct ?? 100)}% · ~${Math.max(0, Math.round((d.batteryPct ?? 100) / 100 * d.enduranceMin))} min remaining</div>
       </div>` : ''}
     `;
@@ -19389,13 +19389,14 @@ async function main() {
     }
 
     const totalActive = dispatches.length - bucketed.get('complete').length;
+    const wrapped = totalActive === 0;
     const headerCounts = _MON_ENG_BUCKETS
       .filter(b => b.key !== 'complete' && bucketed.get(b.key).length > 0)
       .map(b => `${bucketed.get(b.key).length} ${b.label.toLowerCase()}`)
       .join(', ');
-    const summary = totalActive > 0
+    const summary = !wrapped
       ? `${totalActive} unit${totalActive === 1 ? '' : 's'} active${headerCounts ? ' · ' + headerCounts : ''}`
-      : `All ${dispatches.length} dispatch${dispatches.length === 1 ? '' : 'es'} complete`;
+      : `Engagement wrapped · ${dispatches.length} dispatch${dispatches.length === 1 ? '' : 'es'} complete`;
 
     const bucketSections = _MON_ENG_BUCKETS.map(bucket => {
       const items = bucketed.get(bucket.key);
@@ -19438,9 +19439,10 @@ async function main() {
         </div>`;
     }).join('');
 
-    return `
+    const html = `
       <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-1);">${summary}</div>
       ${bucketSections}`;
+    return { html, wrapped };
   }
 
   // Expanded formation groups in the Step 3 panel. Keyed by groupId.
@@ -19460,8 +19462,8 @@ async function main() {
     if (panel && ctx) {
       const evObj = getEvent(ctx.eventId);
       const body = panel.querySelector(':scope > .c-panel-body');
-      const html = evObj && _monEngBodyHtml(evObj, ctx.role);
-      if (body && html) body.innerHTML = html;
+      const res = evObj && _monEngBodyHtml(evObj, ctx.role);
+      if (body && res) body.innerHTML = res.html;
     }
   });
 
@@ -19488,20 +19490,23 @@ async function main() {
         return;
       }
       const body = el.querySelector(':scope > .c-panel-body');
-      const html = _monEngBodyHtml(ev, ctx.role);
-      if (body && html) body.innerHTML = html;
+      const res = _monEngBodyHtml(ev, ctx.role);
+      if (body && res) {
+        body.innerHTML = res.html;
+        el.classList.toggle('mon-eng-wrapped', res.wrapped);
+      }
     }, 500);
   }
 
   function _renderStep3ActiveEngagement(event, activeRole) {
-    const bodyHtml = _monEngBodyHtml(event, activeRole);
-    if (!bodyHtml) return '';
+    const res = _monEngBodyHtml(event, activeRole);
+    if (!res) return '';
     _startMonEngTick(event.id, activeRole);
     return `
-      <div class="c-panel c-panel-collapsible" data-mon-eng="${event.id}" style="border-top: 3px solid var(--accent);">
+      <div class="c-panel c-panel-collapsible${res.wrapped ? ' mon-eng-wrapped' : ''}" data-mon-eng="${event.id}" style="border-top: 3px solid var(--accent);">
         <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--accent);">Step 3 · Monitor engagement</div>
         <div class="c-panel-body">
-          ${bodyHtml}
+          ${res.html}
         </div>
       </div>`;
   }
