@@ -640,7 +640,7 @@ import { activateManhattanDemo, deactivateManhattanDemo, setManhattanChase } fro
 import './adapters/cooperative_mock.js';
 import './adapters/cooperative_opensky.js';
 import { checkCooperativeTraffic } from './cooperative_traffic_reconciler.js';
-import { loadFromEvents as loadPrecedentIndex, registerEvent as registerPrecedent, hydrateFromIdb as hydratePrecedentIndex, indexSize as precedentIndexSize, getRecord as getPrecedentRecord, allRecords as allPrecedentRecords, clearIndex as clearPrecedentIndex } from './precedent_index.js';
+import { loadFromEvents as loadPrecedentIndex, registerEvent as registerPrecedent, hydrateFromIdb as hydratePrecedentIndex, indexSize as precedentIndexSize, getRecord as getPrecedentRecord, allRecords as allPrecedentRecords, clearIndex as clearPrecedentIndex, unregisterEvent as unregisterPrecedent } from './precedent_index.js';
 import { buildPrecedentBlock } from './precedent_retrieval.js';
 import { logOperatorDecision, updateFeedbackOutcome, hydrateFeedbackLog, _installConsoleHelper as _installFeedbackConsole } from './feedback_log.js';
 // Feedback-log adapters self-register on import. localStorage is the
@@ -19078,6 +19078,8 @@ async function main() {
 
       ${renderHistoricalPatternPanel(event, activeRole, { hasReportFor: (id) => !!getEvent(id)?.postIncidentReport })}
 
+      ${_renderAnnulHistoryBlock(event, activeRole)}
+
       ${_renderAgenciesOnCasePanel(event, activeRole)}
 
       ${otherList.length ? `
@@ -19721,6 +19723,26 @@ async function main() {
   // Access: also linked from the receiver profile library (Reports tab
   // in Phase C) so PET can browse past incidents they were looped in on
   // without opening every case file individually.
+  // Admin-only maintenance action: withdraw a bogus closed event
+  // (sensor artifact, duplicate, test residue) from the precedent
+  // history index so it stops polluting "prior activity" counts and
+  // Agent B's precedent block. Deliberately NOT a delete — the event
+  // and its Post-Incident Report remain untouched; only the history
+  // index entry is removed. The annulment itself is audit-logged to
+  // the feedback log (who, when, why). Receiver and operator tiers
+  // never see this block.
+  function _renderAnnulHistoryBlock(event, activeRole) {
+    if (activeRole?.kind !== 'admin') return '';
+    if (event?.status !== 'closed') return '';
+    if (!getPrecedentRecord(event.id)) return '';
+    return `
+      <div class="c-panel" style="border-top: 3px solid #6b7280;">
+        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #6b7280;">Admin · History maintenance</div>
+        <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-2);">This closed event is part of the site's precedent history. Annulling withdraws it from historical pattern counts and prior-event retrieval. The event and its report are not deleted. The annulment is audit-logged.</div>
+        <button class="pl-dispatch-btn" style="padding: 6px 14px; font-size: var(--fs-2xs); background: rgba(107, 114, 128, 0.08); color: #9ca3af; border: 1px solid rgba(156, 163, 175, 0.4); border-left: 2px solid #9ca3af; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="annul-history" data-id="${event.id}">Annul from history</button>
+      </div>`;
+  }
+
   function _renderPostIncidentReportPanel(event, activeRole) {
     const report = event?.postIncidentReport;
     if (!report) return '';
@@ -23132,6 +23154,24 @@ async function main() {
         });
         _respondingEscId = null;
         toast('Response sent to operator', 'ok');
+        _lastReceiverViewSig = null;
+        renderReceiverView({ immediate: true });
+      }
+      // ── Admin history annulment ─────────────────────────────
+      else if (action === 'annul-history') {
+        const ev = getEvent(id);
+        const role = getActiveRole();
+        if (!ev || role?.kind !== 'admin') return;
+        const reason = window.prompt('Reason for annulling this event from history (required):');
+        if (!reason || !reason.trim()) { toast('Annulment cancelled — a reason is required.', 'warn'); return; }
+        unregisterPrecedent(id);
+        logOperatorDecision({
+          event: ev,
+          action: 'annul-history',
+          actionDetail: { reason: reason.trim() },
+          actorRole: role?.id || 'admin',
+        });
+        toast(`Event ${id} withdrawn from precedent history.`, 'ok');
         _lastReceiverViewSig = null;
         renderReceiverView({ immediate: true });
       }
