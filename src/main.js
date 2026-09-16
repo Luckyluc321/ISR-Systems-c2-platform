@@ -19366,13 +19366,18 @@ async function main() {
       </div>`;
   }
 
-  function _renderStep3ActiveEngagement(event, activeRole) {
+  // Inner body of the Step 3 panel (summary line + state buckets).
+  // Split from the panel shell so the tick loop can refresh the body
+  // in place without replacing the panel element — replacing the panel
+  // would destroy the collapse listener and is-collapsed state bound
+  // by _bindReceiverActions.
+  function _monEngBodyHtml(event, activeRole) {
     const dispatches = (event.counterDispatches || []).filter(cd => {
       // Only show dispatches this role owns (issued from their scope)
       const scope = _ROLE_DISPATCH_SCOPE_LOOKUP[activeRole?.id];
       return activeRole?.kind === 'admin' || (scope && scope.has(cd.kind));
     });
-    if (!dispatches.length) return '';
+    if (!dispatches.length) return null;
 
     // Bucket dispatches by live state. counterDispatchStateFor returns
     // the current state or 'complete' if the entity has already retired.
@@ -19409,11 +19414,47 @@ async function main() {
     }).join('');
 
     return `
-      <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--accent);">
+      <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-1);">${summary}</div>
+      ${bucketSections}`;
+  }
+
+  // ── Step 3 live tick ──────────────────────────────────────────
+  // Refreshes the Step 3 panel body every 500ms while the panel is in
+  // the DOM, mirroring the dispatch-popup poll cadence. Self-healing
+  // teardown: when the panel leaves the DOM (case closed, view
+  // switched, role changed away) the next tick finds nothing and
+  // clears itself. No lifecycle hooks needed.
+  let _monEngTickTimer = null;
+  let _monEngTickCtx = null;   // { eventId, role }
+
+  function _startMonEngTick(eventId, activeRole) {
+    _monEngTickCtx = { eventId, role: activeRole };
+    if (_monEngTickTimer) return;   // already running; ctx updated above
+    _monEngTickTimer = setInterval(() => {
+      const ctx = _monEngTickCtx;
+      const el = ctx && document.querySelector(`[data-mon-eng="${ctx.eventId}"]`);
+      const ev = ctx && getEvent(ctx.eventId);
+      if (!el || !ev) {
+        clearInterval(_monEngTickTimer);
+        _monEngTickTimer = null;
+        _monEngTickCtx = null;
+        return;
+      }
+      const body = el.querySelector(':scope > .c-panel-body');
+      const html = _monEngBodyHtml(ev, ctx.role);
+      if (body && html) body.innerHTML = html;
+    }, 500);
+  }
+
+  function _renderStep3ActiveEngagement(event, activeRole) {
+    const bodyHtml = _monEngBodyHtml(event, activeRole);
+    if (!bodyHtml) return '';
+    _startMonEngTick(event.id, activeRole);
+    return `
+      <div class="c-panel c-panel-collapsible" data-mon-eng="${event.id}" style="border-top: 3px solid var(--accent);">
         <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--accent);">Step 3 · Monitor engagement</div>
         <div class="c-panel-body">
-          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-1);">${summary}</div>
-          ${bucketSections}
+          ${bodyHtml}
         </div>
       </div>`;
   }
