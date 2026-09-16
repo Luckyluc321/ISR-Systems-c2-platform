@@ -13803,6 +13803,7 @@ async function main() {
       { key: 'swarm_recon_cph_amk', label: 'SWARM · 5-drone recon (CPH → Amager)', cls: 'critical' },
       { key: 'cph_unknown_contact', label: 'Non-identifiable contact (N perimeter)', cls: 'recon' },
       { key: 'cph_shahed_amalienborg', label: 'Shahed-136 attack (Øresund → CPH → Amalienborg)', cls: 'critical' },
+      { key: 'cph_geran3_amalienborg', label: 'Geran-3 jet attack, same route at 2x speed', cls: 'critical' },
       { key: 'cph_quad_recon_apron', label: 'Quadcopter recon over cargo apron (unknown → yellow)' },
       { key: 'cph_dji_hobbyist', label: 'Unauthorized DJI hobbyist (unknown → yellow → resolved)' },
     ],

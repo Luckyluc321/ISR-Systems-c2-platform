@@ -260,6 +260,81 @@ export const TEMPLATES = {
     durationSec: 200,
   },
 
+  // ── Geran-3 jet-powered loitering munition, same route as the
+  //    Shahed-136 scenario at roughly double the closure speed ──
+  //
+  // Russian-built turbojet evolution of the Shahed line, produced at
+  // scale since mid-2025. Specs per CSIS Missile Threat, Defense
+  // Express, and Forbes (verified Sept 2026):
+  //
+  //   Cruise: 300-370 km/h (CONFIRMED, multiple sources) — sim uses
+  //     ~350 km/h (97 m/s), Chinese Telefly JT80 turbojet
+  //   Terminal dash: 550-600 km/h design/max per Ukrainian Defence
+  //     Intelligence (PLAUSIBLE tier, not typical observed cruise) —
+  //     sim uses ~550 km/h (153 m/s) for the dive
+  //   Airframe: Shahed-238 lineage, ~3.5 m length, ~3 m wingspan
+  //   Acoustic: turbojet whine — NO piston "moped" signature, which
+  //     defeats acoustic classifiers trained only on Geran-2
+  //   RF: GNSS/INS + cellular downlink, similar to late Geran-2
+  //
+  // Same ingress route and target as cph_shahed_amalienborg so the
+  // two scenarios demo the speed differential directly: the mesh gets
+  // ~100 s from first detection to impact instead of ~200 s. Half the
+  // decision window is the entire story of this scenario.
+  cph_geran3_amalienborg: {
+    siteId: 'cph',
+    classification: 'hostile',
+    threat: 'high',
+    platform: 'loitering-munition',
+    droneType: 'Geran-3 (jet loitering munition)',
+    confidence: 0.68,
+    confidenceTrend: 'RF (cellular downlink) + turbojet acoustic, no piston signature match',
+    multiSite: true,
+    contributingSensors: [
+      { id: 'N09', confidence: 0.74 },
+      { id: 'N15', confidence: 0.70 },
+      { id: 'N20', confidence: 0.64 },
+      { id: 'N22', confidence: 0.60 },
+    ],
+    evidence: {
+      rfCarrier: 'Cellular 900/1800 MHz downlink + GNSS/INS guidance',
+      rfBandwidth: 'narrowband',
+      rfMatch: 'Geran-3 modem signature 69%',
+      modality: 'RF + acoustic (turbojet whine, no piston match)',
+      evidenceSize: '142.1 MB',
+      note: 'Jet-powered loitering munition class. Turbojet acoustic profile defeats piston-trained classifiers. Closure speed roughly double the Geran-2: compressed response window is the defining threat property. Cruise 300-370 km/h confirmed (CSIS, Defense Express); 550-600 km/h terminal dash per Ukrainian Defence Intelligence.',
+    },
+    waypoints: [
+      // Same route geometry as the Shahed-136 scenario, retimed for
+      // jet speeds: cruise ~97 m/s (600 m legs in ~6 s vs 12 s), dive
+      // ~153 m/s (2 s legs). First detection ~12 s after spawn,
+      // impact at tSec 100 — half the Geran-2 timeline.
+      { lat: 55.6180, lon: 12.6900, alt: 1500, heading: 270, tSec: 0  },  // Ingress east of N17, higher jet cruise altitude
+      { lat: 55.6180, lon: 12.6837, alt: 1500, heading: 270, tSec: 6  },
+      { lat: 55.6180, lon: 12.6775, alt: 1500, heading: 270, tSec: 12 },  // FIRST DETECTION, N17 coverage
+      { lat: 55.6180, lon: 12.6680, alt: 1500, heading: 270, tSec: 18 },
+      { lat: 55.6180, lon: 12.6585, alt: 1500, heading: 270, tSec: 24 },
+      { lat: 55.6180, lon: 12.6490, alt: 1500, heading: 270, tSec: 30 },  // Runway 04R, N15
+      { lat: 55.6180, lon: 12.6395, alt: 1500, heading: 270, tSec: 36 },
+      { lat: 55.6207, lon: 12.6312, alt: 1500, heading: 300, tSec: 42 },  // NW bend, N18
+      { lat: 55.6234, lon: 12.6229, alt: 1500, heading: 315, tSec: 48 },
+      { lat: 55.6272, lon: 12.6162, alt: 1500, heading: 330, tSec: 54 },  // Approaching AMK
+      { lat: 55.6320, lon: 12.6115, alt: 1500, heading: 340, tSec: 60 },
+      { lat: 55.6370, lon: 12.6095, alt: 1500, heading: 345, tSec: 66 },  // AMK cluster centre
+      { lat: 55.6422, lon: 12.6090, alt: 1500, heading: 355, tSec: 72 },
+      { lat: 55.6530, lon: 12.6045, alt: 1500, heading: 355, tSec: 78 },
+      { lat: 55.6640, lon: 12.6005, alt: 1400, heading: 355, tSec: 84 },
+      { lat: 55.6695, lon: 12.5985, alt: 1200, heading: 350, tSec: 90 },  // Terminal descent begins
+      // Terminal dash ~153 m/s
+      { lat: 55.6727, lon: 12.5972, alt: 950, heading: 348, tSec: 92  },
+      { lat: 55.6759, lon: 12.5959, alt: 700, heading: 348, tSec: 94  },
+      { lat: 55.6791, lon: 12.5946, alt: 450, heading: 348, tSec: 96  },
+      { lat: 55.6820, lon: 12.5936, alt: 220, heading: 348, tSec: 98  },
+      { lat: 55.6844, lon: 12.5931, alt: 50,  heading: 348, tSec: 100 },  // Impact at Amalienborg
+    ],
+    durationSec: 100,
+  },
+
   // ── Recon quadcopter, sustained loiter over CPH cargo apron ──
   //
   // Small commercial-class quadcopter, unclear operator, sustained
