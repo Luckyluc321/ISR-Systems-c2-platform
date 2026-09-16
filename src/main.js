@@ -12570,7 +12570,20 @@ async function main() {
       if (p.completed && !state.closedAt && !event.awaitingNeutralization) {
         state.closedAt = performance.now();
         markTrackClosed(p.eventId);
-        closeEvent(p.eventId, event.exit || null, { autoOutcome: 'left coverage' });
+        // Terminal impact: attack-profile templates (Shahed, Geran-3)
+        // declare terminalImpact so waypoint completion means warhead
+        // detonation at the target, not "left coverage". Reuses the
+        // mid-air explosion sequence at ground level. Only fires if
+        // the weapon survived to its final waypoint (a neutralised
+        // track never reaches p.completed — interceptor kill freezes
+        // its waypoints via awaitingNeutralization or downed state).
+        const _tplDone = TEMPLATES[event.templateKey];
+        const _didImpact = !!_tplDone?.terminalImpact;
+        if (_didImpact && p.lat != null && p.lon != null) {
+          _playExplosionSequence(p.lon, p.lat, Math.max(25, p.alt || 30));
+          toast(`IMPACT · ${event.droneType || 'weapon'} detonated at target.`, 'warn');
+        }
+        closeEvent(p.eventId, event.exit || null, { autoOutcome: _didImpact ? 'target impact' : 'left coverage' });
         // Also close any linked/secondary events (e.g. swarm's shadow
         // event at AMK) so they don't linger as active in the inbox.
         const linkedIds = event.linkedEventIds || [];

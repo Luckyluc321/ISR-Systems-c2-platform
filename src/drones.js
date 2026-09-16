@@ -191,6 +191,7 @@ export const TEMPLATES = {
     classification: 'hostile',
     threat: 'high',
     platform: 'loitering-munition',
+    terminalImpact: true,   // warhead detonates at final waypoint (explosion + 'target impact' outcome)
     droneType: 'Shahed-136 / Geran-2 (loitering munition)',
     confidence: 0.72,
     confidenceTrend: 'Acoustic + RF (Iridium 1616 MHz + cellular 900 MHz), piston engine signature',
@@ -286,6 +287,7 @@ export const TEMPLATES = {
     classification: 'hostile',
     threat: 'high',
     platform: 'loitering-munition',
+    terminalImpact: true,   // warhead detonates at final waypoint (explosion + 'target impact' outcome)
     droneType: 'Geran-3 (jet loitering munition)',
     confidence: 0.68,
     confidenceTrend: 'RF (cellular downlink) + turbojet acoustic, no piston signature match',
@@ -307,32 +309,37 @@ export const TEMPLATES = {
     waypoints: [
       // Same route geometry as the Shahed-136 scenario, retimed for
       // jet speeds: cruise ~97 m/s (600 m legs in ~6 s vs 12 s), dive
-      // ~153 m/s (2 s legs). First detection ~12 s after spawn,
-      // impact at tSec 100 — half the Geran-2 timeline.
-      { lat: 55.6180, lon: 12.6900, alt: 1500, heading: 270, tSec: 0  },  // Ingress east of N17, higher jet cruise altitude
-      { lat: 55.6180, lon: 12.6837, alt: 1500, heading: 270, tSec: 6  },
-      { lat: 55.6180, lon: 12.6775, alt: 1500, heading: 270, tSec: 12 },  // FIRST DETECTION, N17 coverage
-      { lat: 55.6180, lon: 12.6680, alt: 1500, heading: 270, tSec: 18 },
-      { lat: 55.6180, lon: 12.6585, alt: 1500, heading: 270, tSec: 24 },
-      { lat: 55.6180, lon: 12.6490, alt: 1500, heading: 270, tSec: 30 },  // Runway 04R, N15
-      { lat: 55.6180, lon: 12.6395, alt: 1500, heading: 270, tSec: 36 },
-      { lat: 55.6207, lon: 12.6312, alt: 1500, heading: 300, tSec: 42 },  // NW bend, N18
-      { lat: 55.6234, lon: 12.6229, alt: 1500, heading: 315, tSec: 48 },
-      { lat: 55.6272, lon: 12.6162, alt: 1500, heading: 330, tSec: 54 },  // Approaching AMK
-      { lat: 55.6320, lon: 12.6115, alt: 1500, heading: 340, tSec: 60 },
-      { lat: 55.6370, lon: 12.6095, alt: 1500, heading: 345, tSec: 66 },  // AMK cluster centre
-      { lat: 55.6422, lon: 12.6090, alt: 1500, heading: 355, tSec: 72 },
-      { lat: 55.6530, lon: 12.6045, alt: 1500, heading: 355, tSec: 78 },
-      { lat: 55.6640, lon: 12.6005, alt: 1400, heading: 355, tSec: 84 },
-      { lat: 55.6695, lon: 12.5985, alt: 1200, heading: 350, tSec: 90 },  // Terminal descent begins
+      // ~153 m/s (2 s legs). Ingress starts ~2.6 km east of N17 over
+      // open Øresund: ~24 s of visible projected-path approach before
+      // first sensor contact, giving the duty officer lead time to
+      // pre-select which agencies to inform. Impact at tSec 112 —
+      // still roughly half the Geran-2 timeline.
+      { lat: 55.6180, lon: 12.7090, alt: 1500, heading: 270, tSec: 0   },  // Ingress far out over Øresund
+      { lat: 55.6180, lon: 12.6995, alt: 1500, heading: 270, tSec: 6   },
+      { lat: 55.6180, lon: 12.6900, alt: 1500, heading: 270, tSec: 12  },  // Closing on the coast
+      { lat: 55.6180, lon: 12.6837, alt: 1500, heading: 270, tSec: 18  },
+      { lat: 55.6180, lon: 12.6775, alt: 1500, heading: 270, tSec: 24  },  // FIRST DETECTION, N17 coverage
+      { lat: 55.6180, lon: 12.6680, alt: 1500, heading: 270, tSec: 30  },
+      { lat: 55.6180, lon: 12.6585, alt: 1500, heading: 270, tSec: 36  },
+      { lat: 55.6180, lon: 12.6490, alt: 1500, heading: 270, tSec: 42  },  // Runway 04R, N15
+      { lat: 55.6180, lon: 12.6395, alt: 1500, heading: 270, tSec: 48  },
+      { lat: 55.6207, lon: 12.6312, alt: 1500, heading: 300, tSec: 54  },  // NW bend, N18
+      { lat: 55.6234, lon: 12.6229, alt: 1500, heading: 315, tSec: 60  },
+      { lat: 55.6272, lon: 12.6162, alt: 1500, heading: 330, tSec: 66  },  // Approaching AMK
+      { lat: 55.6320, lon: 12.6115, alt: 1500, heading: 340, tSec: 72  },
+      { lat: 55.6370, lon: 12.6095, alt: 1500, heading: 345, tSec: 78  },  // AMK cluster centre
+      { lat: 55.6422, lon: 12.6090, alt: 1500, heading: 355, tSec: 84  },
+      { lat: 55.6530, lon: 12.6045, alt: 1500, heading: 355, tSec: 90  },
+      { lat: 55.6640, lon: 12.6005, alt: 1400, heading: 355, tSec: 96  },
+      { lat: 55.6695, lon: 12.5985, alt: 1200, heading: 350, tSec: 102 },  // Terminal descent begins
       // Terminal dash ~153 m/s
-      { lat: 55.6727, lon: 12.5972, alt: 950, heading: 348, tSec: 92  },
-      { lat: 55.6759, lon: 12.5959, alt: 700, heading: 348, tSec: 94  },
-      { lat: 55.6791, lon: 12.5946, alt: 450, heading: 348, tSec: 96  },
-      { lat: 55.6820, lon: 12.5936, alt: 220, heading: 348, tSec: 98  },
-      { lat: 55.6844, lon: 12.5931, alt: 50,  heading: 348, tSec: 100 },  // Impact at Amalienborg
+      { lat: 55.6727, lon: 12.5972, alt: 950, heading: 348, tSec: 104 },
+      { lat: 55.6759, lon: 12.5959, alt: 700, heading: 348, tSec: 106 },
+      { lat: 55.6791, lon: 12.5946, alt: 450, heading: 348, tSec: 108 },
+      { lat: 55.6820, lon: 12.5936, alt: 220, heading: 348, tSec: 110 },
+      { lat: 55.6844, lon: 12.5931, alt: 50,  heading: 348, tSec: 112 },  // Impact at Amalienborg
     ],
-    durationSec: 100,
+    durationSec: 112,
   },
 
   // ── Recon quadcopter, sustained loiter over CPH cargo apron ──
