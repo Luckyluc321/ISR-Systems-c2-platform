@@ -132,6 +132,7 @@ import {
   // Event mutation API (Phase 1 state-consolidation). Every event
   // field write anywhere in this file goes through one of these.
   mutateEvent, appendEventArray, addToEventSet, setEventMapKey, setEventObjectKey,
+  syncMemberTrack, setMemberStatus,
   linkEvents, markNeutralised, recordInteraction,
   setDispatchOutcome, attachPostIncidentReport,
   clearNarrativeCache, setNarrativeCache,
@@ -345,6 +346,10 @@ if (typeof window !== 'undefined') {
     all:    allPrecedentRecords,
     clear:  clearPrecedentIndex,
   };
+  // Swarm Phase 1 dev handle. Per-member source-of-truth inspection:
+  //   window.__isr_members('ev-012')  → memberTracks array (live refs)
+  //   console.table(window.__isr_members('ev-012').map(m => ({...m.kinematics, id: m.memberId, status: m.status, cov: m.inCoverage})))
+  window.__isr_members = (eventId) => getEvent(eventId)?.memberTracks || null;
   // Threat routing dev handle for spot-checking auto-observer output.
   // Usage: window.__isr_routing.route({domain:'aviation', family:'cruise-missile', classification:'hostile', threat:'high'})
   //        window.__isr_routing.explain({...})           → per-rule fire trace
@@ -6185,6 +6190,9 @@ async function main() {
         }
         sw.neutralised = true;
         sw._neutralisedAt = new Date().toISOString();
+        // Swarm Phase 1: source-of-truth status transition. The sw
+        // flag above stays as the render-cache fast path.
+        if (sw.memberId) setMemberStatus(d.eventId, sw.memberId, 'neutralised', { reason: 'interceptor kill' });
         // Clear any lingering jamming visuals from other counter-
         // dispatches now that this hostile is down. Ellipses on empty
         // air look wrong.
@@ -8112,6 +8120,22 @@ async function main() {
       // Shadow event tracks the SAME physical group as the primary —
       // its history record carries the same peak cardinality.
       droneCount: primary.droneCount || 1,
+      // Fresh per-member tracks for this site's view of the same
+      // group. memberId is namespaced to THIS event; provenance to the
+      // primary's member is via sourceMemberId. Status starts from the
+      // primary's current member status (a drone neutralised before
+      // the group reached this site stays neutralised here).
+      memberTracks: primary.memberTracks
+        ? primary.memberTracks.map(mt => ({
+            ...mt,
+            memberId: `${spawnedId}-${mt.memberId.split('-').pop()}`,
+            sourceMemberId: mt.memberId,
+            kinematics: { ...mt.kinematics },
+            formationOffset: { ...mt.formationOffset },
+            inCoverage: false,
+            history: [{ status: mt.status, at: new Date().toISOString() }],
+          }))
+        : undefined,
       spawnTs: Date.now(),
       // Both events are FIRST-CLASS. linkedEventId (singular) is a
       // "source-of-recording-data" pointer used by the tick loop to
@@ -11401,6 +11425,9 @@ async function main() {
           : [];
         swarmBillboards.push({
           billboard: swarmBb,
+          // Source-of-truth pointer: event.memberTracks entry this
+          // render wrapper mirrors. Formation index i (lead is m0).
+          memberId: `${event.id}-m${i}`,
           waypoints: droneWaypoints,   // OWN trajectory, independent of lead
           prevPos: null, prevTs: null, // motion tracking for heading + speed
           trailLine, trailPositions,
@@ -11434,6 +11461,7 @@ async function main() {
     const leadTemplateSlot = template?.swarm?.formation?.[0];
     const leadSwarmMember = leadTemplateSlot ? {
       billboard,   // top-level Cesium billboard for the lead drone
+      memberId: `${event.id}-m0`,   // event.memberTracks[0]
       role: leadTemplateSlot.role || 'lead',
       model: leadTemplateSlot.model || 'Lead',
       rfMHz: leadTemplateSlot.rfMHz || 2412,
@@ -12041,6 +12069,20 @@ async function main() {
             lat: p.lat, lon: p.lon, alt: p.alt,
             heading: leadHdgDeg, speed: p.speed || 25,
           };
+          // Swarm Phase 1: sync the lead's source-of-truth member
+          // track (m0), 1 Hz throttle + immediate on coverage flips.
+          if (state.leadSwarmMember?.memberId) {
+            const _leadCovNow = _shouldAutoDetect(p.lat, p.lon, p.alt);
+            if (!state._leadTrackSyncMs || (nowMs - state._leadTrackSyncMs) >= 1000 || state._leadTrackSyncInCov !== _leadCovNow) {
+              syncMemberTrack(event.id, state.leadSwarmMember.memberId, {
+                lat: p.lat, lon: p.lon, alt: p.alt,
+                heading: leadHdgDeg, speedMs: p.speed || 25,
+                inCoverage: _leadCovNow,
+              });
+              state._leadTrackSyncMs = nowMs;
+              state._leadTrackSyncInCov = _leadCovNow;
+            }
+          }
           // P5A: adaptive sample capture for the lead (same event-driven interval as wingmen).
           // SKIP once the lead is neutralised — drones.js keeps advancing
           // its waypoints (no kill hook), so pushing more samples would
@@ -12244,6 +12286,8 @@ async function main() {
               sw._jamFallLanded = true;
               sw.neutralised = true;
               sw._neutralisedAt = new Date().toISOString();
+              // Swarm Phase 1: source-of-truth status transition.
+              if (sw.memberId) setMemberStatus(event.id, sw.memberId, 'neutralised', { reason: 'jamming forced landing' });
               // Drop a small downed-drone marker at the landing spot so
               // it's visible in top-down after the billboard hides.
               viewer.entities.add({
@@ -12384,6 +12428,19 @@ async function main() {
           };
           // P68: dynamic contributingSensors for the WINGMAN's position too
           _updateContributingSensorsForPosition(event, pos.lat, pos.lon, pos.alt);
+          // Swarm Phase 1: sync source-of-truth member track. Same
+          // throttle as recording samples so listener-silent writes
+          // stay cheap; coverage flips sync immediately below via
+          // _prevInCov handling being per-tick anyway.
+          if (sw.memberId && (!sw._lastTrackSyncMs || (nowMs - sw._lastTrackSyncMs) >= 1000 || sw._trackSyncInCov !== swShouldShow)) {
+            syncMemberTrack(event.id, sw.memberId, {
+              lat: pos.lat, lon: pos.lon, alt: pos.alt,
+              heading: hdgDeg, speedMs,
+              inCoverage: swShouldShow,
+            });
+            sw._lastTrackSyncMs = nowMs;
+            sw._trackSyncInCov = swShouldShow;
+          }
           // P5A: adaptive sample capture (interval decided ONCE per event by platform)
           if (state.recording && (!sw._lastSampleMs || (nowMs - sw._lastSampleMs) >= _sampleIntervalForEvent(event))) {
             state.recording.timeseries.push(_buildDroneSample({
@@ -12673,6 +12730,28 @@ async function main() {
       // are neutralised: history records what showed up, not what was
       // left at close.
       droneCount: template.swarm?.formation?.length || template.swarm?.size || 1,
+      // Per-member source of truth for swarm events (swarm Phase 1,
+      // docs/swarm-individual-tracking-architecture.md). droneState
+      // billboards are a render cache; status, coverage, and the
+      // kinematics snapshot that must survive live HERE. nnTrackId
+      // stays null in sim; the live-path formation clusterer fills it.
+      // Single-drone events do not carry the field.
+      memberTracks: template.swarm?.formation?.length
+        ? template.swarm.formation.map((slot, i) => ({
+            memberId: `${eventId}-m${i}`,
+            nnTrackId: null,
+            kinematics: { lat: null, lon: null, alt: null, heading: null, speedMs: null },
+            inCoverage: false,
+            status: 'tracked',
+            classification: template.classification || 'unknown',
+            class_confidence: template.confidence ?? null,
+            formationOffset: slot.offset || { forward: 0, right: 0, up: 0 },
+            role: slot.role || (i === 0 ? 'lead' : 'wing'),
+            model: slot.model || null,
+            rfMHz: slot.rfMHz || null,
+            history: [{ status: 'tracked', at: new Date().toISOString() }],
+          }))
+        : undefined,
       spawnTs: Date.now(),
     };
     addEvent(event);

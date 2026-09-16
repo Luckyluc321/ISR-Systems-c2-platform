@@ -1304,6 +1304,44 @@ export function addToEventSet(id, field, item, { notify = false } = {}) {
   return e;
 }
 
+// ── Member track mutators (swarm Phase 1) ──────────────────────
+// event.memberTracks[] is the source of truth for per-member state
+// inside a group (swarm) event. See
+// docs/swarm-individual-tracking-architecture.md. droneState in
+// main.js remains a render-time cache; anything that must survive
+// (status, coverage, kinematics snapshot) lives here.
+
+// High-frequency kinematics + coverage sync from the tick loop.
+// notify defaults false: this fires per member per sample interval
+// and must not storm the listener chain.
+export function syncMemberTrack(id, memberId, { lat, lon, alt, heading, speedMs, inCoverage } = {}, { notify = false } = {}) {
+  const e = EVENTS.find(x => x.id === id);
+  const m = e?.memberTracks?.find(t => t.memberId === memberId);
+  if (!m) return null;
+  if (lat != null) m.kinematics.lat = lat;
+  if (lon != null) m.kinematics.lon = lon;
+  if (alt != null) m.kinematics.alt = alt;
+  if (heading != null) m.kinematics.heading = heading;
+  if (speedMs != null) m.kinematics.speedMs = speedMs;
+  if (inCoverage != null) m.inCoverage = !!inCoverage;
+  if (notify) _listeners.forEach(fn => fn(id));
+  return m;
+}
+
+// Status transition with append-only per-member history. Idempotent:
+// setting the current status again records nothing.
+export function setMemberStatus(id, memberId, status, extra = {}, { notify = true } = {}) {
+  const e = EVENTS.find(x => x.id === id);
+  const m = e?.memberTracks?.find(t => t.memberId === memberId);
+  if (!m || !status || m.status === status) return null;
+  m.status = status;
+  Object.assign(m, extra);
+  if (!Array.isArray(m.history)) m.history = [];
+  m.history.push({ status, at: new Date().toISOString(), ...(extra.reason ? { reason: extra.reason } : {}) });
+  if (notify) _listeners.forEach(fn => fn(id));
+  return m;
+}
+
 // Set a key on a Map field on an event. Lazily creates the Map.
 // Used for per-drone state maps kept on the event (_droneCovState,
 // _droneInsideState, participants).
