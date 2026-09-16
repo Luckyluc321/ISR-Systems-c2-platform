@@ -89,11 +89,11 @@ export const OPERATORS = [
     logo: '/logos/energinet.svg',
     scope: 'assigned-sites',
     destinationIds: [],
-    siteIds: ['energinet_hovegaard', 'energinet_bjaeverskov', 'energinet_landerupgaard', 'energinet_kassoe', 'energinet_ferslev'],
+    siteIds: ['energinet_hovegaard', 'energinet_bjaeverskov', 'energinet_landerupgaard', 'energinet_kassoe', 'energinet_ferslev', 'energinet_amager_koblingsstation'],
     sensorCount: 35,
     isMultiSite: true,
     sector: 'Energy (TSO)',
-    description: 'National transmission system operator. 5 substations under sensor coverage, HVDC interconnectors + 400 kV backbone.',
+    description: 'National transmission system operator. 6 substations under sensor coverage, HVDC interconnectors + 400 kV backbone.',
     brandTint: '#4dff9c',
   },
 ];
