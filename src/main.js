@@ -6284,7 +6284,13 @@ async function main() {
           : `Threat neutralised. ${downedCount} downed.`, 'ok');
       }
     } else if (event && !d.profile.visualVerifyOnly && !d.rtbCompleted) {
-      if (!event.outcome || event.outcome === 'awaiting_neutralization') {
+      // Kinetic truth beats machine assumption: a late kill (engagement
+      // resolving after the event already auto-closed) supersedes the
+      // machine-derived autoOutcome the close stamped. Without this,
+      // the "left coverage" / "lost contact" stamp from closeEvent
+      // silently discarded the interceptor's confirmed neutralisation.
+      const machineOutcomes = ['left coverage', 'lost contact'];
+      if (!event.outcome || event.outcome === 'awaiting_neutralization' || machineOutcomes.includes(event.outcome)) {
         markNeutralised(event.id, { outcome: 'neutralized', byDispatchId: d.id, needsPostIncident: false });
         toast(`Threat neutralised. ${d.assetName} confirmed disruption.`, 'ok');
       }
@@ -8032,6 +8038,11 @@ async function main() {
           // Re-entry after close — reactivate. Rare but supported.
           existing.status = 'active';
           existing.endTime = null;
+          // Clear the machine-derived autoOutcome from the earlier
+          // close: the event is live again, its final outcome is
+          // unknown again. Operator/kinetic outcomes never reach this
+          // branch (a neutralised track cannot re-enter coverage).
+          existing.outcome = null;
           addNote(existing.id, `Track re-acquired at ${SITES[sid]?.name || sid}. Event reactivated.`, 'AUTO-CORRELATOR');
         }
       } else {
