@@ -23174,7 +23174,7 @@ async function main() {
         const role = getActiveRole();
         if (!ev || role?.kind !== 'admin') return;
         const reason = window.prompt('Reason for annulling this event from history (required):');
-        if (!reason || !reason.trim()) { toast('Annulment cancelled — a reason is required.', 'warn'); return; }
+        if (!reason || !reason.trim()) { toast('Annulment cancelled. A reason is required.', 'warn'); return; }
         unregisterPrecedent(id);
         logOperatorDecision({
           event: ev,

@@ -26,6 +26,32 @@ export const PRECEDENT_INDEX_VERSION = 'v2.2026-09-16';
 
 const _index = new Map();   // eventId -> PrecedentRecord
 
+// ── Annulment tombstones ─────────────────────────────────────────
+// Admin-annulled event ids. Without this, an annulled event
+// resurrects: the boot gap-fill loop re-registers any closed EVENTS
+// entry lacking a record (seed events on every reload), and a debrief
+// regenerate re-registers runtime events mid-session. registerEvent
+// consults the tombstone set so annulment survives both paths.
+// Persisted to localStorage (small id set, consistent with the
+// small-cache policy; the record store itself stays in IndexedDB).
+// Azure swap: tombstones move server-side with the index.
+const _TOMBSTONE_KEY = 'isr:precedent_annulled:v1';
+const _annulled = new Set();
+try {
+  if (typeof localStorage !== 'undefined') {
+    const raw = localStorage.getItem(_TOMBSTONE_KEY);
+    if (raw) JSON.parse(raw).forEach(id => _annulled.add(id));
+  }
+} catch (_) { /* tombstones start empty; annulment degrades to session-only */ }
+
+function _persistTombstones() {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(_TOMBSTONE_KEY, JSON.stringify([..._annulled]));
+    }
+  } catch (_) { /* quota or unavailable; annulment degrades to session-only */ }
+}
+
 // Hydrate lifecycle. main() awaits hydrateFromIdb() at boot before
 // any code path that fires Agent B can run. Retrieval stays sync
 // because the in-memory Map is fully populated by the time the first
@@ -155,6 +181,7 @@ export function buildSummary(event) {
 // ── Register / query ─────────────────────────────────────────────
 export function registerEvent(event) {
   if (!event?.id) return null;
+  if (_annulled.has(event.id)) return null;   // admin-annulled; never resurrect
   if (!event.endTime && event.status !== 'closed') return null;   // only closed events
   const { vec, fields } = computeFeatureVector(event);
   const record = {
@@ -184,6 +211,8 @@ export function registerEvent(event) {
 
 export function unregisterEvent(eventId) {
   _index.delete(eventId);
+  _annulled.add(eventId);
+  _persistTombstones();
   deletePrecedent(eventId).catch(err => console.warn('[precedent_store] delete failed:', err.message));
 }
 
@@ -201,6 +230,10 @@ export function indexSize() {
 
 export function clearIndex() {
   _index.clear();
+  // Test-reset semantics: a full wipe also forgets annulments so the
+  // test plan's clean-slate step really is a clean slate.
+  _annulled.clear();
+  _persistTombstones();
   _clearIdb().catch(err => console.warn('[precedent_store] clearAll failed:', err.message));
 }
 

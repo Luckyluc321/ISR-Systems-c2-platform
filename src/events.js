@@ -11,6 +11,7 @@
 // own pace. New agents MUST read event.subject.
 import { syncEventSubject, applyNnTickToSubject } from './detection_subject.js';
 import { SITES } from './sites_registry.js';
+import { registerEvent as _resyncPrecedent } from './precedent_index.js';
 
 // Schema version stamps. Every escalation record + assessment package
 // gets its version stamped at write time so future consumers can gate
@@ -920,6 +921,12 @@ export function reclassifyEvent(id, { classification, threat = null, reason = ''
   e.threat = threat;
   e.lastReclassifyReason = reason || 'operator_reclassify';
   syncEventSubject(e);   // rebuilds subject; class_change_log records the transition
+  // Reclassifying an already-closed event must resync its precedent
+  // record, or the history index (and the historical pattern panel's
+  // hostile/friendly/dismissed split) keeps the stale classification
+  // forever. registerEvent overwrites in place and respects annulment
+  // tombstones; live events are rejected by its closed-only gate.
+  if (e.status === 'closed') _resyncPrecedent(e);
   if (from) {
     e.notes.push({
       timestamp: new Date('2026-07-24T14:32:41Z').toISOString(),
