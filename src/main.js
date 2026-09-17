@@ -12583,6 +12583,22 @@ async function main() {
         if (_didImpact && p.lat != null && p.lon != null) {
           _playExplosionSequence(p.lon, p.lat, Math.max(25, p.alt || 30));
           toast(`IMPACT · ${event.droneType || 'weapon'} detonated at target.`, 'warn');
+          // CODE RED ground response: the impact point enters the
+          // wreckages ledger exactly like a downed drone, so every
+          // dispatched patrol re-routes to the detonation site and a
+          // street cordon builds around it. A warhead impact is the
+          // hardest incident scene there is; the response machinery
+          // must treat it at least as urgently as a shot-down drone.
+          const _impIso = new Date().toISOString();
+          const _impWreckId = `wr-${event.id}-impact`;
+          const _impWreck = { id: _impWreckId, lat: p.lat, lon: p.lon, at: _impIso, downedBy: 'terminal-impact', isImpact: true };
+          appendEventArray(event.id, 'wreckages', _impWreck);
+          mutateEvent(event.id, { wreckageLocation: { lat: p.lat, lon: p.lon, at: _impIso } });
+          _rebalancePatrolsToWreckages(event);
+          buildCordon(_impWreck).then(cordon => {
+            _renderWreckagePerimeter(_impWreck, cordon);
+            _rebalancePatrolsToWreckages(event);
+          }).catch(err => console.warn('[impact cordon] build failed:', err.message));
           // Persistent IMPACT marker at the detonation point — same
           // pattern as the DOWNED marker so the coordinate survives on
           // the map after the smoke clears and routes through the
