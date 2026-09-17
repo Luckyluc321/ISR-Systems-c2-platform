@@ -359,6 +359,29 @@ export const RECEIVER_ASSETS = {
     requestable: [],
   },
 
+  'kbr-hovedstaden': {
+    label: 'Hovedstadens Beredskab',
+    baseId: 'hbr-hovedbrandstationen',
+    dispatchable: [
+      {
+        assetKey: 'hbr-brandbil',
+        kind: 'receiver-brandbil',
+        name: 'Brandbil',
+        count: 6,
+        icon: '🚒',
+        useCases: [
+          'Fire suppression at an impact or crash site',
+          'Technical rescue and first response in the capital region',
+          'Scene lighting, water supply, and equipment support',
+        ],
+        capabilities: { fire_suppression: true, technical_rescue: true },
+        deployTime: '4-10 minutes via real road routing',
+        limitations: 'Stages at the assembly point until police declare the scene safe (REFIL doctrine at attack scenes).',
+      },
+    ],
+    requestable: [],
+  },
+
   'brs-hedehusene': {
     label: 'Beredskabsstyrelsen Hovedstaden',
     baseId: 'brs-hedehusene',

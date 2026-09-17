@@ -383,6 +383,11 @@ export const RECEIVER_BASES = {
     name: 'Beredskabsstyrelsen Hovedstaden, Hedelykken 10, 2640 Hedehusene',
     verified: 'OSM Nominatim + brs.dk (address point Hedelykken 10)',
   },
+  'hbr-hovedbrandstationen': {
+    lat: 55.674664, lon: 12.571536,
+    name: 'Hovedbrandstationen, Bag Rådhuset 3, 1550 København V',
+    verified: 'OSM Nominatim fire_station polygon (way 148223100) + hbr.dk/kontakt',
+  },
 };
 
 // Convenience lookup by receiver role id. Some roles map to a specific

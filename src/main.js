@@ -3883,6 +3883,17 @@ async function main() {
       useRoadRouting: true, billboardScale: 0.65,
       label: 'Rescue team',
     },
+    'receiver-brandbil': {
+      cruiseKmh: 75, arriveAtM: 350, engageSec: 600,
+      icon: 'police-vehicle', trail: false, airborne: false,
+      useRoadRouting: true, supportsMultiDispatch: true, maxUnitsPerDispatch: 4,
+      billboardScale: 0.6, swarmSpacingM: 40, cordonSlotSpreadM: 18,
+      // Danish doctrine at attack scenes (REFIL): fire units stage at
+      // the assembly point until police declare the scene safe, same
+      // as medical units.
+      stagesAtScene: true,
+      label: 'Brandbil',
+    },
     'receiver-cyber-team': {
       cruiseKmh: 0, arriveAtM: null, engageSec: 60,
       icon: 'sof', trail: false, airborne: false,

@@ -240,6 +240,7 @@ export const DISPATCH_KIND_ARCHETYPES = {
   'receiver-ambulance':      ARCHETYPES.MEDICAL,
   'receiver-akutlaegebil':   ARCHETYPES.MEDICAL,
   'receiver-rescue-team':    ARCHETYPES.PUBLIC,
+  'receiver-brandbil':       ARCHETYPES.PUBLIC,
 
   // response_assets.js kinds — declared as inventory but not yet
   // dispatch-capable via CD_PROFILE. Enumerated explicitly so a
