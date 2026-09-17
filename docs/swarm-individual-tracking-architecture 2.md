@@ -1,6 +1,6 @@
 # Swarm Individual Tracking Architecture
 
-**Status:** `[phase 2 in progress]` — designed 2026-09-16. P1.1 landed 2026-09-16 (commits 5809fd6 + 06d602b): `event.memberTracks[]` source of truth, syncMemberTrack/setMemberStatus mutators, tick-loop sync, kill-path status routing, frozen-at-spawn shadow clones. P1.2 landed 2026-09-17 (commit 501ee72): swarm roster renders per-member status from memberTracks. P2.1 landed 2026-09-17 (commits 12c99dc + 6f9225e): breakaway detection (observed-deviation grace clock, sensors-observe-only), child event promotion with provenance + cross-links, per-tick child mirroring with sticky detected, child-owned coverage-loss close, kill-path child closure, roster BREAKAWAY badge. Remaining Phase 2: rejoin semantics (P2.2), formation split (P2.3). Adversarially verified; four findings fixed in the follow-up commit.
+**Status:** `[phase 1 in progress]` — designed 2026-09-16, P1.1 landed same day (commits 5809fd6 + 06d602b): `event.memberTracks[]` source of truth, syncMemberTrack/setMemberStatus mutators, tick-loop sync, kill-path status routing, frozen-at-spawn shadow clones. Remaining Phase 1: detail-panel roster reads memberTracks (P1.2). Phase 2 (breakaway promotion) not started.
 
 ## Problem
 
