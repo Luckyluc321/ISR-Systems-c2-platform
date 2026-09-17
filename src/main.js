@@ -194,6 +194,7 @@ try {
 // rule table and docs/cross-agency-flows.md Section 7 for the taxonomy.
 import { assignArchetypes, ARCHETYPES, ARCHETYPE_LABELS, archetypeForDispatchKind, archetypeFor, getArchetypeFallbackHits } from './archetypes.js';
 import { renderHistoricalPatternPanel, getHistoricalPattern, canSeeHistoricalPattern } from './historical_pattern.js';
+import { resolveKineticEffect, resolveJammingEffect, WEAPON_PROFILES, TARGET_PROFILES } from './engagement_effects.js';
 // Phase 2 · 8 sub-section renderers (kinetic / coord / intel /
 // forensic / medical / regulatory / public / liaison). Pure functions
 // (role, event) → HTMLString. Composed into contributor chapters in
@@ -345,6 +346,17 @@ if (typeof window !== 'undefined') {
     canSee: canSeeHistoricalPattern,
     all:    allPrecedentRecords,
     clear:  clearPrecedentIndex,
+  };
+  // Engagement effects dev handle. Survivability + susceptibility
+  // matrix inspection and what-if rolls:
+  //   window.__isr_effects.kinetic({weaponKind:'counter-drone-swarm', roundsFired:10, targetPlatform:'loitering-munition'})
+  //   window.__isr_effects.jamming({weaponKind:'army-c-uas', targetPlatform:'quadcopter'})
+  //   window.__isr_effects.weapons / .targets   → the tuning tables (live refs)
+  window.__isr_effects = {
+    kinetic: resolveKineticEffect,
+    jamming: resolveJammingEffect,
+    weapons: WEAPON_PROFILES,
+    targets: TARGET_PROFILES,
   };
   // Swarm Phase 1 dev handle. Per-member source-of-truth inspection:
   //   window.__isr_members('ev-012')  → memberTracks array (live refs)
@@ -4881,6 +4893,7 @@ async function main() {
     if (state.leadSwarmMember) candidates.push(state.leadSwarmMember);
     if (Array.isArray(state.swarmBillboards)) candidates.push(...state.swarmBillboards);
     let jammedCount = 0;
+    let resistantCount = 0;
     for (const sw of candidates) {
       if (!sw || sw.neutralised || sw._jamFall) continue;
       // Must have a live billboard position (i.e. drone actually rendered).
@@ -4893,6 +4906,17 @@ async function main() {
       const swAlt = bc.height || 60;
       const distM = haversineM(d.curLat, d.curLon, swLat, swLon);
       if (distM > RAD_RADIUS_M) continue;
+      // Susceptibility gate (engagement_effects.js): a target with
+      // anti-jam guidance shrugs the jammer off. Rolled once per
+      // (jammer, target) pair so re-entering the ellipse doesn't
+      // re-roll until a different jammer tries.
+      if (sw._jamResistantTo === d.id) { resistantCount++; continue; }
+      const _jam = resolveJammingEffect({ weaponKind: d.kind, targetPlatform: event.platform });
+      if (!_jam.jammed) {
+        sw._jamResistantTo = d.id;
+        resistantCount++;
+        continue;
+      }
       // Terrain height at drone position — target landing altitude.
       const gh = viewer.scene.globe.getHeight(Cesium.Cartographic.fromDegrees(swLon, swLat));
       const groundAlt = (typeof gh === 'number') ? gh : 0;
@@ -4911,6 +4935,9 @@ async function main() {
     }
     if (jammedCount > 0) {
       toast(`${d.assetName} jamming ${jammedCount} hostile drone${jammedCount === 1 ? '' : 's'}.`, 'info');
+    }
+    if (resistantCount > 0) {
+      toast(`${resistantCount} target${resistantCount === 1 ? '' : 's'} resistant to ${d.assetName} jamming (anti-jam guidance). No effect.`, 'warn');
     }
   }
 
@@ -5509,6 +5536,33 @@ async function main() {
             // outcome flip. For single-target events without a swarm
             // member, mark the event neutralized directly.
             if (!d.assignedSwarmMember && targetEv && targetEv.status === 'active') {
+              // Survivability roll (engagement_effects.js): landing
+              // hits is not a kill. Outcome distribution depends on
+              // weapon class, rounds landed, and target construction;
+              // damage carries across windows so sustained fire
+              // converges on certain neutralisation.
+              const _fxState = droneState.get(d.eventId);
+              const _fx = resolveKineticEffect({
+                weaponKind: d.kind,
+                roundsFired: d._roundsFired || 8,
+                hitQuality: outcome.quality ?? 1,
+                targetPlatform: targetEv.platform,
+                accumulatedDamage: _fxState?._damageAccum || 0,
+              });
+              if (_fxState) _fxState._damageAccum = _fx.damage;
+              if (_fx.outcome === 'survive') {
+                toast(`${targetEv.droneType || 'Target'} absorbed fire and continues. Damage accumulating (${Math.round(_fx.damage * 100)}%). Re-engaging.`, 'warn');
+                appendEventArray(targetEv.id, 'notes', {
+                  timestamp: new Date().toISOString(),
+                  author: 'Interceptor telemetry',
+                  text: `${d.assetName} landed hits but target survived (survive ${Math.round((_fx.probabilities?.survive || 0) * 100)}%). Re-engaging with accumulated damage ${Math.round(_fx.damage * 100)}%.`,
+                  type: 'engagement-partial',
+                });
+                d.engageStartTs = now;   // new engagement window, keep chasing
+                d._roundsFired = 0;
+                return;
+              }
+              d._effectOutcome = _fx.outcome;   // 'explode' | 'disable' → mode below
               // Capture the kill location from live target position (or
               // fall back to the interceptor's current position if that
               // lookup fails). This is the "wreckage" coordinate that
@@ -5555,7 +5609,13 @@ async function main() {
                     return killLive?.alt || 400;
                   })()
                 : (killLive?.alt || 400);
-              const mode = _resolveNeutralisationMode(d);
+              // Mode from the survivability roll when present (explode
+              // vs disabled airframe); rounds-threshold policy remains
+              // the fallback for kinds without an effect profile.
+              const mode = d._effectOutcome === 'explode' ? 'explosion'
+                         : d._effectOutcome === 'disable' ? 'physics-fall'
+                         : _resolveNeutralisationMode(d);
+              d._effectOutcome = null;
               const lastPos = targetEv.lastPosition || {};
               const targetSpeedMs = lastPos.speed || targetEv?.subject?.kinematics?.speed_ms || 30;
               const targetHeadingDeg = (typeof lastPos.heading === 'number') ? lastPos.heading : 0;
@@ -6269,6 +6329,26 @@ async function main() {
       // marked Downed without ever being hit" bug when the enemy
       // fled outside range before the 4s engagement timer expired.
       if (sw && !sw.neutralised && d._firedAtLeastOnce) {
+        // Survivability roll per member (engagement_effects.js). A
+        // member that absorbs the burst keeps flying with accumulated
+        // damage; the interceptor re-engages the same target.
+        const _swFx = resolveKineticEffect({
+          weaponKind: d.kind,
+          roundsFired: d._roundsFired || 8,
+          hitQuality: 1,
+          targetPlatform: event.platform,
+          accumulatedDamage: sw._damageAccum || 0,
+        });
+        sw._damageAccum = _swFx.damage;
+        if (_swFx.outcome === 'survive') {
+          toast(`${sw.model || 'Target'} absorbed fire and continues (damage ${Math.round(_swFx.damage * 100)}%). ${d.assetName} re-engaging.`, 'warn');
+          d._firedAtLeastOnce = false;
+          d._roundsFired = 0;
+          d.engageStartTs = null;
+          d.state = 'en_route';
+          d.lastFrameTs = now;
+          return;
+        }
         // Hit animation at THIS drone's live position
         const cart = sw.billboard?.position?.getValue?.(Cesium.JulianDate.now());
         if (cart) {
