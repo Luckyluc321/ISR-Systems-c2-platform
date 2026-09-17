@@ -19618,10 +19618,10 @@ async function main() {
     // than duplicating it here. Two ack buttons for the same action was
     // confusing UX. This block just tells them WHERE to look.
     const ackGateHtml = !isAcked && rec ? `
-      <div class="c-panel c-panel-collapsible" style="border-top: 3px solid #ffb84d;">
-        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #ffb84d;">Step 1 · Acknowledge receipt</div>
+      <div class="c-panel c-panel-collapsible rcv-step-panel">
+        ${_stepHdr(1, 'Acknowledge receipt', { state: 'current', tint: '#c8a35f' })}
         <div class="c-panel-body"><div style="font-size: var(--fs-xs); color: var(--text); line-height: 1.55;">Click <b style="color: #4dff9c;">Acknowledge receipt</b> in the case-file to the left. Response options unlock once acknowledged.</div></div>
-      </div>` : '';
+      </div>` : _stepHdr(1, 'Acknowledge receipt', { state: 'done', status: 'acked ' + (ackTs ? ackTs.slice(11,19) + 'Z' : ''), tint: 'var(--ok)' });
 
     const ackedBadge = isAcked ? `<span style="font-size: var(--fs-2xs); color: var(--ok); letter-spacing: 0.10em; text-transform: uppercase; font-family: var(--font-mono);">✓ Acked ${ackTs ? ackTs.slice(11,19) + 'Z' : ''}</span>` : '';
 
@@ -19638,9 +19638,10 @@ async function main() {
 
       ${ackGateHtml}
 
+      ${!isAcked && rec ? _renderStepPlaceholder(2, 'Select response option', 'acknowledge first', 'locked') : ''}
       ${isAcked || !rec ? (mineList.length ? `
-        <div class="c-panel c-panel-collapsible">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">${isAcked ? 'Step 2 · Select response option' : 'Your Response Options'}</div>
+        <div class="c-panel c-panel-collapsible rcv-step-panel">
+          ${_stepHdr(2, 'Select response option', { state: 'current', tint: 'var(--accent)' })}
           <div class="c-panel-body">
           <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${mineList.length} option${mineList.length === 1 ? '' : 's'} available. Multiple can be dispatched concurrently. Recommended pick is the closest by ETA.</div>
           <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-3);">
@@ -19856,19 +19857,33 @@ async function main() {
   //
   // Only surfaces on closed events. On a live event, an empty step
   // renderer means "hasn't fired yet" and should stay quiet.
-  function _renderStepPlaceholder(stepNum, titleUpper, statusText) {
+  // Process-spine header: numbered badge + title + state tag. The
+  // number stays visible in EVERY state including done, per Lucas.
+  // States: current (tinted, this is where you act), done (green
+  // check, number kept), locked (grey, preconditions unmet), muted
+  // (not applicable on a closed case).
+  function _stepHdr(num, title, { state = 'current', status = '', tint = 'var(--accent)' } = {}) {
     return `
-      <div class="step-placeholder">
-        <span class="step-placeholder-chevron">▸</span>
-        <span class="step-placeholder-num">STEP ${stepNum}</span>
-        <span class="step-placeholder-sep">·</span>
-        <span class="step-placeholder-title">${titleUpper}</span>
-        <span class="step-placeholder-status">${statusText}</span>
+      <div class="rcv-step-hdr rcv-step-${state}" style="--step-tint: ${tint};">
+        <span class="rcv-step-num">${num}</span>
+        <span class="rcv-step-title">${title}</span>
+        <span class="rcv-step-state">${state === 'done' ? '✓ ' + (status || 'done') : (status || (state === 'locked' ? 'locked' : ''))}</span>
+      </div>`;
+  }
+  function _renderStepPlaceholder(stepNum, titleUpper, statusText, state = 'muted') {
+    return `
+      <div class="rcv-step-row rcv-step-${state}">
+        ${_stepHdr(stepNum, titleUpper, { state, status: statusText, tint: state === 'done' ? 'var(--ok)' : 'var(--text-dim)' })}
       </div>`;
   }
   function _renderStepOrPlaceholder(stepNum, titleUpper, realOutput, event) {
     if (realOutput) return realOutput;
-    if (event?.status !== 'closed') return '';
+    if (event?.status !== 'closed') {
+      // Active case, preconditions unmet: render a visibly LOCKED
+      // spine row instead of hiding the step. The workflow shape
+      // stays constant; only the current step invites action.
+      return _renderStepPlaceholder(stepNum, titleUpper, 'locked', 'locked');
+    }
     // Step 6 gets the actual close timestamp; 4/5 stay "not applicable"
     // (no outcome to confirm, no responder pending, case closed cleanly).
     let statusText = 'not applicable';
@@ -19879,7 +19894,7 @@ async function main() {
     } else if (stepNum === 6) {
       statusText = 'closed';
     }
-    return _renderStepPlaceholder(stepNum, titleUpper, statusText);
+    return _renderStepPlaceholder(stepNum, titleUpper, statusText, stepNum === 6 ? 'done' : 'muted');
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -20127,7 +20142,7 @@ async function main() {
     _startMonEngTick(event.id, activeRole);
     return `
       <div class="c-panel c-panel-collapsible${res.wrapped ? ' mon-eng-wrapped' : ''}" data-mon-eng="${event.id}" style="border-top: 3px solid var(--accent);">
-        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--accent);">Step 3 · Monitor engagement</div>
+        ${_stepHdr(3, 'Monitor engagement', { state: 'current', tint: 'var(--accent)' })}
         <div class="c-panel-body">
           ${res.html}
         </div>
@@ -20180,7 +20195,7 @@ async function main() {
     }).join('');
     return `
       <div class="c-panel c-panel-collapsible" style="border-top: 3px solid #ffb84d;">
-        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #ffb84d;">Step 4 · Confirm outcome</div>
+        ${_stepHdr(4, 'Confirm outcome', { state: 'current', tint: '#c8a35f' })}
         <div class="c-panel-body">
           <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${dispatches.length} completed dispatch${dispatches.length === 1 ? '' : 'es'} awaiting formal outcome. Outcomes lock into the audit trail and unlock handoff options.</div>
           ${blocks}
@@ -20257,7 +20272,7 @@ async function main() {
 
     return `
       <div class="c-panel c-panel-collapsible" style="border-top: 3px solid #4dd2ff;">
-        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #4dd2ff;">Step 5 · Post-incident handoff</div>
+        ${_stepHdr(5, 'Post-incident handoff', { state: 'current', tint: '#7fa8c9' })}
         <div class="c-panel-body">
           ${pending.length ? `
             <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-1);">${pending.length} ground-response destination${pending.length === 1 ? '' : 's'} available for cordon, evidence recovery, and civil handoff.</div>
@@ -20283,7 +20298,7 @@ async function main() {
     if (event.status === 'closed' || event.outcome === 'closed') {
       return `
         <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--ok);">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--ok);">Step 6 · Event closed</div>
+          ${_stepHdr(6, 'Event closed', { state: 'done', status: 'closed', tint: 'var(--ok)' })}
           <div class="c-panel-body"><div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">Event archived to history. Full incident record retained for audit.</div></div>
         </div>`;
     }
@@ -20298,7 +20313,7 @@ async function main() {
     if (chain.length && !postIncidentChainAllLeavesResolved(event)) return '';
     return `
       <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--ok);">
-        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--ok);">Step 6 · Close event</div>
+        ${_stepHdr(6, 'Close event', { state: 'current', tint: 'var(--ok)' })}
         <div class="c-panel-body">
           <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">All outcomes confirmed. All applicable handoffs dispatched. Event ready for formal closure and archive.</div>
           <div style="display: flex; justify-content: flex-end;">
@@ -20394,7 +20409,7 @@ async function main() {
 
     return `
       <div class="c-panel c-panel-collapsible" data-pir-panel="${report.id}" style="border-top: 3px solid #ffb84d;">
-        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #ffb84d;">Step 7 · Incident Report</div>
+        ${_stepHdr(7, 'Incident report', { state: 'current', tint: '#c8a35f' })}
         <div class="c-panel-body">
           <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.14em; color: #ffb84d; font-size: var(--fs-2xs); margin-bottom: var(--space-1);">${emphasis.lead}</div>
           <div style="font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${emphasis.focus}</div>
@@ -21919,7 +21934,7 @@ async function main() {
         ctas.push({
           label: `Request ${r.name.toLowerCase()}`,
           sub: `Routes to ${r.from}. Priority ${r.priority || 'standard'}`,
-          icon: '⚡',
+          icon: '↗',
           tone: 'neutral',
           action: 'receiver-request',
           requestId: r.requestKey,
@@ -21935,7 +21950,7 @@ async function main() {
     // returns a spec for the role, these stubs are skipped.
     if (isActive && isPolitiBranch && !_receiverAssetSpec) {
       if (_siteAllowsAction(event, 'deploy-patrol')) ctas.push({
-        label: 'Deploy patrol', sub: 'Local district cars', icon: '🚔', tone: 'accent',
+        label: 'Deploy patrol', sub: 'Local district cars', icon: '▸', tone: 'accent',
         action: 'deploy-patrol',
         category: 'dispatch',
         tooltip: 'Dispatches district patrol cars to the incident site. Confirms via radio when on scene.',
@@ -21949,7 +21964,7 @@ async function main() {
       // Only regional Politi (not HQ, not specialty) requests AKS backup — AND site must declare aks capability
       if (role.parentId === 'politi' && !roleId.startsWith('politi-special') && _siteAllowsAction(event, 'request-aks')) {
         ctas.push({
-          label: 'Request tactical intervention', sub: 'Aktionsstyrken, national police tactical unit', icon: '⚡', tone: 'neutral',
+          label: 'Request tactical intervention', sub: 'Aktionsstyrken, national police tactical unit', icon: '↗', tone: 'neutral',
           action: 'request-aks',
           category: 'request',
           tooltip: 'Requests Aktionsstyrken, the Danish national police tactical unit, for armed or hostage-taking incidents.',
@@ -21960,13 +21975,13 @@ async function main() {
     // Beredskabsstyrelsen (Danish Emergency Management Agency) actors
     if (isActive && isBrsBranch) {
       if (_siteAllowsAction(event, 'brs-standby')) ctas.push({
-        label: 'Standby response', sub: 'Beredskabsstyrelsen teams on alert', icon: '⏳', tone: 'accent',
+        label: 'Standby response', sub: 'Beredskabsstyrelsen teams on alert', icon: '◷', tone: 'accent',
         action: 'brs-standby',
         category: 'dispatch',
         tooltip: 'Places Beredskabsstyrelsen, the Danish Emergency Management Agency, response teams on active standby without deploying yet.',
       });
       if (_siteAllowsAction(event, 'brs-deploy')) ctas.push({
-        label: 'Full deployment', sub: 'Beredskabsstyrelsen: hazmat, rescue, medical', icon: '🚨', tone: 'accent',
+        label: 'Full deployment', sub: 'Beredskabsstyrelsen: hazmat, rescue, medical', icon: '≡', tone: 'accent',
         action: 'brs-deploy',
         category: 'dispatch',
         tooltip: 'Full Beredskabsstyrelsen deployment. Chemical, biological, radiological, nuclear, rescue, and medical teams en route.',
@@ -21977,7 +21992,7 @@ async function main() {
     const isFlyv = roleId.startsWith('flv-') || role.parentId === 'flyvevaabnet';
     if (isActive && isForsvaretBranch && isFlyv && (event.platform === 'missile' || (event.classification === 'hostile' && ['fixed-wing', 'jet', 'quadcopter'].includes(event.platform)))) {
       ctas.push({
-        label: 'Scramble Air Force fighter', sub: 'On-call squadron', icon: '✈', tone: 'accent',
+        label: 'Scramble Air Force fighter', sub: 'On-call squadron', icon: '↗', tone: 'accent',
         action: 'qra-dispatch',
         category: 'dispatch',
         tooltip: 'Requests fighter intercept from the on-call squadron. Only available while the event is active.',
@@ -21988,13 +22003,13 @@ async function main() {
     const isHaer = roleId.startsWith('haer-') || role.parentId === 'haeren';
     if (isActive && isForsvaretBranch && isHaer) {
       if (_siteAllowsAction(event, 'army-c-uas')) ctas.push({
-        label: 'Deploy army counter drone unit', sub: 'Radio frequency and electronic warfare', icon: '⚡', tone: 'neutral',
+        label: 'Deploy army counter drone unit', sub: 'Radio frequency and electronic warfare', icon: '↗', tone: 'neutral',
         action: 'army-c-uas',
         category: 'dispatch',
         tooltip: 'Requests army counter drone unit deployment. Radio frequency jamming and electronic warfare capability.',
       });
       if (_siteAllowsAction(event, 'army-ground')) ctas.push({
-        label: 'Deploy ground force', sub: 'Rapid reinforcement', icon: '🪖', tone: 'neutral',
+        label: 'Deploy ground force', sub: 'Rapid reinforcement', icon: '▲', tone: 'neutral',
         action: 'army-ground',
         category: 'dispatch',
         tooltip: 'Requests army ground reinforcement to hold cordon or protect infrastructure.',
@@ -22005,7 +22020,7 @@ async function main() {
     const isIntel = roleId === 'fe' || roleId.startsWith('agency-cfcs') || roleId === 'forsvar-intel';
     if (isActive && isForsvaretBranch && isIntel) {
       ctas.push({
-        label: 'Log to intel picture', sub: 'Pattern-of-life analysis', icon: '📊', tone: 'neutral',
+        label: 'Log to intel picture', sub: 'Pattern-of-life analysis', icon: '≣', tone: 'neutral',
         action: 'intel-log',
         category: 'dispatch',
         tooltip: 'Adds this event to the intelligence picture for pattern-of-life analysis. No active response.',
@@ -22015,13 +22030,13 @@ async function main() {
     // Agency (Trafikstyrelsen — aviation regulator)
     if (isActive && isAgencyBranch && roleId === 'agency-traf' && ['quadcopter', 'fixed-wing', 'jet', 'missile'].includes(event.platform)) {
       if (_siteAllowsAction(event, 'issue-notam')) ctas.push({
-        label: 'Issue airspace advisory', sub: 'NOTAM push', icon: '📡', tone: 'accent',
+        label: 'Issue airspace advisory', sub: 'NOTAM push', icon: '⇡', tone: 'accent',
         action: 'issue-notam',
         category: 'dispatch',
         tooltip: 'Issues NOTAM airspace advisory for the affected zone. Distributed to Eurocontrol.',
       });
       if (_siteAllowsAction(event, 'restrict-airspace')) ctas.push({
-        label: 'Restrict airspace', sub: 'Full closure order', icon: '⛔', tone: 'danger',
+        label: 'Restrict airspace', sub: 'Full closure order', icon: '⊘', tone: 'danger',
         action: 'restrict-airspace',
         category: 'dispatch',
         tooltip: 'Full airspace closure order for the affected zone. Requires ministerial sign-off in production.',
@@ -22031,7 +22046,7 @@ async function main() {
     // Agency (Søfartsstyrelsen — maritime regulator)
     if (isActive && isAgencyBranch && roleId === 'agency-sof' && (roleScope === 'maritime' || event.siteId === 'esbjerg')) {
       if (_siteAllowsAction(event, 'issue-maritime-advisory')) ctas.push({
-        label: 'Issue maritime advisory', sub: 'Coast guard notice', icon: '📡', tone: 'accent',
+        label: 'Issue maritime advisory', sub: 'Coast guard notice', icon: '⇡', tone: 'accent',
         action: 'issue-maritime-advisory',
         category: 'dispatch',
         tooltip: 'Issues advisory to coast guard and maritime traffic in affected zone.',
@@ -22041,14 +22056,14 @@ async function main() {
     // Kommune (municipal crisis staff)
     if (isActive && isKommune) {
       if (_siteAllowsAction(event, 'kom-crisis')) ctas.push({
-        label: 'Alert kommune crisis staff', sub: 'Municipal war-room', icon: '🏛', tone: 'accent',
+        label: 'Alert kommune crisis staff', sub: 'Municipal war-room', icon: '◆', tone: 'accent',
         action: 'kom-crisis',
         category: 'dispatch',
         tooltip: 'Alerts the municipal crisis staff. Activates local emergency plan.',
       });
       if (event.classification === 'hostile' && event.threat === 'high' && _siteAllowsAction(event, 'kom-shelter')) {
         ctas.push({
-          label: 'Shelter-in-place notification', sub: 'Public alert', icon: '🏘', tone: 'danger',
+          label: 'Shelter-in-place notification', sub: 'Public alert', icon: '⌂', tone: 'danger',
           action: 'kom-shelter',
           category: 'dispatch',
           tooltip: 'Broadcasts shelter-in-place notification to residents in affected zone via SMS + siren.',
@@ -22059,7 +22074,7 @@ async function main() {
     // Hjemmeværnet (Danish Home Guard) actors
     if (isActive && isHjvBranch) {
       if (_siteAllowsAction(event, 'hjv-reinforce')) ctas.push({
-        label: 'Reinforce guard', sub: 'Hjemmeværnet volunteer callout', icon: '🛡', tone: 'neutral',
+        label: 'Reinforce guard', sub: 'Hjemmeværnet volunteer callout', icon: '◈', tone: 'neutral',
         action: 'hjv-reinforce',
         category: 'dispatch',
         tooltip: 'Calls out Hjemmeværnet, the Danish Home Guard, volunteer patrols to reinforce perimeter or hold cordon.',
@@ -22069,14 +22084,14 @@ async function main() {
     // Region (ambulance + hospital coordination)
     if (isActive && isRegionBranch) {
       if (_siteAllowsAction(event, 'region-ambulance-standby')) ctas.push({
-        label: 'Ambulance standby', sub: 'Regional 112 alerted', icon: '🚑', tone: 'accent',
+        label: 'Ambulance standby', sub: 'Regional 112 alerted', icon: '✚', tone: 'accent',
         action: 'region-ambulance-standby',
         category: 'dispatch',
         tooltip: 'Puts regional ambulance service on active standby for casualty response.',
       });
       if (event.classification === 'hostile' && event.threat === 'high' && _siteAllowsAction(event, 'region-triage-prep')) {
         ctas.push({
-          label: 'Casualty triage prep', sub: 'Regional hospitals', icon: '🏥', tone: 'danger',
+          label: 'Casualty triage prep', sub: 'Regional hospitals', icon: '✚', tone: 'danger',
           action: 'region-triage-prep',
           category: 'dispatch',
           tooltip: 'Alerts regional hospitals to prepare mass-casualty triage.',
@@ -22103,14 +22118,14 @@ async function main() {
     }
     if (isActive) {
       ctas.push({
-        label: 'Cascade to any agency', sub: 'Full picker across all archetypes', icon: '🎯', tone: 'neutral',
+        label: 'Cascade to any agency', sub: 'Full picker across all archetypes', icon: '⌖', tone: 'neutral',
         action: 'cascade-any',
         category: 'request',
         tooltip: 'Opens the full archetype-grouped picker. Type-ahead search across every registered receiver plus recommended defaults tailored to this event.',
       });
     }
     ctas.push({
-      label: 'Loop in observer', sub: 'Add role to case', icon: '👥', tone: 'neutral',
+      label: 'Loop in observer', sub: 'Add role to case', icon: '⊕', tone: 'neutral',
       action: 'observer-add',
       category: 'audit',
       tooltip: 'Adds another role to this event as an observer. They receive notifications but no CTAs unless promoted.',

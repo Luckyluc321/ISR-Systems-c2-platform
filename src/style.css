@@ -9390,3 +9390,106 @@ body.workspace-map-active #receiver-view {
   text-transform: uppercase;
   margin-right: 6px;
 }
+
+/* ── Receiver UI pass R0: shared button tiers ─────────────────
+   One affordance language. Primary = the one thing to do next.
+   Secondary = clearly a button, not shouting. Ghost = quiet action. */
+.btn-primary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 10px 20px;
+  background: var(--accent);
+  color: #06121c;
+  border: none;
+  border-radius: 7px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: filter 120ms, transform 60ms;
+}
+.btn-primary:hover { filter: brightness(1.15); }
+.btn-primary:active { transform: translateY(1px); }
+.btn-secondary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 7px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms;
+}
+.btn-secondary:hover { background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.30); }
+.btn-ghost {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 10px;
+  background: transparent;
+  color: var(--text-dim);
+  border: none;
+  border-radius: 5px;
+  font-size: var(--fs-2xs);
+  cursor: pointer;
+}
+.btn-ghost:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); }
+
+/* ── Receiver UI pass R1: process spine ─────────────────────── */
+.rcv-step-hdr {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: var(--space-2);
+}
+.rcv-step-num {
+  flex: 0 0 auto;
+  width: 22px; height: 22px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--step-tint, var(--accent));
+  border: 1.5px solid var(--step-tint, var(--accent));
+  background: transparent;
+}
+.rcv-step-title {
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--step-tint, var(--accent));
+}
+.rcv-step-state {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+/* Done: number badge fills green-dim, title calms down */
+.rcv-step-done .rcv-step-num { background: rgba(77, 255, 156, 0.12); }
+.rcv-step-done .rcv-step-title { color: var(--text-dim); }
+.rcv-step-done .rcv-step-state { color: var(--ok); }
+/* Locked: everything grey, badge dashed */
+.rcv-step-locked .rcv-step-num { border-style: dashed; color: var(--text-dim); border-color: var(--text-dim); }
+.rcv-step-locked .rcv-step-title { color: var(--text-dim); }
+/* Muted (n/a on closed case) mirrors locked without the dash */
+.rcv-step-muted .rcv-step-num { color: var(--text-dim); border-color: var(--border); }
+.rcv-step-muted .rcv-step-title { color: var(--text-dim); }
+/* Standalone spine rows (done / locked / muted stubs between panels) */
+.rcv-step-row {
+  padding: 8px 12px;
+  margin-top: var(--space-2);
+  background: rgba(255, 255, 255, 0.015);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.rcv-step-row .rcv-step-hdr { margin-bottom: 0; }
