@@ -5552,7 +5552,7 @@ async function main() {
                   appendEventArray(targetEv.id, 'notes', {
                     timestamp: new Date().toISOString(),
                     author: 'Interceptor telemetry',
-                    text: `${d.assetName} jamming ineffective — target guidance resisted (effect probability ${Math.round(_jamFx.probability * 100)}%).`,
+                    text: `${d.assetName} jamming ineffective. Target guidance resisted, no observed effect.`,
                     type: 'engagement-failed',
                   });
                   d.state = 'complete';
@@ -5580,11 +5580,15 @@ async function main() {
               });
               if (_fxState) _fxState._damageAccum = _fx.damage;
               if (_fx.outcome === 'survive') {
-                toast(`${targetEv.droneType || 'Target'} absorbed fire and continues. Damage accumulating (${Math.round(_fx.damage * 100)}%). Re-engaging.`, 'warn');
+                // Operator surface reports only what telemetry can
+                // observe: rounds fired, target still flying. The
+                // damage model is sim-internal and NEVER surfaced —
+                // no sensor measures airframe damage percentages.
+                toast(`${targetEv.droneType || 'Target'} not neutralised. Still flying. ${d.assetName} re-engaging.`, 'warn');
                 appendEventArray(targetEv.id, 'notes', {
                   timestamp: new Date().toISOString(),
                   author: 'Interceptor telemetry',
-                  text: `${d.assetName} landed hits but target survived (survive ${Math.round((_fx.probabilities?.survive || 0) * 100)}%). Re-engaging with accumulated damage ${Math.round(_fx.damage * 100)}%.`,
+                  text: `${d.assetName} engaged, rounds fired, target not neutralised. Re-engaging.`,
                   type: 'engagement-partial',
                 });
                 d.engageStartTs = now;   // new engagement window, keep chasing
@@ -5780,7 +5784,7 @@ async function main() {
               appendEventArray(targetEv.id, 'notes', {
                 timestamp: new Date().toISOString(),
                 author: 'Interceptor telemetry',
-                text: `${d.assetName} engagement failed. Reason: ${reasonText} Engagement quality score ${(outcome.quality * 100).toFixed(0)} percent.`,
+                text: `${d.assetName} engagement failed. Reason: ${reasonText}`,
                 type: 'engagement-failed',
               });
             }
@@ -6371,7 +6375,7 @@ async function main() {
         });
         sw._damageAccum = _swFx.damage;
         if (_swFx.outcome === 'survive') {
-          toast(`${sw.model || 'Target'} absorbed fire and continues (damage ${Math.round(_swFx.damage * 100)}%). ${d.assetName} re-engaging.`, 'warn');
+          toast(`${sw.model || 'Target'} not neutralised. Still flying. ${d.assetName} re-engaging.`, 'warn');
           d._firedAtLeastOnce = false;
           d._roundsFired = 0;
           d.engageStartTs = null;
