@@ -5536,11 +5536,40 @@ async function main() {
             // outcome flip. For single-target events without a swarm
             // member, mark the event neutralized directly.
             if (!d.assignedSwarmMember && targetEv && targetEv.status === 'active') {
+              // Jamming-class weapons (police / army C-UAS) resolve by
+              // susceptibility, not rounds: a susceptible target is
+              // forced down (physics-fall = forced landing), a
+              // resistant one (anti-jam guidance) is unaffected and
+              // the engagement ENDS — re-engaging a jam-proof target
+              // forever would spam the case file with 0%-damage notes
+              // (verify-agent finding: police-c-uas could never
+              // resolve a single-target engagement).
+              const _wp = WEAPON_PROFILES[d.kind];
+              if (_wp?.class === 'jamming') {
+                const _jamFx = resolveJammingEffect({ weaponKind: d.kind, targetPlatform: targetEv.platform });
+                if (!_jamFx.jammed) {
+                  toast(`${targetEv.droneType || 'Target'} resistant to ${d.assetName} jamming (anti-jam guidance). No effect.`, 'warn');
+                  appendEventArray(targetEv.id, 'notes', {
+                    timestamp: new Date().toISOString(),
+                    author: 'Interceptor telemetry',
+                    text: `${d.assetName} jamming ineffective — target guidance resisted (effect probability ${Math.round(_jamFx.probability * 100)}%).`,
+                    type: 'engagement-failed',
+                  });
+                  d.state = 'complete';
+                  _resolveEngagement(d);
+                  return;
+                }
+                d._effectOutcome = 'disable';   // jam success = forced landing
+              } else {
               // Survivability roll (engagement_effects.js): landing
               // hits is not a kill. Outcome distribution depends on
               // weapon class, rounds landed, and target construction;
               // damage carries across windows so sustained fire
-              // converges on certain neutralisation.
+              // converges on certain neutralisation. hitQuality scales
+              // damage on top of already gating the hit roll upstream:
+              // the quadratic penalty on fast targets is intentional
+              // (machine guns should not grind down jets — fast
+              // targets escape via the miss path instead).
               const _fxState = droneState.get(d.eventId);
               const _fx = resolveKineticEffect({
                 weaponKind: d.kind,
@@ -5563,6 +5592,7 @@ async function main() {
                 return;
               }
               d._effectOutcome = _fx.outcome;   // 'explode' | 'disable' → mode below
+              }
               // Capture the kill location from live target position (or
               // fall back to the interceptor's current position if that
               // lookup fails). This is the "wreckage" coordinate that
@@ -6346,7 +6376,12 @@ async function main() {
           d._roundsFired = 0;
           d.engageStartTs = null;
           d.state = 'en_route';
-          d.lastFrameTs = now;
+          // Date.now(), NOT the tick-loop `now` param — that variable
+          // does not exist in _resolveEngagement's scope and reading
+          // it threw a ReferenceError that aborted the rAF callback
+          // before reschedule, freezing every dispatch for the session
+          // (verify-agent finding).
+          d.lastFrameTs = Date.now();
           return;
         }
         // Hit animation at THIS drone's live position
