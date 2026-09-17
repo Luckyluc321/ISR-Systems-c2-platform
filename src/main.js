@@ -768,9 +768,17 @@ async function main() {
   // confirmed; adjust headingOffsetDeg (0 / 90 / 180 / 270) until
   // the nose points along the flight direction.
   window.__isr_shahed_tuning = window.__isr_shahed_tuning || {
-    headingOffsetDeg: 90,      // rotate model forward axis. Try 0, 90, 180, 270 if nose points wrong direction.
+    // 2026-09-17: 90 left the nose pointing 90 degrees LEFT of travel
+    // (field observation). 180 puts the snout on the true direction of
+    // flight. If a model swap ever flips it again, tune live:
+    //   window.__isr_shahed_tuning.headingOffsetDeg = 0 / 90 / 270
+    headingOffsetDeg: 180,
     pitchOffsetDeg: 0,         // additional pitch bias (usually 0)
-    headingSmoothing: 0.18,    // per-frame angular lerp toward target heading (0 = frozen, 1 = snap)
+    // 0.18 converged in about a quarter second, which read as the
+    // airframe snapping 90 degrees in one movement. 0.06 sweeps the
+    // same turn over roughly a second: many small corrections, same
+    // end heading.
+    headingSmoothing: 0.06,    // per-frame angular lerp toward target heading (0 = frozen, 1 = snap)
     pitchSmoothing:   0.10,    // per-frame lerp toward target pitch
     rollSmoothing:    0.08,    // per-frame lerp toward target roll (bank on turns)
     bankFactor:       2.5,     // radians of roll per rad/s yaw rate
