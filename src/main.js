@@ -3739,16 +3739,19 @@ async function main() {
   const CD_PROFILE = {
     'helicopter-intercept': {
       cruiseKmh: 250, arriveAtM: 500, engageSec: 8,
+      onboardSensorRangeM: 800,   // EO/IR turret, longest onboard reach
       icon: 'helicopter', trail: true, airborne: true,
       label: 'Helicopter intercept',
     },
     'army-c-uas': {
       cruiseKmh: 0, arriveAtM: null, engageSec: 12,
+      onboardSensorRangeM: 1500,   // RF detection array, static emplacement
       icon: 'jammer', trail: false, airborne: false, radiationCone: true,
       label: 'Army Counter-Drone Jammer',
     },
     'police-c-uas': {
       cruiseKmh: 80, arriveAtM: 500, engageSec: 10,
+      onboardSensorRangeM: 350,   // vehicle-mounted detector + visual
       icon: 'police-vehicle', trail: false, airborne: false, radiationCone: true,
       useRoadRouting: true,   // ground vehicle → follow real streets via OSRM
       supportsMultiDispatch: true,   // more than one patrol from same base is doctrine
@@ -3766,6 +3769,7 @@ async function main() {
     },
     'army-isr-drone': {
       cruiseKmh: 60, arriveAtM: 300, engageSec: 6,
+      onboardSensorRangeM: 600,   // ISR optics package
       icon: 'quadcopter', trail: true, airborne: true,
       visualVerifyOnly: true,   // does NOT neutralise on its own
       label: 'ISR drone (visual verify)',
@@ -3782,6 +3786,7 @@ async function main() {
     },
     'counter-drone-swarm': {
       cruiseKmh: 120, arriveAtM: 200, engageSec: 4,
+      onboardSensorRangeM: 400,   // interceptor seeker head
       icon: 'counter-drone-interceptor', trail: true, airborne: true,
       swarmSize: 3,              // 3 interceptor drones per dispatch
       swarmSpacingM: 130,        // wider triangle so icons read as distinct pack
@@ -3986,6 +3991,27 @@ async function main() {
   // airborne interceptors. Each patrol gets pinned to a specific
   // wreckage id + ingress heading, then re-routed via OSRM from its
   // current live position.
+  // Onboard-sensor pursuit: does any active response unit still hold
+  // the target with its OWN sensors? Per-model range lives in
+  // CD_PROFILE.onboardSensorRangeM (new response models plug in by
+  // declaring theirs). Deliberately independent of the site sensor
+  // mesh: the C2 map renders only what OUR sensors see, so a pursuit
+  // held on a responder's seeker keeps the event alive without making
+  // the target visible — the operator just sees the responder turn.
+  function _onboardTrackMaintained(event, p) {
+    const lat = p?.lat ?? event?.lastPosition?.lat;
+    const lon = p?.lon ?? event?.lastPosition?.lon;
+    if (lat == null || lon == null) return false;
+    for (const [, cd] of _counterDispatches) {
+      if (cd.eventId !== event.id) continue;
+      if (cd.state !== 'en_route' && cd.state !== 'engaging') continue;
+      const rangeM = cd.profile?.onboardSensorRangeM;
+      if (!rangeM) continue;
+      if (haversineM(cd.curLat, cd.curLon, lat, lon) <= rangeM) return true;
+    }
+    return false;
+  }
+
   function _rebalancePatrolsToWreckages(event) {
     if (!event || !Array.isArray(event.wreckages) || !event.wreckages.length) return;
     const patrolDispatches = [];
@@ -12047,7 +12073,7 @@ async function main() {
           }
         }
 
-        // OUT OF RANGE (terminal) — fires the instant no sensor at this
+        // OUT OF RANGE (marker) — fires the instant no sensor at this
         // site can detect the missile. cov.inCoverage aggregates every
         // sensor's individual coverageRadius from metadata; if any sensor
         // still covers the position we stay in range. No hardcoded buffer.
@@ -12057,15 +12083,25 @@ async function main() {
             const oorTime = new Date().toISOString().slice(11, 19);
             state.outOfRangeMarker = _dropMarker(p.lat, p.lon, '#ff5a5a', `OUT OF RANGE ${oorTime}Z · signal lost`, event.id);
             mutateEvent(event.id, { outOfRange: { lat: p.lat, lon: p.lon, alt: Math.round(p.alt), timestamp: new Date().toISOString() } });
-            if (!state.closedAt && !event.awaitingNeutralization && !event.multiSiteTrack) {
-              state.closedAt = performance.now();
-              markTrackClosed(p.eventId);
-              closeEvent(p.eventId, event.exit || null, { autoOutcome: 'lost contact' });
-              updateContributingRings();
-              renderAlertStrip();
-              if (getSelectedEventId() === p.eventId) renderDetailPanel();
-            }
           }
+        }
+        // Terminal close — separated from the marker drop and
+        // re-evaluated every tick while dark: a responder whose
+        // ONBOARD sensor still holds the target (per-model
+        // onboardSensorRangeM in CD_PROFILE) keeps the pursuit alive.
+        // The map stays dark either way — the responder's seeker is
+        // not our sensor mesh, so the only visible tell is the
+        // responder changing course. The event closes only when both
+        // our mesh AND every responder's onboard sensor have lost it.
+        if (state.outOfRangeDropped && !state.closedAt && !event.awaitingNeutralization
+            && !event.multiSiteTrack && event.status === 'active'
+            && !cov?.inCoverage && !_onboardTrackMaintained(event, p)) {
+          state.closedAt = performance.now();
+          markTrackClosed(p.eventId);
+          closeEvent(p.eventId, event.exit || null, { autoOutcome: 'lost contact' });
+          updateContributingRings();
+          renderAlertStrip();
+          if (getSelectedEventId() === p.eventId) renderDetailPanel();
         }
       } else {
         // Off-map: hide LEAD drone (swarm handled by its own loop below).
