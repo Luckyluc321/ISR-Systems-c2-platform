@@ -768,13 +768,12 @@ async function main() {
   // confirmed; adjust headingOffsetDeg (0 / 90 / 180 / 270) until
   // the nose points along the flight direction.
   window.__isr_shahed_tuning = window.__isr_shahed_tuning || {
-    // 2026-09-17: 90 left the nose 90 degrees LEFT of travel; 180
-    // still bent slightly left (the GLB's authored axis is not on a
-    // clean 90 degree step). 195 compensates the residual. Fine-tune
-    // LIVE while watching a straight flight leg:
-    //   window.__isr_shahed_tuning.headingOffsetDeg = 190 / 195 / 200
-    // and report the value that flies straight so it gets baked here.
-    headingOffsetDeg: 195,
+    // 2026-09-17: 90 left the nose 90 degrees LEFT of travel; 180 is
+    // correct. (The "still slightly left" observation was the 2D icon
+    // bearing missing its cos(lat) correction, fixed in the tick loop,
+    // not this model offset.) Live dial if a model swap ever flips it:
+    //   window.__isr_shahed_tuning.headingOffsetDeg = 0 / 90 / 270
+    headingOffsetDeg: 180,
     pitchOffsetDeg: 0,         // additional pitch bias (usually 0)
     // 0.18 converged in about a quarter second, which read as the
     // airframe snapping 90 degrees in one movement. 0.06 sweeps the
@@ -12175,7 +12174,13 @@ async function main() {
         // the AMRAAM's homing arc, instead of an instant snap.
         if (state.prevLat !== undefined) {
           const dLat = p.lat - state.prevLat;
-          const dLon = p.lon - state.prevLon;
+          // cos(lat) correction: a longitude degree at Copenhagen is
+          // only ~56% of a latitude degree in metres. Without this the
+          // bearing rotates toward north on every diagonal leg, which
+          // read as the icon nose permanently bending LEFT on the
+          // northwest-running attack routes (straight on pure east-west
+          // legs, up to ~10 degrees off on diagonals).
+          const dLon = (p.lon - state.prevLon) * Math.cos(p.lat * Math.PI / 180);
           if (Math.abs(dLat) > 1e-9 || Math.abs(dLon) > 1e-9) {
             const target = -Math.atan2(dLon, dLat);
             if (state.stateHolder.headingInit) {
