@@ -19476,7 +19476,7 @@ async function main() {
              ${unitsCounter}
              <div style="display: flex; align-items: center;">
                ${unitsPickerHtml}
-               <button class="pl-dispatch-btn" style="padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.06); color: #4dff9c; border: 1px solid rgba(77, 255, 156, 0.35); border-left: 2px solid #4dff9c; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.20em; text-transform: uppercase; font-family: var(--font-mono); transition: background 120ms, border-color 120ms;" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">${canRepeat && activeUnitsForThisAsset > 0 ? 'Dispatch more' : 'Dispatch'}</button>
+               <button class="pl-dispatch-btn btn-act-go" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">${canRepeat && activeUnitsForThisAsset > 0 ? 'Dispatch more' : 'Dispatch'}</button>
              </div>
            </div>`;
 
@@ -20189,7 +20189,7 @@ async function main() {
           <label class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-dim); font-size: var(--fs-2xs); display: block; margin-bottom: 4px;">Analyst notes (optional)</label>
           <textarea data-outcome-notes="${cd.dispatchId}" rows="2" placeholder="Free-text observations..." style="width: 100%; padding: 6px 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--border); border-radius: 2px; color: var(--text); font-family: var(--font-body); font-size: var(--fs-sm); resize: vertical; box-sizing: border-box; margin-bottom: var(--space-2);"></textarea>
           <div style="display: flex; justify-content: flex-end;">
-            <button class="pl-dispatch-btn" style="padding: 6px 14px; font-size: var(--fs-2xs); background: rgba(255, 184, 77, 0.08); color: #ffb84d; border: 1px solid rgba(255, 184, 77, 0.4); border-left: 2px solid #ffb84d; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="confirm-outcome" data-dispatch-id="${cd.dispatchId}" data-event-id="${event.id}">Confirm outcome</button>
+            <button class="pl-dispatch-btn btn-act-warn" data-rcv="confirm-outcome" data-dispatch-id="${cd.dispatchId}" data-event-id="${event.id}">Confirm outcome</button>
           </div>
         </article>`;
     }).join('');
@@ -20226,7 +20226,7 @@ async function main() {
           <div style="font-size: var(--fs-sm); color: var(--text); font-weight: 500;">${r.name}</div>
           <div class="c-label" style="margin-top: 2px; color: var(--text-dim);">Tier ${r.tier} · ${r.type}</div>
         </div>
-        <button class="pl-dispatch-btn" style="padding: 6px 12px; font-size: var(--fs-2xs); background: rgba(77, 210, 255, 0.06); color: var(--accent); border: 1px solid rgba(77, 210, 255, 0.4); border-left: 2px solid var(--accent); border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="dispatch-postinc" data-id="${event.id}" data-dest="${r.id}">Dispatch</button>
+        <button class="pl-dispatch-btn btn-act-info" data-rcv="dispatch-postinc" data-id="${event.id}" data-dest="${r.id}">Dispatch</button>
       </div>
     `).join('');
 
@@ -20251,8 +20251,8 @@ async function main() {
         : `<span style="display:inline-flex;align-items:center;padding:2px 8px;background:rgba(77,210,255,0.10);border:1px solid rgba(77,210,255,0.4);border-radius:12px;font-size:var(--fs-2xs);letter-spacing:0.14em;color:#4dd2ff;font-family:var(--font-mono);">OPEN</span>`;
       const controls = entry.status === 'open'
         ? `
-          <button class="pl-dispatch-btn" style="padding:5px 10px;font-size:var(--fs-2xs);background:rgba(255,184,77,0.08);color:#ffb84d;border:1px solid rgba(255,184,77,0.4);border-radius:2px;cursor:pointer;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;font-family:var(--font-mono);" data-rcv="chain-handoff" data-id="${event.id}" data-chain="${entry.id}">Hand off</button>
-          <button class="pl-dispatch-btn" style="padding:5px 10px;font-size:var(--fs-2xs);background:rgba(77,255,156,0.08);color:#4dff9c;border:1px solid rgba(77,255,156,0.4);border-radius:2px;cursor:pointer;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;font-family:var(--font-mono);" data-rcv="chain-resolve" data-id="${event.id}" data-chain="${entry.id}">Mark resolved</button>
+          <button class="pl-dispatch-btn btn-act-info" data-rcv="chain-handoff" data-id="${event.id}" data-chain="${entry.id}">Hand off</button>
+          <button class="pl-dispatch-btn btn-act-go" data-rcv="chain-resolve" data-id="${event.id}" data-chain="${entry.id}">Mark resolved</button>
         `
         : `<span class="c-label" style="color: var(--text-dim);">${(entry.resolvedAt || '').slice(11,19)}Z${entry.resolvedBy ? ' · by ' + entry.resolvedBy : ''}</span>`;
       const leafMarker = leafIds.has(entry.id) && chain.length > 1
@@ -20317,7 +20317,7 @@ async function main() {
         <div class="c-panel-body">
           <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">All outcomes confirmed. All applicable handoffs dispatched. Event ready for formal closure and archive.</div>
           <div style="display: flex; justify-content: flex-end;">
-            <button class="pl-dispatch-btn" style="padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.08); color: var(--ok); border: 1px solid rgba(77, 255, 156, 0.4); border-left: 2px solid var(--ok); border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="close-event" data-id="${event.id}">Close event</button>
+            <button class="pl-dispatch-btn btn-act-go" data-rcv="close-event" data-id="${event.id}">Close event</button>
           </div>
         </div>
       </div>`;
@@ -20351,7 +20351,7 @@ async function main() {
       <div class="c-panel" style="border-top: 3px solid #6b7280;">
         <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #6b7280;">Admin · History maintenance</div>
         <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-2);">This closed event is part of the site's precedent history. Annulling withdraws it from historical pattern counts and prior-event retrieval. The event and its report are not deleted. The annulment is audit-logged.</div>
-        <button class="pl-dispatch-btn" style="padding: 6px 14px; font-size: var(--fs-2xs); background: rgba(107, 114, 128, 0.08); color: #9ca3af; border: 1px solid rgba(156, 163, 175, 0.4); border-left: 2px solid #9ca3af; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="annul-history" data-id="${event.id}">Annul from history</button>
+        <button class="pl-dispatch-btn btn-act-muted" data-rcv="annul-history" data-id="${event.id}">Annul from history</button>
       </div>`;
   }
 

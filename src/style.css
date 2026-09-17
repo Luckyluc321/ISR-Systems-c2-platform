@@ -8677,9 +8677,9 @@ body.view-fleet #fleet-view { display: block; }
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-3);
-  background: rgba(180,200,220,0.03);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  background: rgba(180,200,220,0.045);
+  border: 1px solid rgba(255,255,255,0.14);
+  border-radius: 8px;
   cursor: pointer;
   text-align: left;
   transition: transform var(--motion) var(--ease), border-color var(--motion) var(--ease), background var(--motion) var(--ease);
@@ -8702,10 +8702,8 @@ body.view-fleet #fleet-view { display: block; }
    Actual pressed / done state is handled by rendering an inert
    "Acknowledged at HH:MM:SSZ" pill in place of the button. */
 .rer-cta.primary {
-  background: rgba(180,200,220,0.03);
-  border-color: var(--border);
-  border-left: 2px solid var(--accent);
-  padding-left: calc(var(--space-3) - 1px);
+  background: rgba(77,210,255,0.09);
+  border-color: rgba(77,210,255,0.45);
 }
 .rer-cta.primary:hover:not(:disabled) {
   background: rgba(77,210,255,0.06);
@@ -9493,3 +9491,45 @@ body.workspace-map-active #receiver-view {
   border-radius: 6px;
 }
 .rcv-step-row .rcv-step-hdr { margin-bottom: 0; }
+
+/* ── Receiver UI R2: action button tones ──────────────────────
+   Replaces the seven per-button inline style blobs. Shared shape
+   from the tier system, tone = state colour on border + text with
+   a quiet tinted fill. Real edges, real radius, real tap target. */
+.pl-dispatch-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 9px 18px;
+  border-radius: 7px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background 120ms, border-color 120ms, transform 60ms;
+}
+.pl-dispatch-btn:active { transform: translateY(1px); }
+.btn-act-go {
+  background: rgba(77, 255, 156, 0.10);
+  color: #4dff9c;
+  border: 1px solid rgba(77, 255, 156, 0.45);
+}
+.btn-act-go:hover { background: rgba(77, 255, 156, 0.18); border-color: #4dff9c; }
+.btn-act-warn {
+  background: rgba(200, 163, 95, 0.10);
+  color: #c8a35f;
+  border: 1px solid rgba(200, 163, 95, 0.45);
+}
+.btn-act-warn:hover { background: rgba(200, 163, 95, 0.18); border-color: #c8a35f; }
+.btn-act-info {
+  background: rgba(127, 168, 201, 0.10);
+  color: #7fa8c9;
+  border: 1px solid rgba(127, 168, 201, 0.45);
+}
+.btn-act-info:hover { background: rgba(127, 168, 201, 0.18); border-color: #7fa8c9; }
+.btn-act-muted {
+  background: rgba(156, 163, 175, 0.08);
+  color: #9ca3af;
+  border: 1px solid rgba(156, 163, 175, 0.40);
+}
+.btn-act-muted:hover { background: rgba(156, 163, 175, 0.15); border-color: #9ca3af; }
