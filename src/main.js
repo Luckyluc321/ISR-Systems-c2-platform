@@ -6011,13 +6011,13 @@ async function main() {
       }, 60 + i * 25);
     }
     // Expanding smoke plume — starts dense at explosion centre, expands
-    // and drifts upward, fades over 10 s. Three stacked billboards at
+    // and drifts upward, fades over ~7 s. Three stacked billboards at
     // rising altitudes give it depth.
     setTimeout(() => {
-      _spawnFlashEntity(lon, lat, 10000, 'rgba(50,44,40,0.85)', 32, 130, alt);
-      _spawnFlashEntity(lon, lat, 9500,  'rgba(80,72,66,0.65)', 42, 140, alt + 25);
-      _spawnFlashEntity(lon, lat, 9000,  'rgba(120,110,100,0.45)', 32, 130, alt + 60);
-      _spawnFlashEntity(lon, lat, 8500,  'rgba(160,150,138,0.28)', 22, 110, alt + 110);
+      _spawnFlashEntity(lon, lat, 7000, 'rgba(50,44,40,0.85)', 32, 130, alt);
+      _spawnFlashEntity(lon, lat, 6600, 'rgba(80,72,66,0.65)', 42, 140, alt + 25);
+      _spawnFlashEntity(lon, lat, 6200, 'rgba(120,110,100,0.45)', 32, 130, alt + 60);
+      _spawnFlashEntity(lon, lat, 5800, 'rgba(160,150,138,0.28)', 22, 110, alt + 110);
     }, 400);
   }
 
@@ -7286,6 +7286,7 @@ async function main() {
     if (t.startsWith('REACQUIRED'))   return 'reacq';
     if (t.startsWith('DETECTED'))     return 'detected';
     if (t.includes('DOWNED'))         return 'kill';
+    if (t.includes('IMPACT'))         return 'kill';   // warhead detonation groups with kills in the chip UI
     return 'other';
   }
   // Category buckets used by the filter chip UI.
@@ -12582,6 +12583,39 @@ async function main() {
         if (_didImpact && p.lat != null && p.lon != null) {
           _playExplosionSequence(p.lon, p.lat, Math.max(25, p.alt || 30));
           toast(`IMPACT · ${event.droneType || 'weapon'} detonated at target.`, 'warn');
+          // Persistent IMPACT marker at the detonation point — same
+          // pattern as the DOWNED marker so the coordinate survives on
+          // the map after the smoke clears and routes through the
+          // per-event marker visibility + filter chips (groups with
+          // kills).
+          const _impactEnt = viewer.entities.add({
+            position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 0),
+            properties: { markerEventId: event.id, markerKind: 'impact' },
+            point: {
+              pixelSize: 7,
+              color: Cesium.Color.fromCssColorString('#8b2500'),
+              outlineColor: Cesium.Color.fromCssColorString('#ff8f2a'),
+              outlineWidth: 1,
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+            label: {
+              text: '✸ IMPACT',
+              font: '9px system-ui',
+              fillColor: Cesium.Color.fromCssColorString('#ffb27a'),
+              outlineColor: Cesium.Color.BLACK,
+              outlineWidth: 2,
+              style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+              pixelOffset: new Cesium.Cartesian2(0, -14),
+              showBackground: true,
+              backgroundColor: Cesium.Color.fromCssColorString('rgba(8, 11, 16, 0.85)'),
+              backgroundPadding: new Cesium.Cartesian2(5, 2),
+              heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+              disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            },
+          });
+          if (!_perEventMarkers.has(event.id)) _perEventMarkers.set(event.id, []);
+          _perEventMarkers.get(event.id).push(_impactEnt);
         }
         closeEvent(p.eventId, event.exit || null, { autoOutcome: _didImpact ? 'target impact' : 'left coverage' });
         // Also close any linked/secondary events (e.g. swarm's shadow
