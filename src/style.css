@@ -9317,3 +9317,15 @@ body.workspace-map-active #receiver-view {
   color: #4dff9c;
   border-color: rgba(77, 255, 156, 0.35);
 }
+
+/* Swarm roster downed-member state (P1.2, reads memberTracks status) */
+.dp-swarm-row.is-downed { opacity: 0.55; }
+.dp-swarm-row.is-downed .dp-swarm-id { text-decoration: line-through; }
+.dp-swarm-status-downed {
+  color: #ff8a8a;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  flex: 1 1 auto;
+}

@@ -16681,6 +16681,12 @@ async function main() {
     // function so the telemetry section can read it. Don't redeclare here.
     const _swarmState = droneState.get(e.id);
     const _template = TEMPLATES[e.templateKey];
+    // Swarm P1.2: memberTracks is the source of truth for per-member
+    // STATUS. Live telemetry still comes from the render cache when
+    // this tab owns the tick loop; status comes from the event so a
+    // downed member reads DOWNED instead of silently freezing.
+    const _tracks = e.memberTracks || [];
+    const _trackById = new Map(_tracks.map(t => [t.memberId, t]));
     if (_template?.swarm && _swarmState?.swarmBillboards) {
       // Build a STABLE 5-slot droneList indexed 0..4. Even if some stats
       // are momentarily null (tick hasn't run yet), the slot exists with
@@ -16701,6 +16707,7 @@ async function main() {
           stats: _swarmState.leadStats || { lat: 0, lon: 0, alt: 0, heading: 0, speed: 0, rfCarrierMHz: leadSlot.rfMHz || 2412 },
           conf: e.confidence,
           hasLiveTelemetry: !!_swarmState.leadStats,
+          status: _trackById.get(_swarmState.leadSwarmMember?.memberId)?.status || 'tracked',
         });
       }
       _swarmState.swarmBillboards.forEach((sw, idx) => {
@@ -16712,6 +16719,7 @@ async function main() {
           stats: sw.stats || { lat: 0, lon: 0, alt: 0, heading: 0, speed: 0, rfCarrierMHz: sw.rfMHz || 2412 },
           conf: sw.stats?.confidence || 0,
           hasLiveTelemetry: !!sw.stats,
+          status: _trackById.get(sw.memberId)?.status || (sw.neutralised ? 'neutralised' : 'tracked'),
         });
       });
 
@@ -16737,16 +16745,18 @@ async function main() {
       var totalDrones = droneList.length;
 
       const fmtRow = (d, idx) => `
-        <div class="dp-swarm-row ${idx === _selectedSwarmIndex ? 'is-focused' : ''}" data-swarm-idx="${idx}" title="Click to focus ${d.id} (${d.model})">
+        <div class="dp-swarm-row ${idx === _selectedSwarmIndex ? 'is-focused' : ''} ${d.status === 'neutralised' ? 'is-downed' : ''}" data-swarm-idx="${idx}" title="Click to focus ${d.id} (${d.model})">
           <span class="dp-swarm-id">${d.id}</span>
           <span class="dp-swarm-model">${d.model}</span>
           <span class="dp-swarm-role">${d.role}</span>
-          <span class="dp-swarm-pos mono">${d.stats.lat.toFixed(4)}°N ${d.stats.lon.toFixed(4)}°E</span>
+          ${d.status === 'neutralised'
+            ? `<span class="dp-swarm-status-downed">× DOWNED</span>`
+            : `<span class="dp-swarm-pos mono">${d.stats.lat.toFixed(4)}°N ${d.stats.lon.toFixed(4)}°E</span>
           <span class="dp-swarm-alt mono">${Math.round(d.stats.alt)} m</span>
           <span class="dp-swarm-hdg mono">${Math.round(d.stats.heading)}°</span>
           <span class="dp-swarm-spd mono">${(d.stats.speed || 0).toFixed(1)} m/s</span>
           <span class="dp-swarm-rf mono">${d.stats.rfCarrierMHz || 2412} MHz</span>
-          <span class="dp-swarm-conf mono">${Math.round((d.conf || 0) * 100)}%</span>
+          <span class="dp-swarm-conf mono">${Math.round((d.conf || 0) * 100)}%</span>`}
         </div>`;
       swarmRoster = `
         <div class="dp-section dp-swarm">
