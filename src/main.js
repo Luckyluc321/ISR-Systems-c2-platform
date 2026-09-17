@@ -768,11 +768,13 @@ async function main() {
   // confirmed; adjust headingOffsetDeg (0 / 90 / 180 / 270) until
   // the nose points along the flight direction.
   window.__isr_shahed_tuning = window.__isr_shahed_tuning || {
-    // 2026-09-17: 90 left the nose pointing 90 degrees LEFT of travel
-    // (field observation). 180 puts the snout on the true direction of
-    // flight. If a model swap ever flips it again, tune live:
-    //   window.__isr_shahed_tuning.headingOffsetDeg = 0 / 90 / 270
-    headingOffsetDeg: 180,
+    // 2026-09-17: 90 left the nose 90 degrees LEFT of travel; 180
+    // still bent slightly left (the GLB's authored axis is not on a
+    // clean 90 degree step). 195 compensates the residual. Fine-tune
+    // LIVE while watching a straight flight leg:
+    //   window.__isr_shahed_tuning.headingOffsetDeg = 190 / 195 / 200
+    // and report the value that flies straight so it gets baked here.
+    headingOffsetDeg: 195,
     pitchOffsetDeg: 0,         // additional pitch bias (usually 0)
     // 0.18 converged in about a quarter second, which read as the
     // airframe snapping 90 degrees in one movement. 0.06 sweeps the
