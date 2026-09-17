@@ -18272,9 +18272,11 @@ async function main() {
         records.forEach((r, idx) => {
           setTimeout(() => updateEscalationStatus(eventId, r.id, 'delivered'), 1500 + idx * 300);
           setTimeout(() => updateEscalationStatus(eventId, r.id, 'read'), 4500 + idx * 500);
-          if (Math.random() < 0.6 || getDestination(r.destinationId)?.type === 'internal') {
-            setTimeout(() => updateEscalationStatus(eventId, r.id, 'acknowledged'), 8000 + idx * 800);
-          }
+          // NO auto-acknowledge. Delivered/read are transport receipts
+          // the system legitimately generates; acknowledgment is a
+          // HUMAN decision that only happens when someone acks from
+          // that agency's receiver profile. A random timer pretending
+          // to be PET was fake data on an operator surface.
         });
       }));
       modalCard.querySelector('[data-modal="send"]').addEventListener('click', () => {
@@ -18287,9 +18289,11 @@ async function main() {
         records.forEach((r, idx) => {
           setTimeout(() => updateEscalationStatus(eventId, r.id, 'delivered'), 1500 + idx * 300);
           setTimeout(() => updateEscalationStatus(eventId, r.id, 'read'), 4500 + idx * 500);
-          if (Math.random() < 0.6 || getDestination(r.destinationId)?.type === 'internal') {
-            setTimeout(() => updateEscalationStatus(eventId, r.id, 'acknowledged'), 8000 + idx * 800);
-          }
+          // NO auto-acknowledge. Delivered/read are transport receipts
+          // the system legitimately generates; acknowledgment is a
+          // HUMAN decision that only happens when someone acks from
+          // that agency's receiver profile. A random timer pretending
+          // to be PET was fake data on an operator surface.
         });
       });
     };
@@ -19844,12 +19848,15 @@ async function main() {
   // Monitor Engagement bucket ordering. Most-active first so the operator
   // sees urgent state at the top of the panel. RTB variants and holding-
   // cordon come after primary active states, complete last.
+  // Matte, desaturated state palette. Saturated cyan/green on black
+  // read as a DOS console; these hold the same semantic (blue moving,
+  // gold engaging, violet returning, grey done) at premium volume.
   const _MON_ENG_BUCKETS = [
-    { key: 'engaging',          label: 'ENGAGING',              color: '#ffb84d' },
-    { key: 'en_route',          label: 'EN ROUTE',              color: '#4dd2ff' },
-    { key: 'holding-cordon',    label: 'HOLDING CORDON',        color: '#4dd2ff' },
-    { key: 'rtb_via_last_known',label: 'RTB · LAST KNOWN',      color: '#c084fc' },
-    { key: 'rtb_home',          label: 'RTB · HOME',            color: '#c084fc' },
+    { key: 'engaging',          label: 'ENGAGING',              color: '#c8a35f' },
+    { key: 'en_route',          label: 'EN ROUTE',              color: '#7fa8c9' },
+    { key: 'holding-cordon',    label: 'HOLDING CORDON',        color: '#7fa8c9' },
+    { key: 'rtb_via_last_known',label: 'RTB · LAST KNOWN',      color: '#9a8fc0' },
+    { key: 'rtb_home',          label: 'RTB · HOME',            color: '#9a8fc0' },
     { key: 'complete',          label: 'COMPLETE',              color: '#6b7280' },
   ];
 
@@ -19870,13 +19877,16 @@ async function main() {
   // dispatch object from _counterDispatches when available (same tab);
   // falls back to the event-trail mirror for cross-tab renders where
   // only position + state are synced.
-  function _monEngUnitRow(cd, bucketKey, live) {
+  function _monEngUnitRow(cd, bucketKey, live, { inGroup = false } = {}) {
     const elapsedSec = Math.max(0, Math.floor((Date.now() - cd.dispatchedTs) / 1000));
     const elapsedStr = elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
     const kindLabel = RESPONSE_OPTION_DETAILS[cd.kind]?.displayName || cd.kind;
 
-    const metaParts = [kindLabel];
+    // Inside an expanded formation the kind is on the group header;
+    // repeating it per unit is what made the panel read as one block.
+    const metaParts = inGroup ? [] : [kindLabel];
     let progressHtml = '';
+    const bucketColor = (_MON_ENG_BUCKETS.find(b => b.key === bucketKey) || {}).color || '#7fa8c9';
 
     if (bucketKey === 'en_route' && live && live.targetLat != null && live.curLat != null) {
       const distM = haversineM(live.curLat, live.curLon, live.targetLat, live.targetLon);
@@ -19890,7 +19900,7 @@ async function main() {
       // never renders negative progress.
       const initialM = haversineM(live.originLat, live.originLon, live.targetLat, live.targetLon);
       const frac = Math.min(1, Math.max(0, 1 - distM / Math.max(initialM, distM, 1)));
-      progressHtml = `<div class="mon-eng-progress"><div class="mon-eng-progress-bar" style="width: ${Math.round(frac * 100)}%;"></div></div>`;
+      progressHtml = `<div class="mon-eng-progress"><div class="mon-eng-progress-bar" style="width: ${Math.round(frac * 100)}%; background: ${bucketColor};"></div></div>`;
     } else if (bucketKey === 'engaging') {
       metaParts.push(CD_PROFILE[cd.kind]?.stagesAtScene ? 'Staging at perimeter' : 'On station');
       metaParts.push(`Elapsed ${elapsedStr}`);
@@ -19918,10 +19928,16 @@ async function main() {
       }
     }
 
+    // Inside a group the parent name is on the header; the row only
+    // needs its unit slot. "Rigspolitiet · Slotsholmen Interceptor
+    // Team · Unit 1/3" three times over was the wall of text.
+    const rowName = inGroup && cd.memberCount > 1 && cd.memberIndex != null
+      ? `Unit ${cd.memberIndex + 1} / ${cd.memberCount}`
+      : cd.assetName;
     return `
       <div class="mon-eng-unit">
         <div class="mon-eng-unit-main">
-          <div class="mon-eng-unit-name">${cd.assetName}</div>
+          <div class="mon-eng-unit-name">${rowName}</div>
           <div class="mon-eng-unit-meta">${metaParts.join(' · ')}</div>
           ${enduranceHtml}
         </div>
@@ -19976,27 +19992,28 @@ async function main() {
       }
       const rows = Array.from(groups.entries()).map(([groupKey, members]) => {
         if (members.length === 1) {
-          return _monEngUnitRow(members[0], bucket.key, _counterDispatches.get(members[0].dispatchId));
+          return `<div class="mon-eng-card">${_monEngUnitRow(members[0], bucket.key, _counterDispatches.get(members[0].dispatchId), { inGroup: false })}</div>`;
         }
         const expanded = _monEngExpandedGroups.has(groupKey);
         const kindLabel = RESPONSE_OPTION_DETAILS[members[0].kind]?.displayName || members[0].kind;
         const memberRows = expanded
-          ? members.map(cd => _monEngUnitRow(cd, bucket.key, _counterDispatches.get(cd.dispatchId))).join('')
+          ? members.map(cd => _monEngUnitRow(cd, bucket.key, _counterDispatches.get(cd.dispatchId), { inGroup: true })).join('')
           : '';
         return `
-          <div class="mon-eng-unit" data-mon-group-toggle="${groupKey}" style="cursor: pointer;">
-            <div class="mon-eng-unit-main">
-              <div class="mon-eng-unit-name">${expanded ? '▾' : '▸'} ${members[0].groupName || members[0].assetName}</div>
-              <div class="mon-eng-unit-meta">${kindLabel} · ${members.length} units</div>
+          <div class="mon-eng-card">
+            <div class="mon-eng-group-hdr" data-mon-group-toggle="${groupKey}">
+              <span class="mon-eng-caret">${expanded ? '▾' : '▸'}</span>
+              <span class="mon-eng-group-name">${members[0].groupName || members[0].assetName}</span>
+              <span class="mon-eng-group-sub">${kindLabel} · ${members.length} units</span>
             </div>
-          </div>
-          ${expanded ? `<div style="padding-left: var(--space-3); border-left: 1px solid var(--border);">${memberRows}</div>` : ''}`;
+            ${expanded ? `<div class="mon-eng-group-members">${memberRows}</div>` : ''}
+          </div>`;
       }).join('');
       return `
-        <div class="mon-eng-bucket" style="margin-top: var(--space-3);">
-          <div class="mon-eng-bucket-hdr" style="display: flex; align-items: center; gap: var(--space-2); padding: 4px 10px; background: rgba(255,255,255,0.02); border: 1px solid ${bucket.color}66; border-left: 2px solid ${bucket.color}; border-radius: 2px; font-size: var(--fs-2xs); color: ${bucket.color}; font-family: var(--font-mono); letter-spacing: 0.16em; font-weight: 600; text-transform: uppercase;">
-            <span>${bucket.label}</span>
-            <span style="opacity: 0.7;">${items.length} unit${items.length === 1 ? '' : 's'}</span>
+        <div class="mon-eng-bucket">
+          <div class="mon-eng-bucket-hdr">
+            <span class="mon-eng-state-pill" style="color: ${bucket.color}; border-color: ${bucket.color}55; background: ${bucket.color}14;">${bucket.label}</span>
+            <span class="mon-eng-bucket-count">${items.length} unit${items.length === 1 ? '' : 's'}</span>
           </div>
           ${rows}
         </div>`;

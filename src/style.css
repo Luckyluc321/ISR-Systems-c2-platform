@@ -9203,13 +9203,67 @@ body.workspace-map-active #receiver-view {
   line-height: 1.4;
 }
 
-/* Monitor Engagement (Step 3) per-unit rows */
+/* Monitor Engagement (Step 3). Segmented cards on a matte state
+   palette: each formation is a bordered card the eye can hold onto,
+   telemetry is quiet lowercase, colour marks state without shouting. */
+.mon-eng-bucket { margin-top: var(--space-3); }
+.mon-eng-bucket-hdr {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: 6px;
+}
+.mon-eng-state-pill {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  font-weight: 600;
+  padding: 2px 9px;
+  border: 1px solid;
+  border-radius: 999px;
+}
+.mon-eng-bucket-count {
+  font-size: var(--fs-2xs);
+  color: var(--text-dim);
+}
+.mon-eng-card {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin-bottom: 6px;
+}
+.mon-eng-group-hdr {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.mon-eng-group-hdr:hover .mon-eng-group-name { color: #fff; }
+.mon-eng-caret { color: var(--text-dim); font-size: 10px; flex: 0 0 auto; }
+.mon-eng-group-name {
+  font-size: var(--fs-sm);
+  color: var(--text);
+  font-weight: 600;
+}
+.mon-eng-group-sub {
+  font-size: var(--fs-2xs);
+  color: var(--text-dim);
+  margin-left: auto;
+}
+.mon-eng-group-members {
+  margin-top: 6px;
+  border-top: 1px solid var(--border);
+}
 .mon-eng-unit {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) 0;
-  border-top: 1px solid var(--border);
+  padding: 7px 0;
+}
+.mon-eng-group-members .mon-eng-unit + .mon-eng-unit {
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
 }
 .mon-eng-unit-main { flex: 1 1 auto; min-width: 0; }
 .mon-eng-unit-name {
@@ -9221,23 +9275,20 @@ body.workspace-map-active #receiver-view {
   margin-top: 2px;
   color: var(--text-dim);
   font-size: var(--fs-2xs);
-  font-family: var(--font-mono);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
-.mon-eng-endurance-warn { color: #ffb84d; }
+.mon-eng-endurance-warn { color: #c8a35f; }
 .mon-eng-progress {
-  width: 90px;
-  height: 4px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 2px;
+  width: 84px;
+  height: 3px;
+  background: rgba(255, 255, 255, 0.07);
+  border-radius: 999px;
   overflow: hidden;
   flex: 0 0 auto;
 }
 .mon-eng-progress-bar {
   height: 100%;
-  background: #4dd2ff;
-  border-radius: 2px;
+  border-radius: 999px;
   transition: width 400ms linear;
 }
 
