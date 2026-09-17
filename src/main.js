@@ -801,6 +801,11 @@ async function main() {
   // merges body + rotors). Real drones at high shutter speed show
   // frozen props anyway. Swap to a GLB with embedded prop animation
   // clips OR separately-named rotor nodes to add spinning.
+  // 2D icon bearing trim. Sub-degree alignment between the drone
+  // symbol's drawn apex and the computed course. Negative = nose
+  // counter-clockwise. Dial live on a straight leg, report the value.
+  window.__isr_icon_tuning = window.__isr_icon_tuning || { bearingTrimDeg: -2 };
+
   window.__isr_quad_tuning = window.__isr_quad_tuning || {
     // Model orientation — the assault_drone_concept GLB's authored
     // forward axis is not 90°-rotated like the Shahed. Default 0
@@ -12182,7 +12187,14 @@ async function main() {
           // legs, up to ~10 degrees off on diagonals).
           const dLon = (p.lon - state.prevLon) * Math.cos(p.lat * Math.PI / 180);
           if (Math.abs(dLat) > 1e-9 || Math.abs(dLon) > 1e-9) {
-            const target = -Math.atan2(dLon, dLat);
+            // bearingTrimDeg: final sub-degree alignment between the
+            // icon art's apex and the computed course (canvas pixel
+            // grid + axis projection leave a hair of skew the math
+            // cannot see). Negative rotates the nose counter-clockwise.
+            // Dial LIVE while watching a straight leg:
+            //   window.__isr_icon_tuning.bearingTrimDeg = -4 / -2 / 0 / 2
+            const _trim = ((window.__isr_icon_tuning?.bearingTrimDeg ?? -2) * Math.PI) / 180;
+            const target = -Math.atan2(dLon, dLat) + _trim;
             if (state.stateHolder.headingInit) {
               let delta = target - state.stateHolder.headingRad;
               while (delta > Math.PI) delta -= 2 * Math.PI;
