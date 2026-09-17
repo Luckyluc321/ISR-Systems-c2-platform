@@ -3856,6 +3856,31 @@ async function main() {
       icon: 'sof', trail: false, airborne: false,
       label: 'National coordination cell',
     },
+    // ── Medical + rescue response (impact / mass-casualty scenes) ──
+    // Plain names per operational reality: ambulances and the
+    // emergency doctor car (akutlægebil) deploy to a point of impact.
+    // Ambulances multi-dispatch like patrol packs; the akutlægebil is
+    // a single faster unit. BRS rescue team is the national civil
+    // protection heavy-rescue element.
+    'receiver-ambulance': {
+      cruiseKmh: 85, arriveAtM: 300, engageSec: 300,
+      icon: 'police-vehicle', trail: false, airborne: false,
+      useRoadRouting: true, supportsMultiDispatch: true, maxUnitsPerDispatch: 5,
+      billboardScale: 0.55, swarmSpacingM: 40, cordonSlotSpreadM: 18,
+      label: 'Ambulance',
+    },
+    'receiver-akutlaegebil': {
+      cruiseKmh: 105, arriveAtM: 250, engageSec: 240,
+      icon: 'police-vehicle', trail: false, airborne: false,
+      useRoadRouting: true, billboardScale: 0.55,
+      label: 'Akutlægebil',
+    },
+    'receiver-rescue-team': {
+      cruiseKmh: 70, arriveAtM: 400, engageSec: 900,
+      icon: 'sof', trail: false, airborne: false,
+      useRoadRouting: true, billboardScale: 0.65,
+      label: 'Rescue team',
+    },
     'receiver-cyber-team': {
       cruiseKmh: 0, arriveAtM: null, engageSec: 60,
       icon: 'sof', trail: false, airborne: false,

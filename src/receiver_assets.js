@@ -252,6 +252,135 @@ export const RECEIVER_ASSETS = {
       },
     ],
   },
+
+  // ── Medical + rescue (impact / mass-casualty response) ───────
+  // Plain asset names per operational reality: ambulances and the
+  // akutlægebil deploy to a point of impact. Hospitals hold small
+  // own fleets; the regional fleet lives at Akutberedskabet (AMK
+  // Hovedstaden, Ballerup). BRS Hedehusene is the national civil
+  // protection heavy-rescue center closest to Copenhagen.
+
+  'amk-hovedstaden': {
+    label: 'Akutmedicinsk Koordinationscenter Hovedstaden',
+    baseId: 'akutberedskabet-ballerup',
+    dispatchable: [
+      {
+        assetKey: 'amk-ambulance',
+        kind: 'receiver-ambulance',
+        name: 'Ambulance',
+        count: 8,
+        icon: '🚑',
+        useCases: [
+          'Casualty transport from an impact or crash site',
+          'On-scene triage and stabilisation',
+          'Standby posture at an active threat perimeter',
+        ],
+        capabilities: { casualty_transport: true, triage: true },
+        deployTime: '5-12 minutes via real road routing',
+        limitations: 'Staging outside the cordon until the scene is declared safe by police.',
+      },
+      {
+        assetKey: 'amk-akutlaegebil',
+        kind: 'receiver-akutlaegebil',
+        name: 'Akutlægebil',
+        count: 2,
+        icon: '🚨',
+        useCases: [
+          'Physician-level intervention at the scene',
+          'Mass-casualty medical command on arrival',
+        ],
+        capabilities: { physician_on_scene: true, medical_command: true },
+        deployTime: '4-10 minutes via real road routing',
+        limitations: 'Single vehicle, no transport capacity. Works with ambulances, not instead of them.',
+      },
+    ],
+    requestable: [],
+  },
+
+  'hospital-rigshospitalet': {
+    label: 'Rigshospitalet',
+    baseId: 'hospital-rigshospitalet',
+    dispatchable: [
+      { assetKey: 'righ-ambulance', kind: 'receiver-ambulance', name: 'Ambulance', count: 2, icon: '🚑',
+        useCases: ['Casualty transport to own akutmodtagelse', 'On-scene triage support'],
+        capabilities: { casualty_transport: true, triage: true },
+        deployTime: '4-10 minutes via real road routing',
+        limitations: 'Staging outside the cordon until police declare the scene safe.' },
+      { assetKey: 'righ-akutlaegebil', kind: 'receiver-akutlaegebil', name: 'Akutlægebil', count: 1, icon: '🚨',
+        useCases: ['Physician-level intervention at the scene'],
+        capabilities: { physician_on_scene: true },
+        deployTime: '3-8 minutes via real road routing',
+        limitations: 'Single vehicle, no transport capacity.' },
+    ],
+    requestable: [],
+  },
+
+  'hospital-hvidovre': {
+    label: 'Hvidovre Hospital',
+    baseId: 'hospital-hvidovre',
+    dispatchable: [
+      { assetKey: 'hvh-ambulance', kind: 'receiver-ambulance', name: 'Ambulance', count: 2, icon: '🚑',
+        useCases: ['Casualty transport to own akutmodtagelse', 'On-scene triage support'],
+        capabilities: { casualty_transport: true, triage: true },
+        deployTime: '5-12 minutes via real road routing',
+        limitations: 'Staging outside the cordon until police declare the scene safe.' },
+      { assetKey: 'hvh-akutlaegebil', kind: 'receiver-akutlaegebil', name: 'Akutlægebil', count: 1, icon: '🚨',
+        useCases: ['Physician-level intervention at the scene'],
+        capabilities: { physician_on_scene: true },
+        deployTime: '4-10 minutes via real road routing',
+        limitations: 'Single vehicle, no transport capacity.' },
+    ],
+    requestable: [],
+  },
+
+  'hospital-herlev': {
+    label: 'Herlev Hospital',
+    baseId: 'hospital-herlev',
+    dispatchable: [
+      { assetKey: 'her-ambulance', kind: 'receiver-ambulance', name: 'Ambulance', count: 2, icon: '🚑',
+        useCases: ['Casualty transport to own akutmodtagelse', 'On-scene triage support'],
+        capabilities: { casualty_transport: true, triage: true },
+        deployTime: '6-14 minutes via real road routing',
+        limitations: 'Staging outside the cordon until police declare the scene safe.' },
+    ],
+    requestable: [],
+  },
+
+  'hospital-bispebjerg': {
+    label: 'Bispebjerg Hospital',
+    baseId: 'hospital-bispebjerg',
+    dispatchable: [
+      { assetKey: 'bbh-ambulance', kind: 'receiver-ambulance', name: 'Ambulance', count: 2, icon: '🚑',
+        useCases: ['Casualty transport to own akutmodtagelse', 'On-scene triage support'],
+        capabilities: { casualty_transport: true, triage: true },
+        deployTime: '4-10 minutes via real road routing',
+        limitations: 'Staging outside the cordon until police declare the scene safe.' },
+    ],
+    requestable: [],
+  },
+
+  'brs-hedehusene': {
+    label: 'Beredskabsstyrelsen Hovedstaden',
+    baseId: 'brs-hedehusene',
+    dispatchable: [
+      {
+        assetKey: 'brs-rescue-team',
+        kind: 'receiver-rescue-team',
+        name: 'Rescue team',
+        count: 2,
+        icon: '⛑',
+        useCases: [
+          'Heavy rescue at a structural impact site',
+          'Search of collapsed or damaged structures',
+          'Scene support for fire and hazmat conditions',
+        ],
+        capabilities: { heavy_rescue: true, structural_search: true, hazmat_support: true },
+        deployTime: '20-35 minutes via real road routing',
+        limitations: 'Not a medical unit. Works alongside ambulances and fire services.',
+      },
+    ],
+    requestable: [],
+  },
 };
 
 // Resolve the asset spec for a receiver role. Returns null if the

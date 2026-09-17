@@ -348,6 +348,41 @@ export const RECEIVER_BASES = {
     name: 'Region Midtjylland, Skottenborg 26, 8800 Viborg',
     verified: 'rm.dk',
   },
+
+  // ── Medical + rescue (impact / mass-casualty response) ────────
+  // Coordinates verified 2026-09-17 via OSM Nominatim (agent pass,
+  // cross-checked against agency websites for the non-hospital sites).
+
+  'hospital-rigshospitalet': {
+    lat: 55.695976, lon: 12.566650,
+    name: 'Rigshospitalet, Blegdamsvej 9, 2100 København Ø',
+    verified: 'OSM Nominatim (address point Blegdamsvej 9)',
+  },
+  'hospital-herlev': {
+    lat: 55.731165, lon: 12.442664,
+    name: 'Herlev Hospital, Borgmester Ib Juuls Vej 1, 2730 Herlev',
+    verified: 'OSM Nominatim',
+  },
+  'hospital-hvidovre': {
+    lat: 55.648669, lon: 12.470252,
+    name: 'Hvidovre Hospital, Kettegård Allé 30, 2650 Hvidovre',
+    verified: 'OSM Nominatim (address point Kettegård Allé 30)',
+  },
+  'hospital-bispebjerg': {
+    lat: 55.714557, lon: 12.540180,
+    name: 'Bispebjerg Hospital, Bispebjerg Bakke 23, 2400 København NV',
+    verified: 'OSM Nominatim',
+  },
+  'akutberedskabet-ballerup': {
+    lat: 55.730301, lon: 12.343056,
+    name: 'Region Hovedstadens Akutberedskab, Telegrafvej 5, 2750 Ballerup',
+    verified: 'OSM Nominatim + proff.dk registry',
+  },
+  'brs-hedehusene': {
+    lat: 55.649054, lon: 12.185789,
+    name: 'Beredskabsstyrelsen Hovedstaden, Hedelykken 10, 2640 Hedehusene',
+    verified: 'OSM Nominatim + brs.dk (address point Hedelykken 10)',
+  },
 };
 
 // Convenience lookup by receiver role id. Some roles map to a specific
