@@ -4294,7 +4294,6 @@ async function main() {
     if (!Array.isArray(records) || !records.length) return;
     records.forEach((r, idx) => {
       setTimeout(() => updateEscalationStatus(eventId, r.id, 'delivered'), 1500 + idx * 300);
-      setTimeout(() => updateEscalationStatus(eventId, r.id, 'read'), 4500 + idx * 500);
     });
   }
 
@@ -7285,7 +7284,6 @@ async function main() {
       });
       records.forEach((r, idx) => {
         setTimeout(() => updateEscalationStatus(event.id, r.id, 'delivered'), 800 + idx * 200);
-        setTimeout(() => updateEscalationStatus(event.id, r.id, 'read'), 2500 + idx * 300);
       });
       toast(`Auto escalated · reacquired at ${site ? site.name : siteId}`, 'ok');
     }
@@ -12960,6 +12958,25 @@ async function main() {
             _renderWreckagePerimeter(_impWreck, cordon);
             _rebalancePatrolsToWreckages(event);
           }).catch(err => console.warn('[impact cordon] build failed:', err.message));
+          // Consequence auto-cascade: our sensors observed a warhead
+          // detonation, so the system alerts the consequence chain
+          // immediately (detection + alerting, never action). Medical
+          // coordination, nearest akutmodtagelser, fire and rescue,
+          // heavy rescue, and police receive the case in their inbox;
+          // dispatch decisions stay with the humans in each profile.
+          try {
+            const _casRecords = escalateEvent(event.id, {
+              destinationIds: ['amk-hovedstaden', 'hospital-rigshospitalet', 'hospital-bispebjerg', 'kbr-hovedstaden', 'brs-hedehusene'],
+              payload: 'full',
+              message: `Warhead detonation observed at ${p.lat.toFixed(4)}N ${p.lon.toFixed(4)}E. Casualties possible. Immediate consequence response requested. Scene not yet declared safe by police.`,
+              operator: 'AUTO-CASCADE',
+              operatorRoleId: 'system-impact-cascade',
+            });
+            _casRecords.forEach((r, idx) => {
+              setTimeout(() => updateEscalationStatus(event.id, r.id, 'delivered'), 1200 + idx * 250);
+            });
+            toast('Consequence cascade sent: medical, fire and rescue alerted.', 'warn');
+          } catch (err) { console.warn('[impact cascade] failed:', err.message); }
           // Persistent IMPACT marker at the detonation point — same
           // pattern as the DOWNED marker so the coordinate survives on
           // the map after the smoke clears and routes through the
@@ -18271,7 +18288,6 @@ async function main() {
         closeEscalateModal();
         records.forEach((r, idx) => {
           setTimeout(() => updateEscalationStatus(eventId, r.id, 'delivered'), 1500 + idx * 300);
-          setTimeout(() => updateEscalationStatus(eventId, r.id, 'read'), 4500 + idx * 500);
           // NO auto-acknowledge. Delivered/read are transport receipts
           // the system legitimately generates; acknowledgment is a
           // HUMAN decision that only happens when someone acks from
@@ -18288,7 +18304,6 @@ async function main() {
         closeEscalateModal();
         records.forEach((r, idx) => {
           setTimeout(() => updateEscalationStatus(eventId, r.id, 'delivered'), 1500 + idx * 300);
-          setTimeout(() => updateEscalationStatus(eventId, r.id, 'read'), 4500 + idx * 500);
           // NO auto-acknowledge. Delivered/read are transport receipts
           // the system legitimately generates; acknowledgment is a
           // HUMAN decision that only happens when someone acks from
@@ -23730,7 +23745,23 @@ async function main() {
         renderReceiverView({ immediate: true });
       }
       // ── Event Workspace routing ─────────────────────────────
-      else if (action === 'open-report') { _workspaceEventId = id; _workspaceMode = 'report'; _exitMapMode(); renderReceiverView(); }
+      else if (action === 'open-report') {
+        _workspaceEventId = id; _workspaceMode = 'report'; _exitMapMode();
+        // Honest read receipts: 'read' fires when THIS profile opens
+        // the case, never from a timer. Flips only this role's own
+        // delivered/sent escalations.
+        const _openEv = getEvent(id);
+        const _openRole = getActiveRole();
+        if (_openEv && _openRole?.kind === 'receiver') {
+          const _myDests = new Set([...(getRoleDestinationIdsRolledUp(_openRole.id) || []), _openRole.id]);
+          for (const esc of (_openEv.escalations || [])) {
+            if (_myDests.has(esc.destinationId) && (esc.status === 'delivered' || esc.status === 'sent')) {
+              updateEscalationStatus(_openEv.id, esc.id, 'read');
+            }
+          }
+        }
+        renderReceiverView();
+      }
       else if (action === 'open-map')    {
         _workspaceEventId = id; _workspaceMode = 'map';
         const ev = _lookupWorkspaceEvent(id);

@@ -11,6 +11,33 @@
 
 const DESTINATIONS = [
   // ═══════════════════════════════════════════════════════════
+  // CONSEQUENCE RESPONSE (site-independent)
+  // ─────────────────────────────────────────────────────────
+  // Medical, fire, and rescue recipients for the impact
+  // auto-cascade. Ids equal the receiver role ids so escalation
+  // visibility (destinationId === roleId path) and name rendering
+  // both resolve without a mapping layer. tier 3 = external
+  // authority, no siteId (they respond wherever the impact is).
+  { id: 'amk-hovedstaden', siteId: null, tier: 3, type: 'agency',
+    name: 'Akutmedicinsk Koordinationscenter Hovedstaden',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'hospital-rigshospitalet', siteId: null, tier: 3, type: 'agency',
+    name: 'Rigshospitalet Akutmodtagelse',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'hospital-hvidovre', siteId: null, tier: 3, type: 'agency',
+    name: 'Hvidovre Hospital Akutmodtagelse',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'hospital-bispebjerg', siteId: null, tier: 3, type: 'agency',
+    name: 'Bispebjerg Hospital Akutmodtagelse',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'kbr-hovedstaden', siteId: null, tier: 3, type: 'agency',
+    name: 'Hovedstadens Beredskab',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'brs-hedehusene', siteId: null, tier: 3, type: 'agency',
+    name: 'Beredskabsstyrelsen Hovedstaden (Hedehusene)',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+
+  // ═══════════════════════════════════════════════════════════
   // CPH AIRPORT
   // ═══════════════════════════════════════════════════════════
 
