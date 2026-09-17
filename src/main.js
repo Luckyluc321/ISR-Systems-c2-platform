@@ -10380,7 +10380,7 @@ async function main() {
     document.body.classList.add('mode-analysis');
     const resolved = _debriefResolveSamples(event);
     if (!resolved || !resolved.samples.length) {
-      toast('No trajectory data for this event — debrief unavailable.', 'info');
+      toast('No trajectory data for this event. Debrief unavailable.', 'info');
       return;
     }
     const samples = resolved.samples;
@@ -12900,7 +12900,7 @@ async function main() {
         evaluateClassificationPipeline(event, pipelineCtx);
         evaluateAttackProfileDetector(event, pipelineCtx, {
           onAdvisory: (ev, rules) => {
-            toast(`Attack profile advisory — ${ev.droneType || 'track'} · ${rules[0]}. Operator confirmation required to promote to red.`, 'warn');
+            toast(`Attack profile advisory. ${ev.droneType || 'track'} · ${rules[0]}. Operator confirmation required to promote to red.`, 'warn');
             renderAlertStrip();
           },
         });
@@ -17929,7 +17929,7 @@ async function main() {
         if (nowAll && !_rbCompletionNoted(e.id)) {
           _rbMarkCompletionNoted(e.id);
           addNote(e.id, `Response playbook complete. All ${rb.steps.length} steps executed for "${rb.title}".`, 'PLAYBOOK');
-          toast('Playbook complete — logged to event timeline', 'ok');
+          toast('Playbook complete. Logged to event timeline.', 'ok');
         }
       });
     });
@@ -23488,7 +23488,7 @@ async function main() {
           a.click();
           document.body.removeChild(a);
           setTimeout(() => URL.revokeObjectURL(url), 1000);
-          toast(`Chain report downloaded — ${bundle.event_count} events, ${bundle.contributors.length} contributors.`, 'ok');
+          toast(`Chain report downloaded. ${bundle.event_count} events, ${bundle.contributors.length} contributors.`, 'ok');
         } catch (err) {
           toast(`Chain export failed: ${err.message || 'unknown'}`, 'err');
         }
