@@ -12606,7 +12606,22 @@ async function main() {
       // ended. `awaitingNeutralization` still exempts events under
       // active F-35 pursuit so they close on interception, not on
       // waypoint end.
-      if (p.completed && !state.closedAt && !event.awaitingNeutralization) {
+      //
+      // Airborne interceptor engagements ALSO defer this close: the
+      // engagement window is seconds long and its resolution decides
+      // the true ending. A hit closes the event as neutralised (kill
+      // path) and the warhead never detonates; a miss lets this branch
+      // fire next tick and the terminal impact proceeds. Without the
+      // exemption, a last-second kill resolved silently against an
+      // already-closed event — the interceptor caught the weapon and
+      // nothing happened (found live on the Geran-3 scenario).
+      const _resolvingEngagement = (() => {
+        for (const [, cd] of _counterDispatches) {
+          if (cd.eventId === p.eventId && cd.state === 'engaging' && cd.profile?.airborne) return true;
+        }
+        return false;
+      })();
+      if (p.completed && !state.closedAt && event.status === 'active' && !event.awaitingNeutralization && !_resolvingEngagement) {
         state.closedAt = performance.now();
         markTrackClosed(p.eventId);
         // Terminal impact: attack-profile templates (Shahed, Geran-3)
