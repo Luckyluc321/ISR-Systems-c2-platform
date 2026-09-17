@@ -4022,7 +4022,7 @@ async function main() {
       entry: null, exit: null,
       lastPosition: { lat: pos.lat, lon: pos.lon, alt: pos.alt, heading: hdgDeg, speed: speedMs, timestamp: nowIso },
       contributingSensors: [],
-      evidence: event.evidence,
+      evidence: event.evidence ? { ...event.evidence } : null,
       notes: [{
         timestamp: nowIso,
         author: 'AUTO-CORRELATOR',
@@ -12616,28 +12616,35 @@ async function main() {
           // Swarm Phase 2: breakaway detection. Deviation anchor is the
           // formation lead (the group's reference point); a member is a
           // breakaway candidate when its distance from the lead exceeds
-          // its own slot offset magnitude plus the tuned threshold,
-          // sustained for the grace window. Promotion fires once. The
-          // promoted member's child event mirrors position + coverage
-          // each tick until the member dies or the parent closes.
+          // its own slot offset magnitude plus the tuned threshold.
+          // The grace clock accumulates OBSERVED deviation only: ticks
+          // where our sensors actually see the member (sensors-observe-
+          // only — a formation break no sensor witnessed must never be
+          // announced from sim ground truth). Promotion fires once.
           if (!sw._breakawayChildId && !sw.neutralised && leadPos) {
             const _bw = window.__isr_breakaway || { distM: 500, graceSec: 10 };
             const slotMagM = Math.hypot(sw.offset?.forward || 0, sw.offset?.right || 0);
             const devM = haversineM(pos.lat, pos.lon, leadPos.lat, leadPos.lon);
+            const dtBwMs = Math.min(500, nowMs - (sw._lastBwTickMs || nowMs));
+            sw._lastBwTickMs = nowMs;
             if (devM > slotMagM + _bw.distM) {
-              if (!sw._breakawaySince) sw._breakawaySince = nowMs;
-              if ((nowMs - sw._breakawaySince) / 1000 >= _bw.graceSec) {
+              if (swShouldShow) sw._breakawayObsMs = (sw._breakawayObsMs || 0) + dtBwMs;
+              if ((sw._breakawayObsMs || 0) / 1000 >= _bw.graceSec) {
                 _promoteBreakawayMember(event, sw, pos, hdgDeg, speedMs);
               }
             } else {
-              sw._breakawaySince = null;
+              sw._breakawayObsMs = 0;
             }
           } else if (sw._breakawayChildId && !sw.neutralised) {
             const childEv = getEvent(sw._breakawayChildId);
             if (childEv && childEv.status === 'active') {
               mutateEvent(childEv.id, {
                 lastPosition: { lat: pos.lat, lon: pos.lon, alt: pos.alt, heading: hdgDeg, speed: speedMs, timestamp: new Date().toISOString() },
-                detected: swShouldShow,
+                // Sticky-once-true, matching every other detected write
+                // in the codebase. Coverage loss must not vanish an
+                // active event from the strip; the child's own OOR
+                // close below handles a sustained loss truthfully.
+                ...(swShouldShow ? { detected: true } : {}),
               });
               if (childEv.memberTracks?.[0]) {
                 syncMemberTrack(childEv.id, childEv.memberTracks[0].memberId, {
@@ -12645,6 +12652,24 @@ async function main() {
                   heading: hdgDeg, speedMs,
                   inCoverage: swShouldShow,
                 });
+              }
+              // Child owns its coverage-loss close: sustained loss of
+              // the member (outside our mesh AND outside every
+              // responder's onboard range) closes the child 'lost
+              // contact' — which also unblocks the parent's own
+              // coverage-loss close (linkedActive gate).
+              if (!swShouldShow && !_onboardTrackMaintained(childEv, pos)) {
+                if (!sw._bwChildOorSince) sw._bwChildOorSince = nowMs;
+                if ((nowMs - sw._bwChildOorSince) / 1000 >= 30) {
+                  closeEvent(childEv.id, null, { autoOutcome: 'lost contact' });
+                  appendEventArray(event.id, 'notes', {
+                    timestamp: new Date().toISOString(),
+                    author: 'AUTO-CORRELATOR',
+                    text: `Breakaway track ${childEv.id} lost. No sensor or responder holds it.`,
+                  });
+                }
+              } else {
+                sw._bwChildOorSince = null;
               }
             }
           }
@@ -12856,7 +12881,11 @@ async function main() {
         const linkedIds = event.linkedEventIds || [];
         for (const lid of linkedIds) {
           const le = getEvent(lid);
-          if (le && le.status === 'active') closeEvent(lid, le.exit || null, { autoOutcome: 'left coverage' });
+          // Outcome per what the sensors last knew: a linked track that
+          // was still detected when the scenario tore down ends as
+          // 'lost contact' (the track ended, not the drone's transit);
+          // an undetected one genuinely left coverage.
+          if (le && le.status === 'active') closeEvent(lid, le.exit || null, { autoOutcome: le.detected ? 'lost contact' : 'left coverage' });
         }
         updateContributingRings();
         renderAlertStrip();
@@ -15933,7 +15962,7 @@ async function main() {
       const respCount = (e.escalations || []).filter(esc => esc.response && esc.response.text).length;
       const respBadge = respCount > 0 ? `<span class="alert-resp" title="${respCount} response${respCount === 1 ? '' : 's'} received">↩ ${respCount}</span>` : '';
       const timeStr = isActive ? 'now' : relativeTime(e.startTime);
-      const rangeLine = isActive && e.lastPosition
+      const rangeLine = isActive && e.lastPosition && e.lastPosition.rangeToPerim != null
         ? `<div class="alert-line"><span>Range</span><b>${e.lastPosition.rangeToPerim} m</b></div>`
         : `<div class="alert-line"><span>Duration</span><b>${formatDuration(e.duration)}</b></div>`;
       // Operator alert card actions. Acknowledge is a RECEIVER action
