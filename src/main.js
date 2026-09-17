@@ -3991,6 +3991,81 @@ async function main() {
   // airborne interceptors. Each patrol gets pinned to a specific
   // wreckage id + ingress heading, then re-routed via OSRM from its
   // current live position.
+  // ── Swarm Phase 2: breakaway promotion ─────────────────────────
+  // A member that leaves the formation (sustained deviation beyond
+  // its slot offset + threshold) promotes to its OWN child event with
+  // full lifecycle and provenance. The parent's member track flips to
+  // 'broken-away' with a pointer; both events cross-link. The child
+  // is a TRACKING event — the render (billboard, trail, coverage
+  // gating) stays with the parent's swarm wrapper, and the child's
+  // lastPosition/detected mirror the member each tick. Detection-only
+  // throughout: promotion creates tracking context, never action.
+  // Tuning: window.__isr_breakaway.
+  window.__isr_breakaway = { distM: 500, graceSec: 10 };
+
+  function _promoteBreakawayMember(event, sw, pos, hdgDeg, speedMs) {
+    const childId = nextEventId();
+    const nowIso = new Date().toISOString();
+    const inCov = _shouldAutoDetect(pos.lat, pos.lon, pos.alt);
+    const child = {
+      id: childId,
+      siteId: event.siteId,
+      classification: event.classification,
+      threat: event.threat,
+      platform: 'quadcopter',
+      droneType: `${sw.model || 'Unknown platform'} (breakaway from ${event.id})`,
+      confidence: event.confidence,
+      status: 'active',
+      startTime: nowIso,
+      endTime: null,
+      duration: 0,
+      entry: null, exit: null,
+      lastPosition: { lat: pos.lat, lon: pos.lon, alt: pos.alt, heading: hdgDeg, speed: speedMs, timestamp: nowIso },
+      contributingSensors: [],
+      evidence: event.evidence,
+      notes: [{
+        timestamp: nowIso,
+        author: 'AUTO-CORRELATOR',
+        text: `Member ${sw.memberId || sw.role} broke formation from ${event.id}. Promoted to independent track.`,
+      }],
+      templateKey: null,
+      multiSiteTrack: true,
+      detected: inCov,
+      droneCount: 1,
+      memberTracks: [{
+        memberId: `${childId}-m0`,
+        sourceMemberId: sw.memberId || null,
+        nnTrackId: null,
+        kinematics: { lat: pos.lat, lon: pos.lon, alt: pos.alt, heading: hdgDeg, speedMs },
+        inCoverage: inCov,
+        status: 'tracked',
+        classification: event.classification,
+        class_confidence: event.confidence ?? null,
+        formationOffset: { ...(sw.offset || { forward: 0, right: 0, up: 0 }) },
+        role: sw.role || 'breakaway',
+        model: sw.model || null,
+        rfMHz: sw.rfMHz || null,
+        history: [{ status: 'tracked', at: nowIso, reason: 'breakaway promotion' }],
+      }],
+      provenance: { breakawayOf: event.id, sourceMemberId: sw.memberId || null, promotedAt: nowIso },
+      linkedEventIds: [event.id],
+      spawnTs: Date.now(),
+    };
+    addEvent(child);
+    appendEventArray(event.id, 'linkedEventIds', childId);
+    appendEventArray(event.id, 'notes', {
+      timestamp: nowIso,
+      author: 'AUTO-CORRELATOR',
+      text: `Member ${sw.role || sw.memberId} broke formation. Tracking independently as ${childId}.`,
+      type: 'breakaway',
+    });
+    if (sw.memberId) setMemberStatus(event.id, sw.memberId, 'broken-away', { childEventId: childId, reason: 'sustained formation deviation' });
+    sw._breakawayChildId = childId;
+    toast(`Formation break · ${sw.model || 'member'} tracking independently as ${childId}.`, 'warn');
+    renderAlertStrip();
+    return child;
+  }
+
   // Onboard-sensor pursuit: does any active response unit still hold
   // the target with its OWN sensors? Per-model range lives in
   // CD_PROFILE.onboardSensorRangeM (new response models plug in by
@@ -6257,6 +6332,15 @@ async function main() {
         // Swarm Phase 1: source-of-truth status transition. The sw
         // flag above stays as the render-cache fast path.
         if (sw.memberId) setMemberStatus(d.eventId, sw.memberId, 'neutralised', { reason: 'interceptor kill' });
+        // Swarm Phase 2: a promoted breakaway's child event ends with
+        // its member. Kill closes the child as neutralised.
+        if (sw._breakawayChildId) {
+          const bwChild = getEvent(sw._breakawayChildId);
+          if (bwChild && bwChild.status === 'active') {
+            markNeutralised(bwChild.id, { outcome: 'neutralized', byDispatchId: d.id, needsPostIncident: false });
+            closeEvent(bwChild.id, null);
+          }
+        }
         // Clear any lingering jamming visuals from other counter-
         // dispatches now that this hostile is down. Ellipses on empty
         // air look wrong.
@@ -12367,6 +12451,15 @@ async function main() {
               sw._neutralisedAt = new Date().toISOString();
               // Swarm Phase 1: source-of-truth status transition.
               if (sw.memberId) setMemberStatus(event.id, sw.memberId, 'neutralised', { reason: 'jamming forced landing' });
+              // Swarm Phase 2: close a promoted breakaway's child event
+              // with its member.
+              if (sw._breakawayChildId) {
+                const bwChild = getEvent(sw._breakawayChildId);
+                if (bwChild && bwChild.status === 'active') {
+                  markNeutralised(bwChild.id, { outcome: 'neutralized', needsPostIncident: false });
+                  closeEvent(bwChild.id, null);
+                }
+              }
               // Drop a small downed-drone marker at the landing spot so
               // it's visible in top-down after the billboard hides.
               viewer.entities.add({
@@ -12519,6 +12612,41 @@ async function main() {
             });
             sw._lastTrackSyncMs = nowMs;
             sw._trackSyncInCov = swShouldShow;
+          }
+          // Swarm Phase 2: breakaway detection. Deviation anchor is the
+          // formation lead (the group's reference point); a member is a
+          // breakaway candidate when its distance from the lead exceeds
+          // its own slot offset magnitude plus the tuned threshold,
+          // sustained for the grace window. Promotion fires once. The
+          // promoted member's child event mirrors position + coverage
+          // each tick until the member dies or the parent closes.
+          if (!sw._breakawayChildId && !sw.neutralised && leadPos) {
+            const _bw = window.__isr_breakaway || { distM: 500, graceSec: 10 };
+            const slotMagM = Math.hypot(sw.offset?.forward || 0, sw.offset?.right || 0);
+            const devM = haversineM(pos.lat, pos.lon, leadPos.lat, leadPos.lon);
+            if (devM > slotMagM + _bw.distM) {
+              if (!sw._breakawaySince) sw._breakawaySince = nowMs;
+              if ((nowMs - sw._breakawaySince) / 1000 >= _bw.graceSec) {
+                _promoteBreakawayMember(event, sw, pos, hdgDeg, speedMs);
+              }
+            } else {
+              sw._breakawaySince = null;
+            }
+          } else if (sw._breakawayChildId && !sw.neutralised) {
+            const childEv = getEvent(sw._breakawayChildId);
+            if (childEv && childEv.status === 'active') {
+              mutateEvent(childEv.id, {
+                lastPosition: { lat: pos.lat, lon: pos.lon, alt: pos.alt, heading: hdgDeg, speed: speedMs, timestamp: new Date().toISOString() },
+                detected: swShouldShow,
+              });
+              if (childEv.memberTracks?.[0]) {
+                syncMemberTrack(childEv.id, childEv.memberTracks[0].memberId, {
+                  lat: pos.lat, lon: pos.lon, alt: pos.alt,
+                  heading: hdgDeg, speedMs,
+                  inCoverage: swShouldShow,
+                });
+              }
+            }
           }
           // P5A: adaptive sample capture (interval decided ONCE per event by platform)
           if (state.recording && (!sw._lastSampleMs || (nowMs - sw._lastSampleMs) >= _sampleIntervalForEvent(event))) {
@@ -16858,7 +16986,7 @@ async function main() {
           <span class="dp-swarm-role">${d.role}</span>
           ${d.status === 'neutralised'
             ? `<span class="dp-swarm-status-downed">× DOWNED</span>`
-            : `<span class="dp-swarm-pos mono">${d.stats.lat.toFixed(4)}°N ${d.stats.lon.toFixed(4)}°E</span>
+            : `${d.status === 'broken-away' ? `<span class="dp-swarm-status-breakaway">↗ BREAKAWAY</span>` : ''}<span class="dp-swarm-pos mono">${d.stats.lat.toFixed(4)}°N ${d.stats.lon.toFixed(4)}°E</span>
           <span class="dp-swarm-alt mono">${Math.round(d.stats.alt)} m</span>
           <span class="dp-swarm-hdg mono">${Math.round(d.stats.heading)}°</span>
           <span class="dp-swarm-spd mono">${(d.stats.speed || 0).toFixed(1)} m/s</span>

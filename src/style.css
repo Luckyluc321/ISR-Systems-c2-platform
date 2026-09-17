@@ -9329,3 +9329,13 @@ body.workspace-map-active #receiver-view {
   text-transform: uppercase;
   flex: 1 1 auto;
 }
+
+/* Swarm roster breakaway badge (P2.1) */
+.dp-swarm-status-breakaway {
+  color: #ffb84d;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-right: 6px;
+}
