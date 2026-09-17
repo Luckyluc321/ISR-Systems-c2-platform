@@ -3863,14 +3863,16 @@ async function main() {
     // a single faster unit. BRS rescue team is the national civil
     // protection heavy-rescue element.
     'receiver-ambulance': {
-      cruiseKmh: 85, arriveAtM: 300, engageSec: 300,
+      cruiseKmh: 85, arriveAtM: 400, engageSec: 300,
+      stagesAtScene: true,   // on-station state reads STAGING, not ENGAGING
       icon: 'police-vehicle', trail: false, airborne: false,
       useRoadRouting: true, supportsMultiDispatch: true, maxUnitsPerDispatch: 5,
       billboardScale: 0.55, swarmSpacingM: 40, cordonSlotSpreadM: 18,
       label: 'Ambulance',
     },
     'receiver-akutlaegebil': {
-      cruiseKmh: 105, arriveAtM: 250, engageSec: 240,
+      cruiseKmh: 105, arriveAtM: 350, engageSec: 240,
+      stagesAtScene: true,   // on-station state reads STAGING, not ENGAGING
       icon: 'police-vehicle', trail: false, airborne: false,
       useRoadRouting: true, billboardScale: 0.55,
       label: 'Akutlægebil',
@@ -13120,7 +13122,9 @@ async function main() {
   }
 
   function _renderDispatchPopupContent(d) {
-    const stateLabel = { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE', rtb_via_last_known: 'RTB · LAST KNOWN', rtb_home: 'RTB · HOME', 'holding-cordon': 'HOLDING CORDON' }[d.state] || (d.state || '').toUpperCase();
+    const stateLabel = (d.state === 'engaging' && d.profile?.stagesAtScene)
+      ? 'STAGING'
+      : { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE', rtb_via_last_known: 'RTB · LAST KNOWN', rtb_home: 'RTB · HOME', 'holding-cordon': 'HOLDING CORDON' }[d.state] || (d.state || '').toUpperCase();
     const stateClass = d.state === 'complete' ? 'offline' : d.state === 'engaging' ? 'degraded' : 'online';
     const elapsedSec = Math.max(0, Math.floor((Date.now() - d.dispatchedTs) / 1000));
     const elapsedStr = elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
@@ -13132,7 +13136,7 @@ async function main() {
     const speedKmh = d.profile?.cruiseKmh || 0;
     const etaLine = (d.state === 'en_route' && distToTarget != null && speedKmh > 0)
       ? `${Math.max(1, Math.round((distToTarget / 1000) / speedKmh * 60))} min ETA · ${distToTarget} m out`
-      : d.state === 'engaging' ? 'On station, engaging target'
+      : d.state === 'engaging' ? (d.profile?.stagesAtScene ? 'Staging at scene perimeter' : 'On station, engaging target')
       : d.state === 'complete' ? 'Engagement complete'
       : d.state === 'rtb_via_last_known' ? 'Signal lost, RTB via last-known coord'
       : d.state === 'rtb_home' ? 'Returning to base'
@@ -19040,7 +19044,9 @@ async function main() {
     // graduated-response system's top pick at a glance.
     const dispatchRow = (a, idx) => {
       const cdState = counterDispatchStateFor(event.id, a.id);
-      const stateLabel = { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE' }[cdState];
+      const stateLabel = (cdState === 'engaging' && CD_PROFILE[a.kind]?.stagesAtScene)
+        ? 'STAGING'
+        : { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE' }[cdState];
       const stateColor = cdState === 'complete' ? '#6b7280' : cdState === 'engaging' ? '#ffb84d' : '#4dd2ff';
       // Asset-level overrides > kind-level defaults. Prevents two
       // Politi teams (Rigspolitiet + Copenhagen) showing identical
@@ -19548,7 +19554,7 @@ async function main() {
       const frac = Math.min(1, Math.max(0, 1 - distM / Math.max(initialM, distM, 1)));
       progressHtml = `<div class="mon-eng-progress"><div class="mon-eng-progress-bar" style="width: ${Math.round(frac * 100)}%;"></div></div>`;
     } else if (bucketKey === 'engaging') {
-      metaParts.push('On station');
+      metaParts.push(CD_PROFILE[cd.kind]?.stagesAtScene ? 'Staging at perimeter' : 'On station');
       metaParts.push(`Elapsed ${elapsedStr}`);
     } else if (bucketKey === 'holding-cordon') {
       metaParts.push('On cordon');
