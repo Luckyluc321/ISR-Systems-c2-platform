@@ -1,6 +1,6 @@
 # Swarm Individual Tracking Architecture
 
-**Status:** `[phase 1 in progress]` — designed 2026-09-16, P1.1 landed same day (commits 5809fd6 + 06d602b): `event.memberTracks[]` source of truth, syncMemberTrack/setMemberStatus mutators, tick-loop sync, kill-path status routing, frozen-at-spawn shadow clones. Remaining Phase 1: detail-panel roster reads memberTracks (P1.2). Phase 2 (breakaway promotion) not started.
+**Status:** `[phase 1 complete]` — designed 2026-09-16. P1.1 landed 2026-09-16 (commits 5809fd6 + 06d602b): `event.memberTracks[]` source of truth, syncMemberTrack/setMemberStatus mutators, tick-loop sync, kill-path status routing, frozen-at-spawn shadow clones. P1.2 landed 2026-09-17 (commit 501ee72): swarm roster renders per-member status from memberTracks (× DOWNED tag on neutralised members). Phase 2 (breakaway promotion) not started.
 
 ## Problem
 
