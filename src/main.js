@@ -13881,22 +13881,6 @@ async function main() {
       // so instead check the raw coverage state by re-sampling.
       // A jam-fall in progress overrides this — we WANT to watch it
       // crash regardless of coverage.
-      //
-      // Downed (tracer kill or jam-crash landed) → TV static, then
-      // exit POV. Without this the hidden billboard keeps returning
-      // its last position and the camera freezes on a dead frame
-      // forever. The feed is gone; show the loss, then leave.
-      if ((sw.neutralised || sw._jamFallLanded) && !_dronePov.staticShown) {
-        _triggerDroneStatic();
-        setTimeout(() => {
-          if (_dronePov.active && _dronePov.swRef === sw) {
-            toast('Feed lost. Drone downed. Exiting POV.', 'info');
-            _exitDronePOV();
-          }
-        }, 1800);
-        return;
-      }
-      if (_dronePov.staticShown) return;   // static playing, hold last frame until the timed exit
       if (!sw._jamFall) {
         const cart0 = sw.billboard.position?.getValue?.(Cesium.JulianDate.now());
         if (cart0) {
@@ -13916,6 +13900,10 @@ async function main() {
       // Translate the camera to the drone position while preserving the
       // user's current orientation (heading/pitch/roll from look drags).
       viewer.scene.camera.position = cart;
+      // Jam-crash landing → TV static overlay. Fires once.
+      if (sw._jamFallLanded && !_dronePov.staticShown) {
+        _triggerDroneStatic();
+      }
     });
   }
 
