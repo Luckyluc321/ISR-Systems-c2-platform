@@ -389,7 +389,12 @@ export function tacticalKindsForSubject(subject) {
   // pack hunt) + Army C-UAS jammer for multi-target RF disruption +
   // helicopter for airborne C2 and follow-up
   if (isSwarm) {
-    return { kinds: ['counter-drone-swarm', 'army-c-uas', 'helicopter-intercept'], rationale: `Multi-airframe ${cardinality}. Interceptor swarm for kinetic engagement inside restricted airspace. Army C-UAS jammer for RF disruption. Helicopter intercept for airborne C2 and follow-up.` };
+    // police-c-uas restored 2026-09-17: the gap-9 droneCount fix made
+    // swarm events hit this branch for the first time (cardinality was
+    // silently '1' before), and the branch predated police having a
+    // ground role. Police patrol is the ground first-response layer
+    // regardless of how many airframes are overhead.
+    return { kinds: ['police-c-uas', 'counter-drone-swarm', 'army-c-uas', 'helicopter-intercept'], rationale: `Multi-airframe ${cardinality}. Police counter drone patrol as ground first-response layer. Interceptor swarm for kinetic engagement inside restricted airspace. Army C-UAS jammer for RF disruption. Helicopter intercept for airborne C2 and follow-up.` };
   }
 
   // Fixed-wing drones + VTOL — larger, longer endurance, helicopter class
