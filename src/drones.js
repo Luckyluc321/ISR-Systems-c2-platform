@@ -342,6 +342,74 @@ export const TEMPLATES = {
     durationSec: 112,
   },
 
+  // ── Shahed-238, the fastest of the family. Same route again ──
+  //
+  // Iranian jet original (Czech TJ150 turbojet lineage). ~600 km/h
+  // maximum per leaked design specs via CSIS Missile Threat
+  // (PLAUSIBLE tier; the fastest credibly reported figure in the
+  // family). Sim flies ~450 km/h (125 m/s) ingress with a ~600 km/h
+  // (167 m/s) terminal dash. First detection to impact ~80 s: the
+  // shortest decision window of the three family scenarios
+  // (Geran-2 ~176 s, Geran-3 ~88 s).
+  //
+  // Family note per Sept 2026 research: Geran-4/5 (the variants
+  // dominating Russian production per Ukrainian HUR, single
+  // reporting chain) cruise 300-400 km/h — inside Geran-3's
+  // envelope. No verified distinct capability, so no separate
+  // scenario: inventing one would be fake differentiation.
+  cph_shahed238_amalienborg: {
+    siteId: 'cph',
+    classification: 'hostile',
+    threat: 'high',
+    platform: 'loitering-munition',
+    terminalImpact: true,
+    droneType: 'Shahed-238 (jet loitering munition)',
+    confidence: 0.64,
+    confidenceTrend: 'Turbojet acoustic + weak RF, highest closure rate in family catalog',
+    multiSite: true,
+    contributingSensors: [
+      { id: 'N09', confidence: 0.70 },
+      { id: 'N15', confidence: 0.66 },
+      { id: 'N20', confidence: 0.61 },
+    ],
+    evidence: {
+      rfCarrier: 'GNSS/INS guidance, minimal RF emissions',
+      rfBandwidth: 'narrowband',
+      rfMatch: 'Shahed-238 signature 61%',
+      modality: 'Acoustic (turbojet) + visual silhouette',
+      evidenceSize: '128.7 MB',
+      note: 'Jet loitering munition, fastest of the Shahed family. ~600 km/h maximum per leaked design specifications (CSIS Missile Threat, plausible tier). Closure rate compresses the response window below one and a half minutes from first detection.',
+    },
+    waypoints: [
+      // Cruise ~125 m/s (600 m legs in ~5 s), dash ~167 m/s.
+      { lat: 55.6180, lon: 12.7090, alt: 1800, heading: 270, tSec: 0  },
+      { lat: 55.6180, lon: 12.6995, alt: 1800, heading: 270, tSec: 5  },
+      { lat: 55.6180, lon: 12.6900, alt: 1800, heading: 270, tSec: 10 },
+      { lat: 55.6180, lon: 12.6837, alt: 1800, heading: 270, tSec: 15 },
+      { lat: 55.6180, lon: 12.6775, alt: 1800, heading: 270, tSec: 20 },  // FIRST DETECTION, N17
+      { lat: 55.6180, lon: 12.6680, alt: 1800, heading: 270, tSec: 25 },
+      { lat: 55.6180, lon: 12.6585, alt: 1800, heading: 270, tSec: 30 },
+      { lat: 55.6180, lon: 12.6490, alt: 1800, heading: 270, tSec: 35 },  // Runway 04R, N15
+      { lat: 55.6180, lon: 12.6395, alt: 1800, heading: 270, tSec: 40 },
+      { lat: 55.6207, lon: 12.6312, alt: 1800, heading: 300, tSec: 45 },  // NW bend, N18
+      { lat: 55.6234, lon: 12.6229, alt: 1800, heading: 315, tSec: 50 },
+      { lat: 55.6272, lon: 12.6162, alt: 1800, heading: 330, tSec: 55 },  // Approaching AMK
+      { lat: 55.6320, lon: 12.6115, alt: 1800, heading: 340, tSec: 60 },
+      { lat: 55.6370, lon: 12.6095, alt: 1800, heading: 345, tSec: 65 },  // AMK cluster centre
+      { lat: 55.6422, lon: 12.6090, alt: 1800, heading: 355, tSec: 70 },
+      { lat: 55.6530, lon: 12.6045, alt: 1700, heading: 355, tSec: 75 },
+      { lat: 55.6640, lon: 12.6005, alt: 1500, heading: 355, tSec: 80 },
+      { lat: 55.6695, lon: 12.5985, alt: 1300, heading: 350, tSec: 85 },  // Terminal descent begins
+      // Terminal dash ~167 m/s
+      { lat: 55.6727, lon: 12.5972, alt: 1000, heading: 348, tSec: 87 },
+      { lat: 55.6759, lon: 12.5959, alt: 720,  heading: 348, tSec: 89 },
+      { lat: 55.6791, lon: 12.5946, alt: 460,  heading: 348, tSec: 91 },
+      { lat: 55.6820, lon: 12.5936, alt: 220,  heading: 348, tSec: 93 },
+      { lat: 55.6844, lon: 12.5931, alt: 50,   heading: 348, tSec: 95 },  // Impact at Amalienborg
+    ],
+    durationSec: 95,
+  },
+
   // ── Recon quadcopter, sustained loiter over CPH cargo apron ──
   //
   // Small commercial-class quadcopter, unclear operator, sustained
