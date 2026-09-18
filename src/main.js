@@ -10781,12 +10781,17 @@ async function main() {
     for (const s of samples) {
       const b = bandOf(s.confidence || 0);
       const confirmed = _sampleIsConfirmed(s);
-      if (!current || current.band !== b || current.confirmed !== confirmed) {
+      // Coverage gaps are their own segment kind: the platform was
+      // OUTSIDE every sensor's reach, so replay must not draw the
+      // recorded path there (that is sim ground truth no sensor saw).
+      const isGap = s.detection_state === 'sensor_gap';
+      if (!current || current.band !== b || current.confirmed !== confirmed || current.isGap !== isGap) {
         if (current) current.positions.push([s.lon, s.lat, s.altitude_agl_m]);
-        current = { band: b, confirmed, avgConf: s.confidence || 0, positions: [] };
+        current = { band: b, confirmed, isGap, avgConf: s.confidence || 0, positions: [], tStart: s.timestamp_utc, tEnd: s.timestamp_utc };
         segments.push(current);
       }
       current.positions.push([s.lon, s.lat, s.altitude_agl_m]);
+      current.tEnd = s.timestamp_utc;
     }
     return segments;
   }
@@ -10797,6 +10802,51 @@ async function main() {
       const segments = _replayBuildTrailSegments(samples);
       for (const seg of segments) {
         if (seg.positions.length < 2) continue;
+        if (seg.isGap) {
+          // Honest bridge: a straight dim grey dashed line between the
+          // last observed point and the reacquisition point. We know
+          // those two truths and nothing in between. Seam markers
+          // carry the timestamps.
+          const a = seg.positions[0];
+          const z = seg.positions[seg.positions.length - 1];
+          const bridge = viewer.entities.add({
+            polyline: {
+              positions: Cesium.Cartesian3.fromDegreesArrayHeights([...a, ...z]),
+              width: 1.5,
+              material: new Cesium.PolylineDashMaterialProperty({
+                color: Cesium.Color.fromCssColorString('#9ca3af').withAlpha(0.45),
+                dashLength: 10,
+              }),
+              clampToGround: false,
+            },
+          });
+          bridge._replayDroneId = droneId;
+          bridge._replayConfirmed = false;
+          trailEntities.push(bridge);
+          const seam = (posArr, text) => {
+            const m = viewer.entities.add({
+              position: Cesium.Cartesian3.fromDegrees(posArr[0], posArr[1], posArr[2]),
+              point: { pixelSize: 5, color: Cesium.Color.fromCssColorString('#9ca3af'), outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: Number.POSITIVE_INFINITY },
+              label: {
+                text,
+                font: '9px system-ui',
+                fillColor: Cesium.Color.fromCssColorString('#9ca3af'),
+                outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                pixelOffset: new Cesium.Cartesian2(0, -12),
+                showBackground: true,
+                backgroundColor: Cesium.Color.fromCssColorString('rgba(8, 11, 16, 0.85)'),
+                backgroundPadding: new Cesium.Cartesian2(4, 2),
+                disableDepthTestDistance: Number.POSITIVE_INFINITY,
+              },
+            });
+            m._replayDroneId = droneId;
+            trailEntities.push(m);
+          };
+          seam(a, `signal lost ${String(seg.tStart || '').slice(11, 19)}Z`);
+          seam(z, `reacquired ${String(seg.tEnd || '').slice(11, 19)}Z`);
+          continue;
+        }
         const flat = seg.positions.flat();
         const color = _confidenceColor(seg.avgConf);
         // Confirmed = solid, full width, full alpha.
