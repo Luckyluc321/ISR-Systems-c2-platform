@@ -9308,13 +9308,43 @@ body.workspace-map-active #receiver-view {
 }
 .hist-pattern-empty { color: var(--text-dim); }
 .hist-pattern-row {
-  padding: var(--space-2) 0;
-  border-top: 1px solid var(--border);
+  padding: 8px 12px;
+  margin-bottom: 6px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  transition: border-color 120ms, background 120ms;
 }
+.hist-pattern-clickable:hover { border-color: rgba(192, 132, 252, 0.45); background: rgba(255, 255, 255, 0.04); }
 .hist-pattern-row-main {
   display: flex;
   align-items: center;
   gap: var(--space-2);
+}
+.hist-pattern-title {
+  font-size: var(--fs-sm);
+  color: var(--text);
+  font-weight: 600;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.hist-pattern-open {
+  color: var(--text-dim);
+  font-size: 15px;
+  flex: 0 0 auto;
+}
+.hist-pattern-clickable:hover .hist-pattern-open { color: #c084fc; }
+.hist-pattern-sub {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-top: 3px;
+  min-width: 0;
+}
+.hist-pattern-sub .hist-pattern-summary {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1 1 auto; min-width: 0; margin: 0; opacity: 0.7;
 }
 .hist-pattern-date {
   font-family: var(--font-mono);

@@ -121,18 +121,28 @@ export function renderHistoricalPatternPanel(event, activeRole, opts = {}) {
 
     const rows = priors.map(r => {
       const linkable = typeof opts.hasReportFor === 'function' && opts.hasReportFor(r.eventId);
-      const outcome = r.outcome || 'outcome unrecorded';
       const cls = r.classification || 'unclassified';
       const clsLabel = cls === 'resolved' ? 'dismissed' : cls;
+      // The summary's first segment is the platform model: it becomes
+      // the card title. The remainder is one dim truncated line; the
+      // popup carries the full detail. Outcome only renders when it
+      // says something ("unrecorded" is noise at list level).
+      const parts = String(r.summary || '').split(/,(.+)/s);
+      const title = (parts[0] || r.featureFields?.platform_family || 'Detection').trim();
+      const rest = (parts[1] || '').trim().replace(/^\s*/, '');
       return `
         <div class="hist-pattern-row hist-pattern-clickable" data-hist-view="${_esc(r.eventId)}" title="Open incident overview">
           <div class="hist-pattern-row-main">
-            <span class="hist-pattern-date">${_esc(_fmtDate(r.closedAt))}</span>
+            <span class="hist-pattern-title">${_esc(title)}</span>
             <span class="hist-pattern-class hist-pattern-class-${_esc(cls)}">${_esc(clsLabel)}</span>
-            <span class="hist-pattern-outcome">${_esc(outcome)}</span>
-            ${linkable ? `<button class="hist-pattern-link" data-rcv="open-report" data-id="${_esc(r.eventId)}">View report</button>` : ''}
+            <span class="hist-pattern-open">›</span>
           </div>
-          ${r.summary ? `<div class="hist-pattern-summary">${_esc(r.summary)}</div>` : ''}
+          <div class="hist-pattern-sub">
+            <span class="hist-pattern-date">${_esc(_fmtDate(r.closedAt))}</span>
+            ${r.outcome ? `<span class="hist-pattern-outcome">${_esc(r.outcome)}</span>` : ''}
+            ${rest ? `<span class="hist-pattern-summary">${_esc(rest)}</span>` : ''}
+          </div>
+          ${linkable ? `<button class="hist-pattern-link" data-rcv="open-report" data-id="${_esc(r.eventId)}">View report</button>` : ''}
         </div>`;
     }).join('');
     bodyHtml = `
