@@ -9433,3 +9433,41 @@ body.workspace-map-active #receiver-view {
 }
 .hist-pattern-class { font-size: 9px; padding: 1px 5px; }
 .hist-pattern-summary { color: var(--text); opacity: 0.85; }
+
+/* ── Prior-activity incident popup ──────────────────────────── */
+.hist-pattern-clickable { cursor: pointer; }
+.hist-pattern-clickable:hover { background: rgba(255, 255, 255, 0.03); }
+.hp-pop-overlay {
+  position: fixed; inset: 0; z-index: 4000;
+  background: rgba(4, 7, 12, 0.72);
+  display: flex; align-items: center; justify-content: center;
+}
+.hp-pop-card {
+  width: min(560px, 92vw);
+  max-height: 84vh; overflow-y: auto;
+  background: var(--surface-panel, #0b0f16);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px 18px;
+}
+.hp-pop-hdr { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.hp-pop-title { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--text); font-weight: 600; flex: 1 1 auto; }
+.hp-pop-x {
+  background: transparent; border: 1px solid var(--border); border-radius: 3px;
+  color: var(--text-dim); font-size: 14px; line-height: 1; padding: 3px 8px; cursor: pointer;
+}
+.hp-pop-x:hover { color: var(--text); border-color: var(--text-dim); }
+.hp-pop-summary { font-size: var(--fs-xs); color: var(--text); opacity: 0.85; line-height: 1.55; margin-bottom: 12px; }
+.hp-pop-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; margin-bottom: 12px; }
+.hp-pop-grid > div { display: flex; justify-content: space-between; gap: 8px; font-size: var(--fs-2xs); border-bottom: 1px solid rgba(255,255,255,0.05); padding: 4px 0; }
+.hp-pop-grid span { color: var(--text-dim); }
+.hp-pop-grid b { color: var(--text); font-weight: 600; }
+.hp-pop-sec {
+  font-family: var(--font-mono); font-size: 10px; font-weight: 600;
+  letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim);
+  margin: 12px 0 6px; display: flex; align-items: baseline; gap: 10px;
+}
+.hp-corr-score { color: var(--accent); text-transform: none; letter-spacing: 0.04em; margin-left: auto; }
+.hp-corr-line { font-size: var(--fs-2xs); color: var(--text-dim); padding: 3px 0; }
+.hp-corr-line.is-match { color: var(--text); }
+.hp-pop-note { font-size: 10px; color: var(--text-dim); margin-top: 8px; line-height: 1.5; }

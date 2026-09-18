@@ -125,7 +125,7 @@ export function renderHistoricalPatternPanel(event, activeRole, opts = {}) {
       const cls = r.classification || 'unclassified';
       const clsLabel = cls === 'resolved' ? 'dismissed' : cls;
       return `
-        <div class="hist-pattern-row">
+        <div class="hist-pattern-row hist-pattern-clickable" data-hist-view="${_esc(r.eventId)}" title="Open incident overview">
           <div class="hist-pattern-row-main">
             <span class="hist-pattern-date">${_esc(_fmtDate(r.closedAt))}</span>
             <span class="hist-pattern-class hist-pattern-class-${_esc(cls)}">${_esc(clsLabel)}</span>

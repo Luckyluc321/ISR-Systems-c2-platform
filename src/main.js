@@ -657,7 +657,7 @@ import { activateManhattanDemo, deactivateManhattanDemo, setManhattanChase } fro
 import './adapters/cooperative_mock.js';
 import './adapters/cooperative_opensky.js';
 import { checkCooperativeTraffic } from './cooperative_traffic_reconciler.js';
-import { loadFromEvents as loadPrecedentIndex, registerEvent as registerPrecedent, hydrateFromIdb as hydratePrecedentIndex, indexSize as precedentIndexSize, getRecord as getPrecedentRecord, allRecords as allPrecedentRecords, clearIndex as clearPrecedentIndex, unregisterEvent as unregisterPrecedent } from './precedent_index.js';
+import { loadFromEvents as loadPrecedentIndex, registerEvent as registerPrecedent, hydrateFromIdb as hydratePrecedentIndex, indexSize as precedentIndexSize, getRecord as getPrecedentRecord, allRecords as allPrecedentRecords, clearIndex as clearPrecedentIndex, unregisterEvent as unregisterPrecedent, computeFeatureVector as computeEventFeatures } from './precedent_index.js';
 import { buildPrecedentBlock } from './precedent_retrieval.js';
 import { logOperatorDecision, updateFeedbackOutcome, hydrateFeedbackLog, _installConsoleHelper as _installFeedbackConsole } from './feedback_log.js';
 // Feedback-log adapters self-register on import. localStorage is the
@@ -20123,6 +20123,81 @@ async function main() {
       ${bucketSections}`;
     return { html, wrapped };
   }
+
+  // ── Prior-activity incident popup ────────────────────────────
+  // Click a history row: overlay with the archived one-pager and a
+  // DETERMINISTIC correlation checklist against the active event.
+  // Every correlation line traces to computed sensor-derived features
+  // (precedent vectors); no agent, no latency, no hallucination risk.
+  function _openHistPopup(priorId, activeId) {
+    const rec = getPrecedentRecord(priorId);
+    if (!rec) return;
+    const ev = getEvent(priorId);           // in-session only
+    const active = getEvent(activeId);
+    const esc = v => String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    const f = rec.featureFields || {};
+    // One-pager block: full event when held, compact record otherwise
+    const onePager = ev ? `
+      <div class="hp-pop-grid">
+        <div><span>Platform</span><b>${esc(ev.droneType || ev.platform)}</b></div>
+        <div><span>Entered</span><b>${esc(ev.entry?.timestamp?.slice(11,19) || ev.startTime?.slice(11,19) || '?')}Z</b></div>
+        <div><span>Ended</span><b>${esc(ev.endTime?.slice(11,19) || '?')}Z</b></div>
+        <div><span>Site dwell</span><b>${esc(formatDuration(ev.duration))}</b></div>
+        <div><span>Classification</span><b>${esc(ev.classification)}</b></div>
+        <div><span>Confidence</span><b>${ev.confidence != null ? Math.round(ev.confidence * 100) + '%' : '?'}</b></div>
+        <div><span>Dispatches</span><b>${(ev.counterDispatches || []).length}</b></div>
+        <div><span>Outcome</span><b>${esc(ev.outcome || 'unrecorded')}</b></div>
+      </div>` : `
+      <div class="hp-pop-grid">
+        <div><span>Closed</span><b>${esc(rec.closedAt?.slice(0,10))} ${esc(rec.closedAt?.slice(11,19))}Z</b></div>
+        <div><span>Classification</span><b>${esc(rec.classification || 'unclassified')}</b></div>
+        <div><span>Outcome</span><b>${esc(rec.outcome || 'unrecorded')}</b></div>
+        <div><span>Family</span><b>${esc(f.platform_family)}</b></div>
+      </div>
+      <div class="hp-pop-note">Compact archive record. The full report was generated at close; the server-side report archive arrives with the Azure backend.</div>`;
+    // Deterministic correlation vs active event
+    let corrHtml = '';
+    if (active) {
+      const a = computeEventFeatures(active);
+      const rv = rec.featureVector || [];
+      let dot = 0, ma = 0, mb = 0;
+      for (let i = 0; i < Math.min(a.vec.length, rv.length); i++) { dot += a.vec[i]*rv[i]; ma += a.vec[i]*a.vec[i]; mb += rv[i]*rv[i]; }
+      const sim = (ma && mb) ? dot / (Math.sqrt(ma) * Math.sqrt(mb)) : 0;
+      const band = sim >= 0.75 ? 'high' : sim >= 0.5 ? 'medium' : 'low';
+      const af = a.fields;
+      const hpA = new Set(af.hotspot_ids || []);
+      const dwellShared = (f.hotspot_ids || []).filter(h => hpA.has(h));
+      const line = (match, text) => `<div class="hp-corr-line ${match ? 'is-match' : ''}">${match ? '✓' : '·'} ${text}</div>`;
+      corrHtml = `
+        <div class="hp-pop-sec">Correlation with active event <span class="hp-corr-score">similarity ${sim.toFixed(2)} · ${band}</span></div>
+        ${line(af.platform_family === f.platform_family, af.platform_family === f.platform_family ? `same platform family (${esc(f.platform_family)})` : `different platform family (${esc(f.platform_family)} vs ${esc(af.platform_family)})`)}
+        ${line(af.approach_bucket && af.approach_bucket === f.approach_bucket, af.approach_bucket === f.approach_bucket && af.approach_bucket ? `same approach corridor (${esc(f.approach_bucket)} ingress)` : `different approach corridor (${esc(f.approach_bucket || '?')} vs ${esc(af.approach_bucket || '?')})`)}
+        ${line(af.cardinality_bucket === f.cardinality_bucket, af.cardinality_bucket === f.cardinality_bucket ? `same formation size (${esc(f.cardinality_bucket)})` : `different formation size (${esc(f.cardinality_bucket)} vs ${esc(af.cardinality_bucket)})`)}
+        ${line(dwellShared.length > 0, dwellShared.length ? `dwell over same asset${dwellShared.length === 1 ? '' : 's'} (${dwellShared.map(esc).join(', ')})` : 'no shared dwell hotspots')}
+        <div class="hp-pop-note">Every line derives from computed track features. Context for your judgment, not a conclusion.</div>`;
+    }
+    const overlay = document.createElement('div');
+    overlay.className = 'hp-pop-overlay';
+    overlay.innerHTML = `
+      <div class="hp-pop-card">
+        <div class="hp-pop-hdr">
+          <span class="hp-pop-title">${esc(rec.closedAt?.slice(0,10))} · ${esc(ev?.droneType || f.platform_family)}</span>
+          <span class="hist-pattern-class hist-pattern-class-${esc(rec.classification || 'unclassified')}">${esc(rec.classification === 'resolved' ? 'dismissed' : (rec.classification || 'unclassified'))}</span>
+          <button class="hp-pop-x" title="Close">×</button>
+        </div>
+        ${rec.summary ? `<div class="hp-pop-summary">${esc(rec.summary)}</div>` : ''}
+        ${onePager}
+        ${corrHtml}
+      </div>`;
+    overlay.addEventListener('click', (e) => { if (e.target === overlay || e.target.classList.contains('hp-pop-x')) overlay.remove(); });
+    document.body.appendChild(overlay);
+  }
+  document.addEventListener('click', (ev) => {
+    const row = ev.target.closest('[data-hist-view]');
+    if (!row) return;
+    if (ev.target.closest('[data-rcv]')) return;   // View report button keeps its own action
+    _openHistPopup(row.dataset.histView, _workspaceEventId);
+  });
 
   // Expanded formation groups in the Step 3 panel. Keyed by groupId.
   // Default collapsed (header row only). Document-level delegated
