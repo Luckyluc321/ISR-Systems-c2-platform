@@ -14411,19 +14411,75 @@ async function main() {
       simPanel.innerHTML = `<div class="cp-empty" style="padding:12px;font-family:var(--font-mono);font-size:var(--fs-2xs);color:var(--text-dim);letter-spacing:0.08em;">No threat scenarios authored for this site yet. Site config, sensor grid, and receiver routing are live — drone-path templates land next.</div>`;
       return;
     }
-    simPanel.innerHTML = menu.map(t =>
-      `<button class="cp-btn wide sim-btn ${t.cls || ''}" data-threat="${t.key}" data-site="${site}">${t.label}</button>`
-    ).join('');
-    simPanel.querySelectorAll('.sim-btn[data-threat]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        if (anyTrackLive()) return;
-        const key = btn.dataset.threat;
-        const s = btn.dataset.site || 'cph';
-        flyTo(s);
-        setTimeout(() => window.__spawnDrone(key), 1500);
-      });
+    // ── Sim composer: threat × path selection ──────────────────
+    // Each authored template is a (threat, path) pair. Threats that
+    // share a route (the Shahed family on the Amalienborg run) show
+    // one path entry each pointing at their own retimed template.
+    // Unannotated keys fall back to threat = label, path = authored
+    // route, so every site works without curation.
+    const meta = k => _SIM_COMPOSER_META[k] || null;
+    const entries = menu.map(t => ({
+      key: t.key, cls: t.cls || '',
+      threat: meta(t.key)?.threat || t.label,
+      pathLabel: meta(t.key)?.pathLabel || 'Authored route',
+    }));
+    const threats = [...new Set(entries.map(e => e.threat))];
+    if (!threats.includes(_simSelThreat)) _simSelThreat = null;
+    const pathsForSel = _simSelThreat
+      ? entries.filter(e => e.threat === _simSelThreat)
+      : [];
+    const selEntry = pathsForSel.find(e => e.pathLabel === _simSelPath) || null;
+    simPanel.innerHTML = `
+      <div class="sim-composer-box">
+        <div class="sim-composer-hdr">Select threat</div>
+        ${threats.map(th => {
+          const cls = entries.find(e => e.threat === th)?.cls || '';
+          return `<button class="cp-btn wide sim-btn ${cls} ${th === _simSelThreat ? 'active' : ''}" data-comp-threat="${th.replace(/"/g, '&quot;')}">${th}</button>`;
+        }).join('')}
+      </div>
+      <div class="sim-composer-box ${_simSelThreat ? '' : 'is-waiting'}">
+        <div class="sim-composer-hdr">Select path</div>
+        ${_simSelThreat
+          ? pathsForSel.map(e => `<button class="cp-btn wide sim-btn ${e.cls} ${e.pathLabel === _simSelPath ? 'active' : ''}" data-comp-path="${e.pathLabel.replace(/"/g, '&quot;')}">${e.pathLabel}</button>`).join('')
+          : `<div class="sim-composer-hint">Pick a threat first.</div>`}
+      </div>
+      <button class="cp-btn wide sim-btn sim-launch ${selEntry ? '' : 'disabled'}" data-comp-launch ${selEntry ? '' : 'disabled'}>Launch simulation</button>`;
+    simPanel.querySelectorAll('[data-comp-threat]').forEach(btn => btn.addEventListener('click', () => {
+      _simSelThreat = btn.dataset.compThreat;
+      const ps = entries.filter(e => e.threat === _simSelThreat);
+      _simSelPath = ps.length === 1 ? ps[0].pathLabel : null;
+      renderSimPanel();
+    }));
+    simPanel.querySelectorAll('[data-comp-path]').forEach(btn => btn.addEventListener('click', () => {
+      _simSelPath = btn.dataset.compPath;
+      renderSimPanel();
+    }));
+    const launchBtn = simPanel.querySelector('[data-comp-launch]');
+    if (launchBtn && selEntry) launchBtn.addEventListener('click', () => {
+      if (anyTrackLive()) return;
+      flyTo(site);
+      setTimeout(() => window.__spawnDrone(selEntry.key), 1500);
     });
   }
+  let _simSelThreat = null;
+  let _simSelPath = null;
+  // Threat/path annotation for the composer. Keys not listed fall
+  // back automatically. pathLabel doubles as the path identity.
+  const _SIM_COMPOSER_META = {
+    cph_shahed_amalienborg:    { threat: 'Shahed-136 / Geran-2',   pathLabel: 'Øresund → CPH → Amalienborg' },
+    cph_geran3_amalienborg:    { threat: 'Geran-3 (jet)',          pathLabel: 'Øresund → CPH → Amalienborg' },
+    cph_shahed238_amalienborg: { threat: 'Shahed-238 (jet)',       pathLabel: 'Øresund → CPH → Amalienborg' },
+    cph_quad_hostile:          { threat: 'Quadcopter, hostile',    pathLabel: 'Perimeter ingress' },
+    cph_fixedwing_hostile:     { threat: 'Fixed-wing UAS',         pathLabel: 'Recon transit' },
+    cph_recon_hostile:         { threat: 'HALE reconnaissance',    pathLabel: 'High-altitude loiter' },
+    cph_jet_friendly:          { threat: 'Jet (SAS 743), friendly',pathLabel: 'Filed airliner route' },
+    cph_missile_hostile:       { threat: 'Cruise missile',         pathLabel: 'Baltic sea ingress' },
+    cph_missile_inbound_sw:    { threat: 'Cruise missile',         pathLabel: 'SW continuation ingress' },
+    swarm_recon_cph_amk:       { threat: '5-drone recon swarm',    pathLabel: 'CPH → Amager transit' },
+    cph_unknown_contact:       { threat: 'Non-identifiable contact', pathLabel: 'N perimeter approach' },
+    cph_quad_recon_apron:      { threat: 'Quadcopter recon',       pathLabel: 'Cargo apron loiter' },
+    cph_dji_hobbyist:          { threat: 'DJI hobbyist',           pathLabel: 'Perimeter stray' },
+  };
   if (simSelect) {
     simSelect.addEventListener('change', renderSimPanel);
     renderSimPanel();

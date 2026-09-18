@@ -9390,3 +9390,36 @@ body.workspace-map-active #receiver-view {
   text-transform: uppercase;
   margin-right: 6px;
 }
+
+/* ── Sim composer: threat × path boxes (platform grammar) ────── */
+.sim-composer-box {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+  padding: 8px;
+  margin-bottom: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sim-composer-box.is-waiting { opacity: 0.55; }
+.sim-composer-hdr {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+  padding: 2px 4px 6px;
+}
+.sim-composer-hint {
+  font-size: var(--fs-2xs);
+  color: var(--text-dim);
+  padding: 4px;
+}
+.sim-btn.active {
+  border-color: var(--accent);
+  background: rgba(77, 210, 255, 0.10);
+  color: var(--accent);
+}
+.sim-btn.sim-launch.disabled { opacity: 0.4; cursor: not-allowed; }
