@@ -493,6 +493,11 @@ function _rankScore(outlierScore, trendScore, criticalityMult, isHighlight) {
 // ── Prose formatter (deterministic phrasing where safe) ──────
 
 function _proseForSignal(sig) {
+  if (sig.signal === 'coverage_profile') {
+    const g = sig.sensor_gaps || [];
+    const durs = g.map(x => `${x.duration_s} s`).join(', ');
+    return `Sensor coverage was not continuous: ${sig.contact_windows} contact windows with ${g.length} gap${g.length === 1 ? '' : 's'}${durs ? ` (${durs})` : ''}. The track re-entered coverage after each gap; positions during gaps were unobserved.`;
+  }
   switch (sig.signal) {
     case 'approach_vector':
       return `Closest approach to ${sig.asset_name} was ${sig.closest_dist_m}m at altitude ${sig.moment_alt_m ?? '?'}m (t=${Math.round(sig.moment_t_sec ?? 0)}s).`;
@@ -626,6 +631,46 @@ function _buildIdentifySentence(event, ctx, samples) {
 
 // ── Public: extract + rank in one pass ────────────────────────
 
+// Coverage profile: contact windows and sensor gaps from the sample
+// stream's detection_state. A track that exits and re-enters coverage
+// is exactly the context the debrief must carry: the platform was
+// unobserved during gaps, and every gap is a fact the narrative may
+// reference but never paper over. Continuous contact returns null
+// (no signal — absence of gaps is the default, not a finding).
+function _extractCoverageProfile(samples) {
+  let windows = 0, inWin = false, lastDetected = null;
+  const gaps = [];
+  let gapStartTs = null;
+  for (const s of samples) {
+    const det = s.detection_state === 'detected';
+    if (det && !inWin) {
+      windows++;
+      inWin = true;
+      if (gapStartTs != null) {
+        gaps.push({
+          lost_at: gapStartTs,
+          reacquired_at: s.timestamp_utc,
+          duration_s: Math.max(0, Math.round((Date.parse(s.timestamp_utc) - Date.parse(gapStartTs)) / 1000)),
+        });
+        gapStartTs = null;
+      }
+    } else if (!det && inWin) {
+      inWin = false;
+      gapStartTs = lastDetected?.timestamp_utc || s.timestamp_utc;
+    }
+    if (det) lastDetected = s;
+  }
+  if (windows <= 1 && gaps.length === 0) return null;
+  return {
+    signal: 'coverage_profile',
+    contact_windows: windows,
+    sensor_gaps: gaps,
+    // Rank weight grows with gap count so a fragmented track always
+    // surfaces in the block; a single re-entry still clears ranking.
+    z_vs_site_baseline: 1.5 + gaps.length,
+  };
+}
+
 export function extractAndRankSignals(event, samples, opts = {}) {
   const siteId = event?.siteId;
   const ctx = opts.ctx || contextForSite(siteId);
@@ -647,6 +692,8 @@ export function extractAndRankSignals(event, samples, opts = {}) {
   rawSignals.push(..._extractDwellHotspots(samples, highlights, baseline));
   const cohesion = _extractFormationCohesion(samples, baseline);
   if (cohesion) rawSignals.push(cohesion);
+  const coverage = _extractCoverageProfile(samples);
+  if (coverage) rawSignals.push(coverage);
 
   // Compute per-signal scores.
   const scored = rawSignals.map(sig => {
