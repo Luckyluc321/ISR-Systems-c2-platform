@@ -14411,12 +14411,12 @@ async function main() {
       simPanel.innerHTML = `<div class="cp-empty" style="padding:12px;font-family:var(--font-mono);font-size:var(--fs-2xs);color:var(--text-dim);letter-spacing:0.08em;">No threat scenarios authored for this site yet. Site config, sensor grid, and receiver routing are live — drone-path templates land next.</div>`;
       return;
     }
-    // ── Sim composer: threat × path selection ──────────────────
-    // Each authored template is a (threat, path) pair. Threats that
-    // share a route (the Shahed family on the Amalienborg run) show
-    // one path entry each pointing at their own retimed template.
-    // Unannotated keys fall back to threat = label, path = authored
-    // route, so every site works without curation.
+    // ── Sim composer: threat and path DROPDOWNS ────────────────
+    // Two collapsed selects in the same grammar as the site picker
+    // above. Options stay hidden until the dropdown opens. Path
+    // enables after a threat is chosen (auto-selected when the
+    // threat has exactly one route). Launch resolves the authored
+    // template for the chosen pair.
     const meta = k => _SIM_COMPOSER_META[k] || null;
     const entries = menu.map(t => ({
       key: t.key, cls: t.cls || '',
@@ -14424,36 +14424,38 @@ async function main() {
       pathLabel: meta(t.key)?.pathLabel || 'Authored route',
     }));
     const threats = [...new Set(entries.map(e => e.threat))];
-    if (!threats.includes(_simSelThreat)) _simSelThreat = null;
-    const pathsForSel = _simSelThreat
-      ? entries.filter(e => e.threat === _simSelThreat)
-      : [];
+    if (!threats.includes(_simSelThreat)) { _simSelThreat = null; _simSelPath = null; }
+    const pathsForSel = _simSelThreat ? entries.filter(e => e.threat === _simSelThreat) : [];
+    if (_simSelThreat && pathsForSel.length === 1) _simSelPath = pathsForSel[0].pathLabel;
     const selEntry = pathsForSel.find(e => e.pathLabel === _simSelPath) || null;
+    const esc = v => v.replace(/"/g, '&quot;');
     simPanel.innerHTML = `
-      <div class="sim-composer-box">
-        <div class="sim-composer-hdr">Select threat</div>
-        ${threats.map(th => {
-          const cls = entries.find(e => e.threat === th)?.cls || '';
-          return `<button class="cp-btn wide sim-btn ${cls} ${th === _simSelThreat ? 'active' : ''}" data-comp-threat="${th.replace(/"/g, '&quot;')}">${th}</button>`;
-        }).join('')}
+      <div class="sim-composer-field">
+        <div class="sim-composer-hdr">Threat</div>
+        <select class="sim-select" id="sim-comp-threat">
+          <option value="" ${_simSelThreat ? '' : 'selected'} disabled>Select threat…</option>
+          ${threats.map(th => `<option value="${esc(th)}" ${th === _simSelThreat ? 'selected' : ''}>${th}</option>`).join('')}
+        </select>
       </div>
-      <div class="sim-composer-box ${_simSelThreat ? '' : 'is-waiting'}">
-        <div class="sim-composer-hdr">Select path</div>
-        ${_simSelThreat
-          ? pathsForSel.map(e => `<button class="cp-btn wide sim-btn ${e.cls} ${e.pathLabel === _simSelPath ? 'active' : ''}" data-comp-path="${e.pathLabel.replace(/"/g, '&quot;')}">${e.pathLabel}</button>`).join('')
-          : `<div class="sim-composer-hint">Pick a threat first.</div>`}
+      <div class="sim-composer-field">
+        <div class="sim-composer-hdr">Path</div>
+        <select class="sim-select" id="sim-comp-path" ${_simSelThreat ? '' : 'disabled'}>
+          <option value="" ${_simSelPath ? '' : 'selected'} disabled>${_simSelThreat ? 'Select path…' : 'Select threat first'}</option>
+          ${pathsForSel.map(e => `<option value="${esc(e.pathLabel)}" ${e.pathLabel === _simSelPath ? 'selected' : ''}>${e.pathLabel}</option>`).join('')}
+        </select>
       </div>
-      <button class="cp-btn wide sim-btn sim-launch ${selEntry ? '' : 'disabled'}" data-comp-launch ${selEntry ? '' : 'disabled'}>Launch simulation</button>`;
-    simPanel.querySelectorAll('[data-comp-threat]').forEach(btn => btn.addEventListener('click', () => {
-      _simSelThreat = btn.dataset.compThreat;
-      const ps = entries.filter(e => e.threat === _simSelThreat);
-      _simSelPath = ps.length === 1 ? ps[0].pathLabel : null;
+      <button class="cp-btn wide sim-btn sim-launch" data-comp-launch ${selEntry ? '' : 'disabled'}>Launch simulation</button>`;
+    const thSel = simPanel.querySelector('#sim-comp-threat');
+    if (thSel) thSel.addEventListener('change', () => {
+      _simSelThreat = thSel.value || null;
+      _simSelPath = null;
       renderSimPanel();
-    }));
-    simPanel.querySelectorAll('[data-comp-path]').forEach(btn => btn.addEventListener('click', () => {
-      _simSelPath = btn.dataset.compPath;
+    });
+    const paSel = simPanel.querySelector('#sim-comp-path');
+    if (paSel) paSel.addEventListener('change', () => {
+      _simSelPath = paSel.value || null;
       renderSimPanel();
-    }));
+    });
     const launchBtn = simPanel.querySelector('[data-comp-launch]');
     if (launchBtn && selEntry) launchBtn.addEventListener('click', () => {
       if (anyTrackLive()) return;
