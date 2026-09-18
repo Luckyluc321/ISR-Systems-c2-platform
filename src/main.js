@@ -5108,6 +5108,14 @@ async function main() {
     if (event?.status === 'closed' && event.linkedEventIds?.length) {
       for (const linkedId of event.linkedEventIds) {
         const linked = getEvent(linkedId);
+        // NEVER hand an interceptor group to a breakaway child: it is
+        // a single promoted member the group was not assigned to. The
+        // child was the first linked event in a month to satisfy the
+        // lastPosition gate (its mirror writes per tick), which flipped
+        // every interceptor's eventId to it the moment the overwatch
+        // panicked — no assignments, no engagement, mass RTB past four
+        // live drones (field-found 2026-09-18, deep-dive confirmed).
+        if (linked?.provenance?.breakawayOf) continue;
         if (linked && linked.status === 'active' && linked.lastPosition) {
           if (d.eventId !== linkedId) {
             const fromSite = siteName(event.siteId) || event.siteId;
@@ -6551,6 +6559,25 @@ async function main() {
             if (sw2.neutralised) downedCount++;
             else if (sw2.role === 'overwatch') overwatchSurvived = true;
           }
+        }
+        // Truthful-outcome guard: a group that downed NOTHING while
+        // live hostiles remain must never record "neutralised". This
+        // fired via the handover bug (interceptors keyed to an event
+        // with no droneState → downedCount 0 → "neutralised, 0
+        // downed"). Record the honest failure instead.
+        const _liveHostilesRemain = (state?.leadSwarmMember && !state.leadSwarmMember.neutralised)
+          || (state?.swarmBillboards || []).some(sw2 => !sw2.neutralised)
+          || !state;   // no render state resolvable = cannot claim a kill
+        if (downedCount === 0 && _liveHostilesRemain) {
+          setDispatchOutcome(event.id, d.id, {
+            outcomeId: 'engagement_unsuccessful',
+            outcomeLabel: 'Engagement unsuccessful. No hostiles downed.',
+            notes: 'Interceptor group completed its engagement cycle without a confirmed kill. Targets remained airborne.',
+            confirmedAt: new Date().toISOString(),
+            confirmedBy: 'system_auto',
+          });
+          toast('Interceptor group disengaged. No hostiles downed.', 'warn');
+          return;
         }
         // Auto-outcome on the dispatch group
         const outcomeId = overwatchSurvived ? 'partial_neutralisation' : 'neutralised';
