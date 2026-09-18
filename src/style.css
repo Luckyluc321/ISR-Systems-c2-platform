@@ -9405,3 +9405,31 @@ body.workspace-map-active #receiver-view {
 .sim-composer-field .sim-select { width: 100%; }
 .sim-composer-field .sim-select:disabled { opacity: 0.5; cursor: not-allowed; }
 .sim-btn.sim-launch:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* Per-card dispatch state chip (replaces the oversized bucket pill) */
+.mon-eng-chip {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  padding: 1px 6px;
+  border: 1px solid;
+  border-radius: 3px;
+  vertical-align: 1px;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+.mon-eng-group-hdr .mon-eng-chip { margin-left: 8px; flex: 0 0 auto; }
+
+/* Prior activity rows: calm the type. Date recedes, outcome stops
+   shouting, summary carries the reading line. */
+.hist-pattern-date { color: var(--text-dim); font-size: 10px; }
+.hist-pattern-outcome {
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-family: var(--font-body);
+  color: var(--text-dim);
+}
+.hist-pattern-class { font-size: 9px; padding: 1px 5px; }
+.hist-pattern-summary { color: var(--text); opacity: 0.85; }

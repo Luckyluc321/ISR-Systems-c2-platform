@@ -14914,17 +14914,17 @@ async function main() {
                     title="${a.alreadyOnCase ? 'Already on the case via a prior escalation' : 'Toggle to include in this cascade'}"
                     style="
                       display: inline-flex; align-items: center; gap: 6px;
-                      padding: 6px 12px; border-radius: 999px;
-                      background: ${a.preselected ? 'rgba(77,210,255,0.10)' : 'rgba(255,255,255,0.02)'};
-                      border: 1px solid ${a.preselected ? 'var(--accent)' : 'var(--border)'};
-                      color: ${a.preselected ? 'var(--accent)' : 'var(--text)'};
+                      padding: 6px 12px; border-radius: 4px;
+                      background: ${a.preselected ? 'rgba(127,168,201,0.08)' : 'rgba(255,255,255,0.02)'};
+                      border: 1px solid ${a.preselected ? 'rgba(127,168,201,0.45)' : 'var(--border)'};
+                      color: ${a.preselected ? '#a9c4d8' : 'var(--text)'};
                       cursor: pointer; font-family: var(--font-body);
                       font-size: var(--fs-xs); font-weight: 500;
                       transition: border-color 120ms, background 120ms, color 120ms;
                     ">
-              <span class="cascade-agency-check" aria-hidden="true" style="width:10px; height:10px; border-radius:50%; background: ${a.preselected ? 'var(--accent)' : 'transparent'}; border: 1px solid ${a.preselected ? 'var(--accent)' : 'var(--text-dim)'};"></span>
+              <span class="cascade-agency-check" aria-hidden="true" style="width:6px; height:6px; border-radius:50%; background: ${a.preselected ? '#7fa8c9' : 'transparent'}; border: 1px solid ${a.preselected ? '#7fa8c9' : 'var(--border)'};"></span>
               <span>${a.label}</span>
-              ${a.alreadyOnCase ? `<span style="font-size:9px; padding:1px 6px; border-radius:8px; background:rgba(255,184,77,0.14); color:#ffb84d; font-family:var(--font-mono); letter-spacing:0.06em;">ON CASE</span>` : ''}
+              ${a.alreadyOnCase ? `<span style="font-size:9px; padding:1px 6px; border-radius:3px; border:1px solid var(--border); color:var(--text-dim); font-family:var(--font-mono); letter-spacing:0.08em;">on case</span>` : ''}
             </button>
           `).join('')}
         </div>
@@ -20035,10 +20035,11 @@ async function main() {
     const rowName = inGroup && cd.memberCount > 1 && cd.memberIndex != null
       ? `Unit ${cd.memberIndex + 1} / ${cd.memberCount}`
       : cd.assetName;
+    const bucketLabel = (_MON_ENG_BUCKETS.find(b => b.key === bucketKey) || {}).label || '';
     return `
       <div class="mon-eng-unit">
         <div class="mon-eng-unit-main">
-          <div class="mon-eng-unit-name">${rowName}</div>
+          <div class="mon-eng-unit-name">${rowName}${!inGroup ? ` <span class="mon-eng-chip" style="color: ${bucketColor}; border-color: ${bucketColor}55;">${bucketLabel}</span>` : ''}</div>
           <div class="mon-eng-unit-meta">${metaParts.join(' · ')}</div>
           ${enduranceHtml}
         </div>
@@ -20106,16 +20107,13 @@ async function main() {
               <span class="mon-eng-caret">${expanded ? '▾' : '▸'}</span>
               <span class="mon-eng-group-name">${members[0].groupName || members[0].assetName}</span>
               <span class="mon-eng-group-sub">${kindLabel} · ${members.length} units</span>
+              <span class="mon-eng-chip" style="color: ${bucket.color}; border-color: ${bucket.color}55;">${bucket.label}</span>
             </div>
             ${expanded ? `<div class="mon-eng-group-members">${memberRows}</div>` : ''}
           </div>`;
       }).join('');
       return `
         <div class="mon-eng-bucket">
-          <div class="mon-eng-bucket-hdr">
-            <span class="mon-eng-state-pill" style="color: ${bucket.color}; border-color: ${bucket.color}55; background: ${bucket.color}14;">${bucket.label}</span>
-            <span class="mon-eng-bucket-count">${items.length} unit${items.length === 1 ? '' : 's'}</span>
-          </div>
           ${rows}
         </div>`;
     }).join('');
