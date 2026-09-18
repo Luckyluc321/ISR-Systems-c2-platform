@@ -19476,7 +19476,7 @@ async function main() {
              ${unitsCounter}
              <div style="display: flex; align-items: center;">
                ${unitsPickerHtml}
-               <button class="pl-dispatch-btn btn-act-go" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">${canRepeat && activeUnitsForThisAsset > 0 ? 'Dispatch more' : 'Dispatch'}</button>
+               <button class="pl-dispatch-btn" style="padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.06); color: #4dff9c; border: 1px solid rgba(77, 255, 156, 0.35); border-left: 2px solid #4dff9c; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.20em; text-transform: uppercase; font-family: var(--font-mono); transition: background 120ms, border-color 120ms;" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">${canRepeat && activeUnitsForThisAsset > 0 ? 'Dispatch more' : 'Dispatch'}</button>
              </div>
            </div>`;
 
@@ -19618,10 +19618,10 @@ async function main() {
     // than duplicating it here. Two ack buttons for the same action was
     // confusing UX. This block just tells them WHERE to look.
     const ackGateHtml = !isAcked && rec ? `
-      <div class="c-panel c-panel-collapsible rcv-step-panel">
-        ${_stepHdr(1, 'Acknowledge receipt', { state: 'current', tint: '#c8a35f' })}
+      <div class="c-panel c-panel-collapsible" style="border-top: 3px solid #ffb84d;">
+        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #ffb84d;">Step 1 · Acknowledge receipt</div>
         <div class="c-panel-body"><div style="font-size: var(--fs-xs); color: var(--text); line-height: 1.55;">Click <b style="color: #4dff9c;">Acknowledge receipt</b> in the case-file to the left. Response options unlock once acknowledged.</div></div>
-      </div>` : _stepHdr(1, 'Acknowledge receipt', { state: 'done', status: 'acked ' + (ackTs ? ackTs.slice(11,19) + 'Z' : ''), tint: 'var(--ok)' });
+      </div>` : '';
 
     const ackedBadge = isAcked ? `<span style="font-size: var(--fs-2xs); color: var(--ok); letter-spacing: 0.10em; text-transform: uppercase; font-family: var(--font-mono);">✓ Acked ${ackTs ? ackTs.slice(11,19) + 'Z' : ''}</span>` : '';
 
@@ -19638,10 +19638,9 @@ async function main() {
 
       ${ackGateHtml}
 
-      ${!isAcked && rec ? _renderStepPlaceholder(2, 'Select response option', 'acknowledge first', 'locked') : ''}
       ${isAcked || !rec ? (mineList.length ? `
-        <div class="c-panel c-panel-collapsible rcv-step-panel">
-          ${_stepHdr(2, 'Select response option', { state: 'current', tint: 'var(--accent)' })}
+        <div class="c-panel c-panel-collapsible">
+          <div class="c-panel-title" style="margin-bottom: var(--space-2);">${isAcked ? 'Step 2 · Select response option' : 'Your Response Options'}</div>
           <div class="c-panel-body">
           <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${mineList.length} option${mineList.length === 1 ? '' : 's'} available. Multiple can be dispatched concurrently. Recommended pick is the closest by ETA.</div>
           <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-3);">
@@ -19857,33 +19856,19 @@ async function main() {
   //
   // Only surfaces on closed events. On a live event, an empty step
   // renderer means "hasn't fired yet" and should stay quiet.
-  // Process-spine header: numbered badge + title + state tag. The
-  // number stays visible in EVERY state including done, per Lucas.
-  // States: current (tinted, this is where you act), done (green
-  // check, number kept), locked (grey, preconditions unmet), muted
-  // (not applicable on a closed case).
-  function _stepHdr(num, title, { state = 'current', status = '', tint = 'var(--accent)' } = {}) {
+  function _renderStepPlaceholder(stepNum, titleUpper, statusText) {
     return `
-      <div class="rcv-step-hdr rcv-step-${state}" style="--step-tint: ${tint};">
-        <span class="rcv-step-num">${num}</span>
-        <span class="rcv-step-title">${title}</span>
-        <span class="rcv-step-state">${state === 'done' ? '✓ ' + (status || 'done') : (status || (state === 'locked' ? 'locked' : ''))}</span>
-      </div>`;
-  }
-  function _renderStepPlaceholder(stepNum, titleUpper, statusText, state = 'muted') {
-    return `
-      <div class="rcv-step-row rcv-step-${state}">
-        ${_stepHdr(stepNum, titleUpper, { state, status: statusText, tint: state === 'done' ? 'var(--ok)' : 'var(--text-dim)' })}
+      <div class="step-placeholder">
+        <span class="step-placeholder-chevron">▸</span>
+        <span class="step-placeholder-num">STEP ${stepNum}</span>
+        <span class="step-placeholder-sep">·</span>
+        <span class="step-placeholder-title">${titleUpper}</span>
+        <span class="step-placeholder-status">${statusText}</span>
       </div>`;
   }
   function _renderStepOrPlaceholder(stepNum, titleUpper, realOutput, event) {
     if (realOutput) return realOutput;
-    if (event?.status !== 'closed') {
-      // Active case, preconditions unmet: render a visibly LOCKED
-      // spine row instead of hiding the step. The workflow shape
-      // stays constant; only the current step invites action.
-      return _renderStepPlaceholder(stepNum, titleUpper, 'locked', 'locked');
-    }
+    if (event?.status !== 'closed') return '';
     // Step 6 gets the actual close timestamp; 4/5 stay "not applicable"
     // (no outcome to confirm, no responder pending, case closed cleanly).
     let statusText = 'not applicable';
@@ -19894,7 +19879,7 @@ async function main() {
     } else if (stepNum === 6) {
       statusText = 'closed';
     }
-    return _renderStepPlaceholder(stepNum, titleUpper, statusText, stepNum === 6 ? 'done' : 'muted');
+    return _renderStepPlaceholder(stepNum, titleUpper, statusText);
   }
 
   // ══════════════════════════════════════════════════════════════════
@@ -20142,7 +20127,7 @@ async function main() {
     _startMonEngTick(event.id, activeRole);
     return `
       <div class="c-panel c-panel-collapsible${res.wrapped ? ' mon-eng-wrapped' : ''}" data-mon-eng="${event.id}" style="border-top: 3px solid var(--accent);">
-        ${_stepHdr(3, 'Monitor engagement', { state: 'current', tint: 'var(--accent)' })}
+        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--accent);">Step 3 · Monitor engagement</div>
         <div class="c-panel-body">
           ${res.html}
         </div>
@@ -20189,13 +20174,13 @@ async function main() {
           <label class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: var(--text-dim); font-size: var(--fs-2xs); display: block; margin-bottom: 4px;">Analyst notes (optional)</label>
           <textarea data-outcome-notes="${cd.dispatchId}" rows="2" placeholder="Free-text observations..." style="width: 100%; padding: 6px 8px; background: rgba(0,0,0,0.25); border: 1px solid var(--border); border-radius: 2px; color: var(--text); font-family: var(--font-body); font-size: var(--fs-sm); resize: vertical; box-sizing: border-box; margin-bottom: var(--space-2);"></textarea>
           <div style="display: flex; justify-content: flex-end;">
-            <button class="pl-dispatch-btn btn-act-warn" data-rcv="confirm-outcome" data-dispatch-id="${cd.dispatchId}" data-event-id="${event.id}">Confirm outcome</button>
+            <button class="pl-dispatch-btn" style="padding: 6px 14px; font-size: var(--fs-2xs); background: rgba(255, 184, 77, 0.08); color: #ffb84d; border: 1px solid rgba(255, 184, 77, 0.4); border-left: 2px solid #ffb84d; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="confirm-outcome" data-dispatch-id="${cd.dispatchId}" data-event-id="${event.id}">Confirm outcome</button>
           </div>
         </article>`;
     }).join('');
     return `
       <div class="c-panel c-panel-collapsible" style="border-top: 3px solid #ffb84d;">
-        ${_stepHdr(4, 'Confirm outcome', { state: 'current', tint: '#c8a35f' })}
+        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #ffb84d;">Step 4 · Confirm outcome</div>
         <div class="c-panel-body">
           <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${dispatches.length} completed dispatch${dispatches.length === 1 ? '' : 'es'} awaiting formal outcome. Outcomes lock into the audit trail and unlock handoff options.</div>
           ${blocks}
@@ -20226,7 +20211,7 @@ async function main() {
           <div style="font-size: var(--fs-sm); color: var(--text); font-weight: 500;">${r.name}</div>
           <div class="c-label" style="margin-top: 2px; color: var(--text-dim);">Tier ${r.tier} · ${r.type}</div>
         </div>
-        <button class="pl-dispatch-btn btn-act-info" data-rcv="dispatch-postinc" data-id="${event.id}" data-dest="${r.id}">Dispatch</button>
+        <button class="pl-dispatch-btn" style="padding: 6px 12px; font-size: var(--fs-2xs); background: rgba(77, 210, 255, 0.06); color: var(--accent); border: 1px solid rgba(77, 210, 255, 0.4); border-left: 2px solid var(--accent); border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="dispatch-postinc" data-id="${event.id}" data-dest="${r.id}">Dispatch</button>
       </div>
     `).join('');
 
@@ -20251,8 +20236,8 @@ async function main() {
         : `<span style="display:inline-flex;align-items:center;padding:2px 8px;background:rgba(77,210,255,0.10);border:1px solid rgba(77,210,255,0.4);border-radius:12px;font-size:var(--fs-2xs);letter-spacing:0.14em;color:#4dd2ff;font-family:var(--font-mono);">OPEN</span>`;
       const controls = entry.status === 'open'
         ? `
-          <button class="pl-dispatch-btn btn-act-info" data-rcv="chain-handoff" data-id="${event.id}" data-chain="${entry.id}">Hand off</button>
-          <button class="pl-dispatch-btn btn-act-go" data-rcv="chain-resolve" data-id="${event.id}" data-chain="${entry.id}">Mark resolved</button>
+          <button class="pl-dispatch-btn" style="padding:5px 10px;font-size:var(--fs-2xs);background:rgba(255,184,77,0.08);color:#ffb84d;border:1px solid rgba(255,184,77,0.4);border-radius:2px;cursor:pointer;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;font-family:var(--font-mono);" data-rcv="chain-handoff" data-id="${event.id}" data-chain="${entry.id}">Hand off</button>
+          <button class="pl-dispatch-btn" style="padding:5px 10px;font-size:var(--fs-2xs);background:rgba(77,255,156,0.08);color:#4dff9c;border:1px solid rgba(77,255,156,0.4);border-radius:2px;cursor:pointer;font-weight:600;letter-spacing:0.14em;text-transform:uppercase;font-family:var(--font-mono);" data-rcv="chain-resolve" data-id="${event.id}" data-chain="${entry.id}">Mark resolved</button>
         `
         : `<span class="c-label" style="color: var(--text-dim);">${(entry.resolvedAt || '').slice(11,19)}Z${entry.resolvedBy ? ' · by ' + entry.resolvedBy : ''}</span>`;
       const leafMarker = leafIds.has(entry.id) && chain.length > 1
@@ -20272,7 +20257,7 @@ async function main() {
 
     return `
       <div class="c-panel c-panel-collapsible" style="border-top: 3px solid #4dd2ff;">
-        ${_stepHdr(5, 'Post-incident handoff', { state: 'current', tint: '#7fa8c9' })}
+        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #4dd2ff;">Step 5 · Post-incident handoff</div>
         <div class="c-panel-body">
           ${pending.length ? `
             <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-1);">${pending.length} ground-response destination${pending.length === 1 ? '' : 's'} available for cordon, evidence recovery, and civil handoff.</div>
@@ -20298,7 +20283,7 @@ async function main() {
     if (event.status === 'closed' || event.outcome === 'closed') {
       return `
         <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--ok);">
-          ${_stepHdr(6, 'Event closed', { state: 'done', status: 'closed', tint: 'var(--ok)' })}
+          <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--ok);">Step 6 · Event closed</div>
           <div class="c-panel-body"><div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">Event archived to history. Full incident record retained for audit.</div></div>
         </div>`;
     }
@@ -20313,11 +20298,11 @@ async function main() {
     if (chain.length && !postIncidentChainAllLeavesResolved(event)) return '';
     return `
       <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--ok);">
-        ${_stepHdr(6, 'Close event', { state: 'current', tint: 'var(--ok)' })}
+        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--ok);">Step 6 · Close event</div>
         <div class="c-panel-body">
           <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">All outcomes confirmed. All applicable handoffs dispatched. Event ready for formal closure and archive.</div>
           <div style="display: flex; justify-content: flex-end;">
-            <button class="pl-dispatch-btn btn-act-go" data-rcv="close-event" data-id="${event.id}">Close event</button>
+            <button class="pl-dispatch-btn" style="padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.08); color: var(--ok); border: 1px solid rgba(77, 255, 156, 0.4); border-left: 2px solid var(--ok); border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="close-event" data-id="${event.id}">Close event</button>
           </div>
         </div>
       </div>`;
@@ -20351,7 +20336,7 @@ async function main() {
       <div class="c-panel" style="border-top: 3px solid #6b7280;">
         <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #6b7280;">Admin · History maintenance</div>
         <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-2);">This closed event is part of the site's precedent history. Annulling withdraws it from historical pattern counts and prior-event retrieval. The event and its report are not deleted. The annulment is audit-logged.</div>
-        <button class="pl-dispatch-btn btn-act-muted" data-rcv="annul-history" data-id="${event.id}">Annul from history</button>
+        <button class="pl-dispatch-btn" style="padding: 6px 14px; font-size: var(--fs-2xs); background: rgba(107, 114, 128, 0.08); color: #9ca3af; border: 1px solid rgba(156, 163, 175, 0.4); border-left: 2px solid #9ca3af; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.18em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="annul-history" data-id="${event.id}">Annul from history</button>
       </div>`;
   }
 
@@ -20409,7 +20394,7 @@ async function main() {
 
     return `
       <div class="c-panel c-panel-collapsible" data-pir-panel="${report.id}" style="border-top: 3px solid #ffb84d;">
-        ${_stepHdr(7, 'Incident report', { state: 'current', tint: '#c8a35f' })}
+        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #ffb84d;">Step 7 · Incident Report</div>
         <div class="c-panel-body">
           <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.14em; color: #ffb84d; font-size: var(--fs-2xs); margin-bottom: var(--space-1);">${emphasis.lead}</div>
           <div style="font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${emphasis.focus}</div>
