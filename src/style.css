@@ -1619,6 +1619,11 @@ body.details-collapsed #control-panel {
   padding: 14px 22px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   overflow-y: auto;
+  /* Sections must never compress into each other: the flex column
+     was shrinking PAYLOAD and OPERATOR MESSAGE on tall content,
+     overlapping them unusably (field-found). Only the destination
+     list (nth 3) flexes and scrolls. */
+  flex: 0 0 auto;
 }
 .escp-section:nth-of-type(3) { flex: 1 1 auto; min-height: 0; }
 .escp-section-hdr {
@@ -9415,10 +9420,15 @@ body.workspace-map-active #receiver-view {
 .dp-swarm-status-breakaway {
   color: #ffb84d;
   font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.14em;
+  font-size: 8.5px;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  margin-right: 6px;
+  padding: 0 4px;
+  border: 1px solid rgba(255, 184, 77, 0.4);
+  border-radius: 3px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  align-self: center;
 }
 
 /* ── Sim composer: threat + path dropdowns (site-picker grammar) ── */

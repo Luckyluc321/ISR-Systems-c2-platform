@@ -20206,7 +20206,12 @@ async function main() {
       // render flat.
       const groups = new Map();
       for (const cd of items) {
-        const key = cd.groupId || cd.dispatchId;
+        // Formation groups share a groupId. Repeated SINGLE dispatches
+        // of the same asset (Dispatch more clicked twice) carry unique
+        // group ids, which rendered two identical standalone cards
+        // instead of one expandable group (field-found): those key on
+        // asset + kind so same-type units always fold together.
+        const key = (cd.groupId && cd.memberCount > 1) ? cd.groupId : `${cd.assetId}::${cd.kind}`;
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(cd);
       }
