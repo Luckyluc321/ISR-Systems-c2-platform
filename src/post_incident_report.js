@@ -102,6 +102,17 @@ export function buildPostIncidentReport(event, { getDestination = null } = {}) {
       linkedEventIds: Array.isArray(event.linkedEventIds) ? [...event.linkedEventIds] : [],
     },
     summary,
+    // Downed airframes: every wreckage on this event with position,
+    // time, and what downed it. One of the most operationally
+    // important facts of an incident; forensic teams, cordon
+    // planning, and evidence chains all key off these coordinates.
+    downed_airframes: (event.wreckages || []).map(w => ({
+      id: w.id,
+      lat: w.lat, lon: w.lon,
+      at: w.at,
+      downed_by: w.downedBy || null,
+      is_impact_site: !!w.isImpact,
+    })),
     recommendation: recommendation || null,
     detection: {
       subject: event.subject || null,

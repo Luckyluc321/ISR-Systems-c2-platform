@@ -12090,8 +12090,19 @@ async function main() {
             && !event.awaitingNeutralization
             && !f35Chasing
             && !missileChasing) {
+          // "No chase" means no unit still pursuing the AIR track.
+          // Ground units pinned to wreckage (holding-cordon, or any
+          // dispatch with an assigned wreckage) are guarding debris,
+          // not chasing: they must never hold a dead-air event open.
+          // Field-found: AMK stayed LIVE forever with zero detections
+          // because cordon cars never reach 'complete'.
           const noChase = !Array.isArray(event.counterDispatches)
-            || event.counterDispatches.every(c => c.state === 'complete');
+            || event.counterDispatches.every(c =>
+                 c.state === 'complete'
+                 || c.state === 'holding-cordon'
+                 || c.state === 'rtb_home'
+                 || c.state === 'rtb_via_last_known'
+                 || !!c.assignedWreckageId);
           const linkedActive = Array.isArray(event.linkedEventIds)
             && event.linkedEventIds.some(lid => {
               const le = getEvent(lid);
@@ -20584,6 +20595,16 @@ async function main() {
     const chainCount = report.handoff_chain?.length || 0;
     const timelineCount = report.timeline?.length || 0;
 
+    const downed = report.downed_airframes || [];
+    const downedRows = downed.length ? `
+      <div class="c-panel-title" style="margin: var(--space-3) 0 var(--space-2); color: #ff8a8a;">Downed airframes · ${downed.length}</div>
+      ${downed.map(w => `
+        <div style="display:flex;gap:var(--space-3);padding:5px 0;border-top:1px solid var(--border);font-size:var(--fs-2xs);">
+          <span style="color:var(--text-dim);font-family:var(--font-mono);flex:0 0 80px;">${(w.at || '').slice(11,19)}Z</span>
+          <span style="color:${w.is_impact_site ? '#ff8f2a' : '#ff8a8a'};font-family:var(--font-mono);flex:0 0 90px;">${w.is_impact_site ? 'IMPACT' : 'DOWNED'}</span>
+          <span style="color:var(--text);font-family:var(--font-mono);flex:1 1 auto;">${w.lat.toFixed(5)}N ${w.lon.toFixed(5)}E</span>
+          <span style="color:var(--text-dim);flex:0 0 auto;">${w.downed_by === 'terminal-impact' ? 'warhead detonation' : (w.downed_by ? 'by ' + w.downed_by : '')}</span>
+        </div>`).join('')}` : '';
     const timelineRows = (report.timeline || []).map(t => `
       <div style="display:flex;gap:var(--space-3);padding:6px 0;border-top:1px solid var(--border);font-size:var(--fs-2xs);">
         <span style="color:var(--text-dim);font-family:var(--font-mono);flex:0 0 90px;">${(t.ts || '').slice(11,19)}Z</span>
@@ -20642,7 +20663,8 @@ async function main() {
             <div style="padding:var(--space-2);background:rgba(255,255,255,0.02);border-radius:2px;"><div class="c-label" style="color:var(--text-dim);">Outcome</div><div style="color:var(--text);font-family:var(--font-mono);">${(snap.outcome || 'closed').toUpperCase()}</div></div>
           </div>
 
-          ${timelineCount ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Timeline · ${timelineCount}</div>${timelineRows}</div>` : ''}
+          ${timelineCount ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Timeline · ${timelineCount}</div>${downedRows}
+      ${timelineRows}</div>` : ''}
           ${(report.escalations?.length || 0) ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Dispatched to · ${report.escalations.length}</div>${escalationRows}</div>` : ''}
           ${dispatchCount ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Counter-dispatches · ${dispatchCount}</div>${dispatchRows}</div>` : ''}
           ${chainCount ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Ground handoff chain · ${chainCount}</div>${chainRows}</div>` : ''}
