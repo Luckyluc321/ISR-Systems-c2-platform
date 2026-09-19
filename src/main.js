@@ -8054,6 +8054,46 @@ async function main() {
     }
   }
 
+  // ── Unobserved-event sweeper ─────────────────────────────────
+  // Level-triggered lifecycle backstop, independent of any per-event
+  // tick ownership. The AMK phantom-LIVE bug survived two fixes
+  // because every close mechanism was edge-triggered from loops the
+  // shadow event did not own. Rule (operator requirement): no event
+  // may stay LIVE when nothing is observed locally. Any active,
+  // detected event with no live render track of its own, no detection
+  // batch for GRACE seconds, and no active pursuit closes with an
+  // honest outcome: 'neutralized' when its group's airframes are all
+  // down, else 'lost contact'.
+  const _SWEEP_GRACE_MS = 15000;
+  function _sweepUnobservedActiveEvents() {
+    const now = Date.now();
+    for (const ev of EVENTS) {
+      if (ev.status !== 'active') continue;
+      if (ev.detected !== true) continue;             // pre-detection transits are not ours to kill
+      if (ev.awaitingNeutralization) continue;
+      if (droneState.has(ev.id)) continue;            // owns a live track; its own tick governs it
+      const lastObs = ev._lastDetectionTs || ev.spawnTs || Date.parse(ev.startTime || 0) || 0;
+      if (now - lastObs < _SWEEP_GRACE_MS) continue;
+      let chased = false;
+      for (const [, cd] of _counterDispatches) {
+        if (cd.eventId === ev.id && (cd.state === 'en_route' || cd.state === 'engaging')) { chased = true; break; }
+      }
+      if (chased) continue;
+      const primary = getEvent(ev.linkedEventId || ev.shadowOfEventId || ev.provenance?.breakawayOf);
+      const st = primary ? droneState.get(primary.id) : null;
+      let anyLive = false;
+      if (st) {
+        if (st.leadSwarmMember && !st.leadSwarmMember.neutralised) anyLive = true;
+        if (!anyLive && (st.swarmBillboards || []).some(sw => !sw.neutralised)) anyLive = true;
+      }
+      const outcome = (st && !anyLive) ? 'neutralized' : 'lost contact';
+      closeEvent(ev.id, null, { autoOutcome: outcome });
+      addNote(ev.id, `No sensor observation for ${Math.round(_SWEEP_GRACE_MS / 1000)} seconds and no active pursuit. Event closed.`, 'AUTO-CORRELATOR');
+      renderAlertStrip();
+    }
+  }
+  setInterval(_sweepUnobservedActiveEvents, 2000);
+
   // Detection envelope for a passive fused-modality sensor is modeled
   // as a cylinder: coverageRadius meters horizontal, detectionCeilingM
   // meters altitude ceiling. Both must hold for detection. Matches how
@@ -8225,6 +8265,13 @@ async function main() {
   // "sensor N01 saw 0% because the drone exited coverage before the
   // event closed." Peak is monotonic — never decays.
   function _applyDetectionBatchToEvent(batch, targetEvent) {
+    // Observation recency: the sweeper's level-triggered clock.
+    // Stamped whenever any sensor in the batch carries a detection.
+    // Source-agnostic (mock and WebSocket both flow through here),
+    // which is the IF-1 seam the sweeper is allowed to trust.
+    if ((batch.sensors || []).some(se => se.status !== 'offline' && (se.detections || []).length)) {
+      targetEvent._lastDetectionTs = Date.now();
+    }
     for (const sEntry of batch.sensors) {
       if (sEntry.status === 'offline') continue;
       let maxConf = 0;
@@ -12255,7 +12302,9 @@ async function main() {
         // Applies to primary AND linked/shadow events at other sites
         // (fixes: AMK shadow event had zero sensor data because template's
         // contributingSensors were CPH's — no dynamic update ever ran).
-        _updateContributingSensorsForPosition(event, p.lat, p.lon, p.alt);
+        if (!state.leadSwarmMember?.neutralised) {
+          _updateContributingSensorsForPosition(event, p.lat, p.lon, p.alt);
+        }
 
         // ── P55: single-drone recording capture (fixed-wing / jet / missile)
         // Additive path. If the event has NO swarm formation and no recording
@@ -12910,6 +12959,7 @@ async function main() {
           } else if (sw._breakawayChildId && !sw.neutralised) {
             const childEv = getEvent(sw._breakawayChildId);
             if (childEv && childEv.status === 'active') {
+              if (swShouldShow) childEv._lastDetectionTs = Date.now();
               mutateEvent(childEv.id, {
                 lastPosition: { lat: pos.lat, lon: pos.lon, alt: pos.alt, heading: hdgDeg, speed: speedMs, timestamp: new Date().toISOString() },
                 // Sticky-once-true, matching every other detected write
@@ -13007,8 +13057,13 @@ async function main() {
         // sites currently see any of them, and diff vs last tick to
         // trigger spawn-on-entry / close-on-exit per site.
         const groupPositions = [];
-        if (p?.lat != null) groupPositions.push({ lat: p.lat, lon: p.lon });
+        // Dead drones and the dead lead's ghost waypoints are NOT
+        // observations (sensors-observe-only): counting them kept a
+        // death-emptied site inside currentGroupSites forever, so its
+        // exit-close never fired (verified AMK root-cause chain).
+        if (p?.lat != null && !state.leadSwarmMember?.neutralised) groupPositions.push({ lat: p.lat, lon: p.lon });
         for (const sw of state.swarmBillboards || []) {
+          if (sw.neutralised) continue;
           if (sw.stats?.lat != null) groupPositions.push({ lat: sw.stats.lat, lon: sw.stats.lon });
         }
         const currentGroupSites = _aggregateGroupSites(groupPositions);
