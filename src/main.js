@@ -5720,6 +5720,7 @@ async function main() {
                   lon: wreckLon,
                   at: new Date().toISOString(),
                   downedBy: d.id,
+                  model: targetEv.droneType || targetEv.platform || null,
                   mode,
                 };
                 appendEventArray(targetEv.id, 'wreckages', wreck);
@@ -6455,7 +6456,7 @@ async function main() {
           // for cars that dispatched before any kill happened).
           const nowIso = new Date().toISOString();
           const wreckId = `wr-${event.id}-${(event.wreckages?.length || 0) + 1}`;
-          const wreck = { id: wreckId, lat: dropLat, lon: dropLon, at: nowIso, downedBy: d.id };
+          const wreck = { id: wreckId, lat: dropLat, lon: dropLon, at: nowIso, downedBy: d.id, model: sw.model || event.droneType || null };
           appendEventArray(event.id, 'wreckages', wreck);
           mutateEvent(event.id, { wreckageLocation: { lat: dropLat, lon: dropLon, at: nowIso } });
           // Build cordon + rebalance patrol assignments. Fire-and-
@@ -13090,7 +13091,7 @@ async function main() {
           // must treat it at least as urgently as a shot-down drone.
           const _impIso = new Date().toISOString();
           const _impWreckId = `wr-${event.id}-impact`;
-          const _impWreck = { id: _impWreckId, lat: p.lat, lon: p.lon, at: _impIso, downedBy: 'terminal-impact', isImpact: true };
+          const _impWreck = { id: _impWreckId, lat: p.lat, lon: p.lon, at: _impIso, downedBy: 'terminal-impact', isImpact: true, model: event.droneType || event.platform || null };
           appendEventArray(event.id, 'wreckages', _impWreck);
           mutateEvent(event.id, { wreckageLocation: { lat: p.lat, lon: p.lon, at: _impIso } });
           _rebalancePatrolsToWreckages(event);
@@ -19210,6 +19211,10 @@ async function main() {
   // between 'report' (case-file layout) and 'map' (full Cesium focus).
   let _workspaceEventId = null;
   let _workspaceMode = 'report';   // 'report' | 'map'
+  // Workspace navigation history: pushed when opening another event's
+  // workspace from inside one (linked-event jumps), popped by the
+  // back arrow. Cleared on full workspace close.
+  const _workspaceHistory = [];
 
   function renderRoleMenu() {
     const active = getActiveRole();
@@ -20599,12 +20604,20 @@ async function main() {
     const downedRows = downed.length ? `
       <div class="c-panel-title" style="margin: var(--space-3) 0 var(--space-2); color: #ff8a8a;">Downed airframes · ${downed.length}</div>
       ${downed.map(w => `
-        <div style="display:flex;gap:var(--space-3);padding:5px 0;border-top:1px solid var(--border);font-size:var(--fs-2xs);">
-          <span style="color:var(--text-dim);font-family:var(--font-mono);flex:0 0 80px;">${(w.at || '').slice(11,19)}Z</span>
-          <span style="color:${w.is_impact_site ? '#ff8f2a' : '#ff8a8a'};font-family:var(--font-mono);flex:0 0 90px;">${w.is_impact_site ? 'IMPACT' : 'DOWNED'}</span>
-          <span style="color:var(--text);font-family:var(--font-mono);flex:1 1 auto;">${w.lat.toFixed(5)}N ${w.lon.toFixed(5)}E</span>
-          <span style="color:var(--text-dim);flex:0 0 auto;">${w.downed_by === 'terminal-impact' ? 'warhead detonation' : (w.downed_by ? 'by ' + w.downed_by : '')}</span>
-        </div>`).join('')}` : '';
+        <details class="pir-downed">
+          <summary style="display:flex;gap:var(--space-3);align-items:center;padding:5px 0;border-top:1px solid var(--border);font-size:var(--fs-2xs);cursor:pointer;list-style:none;">
+            <span style="color:var(--text-dim);font-size:10px;">▸</span>
+            <span style="color:var(--text-dim);font-family:var(--font-mono);flex:0 0 74px;">${(w.at || '').slice(11,19)}Z</span>
+            <span style="color:${w.is_impact_site ? '#ff8f2a' : '#ff8a8a'};font-family:var(--font-mono);flex:0 0 84px;">${w.is_impact_site ? 'IMPACT' : 'DOWNED'}</span>
+            <span style="color:var(--text);flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${w.model || 'Unknown platform'}</span>
+            <span style="color:var(--text-dim);flex:0 0 auto;">${w.downed_by === 'terminal-impact' ? 'warhead detonation' : (w.downed_by ? 'by ' + w.downed_by : '')}</span>
+          </summary>
+          <div style="padding:6px 0 8px 24px;font-size:var(--fs-2xs);display:grid;grid-template-columns:110px 1fr;gap:3px 12px;">
+            <span style="color:var(--text-dim);">Threat type</span><span style="color:var(--text);">${w.model || 'Unknown platform'}${report.event_snapshot?.platform ? ' · ' + report.event_snapshot.platform : ''}</span>
+            <span style="color:var(--text-dim);">Downed at</span><span style="color:var(--text);font-family:var(--font-mono);">${w.lat.toFixed(5)}N ${w.lon.toFixed(5)}E</span>
+            <span style="color:var(--text-dim);">Time</span><span style="color:var(--text);font-family:var(--font-mono);">${w.at || '?'}</span>
+          </div>
+        </details>`).join('')}` : '';
     const timelineRows = (report.timeline || []).map(t => `
       <div style="display:flex;gap:var(--space-3);padding:6px 0;border-top:1px solid var(--border);font-size:var(--fs-2xs);">
         <span style="color:var(--text-dim);font-family:var(--font-mono);flex:0 0 90px;">${(t.ts || '').slice(11,19)}Z</span>
@@ -20897,7 +20910,7 @@ async function main() {
     return `
       <div class="rcv-workspace ${isMap ? 'is-map-mode' : ''}">
         <header class="rws-topbar">
-          <button class="c-btn-icon" data-rcv="workspace-back" aria-label="Back to inbox" title="Back to inbox">←</button>
+          ${_workspaceHistory.length ? `<button class="c-btn-icon" data-rcv="workspace-back-hist" aria-label="Back to previous report" title="Back to ${_workspaceHistory[_workspaceHistory.length - 1].eventId}">←</button>` : `<button class="c-btn-icon" data-rcv="workspace-back" aria-label="Back to inbox" title="Back to inbox">←</button>`}
           <div class="rws-ident">
             <span class="rws-ident-id">${event.id}</span>
             <span class="rws-ident-sep">·</span>
@@ -24029,6 +24042,12 @@ async function main() {
       }
       // ── Event Workspace routing ─────────────────────────────
       else if (action === 'open-report') {
+        // Navigation history: arriving at a linked event's workspace
+        // from another report gets a real back arrow home.
+        if (_workspaceEventId && _workspaceEventId !== id) {
+          _workspaceHistory.push({ eventId: _workspaceEventId, mode: _workspaceMode });
+          if (_workspaceHistory.length > 20) _workspaceHistory.shift();
+        }
         _workspaceEventId = id; _workspaceMode = 'report'; _exitMapMode();
         // Honest read receipts: 'read' fires when THIS profile opens
         // the case, never from a timer. Flips only this role's own
@@ -24051,7 +24070,17 @@ async function main() {
         if (ev) _enterMapMode(ev);
         renderReceiverView();
       }
+      else if (action === 'workspace-back-hist') {
+        const prev = _workspaceHistory.pop();
+        if (prev) {
+          _workspaceEventId = prev.eventId;
+          _workspaceMode = prev.mode || 'report';
+          _exitMapMode();
+          renderReceiverView({ immediate: true });
+        }
+      }
       else if (action === 'workspace-back' || action === 'workspace-close') {
+        _workspaceHistory.length = 0;
         _workspaceEventId = null;
         _mistralFiredForEvent = null;
         _lastReceiverWorkspaceId = null;

@@ -111,6 +111,7 @@ export function buildPostIncidentReport(event, { getDestination = null } = {}) {
       lat: w.lat, lon: w.lon,
       at: w.at,
       downed_by: w.downedBy || null,
+      model: w.model || null,
       is_impact_site: !!w.isImpact,
     })),
     recommendation: recommendation || null,
