@@ -8023,8 +8023,22 @@ async function main() {
     for (const sid of Object.keys(event._siteAgg)) {
       const agg = event._siteAgg[sid];
       if (!agg) continue;
-      if (agg._oorFiredThisCycle) continue;   // already fired for this in→out cycle
       if (!agg.inCovDrones || _liveCount(agg.inCovDrones) > 0) continue;
+      // Site emptied by DEATHS: close the site's linked shadow event.
+      // The per-site exit lifecycle only closes on coverage-exit
+      // transitions, so a site whose airframes were all shot down
+      // inside coverage kept its event LIVE forever with zero
+      // detections (field-found twice at AMK). Downed inside the
+      // site = the local truth is neutralised.
+      try {
+        const siteEv = _findGroupEventForSite(event, sid);
+        if (siteEv && siteEv.id !== event.id && siteEv.status === 'active') {
+          closeEvent(siteEv.id, null, { autoOutcome: 'neutralized' });
+          addNote(siteEv.id, `All tracked airframes at ${SITES[sid]?.name || sid} are down. Event closed.`, 'AUTO-CORRELATOR');
+          renderAlertStrip();
+        }
+      } catch (_) { /* never break the death-purge tick */ }
+      if (agg._oorFiredThisCycle) continue;   // already fired for this in→out cycle
       // Empty of live drones AND OOR hasn't fired. Fire now.
       const site = SITES[sid];
       const pos = agg._pendingOorPos || { lat: deathLat, lon: deathLon };
