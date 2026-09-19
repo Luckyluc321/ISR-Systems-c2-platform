@@ -10772,26 +10772,58 @@ async function main() {
   // Passthrough helper kept so callers don't need to change.
   function _safeTrailAlt(alt) { return alt || 0; }
 
-  function _replayBuildTrailSegments(samples) {
+  function _replayBuildTrailSegments(samples, intervalMs = 500) {
     // Group into contiguous same-band, same-confirmed-status segments so
     // each polyline is a uniform style and colour.
     const bandOf = (c) => c < 0.5 ? 0 : c < 0.7 ? 1 : c < 0.85 ? 2 : 3;
+    // Hysteresis pre-pass. The coverage gate is a hard cylinder with
+    // zero margin, so a drone skimming a scallop edge flips state for
+    // 1-3 samples repeatedly — every flip minted a fake gap with two
+    // seam markers ("lost 10:24:48Z / reacquired 10:24:49Z" clutter,
+    // field-found). Bounded sensor_gap runs shorter than GAP_MIN_S
+    // reclassify as detected: real seam crossings are tens of seconds,
+    // boundary notches are fractions of one — two orders apart.
+    const GAP_MIN_S = Math.max(2.0, (4 * intervalMs) / 1000);
+    const states = samples.map(x => x.detection_state);
+    let i = 0;
+    while (i < states.length) {
+      if (states[i] === 'sensor_gap') {
+        let j = i;
+        while (j < states.length && states[j] === 'sensor_gap') j++;
+        const endTs = samples[Math.min(j, samples.length - 1)]?.timestamp_utc;
+        const durS = (Date.parse(endTs || 0) - Date.parse(samples[i].timestamp_utc || 0)) / 1000;
+        const bounded = i > 0 && j < states.length && states[i - 1] === 'detected' && states[j] === 'detected';
+        if (bounded && durS < GAP_MIN_S) { for (let k = i; k < j; k++) states[k] = 'detected'; }
+        i = j;
+      } else i++;
+    }
     const segments = [];
     let current = null;
-    for (const s of samples) {
+    let prevDetected = null;
+    for (let idx = 0; idx < samples.length; idx++) {
+      const s = samples[idx];
+      const st = states[idx];
       const b = bandOf(s.confidence || 0);
-      const confirmed = _sampleIsConfirmed(s);
-      // Coverage gaps are their own segment kind: the platform was
-      // OUTSIDE every sensor's reach, so replay must not draw the
-      // recorded path there (that is sim ground truth no sensor saw).
-      const isGap = s.detection_state === 'sensor_gap';
+      const confirmed = st === 'detected';
+      const isGap = st === 'sensor_gap';
       if (!current || current.band !== b || current.confirmed !== confirmed || current.isGap !== isGap) {
-        if (current) current.positions.push([s.lon, s.lat, s.altitude_agl_m]);
-        current = { band: b, confirmed, isGap, avgConf: s.confidence || 0, positions: [], tStart: s.timestamp_utc, tEnd: s.timestamp_utc };
+        const gapBoundary = current && current.isGap !== isGap;
+        // Seam-close push ONLY for style transitions within the same
+        // observability. Pushing across a gap boundary extended the
+        // solid observed trail one sample into unobserved space.
+        if (current && !gapBoundary) current.positions.push([s.lon, s.lat, s.altitude_agl_m]);
+        const nc = { band: b, confirmed, isGap, avgConf: s.confidence || 0, positions: [], tStart: s.timestamp_utc, tEnd: s.timestamp_utc };
+        // Honest seam anchors: last DETECTED sample before the gap,
+        // first REDETECTED sample after it. Marker positions and
+        // timestamps come only from observed samples.
+        if (isGap) nc.anchorA = prevDetected ? { lon: prevDetected.lon, lat: prevDetected.lat, alt: prevDetected.altitude_agl_m, ts: prevDetected.timestamp_utc } : null;
+        if (current && current.isGap && confirmed) current.anchorZ = { lon: s.lon, lat: s.lat, alt: s.altitude_agl_m, ts: s.timestamp_utc };
+        current = nc;
         segments.push(current);
       }
       current.positions.push([s.lon, s.lat, s.altitude_agl_m]);
       current.tEnd = s.timestamp_utc;
+      if (confirmed) prevDetected = s;
     }
     return segments;
   }
@@ -10803,29 +10835,16 @@ async function main() {
       for (const seg of segments) {
         if (seg.positions.length < 2) continue;
         if (seg.isGap) {
-          // Honest bridge: a straight dim grey dashed line between the
-          // last observed point and the reacquisition point. We know
-          // those two truths and nothing in between. Seam markers
-          // carry the timestamps.
-          const a = seg.positions[0];
-          const z = seg.positions[seg.positions.length - 1];
-          const bridge = viewer.entities.add({
-            polyline: {
-              positions: Cesium.Cartesian3.fromDegreesArrayHeights([...a, ...z]),
-              width: 1.5,
-              material: new Cesium.PolylineDashMaterialProperty({
-                color: Cesium.Color.fromCssColorString('#9ca3af').withAlpha(0.45),
-                dashLength: 10,
-              }),
-              clampToGround: false,
-            },
-          });
-          bridge._replayDroneId = droneId;
-          bridge._replayConfirmed = false;
-          trailEntities.push(bridge);
-          const seam = (posArr, text) => {
+          // NO line across a gap. The drone's real path there is sim
+          // ground truth no sensor observed, and a straight chord is
+          // fabricated geometry. The void IS the information; the two
+          // seam markers are the two truths we hold. Markers render
+          // only when BOTH anchors exist (a trailing gap with no
+          // reacquisition draws nothing).
+          if (!seg.anchorA || !seg.anchorZ) continue;
+          const seam = (a, text) => {
             const m = viewer.entities.add({
-              position: Cesium.Cartesian3.fromDegrees(posArr[0], posArr[1], posArr[2]),
+              position: Cesium.Cartesian3.fromDegrees(a.lon, a.lat, a.alt),
               point: { pixelSize: 5, color: Cesium.Color.fromCssColorString('#9ca3af'), outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: Number.POSITIVE_INFINITY },
               label: {
                 text,
@@ -10843,8 +10862,8 @@ async function main() {
             m._replayDroneId = droneId;
             trailEntities.push(m);
           };
-          seam(a, `signal lost ${String(seg.tStart || '').slice(11, 19)}Z`);
-          seam(z, `reacquired ${String(seg.tEnd || '').slice(11, 19)}Z`);
+          seam(seg.anchorA, `signal lost ${String(seg.anchorA.ts || '').slice(11, 19)}Z`);
+          seam(seg.anchorZ, `reacquired ${String(seg.anchorZ.ts || '').slice(11, 19)}Z`);
           continue;
         }
         const flat = seg.positions.flat();
@@ -11043,6 +11062,11 @@ async function main() {
   }
 
   async function startReplay(eventId) {
+    // One marker language at a time: the live run's persistent markers
+    // (OUT OF RANGE, DETECTED, ENTRY/EXIT) tell the same story the
+    // replay seam markers tell, at nearly the same coordinates. Hide
+    // them for the replay's duration; stopReplay restores.
+    try { _setEventMarkersVisibility(eventId, false); } catch (_) {}
     // Ensure recording is loaded from IDB into memory before consuming.
     await window.__isr_ensureRecording(eventId);
     const rec = window.__isr_getRecording(eventId);
@@ -11160,6 +11184,7 @@ async function main() {
 
   function stopReplay() {
     if (!_replayState) return;
+    try { if (_replayState.eventId) _setEventMarkersVisibility(_replayState.eventId, true); } catch (_) {}
     cancelAnimationFrame(_replayState._rafId);
     for (const ent of _replayState.droneEntities.values()) viewer.entities.remove(ent);
     for (const ent of _replayState.trailEntities) viewer.entities.remove(ent);

@@ -638,11 +638,27 @@ function _buildIdentifySentence(event, ctx, samples) {
 // reference but never paper over. Continuous contact returns null
 // (no signal — absence of gaps is the default, not a finding).
 function _extractCoverageProfile(samples) {
+  // Same hysteresis as the replay renderer: bounded sensor_gap runs
+  // under 2 s are coverage-boundary flapping, not real dropouts, and
+  // must not inflate the debrief's window/gap counts.
+  const states = samples.map(x => x.detection_state);
+  let hi = 0;
+  while (hi < states.length) {
+    if (states[hi] === 'sensor_gap') {
+      let hj = hi;
+      while (hj < states.length && states[hj] === 'sensor_gap') hj++;
+      const durS = (Date.parse(samples[Math.min(hj, samples.length - 1)]?.timestamp_utc || 0) - Date.parse(samples[hi].timestamp_utc || 0)) / 1000;
+      const bounded = hi > 0 && hj < states.length && states[hi - 1] === 'detected' && states[hj] === 'detected';
+      if (bounded && durS < 2) { for (let hk = hi; hk < hj; hk++) states[hk] = 'detected'; }
+      hi = hj;
+    } else hi++;
+  }
   let windows = 0, inWin = false, lastDetected = null;
   const gaps = [];
   let gapStartTs = null;
-  for (const s of samples) {
-    const det = s.detection_state === 'detected';
+  for (let si = 0; si < samples.length; si++) {
+    const s = samples[si];
+    const det = states[si] === 'detected';
     if (det && !inWin) {
       windows++;
       inWin = true;
