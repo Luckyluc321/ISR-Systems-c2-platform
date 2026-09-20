@@ -9282,9 +9282,17 @@ async function main() {
       if (droneState.get(linkedId)?.recording) { console.log(`[P5A cross-cued] ${linkedId} already has own recording, skipping`); continue; }
       const startMs = new Date(linked.startTime).getTime();
       const endMs = linked.endTime ? new Date(linked.endTime).getTime() : Date.now();
+      // Time window ALONE let every drone's full-mesh samples bleed
+      // into a site-linked event's own recording, including a fleeing
+      // drone miles outside this site's coverage during the same
+      // window (field-found: AMK replay showed the escaped overwatch's
+      // line extending far past AMK's radius). A sample belongs to
+      // THIS linked event's own recording only if it was also within
+      // THIS site's own sensor footprint, not merely concurrent in time.
       const slice = primaryRec.timeseries.filter(s => {
         const t = new Date(s.timestamp_utc).getTime();
-        return t >= startMs && t <= endMs;
+        if (t < startMs || t > endMs) return false;
+        return _sitesSeeingPoint(s.lat, s.lon, s.altitude_agl_m).has(linked.siteId);
       });
       if (!slice.length) {
         const primaryFirst = primaryRec.timeseries[0]?.timestamp_utc;
@@ -9595,7 +9603,55 @@ async function main() {
     return synth ? [...samples, synth] : samples;
   }
 
+  // Full-access tier: admin + every receiver (government response
+  // agencies) see the complete cross-site trajectory. Only OPERATOR
+  // accounts (the site infrastructure owners — the airport, the
+  // substation owner) are fenced to their own site's own recording.
+  // Single source of truth; scopedTrajectoryFor reuses this.
+  function _isFullAccessRoleId(roleId) {
+    const role = ACCOUNTS?.find?.(r => r.id === roleId) || null;
+    const kind = role?.kind || 'admin';
+    return kind === 'admin' || kind === 'receiver' || !role;
+  }
+
+  // Walk up shadowOfEventId (site-linked shadow -> its primary) and
+  // provenance.breakawayOf (a promoted breakaway member -> the event
+  // that was governing its tick loop when it broke off, always the
+  // topmost primary today since shadow events never own a live track)
+  // to the topmost ancestor. That ancestor's OWN recording already
+  // holds the entire physical encounter continuously — approach,
+  // every site's engagement, any breakaway flight — because every
+  // sample for a given drone was pushed into whichever event's tick
+  // loop actually owned it, and that has only ever been the primary.
+  // Returns the ancestor EVENT OBJECT (not just its id) so callers can
+  // also source ITS OWN terminal/exit coordinate correctly.
+  function _resolveChainPrimaryEvent(event) {
+    let cur = event;
+    let hops = 0;
+    while (cur && hops < 6) {
+      const nextId = cur.shadowOfEventId || cur.provenance?.breakawayOf;
+      if (!nextId || nextId === cur.id) break;
+      const next = getEvent(nextId);
+      if (!next) break;
+      cur = next;
+      hops++;
+    }
+    return cur || event;
+  }
+
   function _debriefResolveSamples(event) {
+    // Full-access roles (admin, every receiver/government agency):
+    // the complete chain, not just this event's own local slice. Falls
+    // through to the scoped chain below only if the chain primary's
+    // recording is unavailable for some reason (defensive, not the
+    // expected path once a scenario has run to completion).
+    if (_isFullAccessRoleId(getActiveRole?.()?.id)) {
+      const chainPrimary = _resolveChainPrimaryEvent(event);
+      const chainRec = window.__isr_getRecording?.(chainPrimary.id);
+      if (chainRec?.timeseries?.length) {
+        return { source: 'chain_recording', samples: _appendTerminalIfMissing(chainPrimary, chainRec.timeseries) };
+      }
+    }
     // Prefer this event's own recording; fall back to primary's recording
     // filtered to this event's time window; last resort: template waypoints.
     const own = window.__isr_getRecording?.(event.id);
@@ -10006,9 +10062,7 @@ async function main() {
     if (!Array.isArray(samples) || samples.length === 0) {
       return { segments: [], fullyVisible: true, hiddenSegmentCount: 0, scopeNote: null, ownedSiteIds: null };
     }
-    const role = ACCOUNTS?.find?.(r => r.id === roleId) || null;
-    const kind = role?.kind || 'admin';
-    const isFullAccess = kind === 'admin' || kind === 'receiver' || !role;
+    const isFullAccess = _isFullAccessRoleId(roleId);
     if (isFullAccess) {
       // Pass-through: preserve source order, all samples confirmed.
       return {
@@ -10466,9 +10520,9 @@ async function main() {
     // runs. For cross-cued events, also ensure the primary is loaded
     // (the resolver's fallback path needs it).
     await window.__isr_ensureRecording(eventId);
-    const _primaryId = event.linkedEventId || event.shadowOfEventId;
-    if (_primaryId && _primaryId !== eventId) {
-      await window.__isr_ensureRecording(_primaryId);
+    const _chainPrimaryEv = _resolveChainPrimaryEvent(event);
+    if (_chainPrimaryEv.id !== eventId) {
+      await window.__isr_ensureRecording(_chainPrimaryEv.id);
     }
     // Rehydrate any persisted narrative from localStorage before we
     // render the debrief panel — a reload otherwise re-triggers Agent B
@@ -11130,8 +11184,18 @@ async function main() {
     // them for the replay's duration; stopReplay restores.
     try { _setEventMarkersVisibility(eventId, false); } catch (_) {}
     // Ensure recording is loaded from IDB into memory before consuming.
-    await window.__isr_ensureRecording(eventId);
-    const rec = window.__isr_getRecording(eventId);
+    // Full-access roles (admin, every receiver) replay the WHOLE chain:
+    // load the topmost ancestor's own recording, which already holds
+    // the entire encounter continuously (see _resolveChainPrimaryEvent).
+    // Site-scoped operator roles keep loading just this one event's own
+    // (now spatially-honest, per the cross-cued slice fix) recording.
+    const _replayEvent = getEvent(eventId);
+    const _activeRoleId = getActiveRole?.()?.id;
+    const _replayFullAccess = _isFullAccessRoleId(_activeRoleId);
+    const _replayChainPrimary = (_replayFullAccess && _replayEvent) ? _resolveChainPrimaryEvent(_replayEvent) : null;
+    const _replayLoadId = _replayChainPrimary ? _replayChainPrimary.id : eventId;
+    await window.__isr_ensureRecording(_replayLoadId);
+    const rec = window.__isr_getRecording(_replayLoadId);
     if (!rec || !rec.timeseries?.length) {
       toast('No trajectory recording available for this event.', 'info');
       return;
@@ -11142,8 +11206,6 @@ async function main() {
     // owned-site segments; admin + state agencies see full trajectory.
     // For operators, filter timeseries to in-scope samples + build
     // inferred bridges between owned sites.
-    const _replayEvent = getEvent(eventId);
-    const _activeRoleId = getActiveRole?.()?.id;
     const _scope = _replayEvent
       ? scopedTrajectoryFor(_replayEvent, _activeRoleId, rec.timeseries)
       : null;
