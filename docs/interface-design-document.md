@@ -128,6 +128,10 @@ Three tenant kinds. Strict isolation. Separate deployments in production. No cro
 
 Isolation is enforced at the query layer, not only in the UI. A receiver sees only events escalated to a destination ID it owns. An operator sees only events at its assigned sites. Admin sees all. IF-5 specifies the enforcement functions. IF-6 specifies the full role registry and interaction rules.
 
+**Operator isolation covers the map and the site surfaces, not only the event ledger.** As of 2026-09-20 an operator account sees only its own sites rendered on the globe: boundaries, perimeters, sub-lines, sensor markers, coverage rings, country-zoom rollup markers and the live contributing-sensor pulse. The same scope applies to the fly-to controls, the simulation site selector, the status bar sensor totals, the fleet hardware inventory, the configuration site list, the destinations editor tabs and the history view and its site filter. Two helpers carry it, `_roleCanSeeSite(siteId, role)` and `_visibleSiteIds(role)`, both of which short-circuit to full visibility for any non-operator role, so admin and receiver behaviour is unchanged.
+
+Site geometry is drawn once at boot for every site and then swept by `applySiteScopeVisibility()`, which is re-run on every role change. Simulation ground truth (the coverage predicates, the per-site aggregation, the detection tick) deliberately continues to iterate every site regardless of viewer, because narrowing it would change what the sensors physically observe rather than what the viewer is shown.
+
 ### 1.2 Deployment topology
 
 Three tiers. The edge tier is where a partner most often integrates.
@@ -906,7 +910,7 @@ Different roles see different portions of a threat trajectory when opening the d
 | Admin | Full trajectory across every site. All segments solid. No scope banner. |
 | Receiver (state agency: Politi, PET, FE, Forsvaret, BRS, Region, kommune, HJV, ministry, agency) | Same as admin — full access for now. Reserved for tightening in a later phase if a customer restricts an agency's cross-site visibility. |
 | Operator (owns 1 site the threat crossed) | Trajectory samples inside owned site's sensor coverage only, rendered solid. All other segments hidden. Scope banner: "Trajectory scoped to your site perimeter. State agencies see the full path." |
-| Operator (owns 2+ sites the threat crossed) | Confirmed segments per owned site + INFERRED (dotted) bridges connecting consecutive confirmed segments. Segments outside all owned sites hidden. Scope banner: "Segments between your sites are inferred (dotted) — your sensors did not observe them directly." |
+| Operator (owns 2+ sites the threat crossed) | Confirmed segments per owned site + INFERRED (dotted) bridges connecting consecutive confirmed segments **at different owned sites**. A target that leaves and re-enters the same site gets no bridge, because it travelled between nothing. Segments outside all owned sites hidden. Scope banner: "Segments between your sites are inferred (dotted). Your sensors did not observe them directly." |
 | Operator (owns 0 sites the threat crossed) | Empty. Toast + banner: "Event outside your site scope." Replay aborts before rendering. Export writes zero rows and warns. |
 
 **Entry point.**
@@ -927,15 +931,26 @@ scopedTrajectoryFor(event, roleId, samples) -> {
 **Site containment.**
 
 ```
-_findSiteContainingPoint(lat, lon) -> siteId | null
+_sitesSeeingPoint(lat, lon, altM) -> Set<siteId>
 ```
 
-Walks `SITES` online sensor coverage circles (per IF-2.4) and returns the first site whose union of circles contains the point. Null if outside all site coverage.
+Returns **every** site whose online sensors cover the point at its recorded altitude, applying the full cylindrical gate from IF-2.4: horizontal distance within `coverage_radius_m` AND altitude at or below the sensor's hardware ceiling. Empty set if no sensor anywhere observes the point.
+
+This is deliberately the same predicate the cross-cued recording writer uses when slicing a site-linked event's own recording, so a sample written INTO a site's recording is never then hidden FROM that site's owner.
+
+Two properties matter and replaced an earlier `_findSiteContainingPoint(lat, lon)` helper removed on 2026-09-20:
+
+- **Set, not first match.** Sensor coverage can overlap across owners. Copenhagen Airport sensor `N22` overlaps all seven Amager substation sensors by 170 to 260 metres, and for those seconds both sets of sensors genuinely observe the target, so both owners are entitled to see it. The previous helper returned the first site in `SITES` key order, which is manifest filename order, so the overlap was awarded by an alphabetical accident.
+- **Altitude aware.** The previous helper passed no altitude, so the ceiling check could never fail and a target above every sensor's ceiling still rendered as confirmed observation. That breaks the sensors-observe-only rule by fabricating observation rather than merely leaking it.
+
+Scope multi-site status is likewise computed from the owned sites the threat **actually crossed**, not from the count of sites the account owns. An operator owning six substations gets single-site treatment on a single-substation overflight.
 
 **Confirmed vs inferred segments.**
 
-- `confirmed` — every sample is inside an owned-site sensor cov. Rendered as a solid polyline with confidence-band colour.
-- `inferred` — synthetic 2-point segment connecting the last confirmed sample of one run to the first confirmed sample of the next. Rendered as dashed line, dim alpha, thinner width. Only emitted when the operator owns MULTIPLE sites (single-site operators see no inferred bridges).
+- `confirmed` is every sample inside an owned-site sensor coverage volume. Rendered as a solid polyline with confidence-band colour.
+- `inferred` is a synthetic 2-point segment connecting the last confirmed sample of one run to the first confirmed sample of the next. Rendered as dashed line, dim alpha, thinner width. Emitted only when the threat crossed MULTIPLE owned sites and the two runs sit at different owned sites.
+
+**The contract applies to the analysis layer, not only to geometry.** `_confirmedSamplesForScope(scope, samples)` reduces a raw sample array to the entitled subset, keyed by `(droneId, t_sec_from_event)`, and returns the input untouched for full-access viewers. Every consumer of a sample array runs through it: the recording export scoper, the replay track builder, the debrief analysis chain (asset correlator, moments extractor, deterministic narrative and the Agent B prompt) and the narrative regenerate handler. Scoping only the polyline left an operator reading a written summary of legs their own sensors never observed, beside a map that correctly hid them.
 
 **Where the contract applies.**
 

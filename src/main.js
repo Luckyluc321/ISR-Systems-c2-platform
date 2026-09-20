@@ -525,6 +525,20 @@ function _sameTenant(siteIdA, siteIdB) {
   const tB = _tenantForSite(siteIdB);
   return !!tA && tA === tB;
 }
+// Site-level visibility for the active account. Admin and every
+// receiver (government response agency) see every site. Operators, who
+// are the site infrastructure owners, see only the sites their own role
+// owns. This is the map and site-list counterpart to
+// _isFullAccessRoleId, which answers the same question for trajectories.
+// Any non-operator role short-circuits to true, so admin and receiver
+// behaviour is unchanged wherever this is called.
+function _roleCanSeeSite(siteId, role = getActiveRole()) {
+  if (!role || role.kind !== 'operator') return true;
+  return Array.isArray(role.siteIds) && role.siteIds.includes(siteId);
+}
+function _visibleSiteIds(role = getActiveRole()) {
+  return Object.keys(SITES).filter(sid => _roleCanSeeSite(sid, role));
+}
 // Filter a linked-event ID list by tenant scope for the active role.
 // Operators: only see links within their own tenant (same operator's
 // siteIds). Receivers + Admin: see everything (no filter — receivers
@@ -719,11 +733,6 @@ import { streamNarrativeLens, knownArchetypes as _lensKnownArchetypes, writeLens
 import { saveRecording as _idbSaveRecording, loadRecording as _idbLoadRecording, deleteRecording as _idbDeleteRecording, listRecordingIds as _idbListRecordingIds, clearAll as _idbClearAll, migrateFromLocalStorage as _idbMigrateFromLocalStorage } from './recording_store.js';
 import { fetchDrivingRoute, computeSegmentLengths, advanceAlongPolyline } from './routing.js';
 import { buildCordon, assignPatrols, clearCordonCache } from './perimeter.js';
-import {
-  CPH_RUNWAYS, CPH_PERIMETER_ROADS, CPH_TAXIWAYS, CPH_RAMP_SPOTS,
-  DK_MOTORWAYS, CPH_ARTERIALS, CITY_GLOWS,
-  interpolateSegment, interpolatePath,
-} from './night_lighting.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -768,12 +777,27 @@ async function main() {
   // confirmed; adjust headingOffsetDeg (0 / 90 / 180 / 270) until
   // the nose points along the flight direction.
   window.__isr_shahed_tuning = window.__isr_shahed_tuning || {
-    // 2026-09-17: 90 left the nose 90 degrees LEFT of travel; 180 is
-    // correct. (The "still slightly left" observation was the 2D icon
-    // bearing missing its cos(lat) correction, fixed in the tick loop,
-    // not this model offset.) Live dial if a model swap ever flips it:
-    //   window.__isr_shahed_tuning.headingOffsetDeg = 0 / 90 / 270
-    headingOffsetDeg: 180,
+    // 2026-09-20: derived from the asset geometry, not eyeballed.
+    // shahed_238_drone.glb carries its nose at mesh +Z, and its root
+    // node matrix diag(1,-1,-1) flips that to glTF root -Z. The glTF
+    // 2.0 convention is nose along +Z, and Cesium's axis correction
+    // maps glTF +Z onto body +X. So this asset's nose lands on body
+    // -X. Cesium heading 0 puts body +X on EAST, not north, so a
+    // compass bearing needs a further -90. Net: 180 - 90 = 90.
+    //
+    // The previous 180 was algebraically the correct orientation with
+    // pitch and roll negated, which is why it read worst through turns
+    // and on the terminal dive rather than on straight legs.
+    headingOffsetDeg: 90,
+    // A nose on body -X also reverses Cesium's pitch and roll axes
+    // through the airframe: positive pitch would drop the nose and
+    // positive roll would lift the right wing. These flip the
+    // world-frame targets into asset space at the final boundary, so
+    // the smoothing, clamps and yaw-rate maths above stay in world
+    // semantics (positive pitch = climbing, positive roll = turning
+    // right). Models authored nose-on-+X leave both at 1.
+    pitchSign: -1,
+    rollSign: -1,
     pitchOffsetDeg: 0,         // additional pitch bias (usually 0)
     // 0.18 converged in about a quarter second, which read as the
     // airframe snapping 90 degrees in one movement. 0.06 sweeps the
@@ -807,11 +831,22 @@ async function main() {
   window.__isr_icon_tuning = window.__isr_icon_tuning || { bearingTrimDeg: -2 };
 
   window.__isr_quad_tuning = window.__isr_quad_tuning || {
-    // Model orientation — the assault_drone_concept GLB's authored
-    // forward axis is not 90°-rotated like the Shahed. Default 0
-    // means "trust the GLB's own forward". Dial 90/180/270 if the
-    // nose still points wrong direction after the fix.
-    headingOffsetDeg: 0,
+    // 2026-09-20: assault_drone_concept.glb is authored to spec, pod
+    // nose on glTF root +Z, which Cesium maps to body +X. Unlike the
+    // Shahed there is no asset reversal, but the same Cesium
+    // convention applies: heading 0 puts body +X on EAST, so a compass
+    // bearing still needs -90. Hence 270, not 0.
+    //
+    // This was wrong by the same 90 degrees as the Shahed and went
+    // unnoticed because an X-frame quadcopter is close to
+    // rotationally symmetric. If the pod nose now reads backwards,
+    // the asset front is at the mast end and the value is 90.
+    headingOffsetDeg: 270,
+    // Nose on body +X, so Cesium's pitch and roll axes already run
+    // the right way through this airframe. See the Shahed rig above
+    // for why a reversed asset needs these at -1.
+    pitchSign: 1,
+    rollSign: 1,
     pitchOffsetDeg: 0,
     // Scale — the GLB reads LARGE at 1:1 (much bigger than a real
     // 40-60cm quadcopter). Real ratio: a quadcopter should be
@@ -1576,7 +1611,20 @@ async function main() {
         earthAtNightLayer.colorToAlpha = Cesium.Color.BLACK;
         earthAtNightLayer.colorToAlphaThreshold = 0.15;
       }
-      if (googlePhotoreal) googlePhotoreal.show = false;
+      if (googlePhotoreal) {
+        // Sim platform mode only (config panel Real/Sim toggle): keep the
+        // real photorealistic building textures visible at night, dimmed
+        // the same way osmBuildings is dimmed below, instead of hiding
+        // them behind the flat fallback. Real platform mode is untouched —
+        // stays hidden, exactly as production has always behaved.
+        googlePhotoreal.show = _isSimMode();
+        if (_isSimMode()) {
+          googlePhotoreal.lightColor = new Cesium.Cartesian3(0.20, 0.25, 0.35);
+          if (googlePhotoreal.imageBasedLighting) {
+            googlePhotoreal.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(0.0, 0.0);
+          }
+        }
+      }
       if (osmBuildings) {
         osmBuildings.show = true;
         osmBuildings.lightColor = new Cesium.Cartesian3(0.20, 0.25, 0.35);
@@ -1584,6 +1632,7 @@ async function main() {
           osmBuildings.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(0.0, 0.0);
         }
       }
+      if (googlePhotoreal) googlePhotoreal.show = false;
       if (window.__isr_sdfiLayer) window.__isr_sdfiLayer.show = false;
       nightBloom.enabled = false;
     } else if (imageryMode === 'day') {
@@ -1661,602 +1710,7 @@ async function main() {
       }
       nightBloom.enabled = false;
     }
-    // Procedural night lights (runways, motorways, city glows) toggle
-    // with the mode. DELIBERATELY does not touch any Cesium global state
-    // (no bloom, no canvas filter, no globe/atmosphere/clock mutations,
-    // no tile style changes). Those APIs leak internal state that
-    // corrupts day mode rendering. Additive entities only.
-    if (imageryMode === 'night') {
-      _renderNightLights();
-      // Trigger close-up check immediately after applyImageryMode
-      // finishes its layer writes. If altitude < 50km, close-up config
-      // takes over (day-lit ground, dark sky). Otherwise stays "night
-      // from space" as applyImageryMode set it.
-      requestAnimationFrame(() => _updateNightCloseUp());
-    } else {
-      _clearNightLights();
-      _deactivateOverlayLights();
-      const container = document.getElementById('cesiumContainer');
-      if (container) container.classList.remove('night-closeup-darken');
-      // If we were in close-up state, reset it so day/auto mode inherit
-      // clean night-distant config (matches applyImageryMode expectations).
-      if (_nightCloseUpActive) {
-        _applyNightDistantConfig();
-        _nightCloseUpActive = false;
-      }
-    }
   }
-
-  // ═══════════════════════════════════════════════════════════════════
-  // Night-mode procedural lighting + altitude-driven imagery blend
-  // ───────────────────────────────────────────────────────────────────
-  // Runways / taxiways / arterials / motorway strings / city glows are
-  // added as Cesium entities and removed when night mode is deactivated.
-  // Imagery blend: at high altitude the darkened Bing + Earth-at-Night
-  // reads as "night from space". At low altitude the SDFI Danish
-  // orthophoto (day imagery, dimmed) fades in so the operator can see
-  // real terrain detail — buildings, runways, waterways — as a
-  // "night-lit terrain" view. Lights populated procedurally on top.
-  // ═══════════════════════════════════════════════════════════════════
-  const _nightLightEntities = [];
-
-  function _clearNightLights() {
-    for (const e of _nightLightEntities) viewer.entities.remove(e);
-    _nightLightEntities.length = 0;
-  }
-
-  // Radial-gradient glow images for point lights. Cached per (color, size) so
-  // we don't regenerate the canvas on every entity. White-hot core + colored
-  // halo fading to transparent — reads as an actual glowing light source
-  // instead of a flat colored disk (which is what Cesium `point` primitives
-  // look like — hence the previous "vague yellow dots" appearance).
-  const _lightGlowCache = new Map();
-  function _lightGlowImage(colorHex) {
-    if (_lightGlowCache.has(colorHex)) return _lightGlowCache.get(colorHex);
-    const size = 128;
-    const c = document.createElement('canvas');
-    c.width = size; c.height = size;
-    const ctx = c.getContext('2d');
-    const cx = size / 2;
-    const cy = size / 2;
-    const col = Cesium.Color.fromCssColorString(colorHex);
-    const r = Math.round(col.red * 255);
-    const g = Math.round(col.green * 255);
-    const b = Math.round(col.blue * 255);
-    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, cx);
-    grad.addColorStop(0.00, `rgba(255, 255, 255, 1.0)`);   // white-hot core
-    grad.addColorStop(0.15, `rgba(255, 255, 255, 0.95)`);  // core spreads
-    grad.addColorStop(0.30, `rgba(${r}, ${g}, ${b}, 0.85)`); // colored inner halo
-    grad.addColorStop(0.55, `rgba(${r}, ${g}, ${b}, 0.35)`); // soft mid halo
-    grad.addColorStop(0.80, `rgba(${r}, ${g}, ${b}, 0.10)`); // faint outer glow
-    grad.addColorStop(1.00, `rgba(${r}, ${g}, ${b}, 0)`);    // fully transparent edge
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, size, size);
-    _lightGlowCache.set(colorHex, c);
-    return c;
-  }
-
-  function _addLightPoint(lat, lon, color, pixelSize, alpha = 1) {
-    // Billboard-based light. Ground-clamped so it sits on actual terrain
-    // (no more sea-level offset that made lights drift over planes when
-    // camera tilts down). Depth test enabled so buildings/aircraft in front
-    // of the light properly occlude it.
-    return viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(lon, lat),
-      billboard: {
-        image: _lightGlowImage(color),
-        // Billboard is a radial gradient — displayed size includes the halo,
-        // so bump up ~2.5× the intended "hot core" pixel size so the visible
-        // bright center matches the old point sizing while the halo extends
-        // beyond it.
-        width: pixelSize * 2.8,
-        height: pixelSize * 2.8,
-        color: Cesium.Color.WHITE.withAlpha(alpha),
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-      },
-      properties: { nightLight: true },
-    });
-  }
-
-  function _addLightPolyline(path, color, width, alpha = 0.7) {
-    // PolylineGlowMaterialProperty gives the road/runway line an actual
-    // glowing bloom appearance (bright core, faded halo along the length)
-    // instead of a flat colored stripe.
-    const positions = Cesium.Cartesian3.fromDegreesArray(path.flatMap(p => [p[1], p[0]]));
-    return viewer.entities.add({
-      polyline: {
-        positions,
-        width,
-        material: new Cesium.PolylineGlowMaterialProperty({
-          glowPower: 0.30,
-          taperPower: 1.0,
-          color: Cesium.Color.fromCssColorString(color).withAlpha(alpha),
-        }),
-        clampToGround: true,
-      },
-      properties: { nightLight: true },
-    });
-  }
-
-  // Lazily-generated radial-gradient PNG for city glow billboards. Bright
-  // amber center fading to fully transparent edge. Much softer than a
-  // solid ellipse (which read as a flat orange disk). Sized in metres
-  // per city via billboard `scale` at add time.
-  let _cityGlowImage = null;
-  function _cityGlowRadialImage() {
-    if (_cityGlowImage) return _cityGlowImage;
-    const size = 256;
-    const c = document.createElement('canvas');
-    c.width = size; c.height = size;
-    const ctx = c.getContext('2d');
-    const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-    g.addColorStop(0, 'rgba(255, 200, 120, 0.55)');
-    g.addColorStop(0.3, 'rgba(255, 180, 100, 0.30)');
-    g.addColorStop(0.6, 'rgba(255, 160, 80, 0.12)');
-    g.addColorStop(1, 'rgba(255, 140, 60, 0)');
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, size, size);
-    _cityGlowImage = c;
-    return c;
-  }
-
-  function _addCityGlow(lat, lon, radiusKm, intensity) {
-    // Radial-gradient billboard with distance-display gating. Visible at
-    // national/regional zoom (>15km altitude), hidden at close zoom so it
-    // doesn't drown the airport view in orange soup. Scale in pixels sized
-    // roughly to the glow radius at typical viewing altitude.
-    return viewer.entities.add({
-      position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
-      billboard: {
-        image: _cityGlowRadialImage(),
-        // Billboard sizes in metres via `sizeInMeters` — makes glow scale
-        // naturally as the camera moves closer or further
-        sizeInMeters: true,
-        width: radiusKm * 2000,   // diameter in metres
-        height: radiusKm * 2000,
-        color: Cesium.Color.WHITE.withAlpha(intensity),
-        // Only render when camera altitude is between 15km and 5000km.
-        // Hides the glow when zoomed in close (no orange soup) and when
-        // zoomed way out (globe view).
-        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(15_000, 5_000_000),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
-      properties: { nightLight: true },
-    });
-  }
-
-  function _renderNightLights() {
-    _clearNightLights();
-    // Sizes bumped substantially so lights survive the CSS filter
-    // (brightness 0.16 = they need to be ~2× normal size to still read
-    // as bright points against the darkened ground).
-    for (const rw of CPH_RUNWAYS) {
-      _nightLightEntities.push(_addLightPolyline(rw.path, rw.color, 4, 1.0));
-      const densePoints = interpolatePath(rw.path, rw.light_spacing_m);
-      for (const [lat, lon] of densePoints) {
-        _nightLightEntities.push(_addLightPoint(lat, lon, rw.color, 6, 1.0));
-      }
-    }
-    for (const road of CPH_PERIMETER_ROADS) {
-      const [start, end] = road.endpoints;
-      const points = interpolateSegment(start[0], start[1], end[0], end[1], road.light_spacing_m);
-      for (const [lat, lon] of points) {
-        _nightLightEntities.push(_addLightPoint(lat, lon, road.color, 4, 0.95));
-      }
-    }
-    for (const tw of CPH_TAXIWAYS) {
-      _nightLightEntities.push(_addLightPolyline(tw.path, '#ffcc88', 2.5, 0.95));
-      const densePoints = interpolatePath(tw.path, 30);
-      for (const [lat, lon] of densePoints) {
-        _nightLightEntities.push(_addLightPoint(lat, lon, '#ffcc88', 5, 1.0));
-      }
-    }
-    for (const spot of CPH_RAMP_SPOTS) {
-      _nightLightEntities.push(_addLightPoint(spot.lat, spot.lon, '#ffe8a3', 10, 1.0));
-    }
-    // Motorways + arterials both bumped substantially so all Danish
-    // roads visibly light up like the airport does.
-    for (const mw of DK_MOTORWAYS) {
-      _nightLightEntities.push(_addLightPolyline(mw.points, '#ffa040', 3.5, 1.0));
-    }
-    for (const art of CPH_ARTERIALS) {
-      _nightLightEntities.push(_addLightPolyline(art.points, '#ffd28a', 3.0, 1.0));
-    }
-    // City glows — soft radial halos over major Danish population centres
-    for (const c of CITY_GLOWS) {
-      _nightLightEntities.push(_addCityGlow(c.lat, c.lon, c.radius_km, c.intensity));
-    }
-    console.log(`[Night lights] rendered ${_nightLightEntities.length} entities across airport, motorways, arterials, and city glows`);
-  }
-
-  // ═══════════════════════════════════════════════════════════════════
-  // HTML overlay lights — TRUE glowing lights OUTSIDE the CSS filter
-  // ───────────────────────────────────────────────────────────────────
-  // Cesium entities inside #cesiumContainer are dimmed by the
-  // night-closeup-darken CSS filter (that's how the ground reads dark).
-  // To make lights actually SHINE we render them to a canvas that lives
-  // OUTSIDE #cesiumContainer (sibling element), unaffected by the filter.
-  //
-  // Per-frame: viewer.scene.postRender fires after Cesium draws. For each
-  // 3D light position we project to 2D window coords and draw a radial
-  // gradient. Occluded points (behind the earth) are skipped via
-  // EllipsoidalOccluder. Additive blending ('lighter') sums brightness
-  // where lights overlap — matches real bloom behaviour.
-  //
-  // Zero Cesium global state touched. Zero forbidden APIs. Additive-only.
-  // ═══════════════════════════════════════════════════════════════════
-  let _overlayCanvas = null;
-  let _overlayCtx = null;
-  let _overlayLights = [];
-  let _overlayPostRenderCb = null;
-  let _overlayResizeCb = null;
-
-  // Small deterministic PRNG so per-light jitter is stable across reloads
-  // (no flicker on rebuild). Seed = light index.
-  function _lightRand(seed) {
-    const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
-    return x - Math.floor(x);
-  }
-  // Per-category ground heights matched to real-world terrain +
-  // googlePhotoreal rendering. Numbers picked so lights sit ON the
-  // visible ground plane at drone POV, minimizing parallax drift as
-  // camera tilts. Won't be perfect everywhere (real elevations vary
-  // by tens of meters across DK), but eliminates airport-area drift
-  // which is the demo money shot. NEVER use clampToHeightMostDetailed
-  // (that's what froze the browser previously — banned).
-  const GROUND_H_CPH_AIRPORT = 8;    // CPH ~5m real + safety, photoreal ~5-8m
-  const GROUND_H_CPH_DOWNTOWN = 12;  // Copenhagen inner-city arterials
-  const GROUND_H_MOTORWAY = 10;      // DK motorway average (varies 0-50m)
-  const GROUND_H_GLOW = 8;           // City glows — height doesn't matter much
-
-  function _pushJitteredLight(lat, lon, color, baseSize, baseAlpha, groundH, extra = {}) {
-    const idx = _overlayLights.length;
-    const jLat = (_lightRand(idx * 3.1) - 0.5) * 0.00006;
-    const jLon = (_lightRand(idx * 5.7) - 0.5) * 0.00006;
-    const sizeVar = 0.7 + _lightRand(idx * 7.3) * 0.6;   // 0.7 - 1.3
-    const alphaVar = 0.65 + _lightRand(idx * 11.1) * 0.35; // 0.65 - 1.0
-    _overlayLights.push({
-      cart3: Cesium.Cartesian3.fromDegrees(lon + jLon, lat + jLat, groundH),
-      color, size: baseSize * sizeVar, alpha: Math.min(1, baseAlpha * alphaVar),
-      ...extra,
-    });
-  }
-
-  function _buildOverlayLights() {
-    _overlayLights = [];
-    for (const rw of CPH_RUNWAYS) {
-      const points = interpolatePath(rw.path, rw.light_spacing_m);
-      for (const [lat, lon] of points) {
-        _pushJitteredLight(lat, lon, rw.color, 3, 1.0, GROUND_H_CPH_AIRPORT);
-      }
-    }
-    for (const road of CPH_PERIMETER_ROADS) {
-      const [start, end] = road.endpoints;
-      const points = interpolateSegment(start[0], start[1], end[0], end[1], Math.max(road.light_spacing_m, 90));
-      for (const [lat, lon] of points) {
-        _pushJitteredLight(lat, lon, road.color, 2, 0.85, GROUND_H_CPH_AIRPORT);
-      }
-    }
-    for (const tw of CPH_TAXIWAYS) {
-      const points = interpolatePath(tw.path, 55);
-      for (const [lat, lon] of points) {
-        _pushJitteredLight(lat, lon, '#ffcc88', 2, 0.9, GROUND_H_CPH_AIRPORT);
-      }
-    }
-    for (const spot of CPH_RAMP_SPOTS) {
-      _pushJitteredLight(spot.lat, spot.lon, '#ffe8a3', 5, 1.0, GROUND_H_CPH_AIRPORT);
-    }
-    for (const mw of DK_MOTORWAYS) {
-      const points = interpolatePath(mw.points, 60);
-      for (const [lat, lon] of points) {
-        _pushJitteredLight(lat, lon, '#ffa040', 2.5, 0.9, GROUND_H_MOTORWAY);
-      }
-    }
-    for (const art of CPH_ARTERIALS) {
-      const points = interpolatePath(art.points, 40);
-      for (const [lat, lon] of points) {
-        _pushJitteredLight(lat, lon, '#ffd28a', 2, 0.85, GROUND_H_CPH_DOWNTOWN);
-      }
-    }
-    for (const c of CITY_GLOWS) {
-      _overlayLights.push({
-        cart3: Cesium.Cartesian3.fromDegrees(c.lon, c.lat, GROUND_H_GLOW),
-        color: '#ffc080', size: 40, alpha: 0.55 * c.intensity,
-        isGlow: true, glowRadiusKm: c.radius_km,
-      });
-    }
-    console.log(`[Overlay lights] precomputed ${_overlayLights.length} jittered light points`);
-  }
-
-  function _ensureOverlayCanvas() {
-    if (_overlayCanvas) return;
-    _overlayCanvas = document.getElementById('night-light-overlay-canvas');
-    if (!_overlayCanvas) return;
-    _overlayCtx = _overlayCanvas.getContext('2d');
-    _resizeOverlayCanvas();
-  }
-
-  function _resizeOverlayCanvas() {
-    if (!_overlayCanvas || !_overlayCtx) return;
-    const dpr = window.devicePixelRatio || 1;
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    _overlayCanvas.width = Math.round(w * dpr);
-    _overlayCanvas.height = Math.round(h * dpr);
-    _overlayCanvas.style.width = w + 'px';
-    _overlayCanvas.style.height = h + 'px';
-    _overlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  }
-
-  // One-shot async: sample REAL Cesium World Terrain elevation at every
-  // light position, replace each light's cart3 with (terrain height +
-  // 0.5m safety lift). Same API pattern the sensor terrain-anchor pass
-  // uses (line ~1067). sampleTerrainMostDetailed loads terrain tiles
-  // ONLY (lightweight, not the 3D-tile depth readback that froze earlier).
-  // Result: lights anchored to actual DK terrain elevation, drift
-  // dramatically reduced at drone POV.
-  let _overlayLightsTerrainSampled = false;
-  async function _sampleOverlayLightsTerrain() {
-    if (_overlayLightsTerrainSampled) return;
-    if (!viewer.terrainProvider) return;
-    if (typeof Cesium.sampleTerrainMostDetailed !== 'function') return;
-    _overlayLightsTerrainSampled = true;
-    try {
-      const carts = _overlayLights.map(l => {
-        const c = Cesium.Cartographic.fromCartesian(l.cart3);
-        return Cesium.Cartographic.fromRadians(c.longitude, c.latitude);
-      });
-      const sampled = await Cesium.sampleTerrainMostDetailed(viewer.terrainProvider, carts);
-      const LIFT_M = 0.5;
-      let ok = 0;
-      sampled.forEach((cart, i) => {
-        if (cart && cart.height != null && !isNaN(cart.height)) {
-          const light = _overlayLights[i];
-          light.cart3 = Cesium.Cartesian3.fromRadians(
-            cart.longitude, cart.latitude, cart.height + LIFT_M
-          );
-          ok++;
-        }
-      });
-      console.log(`[Overlay lights] terrain-anchored ${ok}/${sampled.length} lights (real DK elevation)`);
-      viewer.scene.requestRender();
-    } catch (err) {
-      console.warn('[Overlay lights] terrain sample failed:', err);
-      _overlayLightsTerrainSampled = false; // allow retry
-    }
-  }
-
-  function _activateOverlayLights() {
-    _ensureOverlayCanvas();
-    if (!_overlayCanvas) return;
-    if (_overlayLights.length === 0) _buildOverlayLights();
-    _overlayCanvas.classList.add('active');
-    if (!_overlayPostRenderCb) {
-      _overlayPostRenderCb = () => _drawOverlayLights();
-      viewer.scene.postRender.addEventListener(_overlayPostRenderCb);
-    }
-    if (!_overlayResizeCb) {
-      _overlayResizeCb = () => { _resizeOverlayCanvas(); viewer.scene.requestRender(); };
-      window.addEventListener('resize', _overlayResizeCb);
-    }
-    viewer.scene.requestRender();
-    // Kick off terrain anchor. Runs once, then lights are frozen at real
-    // Danish terrain elevation forever (survives POV changes, tilts, etc).
-    _sampleOverlayLightsTerrain();
-  }
-
-  function _deactivateOverlayLights() {
-    if (_overlayCanvas) {
-      _overlayCanvas.classList.remove('active');
-      if (_overlayCtx) {
-        _overlayCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
-      }
-    }
-    if (_overlayPostRenderCb) {
-      viewer.scene.postRender.removeEventListener(_overlayPostRenderCb);
-      _overlayPostRenderCb = null;
-    }
-    if (_overlayResizeCb) {
-      window.removeEventListener('resize', _overlayResizeCb);
-      _overlayResizeCb = null;
-    }
-  }
-
-  const _overlayScratch2 = new Cesium.Cartesian2();
-  function _drawOverlayLights() {
-    if (!_overlayCtx || !_overlayCanvas) return;
-    const w = window.innerWidth;
-    const h = window.innerHeight;
-    _overlayCtx.clearRect(0, 0, w, h);
-
-    const cameraPos = viewer.camera.positionWC;
-    const cameraAlt = viewer.camera.positionCartographic?.height || 100000;
-    const occluder = new Cesium.EllipsoidalOccluder(Cesium.Ellipsoid.WGS84, cameraPos);
-    const scene = viewer.scene;
-
-    // Additive blend — overlapping lights sum brightness (real bloom look)
-    _overlayCtx.globalCompositeOperation = 'lighter';
-
-    for (const light of _overlayLights) {
-      if (!occluder.isPointVisible(light.cart3)) continue;
-      // worldToWindowCoordinates is the newer API; fall back to wgs84 name for older builds
-      const winPos = (Cesium.SceneTransforms.worldToWindowCoordinates || Cesium.SceneTransforms.wgs84ToWindowCoordinates)
-                       .call(Cesium.SceneTransforms, scene, light.cart3, _overlayScratch2);
-      if (!winPos) continue;
-      const x = winPos.x;
-      const y = winPos.y;
-      if (x < -100 || x > w + 100 || y < -100 || y > h + 100) continue;
-
-      let renderSize = light.size;
-      if (light.isGlow) {
-        // City halo — scale down as camera zooms in (soft ambient sky glow at distance)
-        renderSize = Math.min(220, 6000 * light.glowRadiusKm / Math.max(cameraAlt, 20000));
-      }
-      _drawGlowPoint(_overlayCtx, x, y, renderSize, light.color, light.alpha);
-    }
-
-    _overlayCtx.globalCompositeOperation = 'source-over';
-  }
-
-  function _drawGlowPoint(ctx, x, y, size, colorHex, alpha) {
-    const col = Cesium.Color.fromCssColorString(colorHex);
-    const r = Math.round(col.red * 255);
-    const g = Math.round(col.green * 255);
-    const b = Math.round(col.blue * 255);
-    // Halo width tightened from 3.5× to 2.4× base size. Same brightness
-    // + saturation — only the OUTER falloff is narrowed so lights read as
-    // distinct points instead of merging into a yellow blob mid-runway.
-    const halo = size * 2.4;
-    const grad = ctx.createRadialGradient(x, y, 0, x, y, halo);
-    grad.addColorStop(0.00, `rgba(255,255,255,${(0.95 * alpha).toFixed(3)})`);
-    grad.addColorStop(0.08, `rgba(255,255,255,${(0.80 * alpha).toFixed(3)})`);
-    grad.addColorStop(0.22, `rgba(${r},${g},${b},${(0.65 * alpha).toFixed(3)})`);
-    grad.addColorStop(0.50, `rgba(${r},${g},${b},${(0.22 * alpha).toFixed(3)})`);
-    grad.addColorStop(0.80, `rgba(${r},${g},${b},${(0.05 * alpha).toFixed(3)})`);
-    grad.addColorStop(1.00, `rgba(${r},${g},${b},0)`);
-    ctx.fillStyle = grad;
-    ctx.fillRect(x - halo, y - halo, halo * 2, halo * 2);
-  }
-
-  // ═══════════════════════════════════════════════════════════════════
-  // Night close-up mode (safe retry — DOM-only darken)
-  // ───────────────────────────────────────────────────────────────────
-  // When night mode is active AND camera altitude < 15km, apply:
-  //   1. Imagery layer alpha/brightness/show toggles for Bing / SDFI /
-  //      EarthAtNight — these are the SAME properties applyImageryMode
-  //      already flips per mode, so they self-heal on any user toggle.
-  //   2. CSS filter on #cesiumContainer wrapper (NOT the canvas, NOT
-  //      via any Cesium API) — purely browser-compositor darkening.
-  // Buildings kept dark (their init-time tint + IBL stay untouched).
-  //
-  // Explicitly NEVER touching: bloom, canvas.style.filter, tile styles,
-  // osmBuildings.lightColor/IBL, globe.enableLighting/atmosphere/clock.
-  // Those APIs leaked corruption into day mode in previous attempts.
-  //
-  // Reset happens automatically when user toggles day/auto — applyImageryMode
-  // fully resets Bing/SDFI/EarthAtNight to that mode's values.
-  // ═══════════════════════════════════════════════════════════════════
-  // Night close-up (STEP 1): below 50km altitude in night mode, render
-  // buildings + ground exactly like day mode does. Sky stays night-dark
-  // (via skyAtmosphere brightness + night clock). Procedural lights
-  // continue on top. NO darkening filter yet — that's step 2 once this
-  // baseline is confirmed working.
-  //
-  // The trick to "dark sky + lit ground": night clock (sun below horizon
-  // → dark sky) + enableLighting=false (globe surface flat-lit, ignores
-  // sun position → ground fully visible).
-  //
-  // Every write has a paired reverse in _applyNightDistantConfig().
-  // NEVER touches bloom (was corruption source) or canvas.style.filter.
-  let _nightCloseUpActive = false;
-  function _updateNightCloseUp() {
-    if (imageryMode !== 'night') {
-      if (_nightCloseUpActive) {
-        _applyNightDistantConfig();
-        _nightCloseUpActive = false;
-      }
-      const container = document.getElementById('cesiumContainer');
-      if (container) container.classList.remove('night-closeup-darken');
-      _deactivateOverlayLights();
-      return;
-    }
-    const h = viewer.camera.positionCartographic?.height || 0;
-    const closeUp = h < 50_000;
-    const container = document.getElementById('cesiumContainer');
-    if (closeUp && !_nightCloseUpActive) {
-      _applyNightCloseUpConfig();
-      _nightCloseUpActive = true;
-      if (container) container.classList.add('night-closeup-darken');
-      _activateOverlayLights();
-    } else if (!closeUp && _nightCloseUpActive) {
-      _applyNightDistantConfig();
-      _nightCloseUpActive = false;
-      if (container) container.classList.remove('night-closeup-darken');
-      _deactivateOverlayLights();
-    }
-  }
-
-  function _applyNightCloseUpConfig() {
-    // Replicates EVERY visual property day mode uses, INLINE (does not
-    // call applyImageryMode) so future day-mode edits don't propagate
-    // here and vice versa. Sky pushed EXTRA dark here (below night's
-    // baseline -0.4) so it reads as fully-night at close-up in
-    // combination with the DOM darken filter. Reversed in distant.
-    viewer.scene.globe.enableLighting = false;
-    viewer.scene.skyAtmosphere.brightnessShift = -0.85;   // was -0.4 (night baseline)
-    viewer.scene.skyAtmosphere.saturationShift = -0.4;    // was -0.2
-    viewer.scene.globe.atmosphereLightIntensity = 1.0;    // was 3.0
-    // Imagery brightness = darken THE IMAGERY LAYER at the GPU level
-    // (BEFORE Cesium composites entities on top). Result: ground reads as
-    // night-dark, but our light entities (points/polylines/billboards)
-    // draw at full brightness on top → real "lights punching through
-    // dark ground" effect. No CSS filter needed.
-    // Imagery layers back to day-full brightness. CSS filter on the
-    // container does the visual darkening (safer — cannot corrupt tile
-    // state the way osmBuildings IBL toggling did).
-    if (bingLayer) {
-      bingLayer.show = true;
-      bingLayer.alpha = 1.0;
-      bingLayer.brightness = 1.0;
-      bingLayer.saturation = 1.0;
-    }
-    if (earthAtNightLayer) {
-      earthAtNightLayer.show = false;
-      earthAtNightLayer.alpha = 0;
-      earthAtNightLayer.brightness = 1.0;
-      earthAtNightLayer.dayAlpha = 1.0;
-      earthAtNightLayer.nightAlpha = 1.0;
-    }
-    if (window.__isr_sdfiLayer) {
-      window.__isr_sdfiLayer.show = true;
-      window.__isr_sdfiLayer.alpha = 1.0;
-      window.__isr_sdfiLayer.brightness = 1.0;
-    }
-    if (googlePhotoreal) {
-      googlePhotoreal.show = true;
-      googlePhotoreal.lightColor = undefined;
-      if (googlePhotoreal.imageBasedLighting) {
-        googlePhotoreal.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(1.0, 1.0);
-      }
-    }
-    // osmBuildings deliberately NOT touched. Toggling its
-    // imageBasedLighting / lightColor across mode transitions is what
-    // corrupted the tileset (parts of buildings rendering as white
-    // untextured shells). Left at whatever state applyImageryMode set.
-    // Hide the city-glow BILLBOARDS at close zoom — they were the "big
-    // orange blubber" showing up over the day-rendered ground at
-    // intermediate zoom (distance-display 15km threshold wasn't enough).
-    for (const e of _nightLightEntities) {
-      if (e.billboard && e.properties?.getValue?.()?.nightLight) {
-        e.show = false;
-      }
-    }
-  }
-
-  function _applyNightDistantConfig() {
-    // Every close-up write above reversed to original night config.
-    // osmBuildings deliberately NOT touched (see close-up config note).
-    viewer.scene.globe.enableLighting = true;
-    viewer.scene.skyAtmosphere.brightnessShift = -0.4;    // night baseline
-    viewer.scene.skyAtmosphere.saturationShift = -0.2;
-    viewer.scene.globe.atmosphereLightIntensity = 3.0;
-    if (bingLayer) bingLayer.brightness = 0.15;
-    if (earthAtNightLayer) {
-      earthAtNightLayer.show = true;
-      earthAtNightLayer.alpha = 1.0;
-    }
-    if (window.__isr_sdfiLayer) window.__isr_sdfiLayer.show = false;
-    if (googlePhotoreal) {
-      googlePhotoreal.show = false;
-    }
-    // Restore city glow billboard visibility for the distant view
-    for (const e of _nightLightEntities) {
-      if (e.billboard && e.properties?.getValue?.()?.nightLight) {
-        e.show = true;
-      }
-    }
-  }
-  viewer.camera.moveEnd.addEventListener(() => _updateNightCloseUp());
 
   viewer.scene.postRender.addEventListener(() => {
     if (imageryMode !== 'auto') return;
@@ -2348,6 +1802,11 @@ async function main() {
           }),
           clampToGround: true,
         },
+        // siteId lets applySiteScopeVisibility find this entity later.
+        // Sensors and coverage rings already carried it; the boundary,
+        // perimeter and sub-line families did not, so nothing could ask
+        // them which site they belonged to.
+        properties: { type: 'site-boundary', siteId: site.id },
       });
     }
 
@@ -2368,6 +1827,7 @@ async function main() {
             outline: false,
             heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
           },
+          properties: { type: 'site-perimeter', siteId: site.id },
         });
         // Dashed outline — matches CPH airport siteBoundary weight for
         // consistent site-boundary reading across all site types.
@@ -2385,6 +1845,7 @@ async function main() {
             }),
             clampToGround: true,
           },
+          properties: { type: 'site-perimeter', siteId: site.id },
         });
       });
     }
@@ -2403,6 +1864,7 @@ async function main() {
             }),
             clampToGround: true,
           },
+          properties: { type: 'site-subline', siteId: site.id },
         });
       });
     }
@@ -2466,10 +1928,27 @@ async function main() {
     }
   }
 
-  // Render all sites
+  // Render all sites. Every site is drawn once here regardless of who
+  // is signed in, then applySiteScopeVisibility below hides the ones
+  // the active account does not own. Rendering is not repeated on role
+  // switch, so the sweep is what keeps the globe honest.
   for (const siteKey of Object.keys(SITES)) {
     renderSite(SITES[siteKey]);
   }
+
+  // Account scope on the globe. Hides every entity belonging to a site
+  // the active account does not own. Admin and every receiver are a
+  // no-op here: _roleCanSeeSite returns true for any non-operator role.
+  // entity.show = false removes an entity from picking as well as from
+  // render, so a hidden sensor also stops being clickable.
+  function applySiteScopeVisibility() {
+    for (const e of viewer.entities.values) {
+      const sid = e.properties?.siteId?.getValue?.();
+      if (!sid) continue;
+      e.show = _roleCanSeeSite(sid);
+    }
+  }
+  applySiteScopeVisibility();
 
   // ── Lock all sensor positions to absolute Cartesian3 ──
   // Sample terrain height once, then set entity positions with a small
@@ -2544,7 +2023,10 @@ async function main() {
   function renderRollupMarkers() {
     for (const entity of rollupEntities.values()) viewer.entities.remove(entity);
     rollupEntities.clear();
-    for (const siteId of Object.keys(SITES)) {
+    // Filtered at the source rather than swept afterwards: this path
+    // already re-runs on role switch, so an operator never sees another
+    // owner's site name appear at country zoom.
+    for (const siteId of _visibleSiteIds()) {
       const site = SITES[siteId];
       const s = rollupState(siteId);
       const label = s.count ? `${site.name}  ·  ${s.count} live` : site.name;
@@ -9399,13 +8881,7 @@ async function main() {
     if (!event || !rec?.timeseries) return rec;
     const scope = scopedTrajectoryFor(event, roleId, rec.timeseries);
     if (scope.fullyVisible) return rec;
-    // Build the set of (droneId, t_sec) keys allowed through.
-    const allow = new Set();
-    for (const seg of scope.segments) {
-      if (seg.visibility !== 'confirmed') continue;
-      for (const p of seg.positions) allow.add(`${p.droneId}:${p.t_sec_from_event}`);
-    }
-    const filteredTs = rec.timeseries.filter(s => allow.has(`${s.droneId}:${s.t_sec_from_event}`));
+    const filteredTs = _confirmedSamplesForScope(scope, rec.timeseries);
     return {
       ...rec,
       timeseries: filteredTs,
@@ -9612,6 +9088,16 @@ async function main() {
     const role = ACCOUNTS?.find?.(r => r.id === roleId) || null;
     const kind = role?.kind || 'admin';
     return kind === 'admin' || kind === 'receiver' || !role;
+  }
+
+  // Owned-site scope for an account that is NOT full access. Empty set
+  // for any role that owns no sites. Deliberately does not re-derive
+  // the tier: _isFullAccessRoleId above stays the single source of
+  // truth for "is this viewer fenced at all". This only answers
+  // "fenced to what".
+  function _ownedSiteIdsForRoleId(roleId) {
+    const acct = ACCOUNTS?.find?.(r => r.id === roleId) || null;
+    return new Set(Array.isArray(acct?.siteIds) ? acct.siteIds : []);
   }
 
   // Walk up shadowOfEventId (site-linked shadow -> its primary) and
@@ -10046,17 +9532,15 @@ async function main() {
   // Full spec in IDD IF-6 + IF-8. See safety notes at top of
   // scopedTrajectoryFor for the default-to-admin fallback.
   // ═══════════════════════════════════════════════════════════════════
-  function _findSiteContainingPoint(lat, lon) {
-    // Returns the first site whose online sensor coverage contains
-    // the point. Null if outside all coverage.
-    for (const sid of Object.keys(SITES)) {
-      const site = SITES[sid];
-      if (!site?.sensors?.length) continue;
-      const cov = nearestSensorInCoverage({ lat, lon }, site);
-      if (cov?.inCoverage) return sid;
-    }
-    return null;
-  }
+  // Site containment for scoping uses _sitesSeeingPoint directly (see
+  // the sensor-coverage section). It returns the SET of every site
+  // whose online sensors cover the point at its recorded altitude,
+  // which is the same predicate the cross-cued recording writer uses.
+  // A first-match, altitude-blind variant lived here until 2026-09-20
+  // and disagreed with the write path in two ways: it resolved the
+  // Copenhagen Airport / Amager overlap by manifest filename order,
+  // and it never applied the sensor ceiling, so a target above every
+  // sensor's ceiling still rendered as confirmed observation.
 
   function scopedTrajectoryFor(event, roleId, samples) {
     if (!Array.isArray(samples) || samples.length === 0) {
@@ -10074,8 +9558,8 @@ async function main() {
         _passthrough: true,   // signal to renderer: use legacy per-drone / gap-split path
       };
     }
-    // Operator path — scope to owned sites.
-    const ownedSiteIds = new Set(role.siteIds || []);
+    // Operator path. Scope to owned sites.
+    const ownedSiteIds = _ownedSiteIdsForRoleId(roleId);
     if (ownedSiteIds.size === 0) {
       return {
         segments: [], fullyVisible: false, hiddenSegmentCount: 0,
@@ -10083,23 +9567,44 @@ async function main() {
         ownedSiteIds: [],
       };
     }
-    // Group samples by drone, then per-drone classify each sample as
-    // confirmed (in owned site cov) or hidden.
+    // Group by drone and label every sample against the FULL set of
+    // sites whose online sensors actually saw it, at its recorded
+    // altitude. Same predicate the cross-cued write path uses, so a
+    // sample sliced INTO a site's own recording is never then hidden
+    // FROM that site's owner.
+    //
+    // Set membership, not first match: Copenhagen Airport and the
+    // Amager substation overlap by roughly 200 metres, and for those
+    // seconds BOTH sets of sensors genuinely observe the target, so
+    // both owners are entitled to see it. A first-match lookup gave
+    // the overlap to whichever site sorted first by filename.
+    //
+    // Sample altitude lives on altitude_agl_m (see _buildDroneSample);
+    // `alt` is the live-tick field name, accepted as a fallback.
     const byDrone = new Map();
+    const touchedOwnedSites = new Set();
     for (const s of samples) {
       const id = s.droneId || 'unknown';
+      const altM = typeof s.altitude_agl_m === 'number' ? s.altitude_agl_m
+                 : (typeof s.alt === 'number' ? s.alt : 0);
+      const owned = [];
+      for (const sid of _sitesSeeingPoint(s.lat, s.lon, altM)) {
+        if (!ownedSiteIds.has(sid)) continue;
+        owned.push(sid);
+        touchedOwnedSites.add(sid);
+      }
       if (!byDrone.has(id)) byDrone.set(id, []);
-      byDrone.get(id).push(s);
+      byDrone.get(id).push({ ...s, _inOwnedSite: owned.length > 0, _ownedSites: owned });
     }
     const segments = [];
     let hiddenRunCount = 0;
-    const ownsMultipleSites = ownedSiteIds.size > 1;
+    // The contract reads "owns 2+ sites THE THREAT CROSSED", not
+    // "owns 2+ sites". Energinet owns six substations, so counting the
+    // account put dotted cross-site bridges and the multi-site banner
+    // on every single-substation overflight.
+    const ownsMultipleSites = touchedOwnedSites.size > 1;
 
-    for (const [droneId, droneSamples] of byDrone) {
-      const labeled = droneSamples.map(s => {
-        const inSite = _findSiteContainingPoint(s.lat, s.lon);
-        return { ...s, _inOwnedSite: inSite && ownedSiteIds.has(inSite) };
-      });
+    for (const [droneId, labeled] of byDrone) {
       // Walk labeled samples, group into confirmed vs hidden runs.
       const runs = [];
       let curRun = [labeled[0]];
@@ -10110,9 +9615,25 @@ async function main() {
         else { runs.push({ label: curLabel, samples: curRun }); curRun = [s]; curLabel = s._inOwnedSite; }
       }
       runs.push({ label: curLabel, samples: curRun });
-      // Emit confirmed runs as solid segments. Between two confirmed
-      // runs (separated by a hidden run), inject an inferred bridge
-      // only if the operator owns multiple sites.
+      // Emit confirmed runs as solid segments. A dotted bridge between
+      // two confirmed runs says "the target travelled BETWEEN two of
+      // your sensors lost it here and reacquired it there, and what
+      // happened in between we did not watch".
+      //
+      // Emitted between ANY two consecutive confirmed runs, including
+      // two runs at the same site. A single-site operator whose target
+      // leaves coverage and comes back has exactly the same unobserved
+      // stretch as a two-site one, and gating this on owning multiple
+      // sites left them with two disconnected solid runs and no
+      // indication that anything happened between them.
+      //
+      // The two renderers treat these differently on purpose. Debrief
+      // draws them dotted: it is a post-incident analysis surface and
+      // the operator needs to see that the track continued somewhere
+      // unobserved. Replay draws nothing at all: it reconstructs what
+      // the sensors actually watched, second by second, and a line
+      // moving through a stretch no sensor saw would be fabricated
+      // motion. Same data, two honest readings of it.
       const confirmedRuns = runs.filter(r => r.label);
       hiddenRunCount += runs.filter(r => !r.label).length;
       for (let i = 0; i < confirmedRuns.length; i++) {
@@ -10120,7 +9641,7 @@ async function main() {
         if (run.samples.length >= 2) {
           segments.push({ positions: run.samples, visibility: 'confirmed', droneId });
         }
-        if (ownsMultipleSites && i + 1 < confirmedRuns.length) {
+        if (i + 1 < confirmedRuns.length) {
           const lastOfThis = run.samples[run.samples.length - 1];
           const firstOfNext = confirmedRuns[i + 1].samples[0];
           segments.push({
@@ -10134,8 +9655,8 @@ async function main() {
     const scopeNote = segments.length === 0
       ? 'This event took place outside your site scope. No trajectory available.'
       : (ownsMultipleSites
-        ? 'Segments between your sites are inferred (dotted) — your sensors did not observe them directly.'
-        : 'Trajectory scoped to your site perimeter. State agencies see the full path.');
+        ? 'Trajectory scoped to your sites. Dotted stretches are unobserved: your sensors did not watch them directly.'
+        : 'Trajectory scoped to your site perimeter. Dotted stretches are unobserved. State agencies see the full path.');
     return {
       segments,
       fullyVisible: false,
@@ -10143,6 +9664,26 @@ async function main() {
       scopeNote,
       ownedSiteIds: Array.from(ownedSiteIds),
     };
+  }
+
+  // Reduce a full sample array to only those samples a scoped viewer is
+  // entitled to, keyed by (droneId, t_sec_from_event). Returns the input
+  // untouched for full-access viewers, so admin and receiver paths are a
+  // no-op through here.
+  //
+  // This exists because trajectory scoping is not only about polylines.
+  // The moments extractor, the deterministic narrative and the Agent B
+  // prompt all consume a sample array, and if they are handed the raw
+  // one an operator's written summary describes legs their own sensors
+  // never observed, while the map beside it correctly hides them.
+  function _confirmedSamplesForScope(scope, samples) {
+    if (!scope || scope._passthrough || scope.fullyVisible) return samples;
+    const allow = new Set();
+    for (const seg of scope.segments) {
+      if (seg.visibility !== 'confirmed') continue;
+      for (const p of seg.positions) allow.add(`${p.droneId}:${p.t_sec_from_event}`);
+    }
+    return samples.filter(s => allow.has(`${s.droneId}:${s.t_sec_from_event}`));
   }
 
   function _debriefRenderTrajectory(samples, event = null) {
@@ -10495,7 +10036,12 @@ async function main() {
       invalidatePreprocessed(event);     // preprocessing.js: clear persisted preprocessed
       clearNarrativeCache(event.id);     // events.js: null the in-memory field
       clearPreprocessedCache(event.id);  // events.js: null the in-memory field
-      const samples = window.__isr_getRecording?.(event.id)?.timeseries || [];
+      // Same scoping as the initial debrief render. Without it a
+      // regenerate would quietly widen an operator's narrative back to
+      // the full cross-site flight that the first pass had scoped out.
+      const _regenRaw = window.__isr_getRecording?.(event.id)?.timeseries || [];
+      const _regenScope = scopedTrajectoryFor(event, getActiveRole?.()?.id, _regenRaw);
+      const samples = _confirmedSamplesForScope(_regenScope, _regenRaw);
       const analysis = _debriefAnalyzeAssets(event, samples);
       mutateEvent(event.id, {
         _regenInFlight: _fireMistralDebrief(event, samples, analysis).finally(() => {
@@ -10538,7 +10084,19 @@ async function main() {
       toast('No trajectory data for this event. Debrief unavailable.', 'info');
       return;
     }
-    const samples = resolved.samples;
+    // Trajectory scoping applies to the ANALYSIS layer too, not just to
+    // the polyline. Scope before the asset correlator, the moments
+    // extractor, the deterministic narrative and Agent B see anything,
+    // otherwise a site operator's written summary and its map callouts
+    // describe legs their own sensors never observed while the drawn
+    // track correctly hides them. No-op for admin and receivers.
+    const _dbScope = scopedTrajectoryFor(event, getActiveRole?.()?.id, resolved.samples);
+    const samples = _confirmedSamplesForScope(_dbScope, resolved.samples);
+    if (!samples.length) {
+      toast(_dbScope?.scopeNote || 'Event outside your site scope.', 'info');
+      document.body.classList.remove('mode-analysis');
+      return;
+    }
     const analysis = _debriefAnalyzeAssets(event, samples);
     const moments = _debriefExtractMoments(samples, analysis);
     const narrativeHtml = _debriefBuildNarrative(event, samples, analysis);
@@ -10554,10 +10112,19 @@ async function main() {
       }, 2500);
     }
     // Render map annotations (event passed so trajectory scoping can
-    // resolve per-role visibility — see scopedTrajectoryFor).
+    // resolve per-role visibility, see scopedTrajectoryFor).
+    //
+    // NOTE the deliberate asymmetry: the trajectory renderer gets the
+    // FULL sample array, the analysis layer above gets the scoped one.
+    // _debriefRenderTrajectory scopes internally, and it needs to see
+    // the out-of-scope samples in order to know WHERE the gaps are.
+    // Handing it a pre-filtered array makes the remaining samples look
+    // contiguous, and it draws one solid line straight across ground
+    // the site never observed. The analysis layer has the opposite
+    // need: it must never read a sample this site did not see.
     const entities = [
       ..._debriefRenderAssetHighlights(analysis.touched),
-      ..._debriefRenderTrajectory(samples, event),
+      ..._debriefRenderTrajectory(resolved.samples, event),
       ..._debriefRenderMoments(moments),
     ];
     const narrativeEl = _debriefBuildNarrativePanel(event, narrativeHtml, moments);
@@ -11213,12 +10780,7 @@ async function main() {
     if (_scope && !_scope.fullyVisible) {
       // Keep only confirmed samples for droneEntries (bridges rendered
       // separately below as inferred polylines).
-      const _confirmedPositionSet = new Set();
-      for (const seg of _scope.segments) {
-        if (seg.visibility !== 'confirmed') continue;
-        for (const p of seg.positions) _confirmedPositionSet.add(`${p.droneId}:${p.t_sec_from_event}`);
-      }
-      _filteredSamples = rec.timeseries.filter(s => _confirmedPositionSet.has(`${s.droneId}:${s.t_sec_from_event}`));
+      _filteredSamples = _confirmedSamplesForScope(_scope, rec.timeseries);
       if (_filteredSamples.length === 0) {
         toast(_scope.scopeNote || 'Event outside your site scope.', 'info');
         document.body.classList.remove('mode-analysis');
@@ -11234,26 +10796,22 @@ async function main() {
     for (const [, arr] of droneEntries) arr.sort((a, b) => a.t_sec_from_event - b.t_sec_from_event);
     // Confidence-coloured trails (all drones, static)
     const trailEntities = _replayRenderTrails(droneEntries);
-    // Inferred bridges between owned sites (dotted) — operator scope only.
-    if (_scope && !_scope.fullyVisible) {
-      for (const seg of _scope.segments) {
-        if (seg.visibility !== 'inferred' || seg.positions.length < 2) continue;
-        const flat = [];
-        for (const p of seg.positions) flat.push(p.lon, p.lat, _safeTrailAlt(p.altitude_agl_m || 100));
-        trailEntities.push(viewer.entities.add({
-          polyline: {
-            positions: Cesium.Cartesian3.fromDegreesArrayHeights(flat),
-            width: 2.5,
-            material: new Cesium.PolylineDashMaterialProperty({
-              color: Cesium.Color.fromCssColorString('#ffb84d').withAlpha(0.55),
-              dashLength: 14,
-            }),
-            clampToGround: false,
-          },
-          properties: { replay: true, confirmed: false, scoped: true, droneId: seg.droneId },
-        }));
-      }
-    }
+    // Unobserved stretches render NOTHING in replay. Deliberate, and
+    // deliberately different from the debrief, which dots them.
+    //
+    // Replay reconstructs what the sensors watched as it happened. A
+    // line crossing ground no sensor observed is fabricated motion at
+    // a fabricated speed, and the operator is watching a clock while
+    // it draws. The void between the last confirmed position and the
+    // reacquisition IS the information, and it matches the coverage-gap
+    // treatment already used for every other account. The debrief is a
+    // static post-incident surface where a dotted stretch reads as
+    // "continued, unobserved" rather than as live motion, so it keeps
+    // the bridge. The scope banner names the hidden stretches either
+    // way, so nothing is silently dropped.
+    //
+    // _scope.segments still carries the inferred bridges; replay simply
+    // does not draw them.
     // Ghost billboards — one per drone, translucent variant of platformIcon
     const event = getEvent(eventId);
     const platform = event?.platform || rec.meta?.event_type || 'quadcopter';
@@ -11456,6 +11014,11 @@ async function main() {
       const T = window.__isr_shahed_tuning || {};
       const headingOffset  = ((T.headingOffsetDeg || 0) * Math.PI) / 180;
       const pitchOffset    = ((T.pitchOffsetDeg   || 0) * Math.PI) / 180;
+      // Asset-space axis flips. 1 for a model whose nose sits on body
+      // +X, -1 for one authored nose-reversed. Applied at the HPR
+      // boundary below so everything above stays world-semantic.
+      const pitchSign      = T.pitchSign          ?? 1;
+      const rollSign       = T.rollSign           ?? 1;
       const headingSmooth  = T.headingSmoothing   ?? 0.18;
       const pitchSmooth    = T.pitchSmoothing     ?? 0.10;
       const rollSmooth     = T.rollSmoothing      ?? 0.08;
@@ -11518,8 +11081,8 @@ async function main() {
 
       const hpr = new Cesium.HeadingPitchRoll(
         _smoothedHeading + headingOffset,
-        _smoothedPitch + pitchOffset,
-        _smoothedRoll,
+        (_smoothedPitch + pitchOffset) * pitchSign,
+        _smoothedRoll * rollSign,
       );
       return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
     };
@@ -11542,6 +11105,11 @@ async function main() {
       const T = window.__isr_quad_tuning || {};
       const headingOffset  = ((T.headingOffsetDeg || 0) * Math.PI) / 180;
       const pitchOffset    = ((T.pitchOffsetDeg   || 0) * Math.PI) / 180;
+      // Asset-space axis flips. 1 for a model whose nose sits on body
+      // +X, -1 for one authored nose-reversed. Applied at the HPR
+      // boundary below so everything above stays world-semantic.
+      const pitchSign      = T.pitchSign          ?? 1;
+      const rollSign       = T.rollSign           ?? 1;
       const headingSmooth  = T.headingSmoothing   ?? 0.20;
       const pitchSmooth    = T.pitchSmoothing     ?? 0.15;
       const rollSmooth     = T.rollSmoothing      ?? 0.12;
@@ -11606,8 +11174,8 @@ async function main() {
 
       const hpr = new Cesium.HeadingPitchRoll(
         _qSmoothedHeading + headingOffset,
-        _qSmoothedPitch + pitchOffset,
-        _qSmoothedRoll,
+        (_qSmoothedPitch + pitchOffset) * pitchSign,
+        _qSmoothedRoll * rollSign,
       );
       return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
     };
@@ -11714,6 +11282,9 @@ async function main() {
           const T = window.__isr_shahed_tuning || {};
           const headingOffset  = ((T.headingOffsetDeg || 0) * Math.PI) / 180;
           const pitchOffset    = ((T.pitchOffsetDeg   || 0) * Math.PI) / 180;
+          // Asset-space axis flips. See the lead rig for the rationale.
+          const pitchSign      = T.pitchSign          ?? 1;
+          const rollSign       = T.rollSign           ?? 1;
           const headingSmooth  = T.headingSmoothing   ?? 0.18;
           const pitchSmooth    = T.pitchSmoothing     ?? 0.10;
           const rollSmooth     = T.rollSmoothing      ?? 0.08;
@@ -11769,8 +11340,8 @@ async function main() {
 
           const hpr = new Cesium.HeadingPitchRoll(
             _swSmoothedHeading + headingOffset,
-            _swSmoothedPitch + pitchOffset,
-            _swSmoothedRoll,
+            (_swSmoothedPitch + pitchOffset) * pitchSign,
+            _swSmoothedRoll * rollSign,
           );
           return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
         };
@@ -11790,6 +11361,9 @@ async function main() {
           const T = window.__isr_quad_tuning || {};
           const headingOffset  = ((T.headingOffsetDeg || 0) * Math.PI) / 180;
           const pitchOffset    = ((T.pitchOffsetDeg   || 0) * Math.PI) / 180;
+          // Asset-space axis flips. See the lead rig for the rationale.
+          const pitchSign      = T.pitchSign          ?? 1;
+          const rollSign       = T.rollSign           ?? 1;
           const headingSmooth  = T.headingSmoothing   ?? 0.20;
           const pitchSmooth    = T.pitchSmoothing     ?? 0.15;
           const rollSmooth     = T.rollSmoothing      ?? 0.12;
@@ -11849,8 +11423,8 @@ async function main() {
 
           const hpr = new Cesium.HeadingPitchRoll(
             _swQSmoothedHeading + headingOffset,
-            _swQSmoothedPitch + pitchOffset,
-            _swQSmoothedRoll,
+            (_swQSmoothedPitch + pitchOffset) * pitchSign,
+            _swQSmoothedRoll * rollSign,
           );
           return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
         };
@@ -13349,14 +12923,19 @@ async function main() {
   function updateContributingRings() {
     contributingRingEntities.forEach(e => viewer.entities.remove(e));
     contributingRingEntities = [];
-    // Iterate EVERY online sensor across every site. Any sensor that
-    // currently has a live-event drone inside its coverage radius gets
-    // the pulsing ring. Degraded (orange) and offline (red) sensors
-    // never pulse. Previously scoped to event.contributingSensors which
-    // was a subset — sensors on the same site whose radius the drone
-    // fell into but which weren't yet added to contributingSensors got
-    // no pulse. This iterates the ground truth.
-    for (const sid of Object.keys(SITES)) {
+    // Iterate every online sensor across every site the ACTIVE ACCOUNT
+    // can see. Any such sensor that currently has a live-event drone
+    // inside its coverage radius gets the pulsing ring. Degraded
+    // (orange) and offline (red) sensors never pulse. Previously scoped
+    // to event.contributingSensors which was a subset: sensors on the
+    // same site whose radius the drone fell into but which weren't yet
+    // added to contributingSensors got no pulse. This iterates the
+    // ground truth, narrowed to the viewer's own sites.
+    //
+    // The account filter matters most here. This runs on every tick, so
+    // without it a threat over one operator's substation pulses that
+    // operator's sensors live inside a different operator's session.
+    for (const sid of _visibleSiteIds()) {
       const site = SITES[sid];
       if (!site?.sensors?.length) continue;
       for (const sensor of site.sensors) {
@@ -14367,7 +13946,10 @@ async function main() {
       const t = ent.properties?.type?.getValue?.();
       if (t === 'sensor-coverage') {
         const ringSite = ent.properties.siteId.getValue();
-        ent.show = (siteId != null && ringSite === siteId);
+        // Belt and braces against the scope sweep: a site the active
+        // account does not own can never have its coverage revealed,
+        // whatever selection path got here.
+        ent.show = (siteId != null && ringSite === siteId && _roleCanSeeSite(ringSite));
       }
     }
     if (!siteId) {
@@ -14412,7 +13994,10 @@ async function main() {
       });
       scopeLabel = site.name;
     } else {
-      Object.values(SITES).forEach(site => {
+      // "All sites" means all sites THIS account owns. An operator's
+      // status bar must not total another owner's hardware.
+      _visibleSiteIds().forEach(sid => {
+        const site = SITES[sid];
         site.sensors.forEach(s => {
           total++;
           if (s.status === 'online') online++;
@@ -14498,6 +14083,10 @@ async function main() {
   function flyTo(key) {
     const t = FLY_TARGETS[key];
     if (!t) return;
+    // Entry-point guard. The buttons for unowned sites are hidden by
+    // applyFlyToScope, but flyTo is also reached from the debrief
+    // camera move and from console handles, so refuse here too.
+    if (t.siteId && !_roleCanSeeSite(t.siteId)) return;
     hideSensorPopup();
     setActiveSite(t.siteId);
 
@@ -14575,9 +14164,33 @@ async function main() {
       applyOverlayVisibility();
     });
   });
+  // Hide fly-to buttons, the Energinet group and simulation site
+  // options for sites the active account does not own, so an operator
+  // is never offered a destination they cannot see. Re-run on every
+  // role switch. No-op for admin and receivers.
+  function applyFlyToScope() {
+    document.querySelectorAll('#control-panel .cp-btn[data-fly]').forEach((btn) => {
+      const sid = FLY_TARGETS[btn.dataset.fly]?.siteId;
+      btn.hidden = !!sid && !_roleCanSeeSite(sid);
+    });
+    const grp = document.getElementById('fly-group-energinet');
+    if (grp) grp.hidden = !_visibleSiteIds().some(sid => sid.startsWith('energinet_'));
+    const sel = document.getElementById('sim-site-select');
+    if (sel) {
+      let firstVisible = null;
+      for (const opt of sel.options) {
+        opt.hidden = !_roleCanSeeSite(opt.value);
+        if (!opt.hidden && !firstVisible) firstVisible = opt.value;
+      }
+      // If the current selection just became invisible, move it to the
+      // first site this account can actually simulate against.
+      if (sel.selectedOptions[0]?.hidden && firstVisible) sel.value = firstVisible;
+    }
+  }
   document.querySelectorAll('#control-panel .cp-btn[data-fly]').forEach((btn) => {
     btn.addEventListener('click', () => flyTo(btn.dataset.fly));
   });
+  applyFlyToScope();
   // Fly-to expandable group toggle (e.g. Energinet → 5 substations)
   document.querySelectorAll('[data-fly-expand]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -16064,7 +15677,7 @@ async function main() {
     const editingDest = _editingId && _editingId !== 'new' ? getDestination(_editingId) : null;
     const formOpen = _editingId !== null;
 
-    const tabHtml = Object.keys(SITES).map(sid => `
+    const tabHtml = _visibleSiteIds().map(sid => `
       <button class="cfg-tab ${sid === _configSiteId ? 'on' : ''}" data-site="${sid}">
         ${siteName(sid)}
       </button>`).join('');
@@ -19106,7 +18719,10 @@ async function main() {
   // ── History view ──
   function renderHistory() {
     if (_activeView !== 'history') return;
-    const allEvents = [...EVENTS].sort((a, b) => b.startTime.localeCompare(a.startTime));
+    // visibleEvents() applies the ambient tenant filter in events.js.
+    // Reading the raw EVENTS array here put every other tenant's
+    // incident history in an operator's History view.
+    const allEvents = visibleEvents().sort((a, b) => b.startTime.localeCompare(a.startTime));
     const filtered = allEvents.filter(e => {
       if (_historyFilters.site !== 'all' && e.siteId !== _historyFilters.site) return false;
       if (_historyFilters.class !== 'all' && e.classification !== _historyFilters.class) return false;
@@ -19180,9 +18796,8 @@ async function main() {
           </div>
           <div class="hst-filter-row">
             <select class="cfg-input" id="hst-site">
-              <option value="all"      ${_historyFilters.site==='all'?'selected':''}>All sites</option>
-              <option value="cph"      ${_historyFilters.site==='cph'?'selected':''}>CPH Airport</option>
-              <option value="esbjerg"  ${_historyFilters.site==='esbjerg'?'selected':''}>Esbjerg Harbour</option>
+              <option value="all" ${_historyFilters.site==='all'?'selected':''}>All sites</option>
+              ${_visibleSiteIds().map(sid => `<option value="${sid}" ${_historyFilters.site===sid?'selected':''}>${SITES[sid].name}</option>`).join('')}
             </select>
             <select class="cfg-input" id="hst-class">
               <option value="all"       ${_historyFilters.class==='all'?'selected':''}>All classes</option>
@@ -19209,7 +18824,9 @@ async function main() {
   // ── Fleet view (sensor health across all sites) ──
   function renderFleet() {
     if (_activeView !== 'fleet') return;
-    const sites = Object.values(SITES);
+    // Fleet lists hardware. An operator sees only their own sites'
+    // sensors, not another owner's model numbers and coverage radii.
+    const sites = _visibleSiteIds().map(sid => SITES[sid]);
     fleetView.innerHTML = `
       <div class="flt-hdr">
         <div class="flt-hdr-title">Sensor Fleet</div>
@@ -19266,7 +18883,7 @@ async function main() {
     const rules = getRules();
     const activeRulesCount = rules.filter(r => r.enabled).length;
     const destBySite = dests.reduce((m, d) => { m[d.siteId] = (m[d.siteId] || 0) + 1; return m; }, {});
-    const siteRows = Object.keys(SITES).map(sid => {
+    const siteRows = _visibleSiteIds().map(sid => {
       const s = SITES[sid];
       return `<div class="cfg-site-row"><span>${s.name}</span><span class="mono dim">${destBySite[sid] || 0} destinations</span></div>`;
     }).join('');
@@ -19625,6 +19242,10 @@ async function main() {
     if (!_simulationMode && typeof _dronePov !== 'undefined' && _dronePov.active) {
       _exitDronePOV();
     }
+    // Re-apply the current imagery mode so Sim-gated night rendering
+    // (real building textures) picks up immediately, even if Night was
+    // already selected before this toggle flipped.
+    applyImageryMode();
   }
 
   function updateOperatorChip() {
@@ -24303,6 +23924,17 @@ async function main() {
       setCurrentActor(null);
     }
     updateOperatorChip();
+    // Site geometry is drawn once at boot and never re-rendered, so the
+    // globe and the site-picker surfaces have to be re-scoped here.
+    // Without these two the account switch changed the event ledger but
+    // left every other owner's boundaries, sensors and coverage rings
+    // on screen. Both are no-ops for admin and receiver accounts.
+    try {
+      applySiteScopeVisibility();
+      applyFlyToScope();
+    } catch (err) {
+      console.error('[roleChange] site scope re-apply failed:', err);
+    }
     _selectedReceiverEventId = null;
     _respondingEscId = null;
     _workspaceEventId = null;
