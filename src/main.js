@@ -2578,6 +2578,137 @@ async function main() {
     return c;
   }
 
+  // ── Consequence responder icons ────────────────────────────────────
+  // Medical, fire and heavy rescue units were all drawn with the police
+  // vehicle or the special forces glyph, because those were the only
+  // ground shapes that existed. An ambulance rendered as a police car
+  // with a counter-drone jamming antenna on its roof.
+  //
+  // All three are top-down like policeVehicleIcon above, same 56px
+  // canvas and same wheel treatment, so they read as one family. The
+  // distinguishing mark carries the meaning: a cross, a ladder, a
+  // lifting frame.
+
+  // Ambulance and physician car. Van proportions, cross on the roof,
+  // and deliberately no roof antenna: these carry no jamming equipment.
+  function ambulanceIcon(hex) {
+    const c = document.createElement('canvas');
+    c.width = 56; c.height = 56;
+    const ctx = c.getContext('2d');
+
+    ctx.fillStyle = hex;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(16, 9, 24, 40, 3);
+    ctx.fill(); ctx.stroke();
+
+    // Windscreen and rear window
+    ctx.fillStyle = 'rgba(6, 8, 11, 0.55)';
+    ctx.beginPath(); ctx.roundRect(19, 12, 18, 6, 1); ctx.fill();
+    ctx.beginPath(); ctx.roundRect(19, 40, 18, 6, 1); ctx.fill();
+
+    // Roof cross. White on the body colour for contrast at small sizes.
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(26, 23, 4, 14);
+    ctx.fillRect(21, 28, 14, 4);
+
+    ctx.fillStyle = 'rgba(6, 8, 11, 0.8)';
+    ctx.fillRect(13, 15, 4, 6);
+    ctx.fillRect(13, 37, 4, 6);
+    ctx.fillRect(39, 15, 4, 6);
+    ctx.fillRect(39, 37, 4, 6);
+
+    return c;
+  }
+
+  // Municipal fire engine. Longer than an ambulance, ladder down the
+  // roof, three axles.
+  function fireEngineIcon(hex) {
+    const c = document.createElement('canvas');
+    c.width = 56; c.height = 56;
+    const ctx = c.getContext('2d');
+
+    ctx.fillStyle = hex;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(15, 6, 26, 44, 3);
+    ctx.fill(); ctx.stroke();
+
+    // Cab at the front only; the rest is body.
+    ctx.fillStyle = 'rgba(6, 8, 11, 0.55)';
+    ctx.beginPath(); ctx.roundRect(18, 9, 20, 6, 1); ctx.fill();
+
+    // Ladder: two rails with rungs between them.
+    ctx.strokeStyle = 'rgba(6, 8, 11, 0.8)';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(22, 20); ctx.lineTo(22, 46);
+    ctx.moveTo(34, 20); ctx.lineTo(34, 46);
+    ctx.stroke();
+    ctx.lineWidth = 1.2;
+    for (let y = 23; y <= 44; y += 5) {
+      ctx.beginPath(); ctx.moveTo(22, y); ctx.lineTo(34, y); ctx.stroke();
+    }
+
+    ctx.fillStyle = 'rgba(6, 8, 11, 0.8)';
+    ctx.fillRect(12, 13, 4, 6);
+    ctx.fillRect(12, 30, 4, 6);
+    ctx.fillRect(12, 40, 4, 6);
+    ctx.fillRect(40, 13, 4, 6);
+    ctx.fillRect(40, 30, 4, 6);
+    ctx.fillRect(40, 40, 4, 6);
+
+    return c;
+  }
+
+  // Heavy rescue unit. Boxy body with side equipment lockers and a
+  // lifting frame on the roof, which is what distinguishes it from a
+  // fire engine at a glance.
+  function rescueTeamIcon(hex) {
+    const c = document.createElement('canvas');
+    c.width = 56; c.height = 56;
+    const ctx = c.getContext('2d');
+
+    ctx.fillStyle = hex;
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.roundRect(15, 8, 26, 41, 2);
+    ctx.fill(); ctx.stroke();
+
+    ctx.fillStyle = 'rgba(6, 8, 11, 0.55)';
+    ctx.beginPath(); ctx.roundRect(18, 11, 20, 6, 1); ctx.fill();
+
+    // Side equipment lockers.
+    ctx.strokeStyle = 'rgba(6, 8, 11, 0.7)';
+    ctx.lineWidth = 1;
+    for (let y = 23; y <= 43; y += 7) {
+      ctx.beginPath(); ctx.moveTo(16, y); ctx.lineTo(21, y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(35, y); ctx.lineTo(40, y); ctx.stroke();
+    }
+
+    // Lifting frame: an A shape over the rear deck.
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    ctx.moveTo(23, 44); ctx.lineTo(28, 24); ctx.lineTo(33, 44);
+    ctx.stroke();
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(25, 36); ctx.lineTo(31, 36);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(6, 8, 11, 0.8)';
+    ctx.fillRect(12, 15, 4, 6);
+    ctx.fillRect(12, 38, 4, 6);
+    ctx.fillRect(40, 15, 4, 6);
+    ctx.fillRect(40, 38, 4, 6);
+
+    return c;
+  }
+
   // Counter-drone interceptor icon. Distinct from generic quadcopter:
   // slimmer body, forward-swept arms, subtle "muzzle" indicator to read
   // as kinetic-capable. Green for friendly counter-response.
@@ -3458,7 +3589,7 @@ async function main() {
       cruiseKmh: 85, arriveAtM: 400, engageSec: 300,
       stagesAtScene: true,   // on-station state reads STAGING, not ENGAGING
       consequenceOnly: true,
-      icon: 'police-vehicle', trail: false, airborne: false,
+      icon: 'ambulance', trail: false, airborne: false,
       useRoadRouting: true, supportsMultiDispatch: true, maxUnitsPerDispatch: 5,
       billboardScale: 0.55, swarmSpacingM: 40, cordonSlotSpreadM: 18,
       label: 'Ambulance',
@@ -3467,20 +3598,20 @@ async function main() {
       cruiseKmh: 105, arriveAtM: 350, engageSec: 240,
       stagesAtScene: true,   // on-station state reads STAGING, not ENGAGING
       consequenceOnly: true,
-      icon: 'police-vehicle', trail: false, airborne: false,
+      icon: 'ambulance', trail: false, airborne: false,
       useRoadRouting: true, billboardScale: 0.55,
       label: 'Akutlægebil',
     },
     'receiver-rescue-team': {
       cruiseKmh: 70, arriveAtM: 400, engageSec: 900,
       consequenceOnly: true,
-      icon: 'sof', trail: false, airborne: false,
+      icon: 'rescue-unit', trail: false, airborne: false,
       useRoadRouting: true, billboardScale: 0.65,
       label: 'Rescue team',
     },
     'receiver-brandbil': {
       cruiseKmh: 75, arriveAtM: 350, engageSec: 600,
-      icon: 'police-vehicle', trail: false, airborne: false,
+      icon: 'fire-engine', trail: false, airborne: false,
       useRoadRouting: true, supportsMultiDispatch: true, maxUnitsPerDispatch: 4,
       billboardScale: 0.6, swarmSpacingM: 40, cordonSlotSpreadM: 18,
       // Danish doctrine at attack scenes (REFIL): fire units stage at
@@ -3838,6 +3969,9 @@ async function main() {
       case 'helicopter':               return helicopterIcon(GREEN_COUNTER_HEX);
       case 'jammer':                   return jammerIcon(GREEN_COUNTER_HEX);
       case 'police-vehicle':           return policeVehicleIcon(GREEN_COUNTER_HEX);
+      case 'ambulance':                return ambulanceIcon(GREEN_COUNTER_HEX);
+      case 'fire-engine':              return fireEngineIcon(GREEN_COUNTER_HEX);
+      case 'rescue-unit':              return rescueTeamIcon(GREEN_COUNTER_HEX);
       case 'quadcopter':               return quadcopterIcon(GREEN_COUNTER_HEX);
       case 'sof':                      return sofIcon(GREEN_COUNTER_HEX);
       case 'counter-drone-interceptor':return interceptorDroneIcon(GREEN_COUNTER_HEX);
