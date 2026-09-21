@@ -9,15 +9,20 @@
 //   4 = Military response (real airborne or maritime threat)
 //   5 = NATO / international (cross border or high-severity)
 
-const DESTINATIONS = [
-  // ═══════════════════════════════════════════════════════════
-  // CONSEQUENCE RESPONSE (site-independent)
-  // ─────────────────────────────────────────────────────────
-  // Medical, fire, and rescue recipients for the impact
-  // auto-cascade. Ids equal the receiver role ids so escalation
-  // visibility (destinationId === roleId path) and name rendering
-  // both resolve without a mapping layer. tier 3 = external
-  // authority, no siteId (they respond wherever the impact is).
+// Consequence response recipients, site-independent. Medical, fire and
+// rescue for the impact auto-cascade. Ids equal the receiver role ids so
+// escalation visibility (the destinationId equals roleId path) and name
+// rendering both resolve without a mapping layer. Tier 3 is external
+// authority, and siteId is null because they respond wherever the
+// impact happens.
+//
+// Held in a named constant rather than inline below because the saved
+// override array REPLACES the whole destination list at boot
+// (DESTINATIONS.length = 0). Any browser carrying an override saved
+// before these entries existed would silently lose them, and the impact
+// cascade would go back to reaching nobody. Re-added after the override
+// load, the same way the Aktionsstyrken entries already survive it.
+const CONSEQUENCE_DESTINATIONS = [
   { id: 'amk-hovedstaden', siteId: null, tier: 3, type: 'agency',
     name: 'Akutmedicinsk Koordinationscenter Hovedstaden',
     contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
@@ -36,6 +41,10 @@ const DESTINATIONS = [
   { id: 'brs-hedehusene', siteId: null, tier: 3, type: 'agency',
     name: 'Beredskabsstyrelsen Hovedstaden (Hedehusene)',
     contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+];
+
+const DESTINATIONS = [
+  ...CONSEQUENCE_DESTINATIONS,
 
   // ═══════════════════════════════════════════════════════════
   // CPH AIRPORT
@@ -611,6 +620,20 @@ if (Array.isArray(overrides) && overrides.length) {
   DESTINATIONS.length = 0;
   DESTINATIONS.push(...overrides);
 }
+
+// Re-add any consequence destination the override wipe removed. An
+// override array saved before these entries shipped does not contain
+// them, and without this the impact cascade escalates to ids that no
+// longer resolve, so medical, fire and rescue silently receive nothing.
+// Runs after the override load for exactly that reason, matching the
+// Aktionsstyrken block below. Never overwrites an existing entry, so an
+// operator's own edit to one of these still wins.
+(() => {
+  const present = new Set(DESTINATIONS.map(d => d.id));
+  for (const d of CONSEQUENCE_DESTINATIONS) {
+    if (!present.has(d.id)) DESTINATIONS.push({ ...d });
+  }
+})();
 
 // Auto-add Aktionsstyrken destinations per site. AKS is the national
 // police tactical unit that responds to any critical incident. Rather
