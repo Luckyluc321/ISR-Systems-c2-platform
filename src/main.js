@@ -3497,6 +3497,53 @@ async function main() {
     },
   };
 
+  // Plain display name for a dispatch kind, for anything an operator
+  // reads. RESPONSE_OPTION_DETAILS carries rich copy for the eleven
+  // counter-drone options; none of the eleven receiver kinds has an
+  // entry there, so every one of them fell through to the raw internal
+  // key. A hospital's dispatch card was headed "receiver-ambulance".
+  //
+  // CD_PROFILE already declares a correct plain label for all eleven,
+  // sitting beside the profile it describes, so read that rather than
+  // duplicating eleven entries into another table that would then need
+  // keeping in sync. The final fallback only runs for a kind that has
+  // neither, and title-cases rather than printing a slug.
+  function _kindDisplayName(kind) {
+    if (!kind) return 'Response unit';
+    return RESPONSE_OPTION_DETAILS?.[kind]?.displayName
+      || CD_PROFILE?.[kind]?.label
+      || String(kind).replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
+  // Outcomes an operator can record against a dispatch once it is done.
+  //
+  // outcomesForKind returns an empty list for every receiver kind, and
+  // the caller then fell back to a single option reading "Engagement
+  // complete". An ambulance does not have an engagement. A hospital was
+  // being asked to confirm that its ambulance's engagement was
+  // complete, which is both wrong and exactly the vocabulary that must
+  // not appear near a medical or fire unit.
+  //
+  // Consequence responders get outcomes that describe what actually
+  // happens at a scene. Everything else keeps the engagement default.
+  const _CONSEQUENCE_OUTCOMES = [
+    { id: 'complete', label: 'Response complete' },
+    { id: 'no_action_required', label: 'No action required on arrival' },
+    { id: 'stood_down', label: 'Stood down before arrival' },
+    { id: 'handed_over', label: 'Handed over to another service' },
+  ];
+  function _outcomeOptionsForKind(kind) {
+    const declared = outcomesForKind(kind);
+    if (declared.length) return declared;
+    // Any unit that cannot neutralise should not be asked about an
+    // engagement. consequenceOnly covers medical and fire; the older
+    // visualVerifyOnly marks a profile documented as "does NOT
+    // neutralise on its own" and belongs in the same branch.
+    const _p = CD_PROFILE?.[kind];
+    if (_p?.consequenceOnly || _p?.visualVerifyOnly) return _CONSEQUENCE_OUTCOMES;
+    return [{ id: 'complete', label: 'Engagement complete' }];
+  }
+
   // Simulation-only physics constants. In live operations the platform
   // receives real telemetry from actual assets via adapters (per
   // docs/interface-design-document.md IF-9) and just renders whatever
@@ -13439,7 +13486,7 @@ async function main() {
     const stateClass = d.state === 'complete' ? 'offline' : d.state === 'engaging' ? 'degraded' : 'online';
     const elapsedSec = Math.max(0, Math.floor((Date.now() - d.dispatchedTs) / 1000));
     const elapsedStr = elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
-    const kindLabel = RESPONSE_OPTION_DETAILS?.[d.kind]?.displayName || d.kind;
+    const kindLabel = _kindDisplayName(d.kind);
     const unitStr = (d.memberCount || 1) > 1 ? `Unit ${(d.memberIndex || 0) + 1} of ${d.memberCount}` : 'Single unit';
     const distToTarget = (d.targetLat != null && d.targetLon != null)
       ? Math.round(haversineM(d.curLat, d.curLon, d.targetLat, d.targetLon))
@@ -19580,8 +19627,7 @@ async function main() {
       });
     }
     const _otherKindLabel = (kind) => {
-      const details = RESPONSE_OPTION_DETAILS[kind];
-      return details?.displayName || kind.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+      return _kindDisplayName(kind);
     };
     const otherKindRow = (kind) => {
       const list = otherByKind[kind];
@@ -19677,7 +19723,7 @@ async function main() {
           <div class="c-panel-body">
           <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${mineList.length} option${mineList.length === 1 ? '' : 's'} available. Multiple can be dispatched concurrently. Recommended pick is the closest by ETA.</div>
           <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-3);">
-            ${mineList.map((a) => `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); border-radius: 2px; font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-dim);">○ ${(RESPONSE_OPTION_DETAILS[a.kind]?.displayName || a.kind).split(' ').slice(0, 3).join(' ')}</span>`).join('')}
+            ${mineList.map((a) => `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); border-radius: 2px; font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-dim);">○ ${_kindDisplayName(a.kind).split(' ').slice(0, 3).join(' ')}</span>`).join('')}
           </div>
           ${mineList.map((a, i) => dispatchRow(a, i)).join('')}
           </div>
@@ -19956,7 +20002,7 @@ async function main() {
   function _monEngUnitRow(cd, bucketKey, live, { inGroup = false } = {}) {
     const elapsedSec = Math.max(0, Math.floor((Date.now() - cd.dispatchedTs) / 1000));
     const elapsedStr = elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
-    const kindLabel = RESPONSE_OPTION_DETAILS[cd.kind]?.displayName || cd.kind;
+    const kindLabel = _kindDisplayName(cd.kind);
 
     // Inside an expanded formation the kind is on the group header;
     // repeating it per unit is what made the panel read as one block.
@@ -20077,7 +20123,7 @@ async function main() {
           return `<div class="mon-eng-card">${_monEngUnitRow(members[0], bucket.key, _counterDispatches.get(members[0].dispatchId), { inGroup: false })}</div>`;
         }
         const expanded = _monEngExpandedGroups.has(groupKey);
-        const kindLabel = RESPONSE_OPTION_DETAILS[members[0].kind]?.displayName || members[0].kind;
+        const kindLabel = _kindDisplayName(members[0].kind);
         const memberRows = expanded
           ? members.map(cd => _monEngUnitRow(cd, bucket.key, _counterDispatches.get(cd.dispatchId), { inGroup: true })).join('')
           : '';
@@ -20268,11 +20314,9 @@ async function main() {
     });
     if (!dispatches.length) return '';
     const blocks = dispatches.map(cd => {
-      const outcomeOptions = outcomesForKind(cd.kind);
-      const optionsHtml = outcomeOptions.length
-        ? outcomeOptions.map(o => `<option value="${o.id}">${o.label}</option>`).join('')
-        : '<option value="complete">Engagement complete</option>';
-      const kindLabel = RESPONSE_OPTION_DETAILS[cd.kind]?.displayName || cd.kind;
+      const optionsHtml = _outcomeOptionsForKind(cd.kind)
+        .map(o => `<option value="${o.id}">${o.label}</option>`).join('');
+      const kindLabel = _kindDisplayName(cd.kind);
       return `
         <article style="padding: var(--space-3); border: 1px solid var(--border); border-left: 2px solid #ffb84d; border-radius: var(--radius); background: var(--surface-panel); margin-bottom: var(--space-3);">
           <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: #ffb84d; font-size: var(--fs-2xs); margin-bottom: 4px;">${kindLabel}</div>
