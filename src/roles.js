@@ -1270,7 +1270,12 @@ export const RECEIVERS = [
   description: 'Akuthospital, Herlev. Regional acute reception.' },
   { id: 'hospital-hvidovre', kind: 'receiver', type: 'leaf',
   org: 'Hvidovre Hospital', label: 'Hvidovre Hospital (Amager og Hvidovre)', initials: 'HV',
-  scope: 'regional', destinationIds: [],
+  // Site-independent consequence destination. See brs-hedehusene above.
+  // Missed in the first pass despite already having a destination, a
+  // home base and two vehicles. This is the acute hospital covering
+  // Amager, so it serves both Copenhagen Airport and the Amager
+  // substation: the nearest of the four, and the one left unreachable.
+  scope: 'regional', destinationIds: ['hospital-hvidovre'],
   meta: { region_parent: 'region-hst' },
   description: 'Akuthospital, Hvidovre. Nearest acute to CPH airport / Amager.' },
   { id: 'hospital-bispebjerg', kind: 'receiver', type: 'leaf',

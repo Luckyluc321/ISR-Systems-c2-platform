@@ -12900,7 +12900,11 @@ async function main() {
           // dispatch decisions stay with the humans in each profile.
           try {
             const _casRecords = escalateEvent(event.id, {
-              destinationIds: ['amk-hovedstaden', 'hospital-rigshospitalet', 'hospital-bispebjerg', 'kbr-hovedstaden', 'brs-hedehusene'],
+              // Hvidovre covers Amager, so it is the nearest acute
+              // hospital to both Copenhagen Airport and the Amager
+              // substation, and it was the one omitted. It has carried a
+              // destination, a home base and two vehicles throughout.
+              destinationIds: ['amk-hovedstaden', 'hospital-rigshospitalet', 'hospital-hvidovre', 'hospital-bispebjerg', 'kbr-hovedstaden', 'brs-hedehusene'],
               payload: 'full',
               message: `Warhead detonation observed at ${p.lat.toFixed(4)}N ${p.lon.toFixed(4)}E. Casualties possible. Immediate consequence response requested. Scene not yet declared safe by police.`,
               operator: 'AUTO-CASCADE',
