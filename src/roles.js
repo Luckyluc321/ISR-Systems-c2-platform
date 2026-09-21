@@ -450,7 +450,12 @@ export const RECEIVERS = [
   {
     id: 'brs-hedehusene', kind: 'receiver', type: 'leaf', parentId: 'brs',
     org: 'BRS Hedehusene', label: 'Beredskabscenter Hedehusene', initials: 'BH',
-    scope: 'regional', destinationIds: [],
+    // Site-independent consequence destination, declared in destinations.js
+    // with siteId null and an id equal to this role id. Without this binding
+    // the impact consequence cascade wrote a record nothing surfaced: the
+    // inbox, the reports pool and the acknowledge gate all key on this array,
+    // so an empty one made the case unreachable to the agency it addressed.
+    scope: 'regional', destinationIds: ['brs-hedehusene'],
     description: 'BRS national CBRN + rescue centre, Hedehusene (Sjælland).',
   },
   {
@@ -1089,7 +1094,8 @@ export const RECEIVERS = [
   // ── Hovedstaden + Sjælland shared ────────────────────────────────────────
   { id: 'kbr-hovedstaden', kind: 'receiver', type: 'leaf',
   org: 'Hovedstadens Beredskab', label: 'Hovedstadens Beredskab', initials: 'HBR',
-  scope: 'regional', destinationIds: [],
+  // Site-independent consequence destination. See brs-hedehusene above.
+  scope: 'regional', destinationIds: ['kbr-hovedstaden'],
   meta: { member_kommuner: ['kom-albertslund', 'kom-broendby', 'kom-dragoer', 'kom-frederiksberg', 'kom-glostrup', 'kom-hvidovre', 'kom-koebenhavn', 'kom-roedovre'] },
   description: 'Denmark\'s largest §60 fire & rescue service. 8 owner kommuner, ~1M residents.' },
   { id: 'kbr-beredskab-ost', kind: 'receiver', type: 'leaf',
@@ -1253,7 +1259,8 @@ export const RECEIVERS = [
   // ── Region Hovedstaden (6 akuthospitaler) ────────────────────────────────
   { id: 'hospital-rigshospitalet', kind: 'receiver', type: 'leaf',
   org: 'Rigshospitalet', label: 'Rigshospitalet', initials: 'RH',
-  scope: 'regional', destinationIds: [],
+  // Site-independent consequence destination. See brs-hedehusene above.
+  scope: 'regional', destinationIds: ['hospital-rigshospitalet'],
   meta: { region_parent: 'region-hst' },
   description: 'National university hospital, København. Level-1 trauma centre.' },
   { id: 'hospital-herlev', kind: 'receiver', type: 'leaf',
@@ -1268,7 +1275,8 @@ export const RECEIVERS = [
   description: 'Akuthospital, Hvidovre. Nearest acute to CPH airport / Amager.' },
   { id: 'hospital-bispebjerg', kind: 'receiver', type: 'leaf',
   org: 'Bispebjerg Hospital', label: 'Bispebjerg Hospital', initials: 'BB',
-  scope: 'regional', destinationIds: [],
+  // Site-independent consequence destination. See brs-hedehusene above.
+  scope: 'regional', destinationIds: ['hospital-bispebjerg'],
   meta: { region_parent: 'region-hst' },
   description: 'Akuthospital, København NV.' },
   { id: 'hospital-nordsjaellands', kind: 'receiver', type: 'leaf',
@@ -1742,7 +1750,8 @@ export const RECEIVERS = [
   { id: 'alarm-112-kbh', kind: 'receiver', type: 'leaf', org: 'Alarmcentral 112 København', label: 'Alarmcentral 112 København (Hovedstadens Beredskab)', initials: 'Kbh', scope: 'regional', destinationIds: [], meta: { region: 'region-hst' }, description: 'Alarmcentral 112 København, drevet af Hovedstadens Beredskab. Dækker Region Hovedstaden.' },
   { id: 'alarm-112-slagelse', kind: 'receiver', type: 'leaf', org: 'Alarmcentral 112 Slagelse', label: 'Alarmcentral 112 Slagelse (Rigspolitiet)', initials: 'Sla', scope: 'regional', destinationIds: [], meta: { region: 'region-sjl' }, description: 'Alarmcentral 112 Slagelse, drevet af Rigspolitiet. Dækker Sjælland, Fyn og øerne.' },
   { id: 'alarm-112-aarhus', kind: 'receiver', type: 'leaf', org: 'Alarmcentral 112 Aarhus', label: 'Alarmcentral 112 Aarhus (Rigspolitiet)', initials: 'Aar', scope: 'regional', destinationIds: [], meta: { region: 'region-midt' }, description: 'Alarmcentral 112 Aarhus, drevet af Rigspolitiet. Dækker Jylland.' },
-  { id: 'amk-hovedstaden', kind: 'receiver', type: 'leaf', org: 'Akutmedicinsk Koordinationscenter Hovedstaden', label: 'Akutmedicinsk Koordinationscenter Hovedstaden (Ballerup)', initials: 'Hov', scope: 'regional', destinationIds: [], meta: { region: 'region-hst' }, description: 'Akutmedicinsk Koordinationscenter — regional præhospital koordinering og ambulancetjeneste. Region Hovedstaden, Ballerup (Akutberedskabet).' },
+  // Site-independent consequence destination. See brs-hedehusene above.
+  { id: 'amk-hovedstaden', kind: 'receiver', type: 'leaf', org: 'Akutmedicinsk Koordinationscenter Hovedstaden', label: 'Akutmedicinsk Koordinationscenter Hovedstaden (Ballerup)', initials: 'Hov', scope: 'regional', destinationIds: ['amk-hovedstaden'], meta: { region: 'region-hst' }, description: 'Akutmedicinsk Koordinationscenter — regional præhospital koordinering og ambulancetjeneste. Region Hovedstaden, Ballerup (Akutberedskabet).' },
   { id: 'amk-sjaelland', kind: 'receiver', type: 'leaf', org: 'Akutmedicinsk Koordinationscenter Sjælland', label: 'Akutmedicinsk Koordinationscenter Sjælland (Slagelse)', initials: 'Sjæ', scope: 'regional', destinationIds: [], meta: { region: 'region-sjl' }, description: 'Akutmedicinsk Koordinationscenter — regional præhospital koordinering og ambulancetjeneste. Region Sjælland, Slagelse.' },
   { id: 'amk-syddanmark', kind: 'receiver', type: 'leaf', org: 'Akutmedicinsk Koordinationscenter Syddanmark', label: 'Akutmedicinsk Koordinationscenter Syddanmark (Odense)', initials: 'Syd', scope: 'regional', destinationIds: [], meta: { region: 'region-syd' }, description: 'Akutmedicinsk Koordinationscenter — regional præhospital koordinering og ambulancetjeneste. Region Syddanmark, Odense.' },
   { id: 'amk-midtjylland', kind: 'receiver', type: 'leaf', org: 'Akutmedicinsk Koordinationscenter Midtjylland', label: 'Akutmedicinsk Koordinationscenter Midtjylland (Aarhus)', initials: 'Mid', scope: 'regional', destinationIds: [], meta: { region: 'region-midt' }, description: 'Akutmedicinsk Koordinationscenter — regional præhospital koordinering og ambulancetjeneste. Region Midtjylland, Aarhus (Præhospitalet).' },

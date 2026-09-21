@@ -626,7 +626,7 @@ The registry is a flat `RECEIVERS` array in `roles.js` with lazy parent-chain re
 | `label` | string | yes | Display label in the UI. Usually matches `org` or expands it. |
 | `initials` | string | yes | 2-3 letter monogram for compact chips. |
 | `scope` | enum | yes | `all-sites`, `national`, `regional`, `aviation`, `maritime`, or a specific site slug. |
-| `destinationIds` | string[] | yes | Legacy destination IDs (`{siteCode}-t{tier}-{roleSlug}`) that route escalations to this receiver. Empty array on new sourced entries; populated as sites declare them (IF-6.8). |
+| `destinationIds` | string[] | yes | Destination IDs that route escalations to this receiver. Two shapes are legitimate: **site-scoped** (`{siteCode}-t{tier}-{roleSlug}`) for receivers a site fans out to, and **self-referential** (the role's own id) for the site-independent consequence-response receivers whose destination record carries `siteId: null` and which respond wherever an impact happens. Empty array on new sourced entries; populated as sites declare them (IF-6.8). **An empty array makes the receiver unreachable, not merely unrouted:** the inbox, the reports pool and the acknowledge gate all key on this field, so an escalation written to a role holding `[]` is recorded on the event and surfaced to nobody. |
 | `parentId` | string | no | Role id of this leaf's direct parent. Null for top-level branches. |
 | `childrenIds` | string[] | required on `parent` type | Role ids of this branch's direct children. |
 | `description` | string | yes | One-line human description. |
