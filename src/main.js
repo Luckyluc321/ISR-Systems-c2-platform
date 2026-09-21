@@ -1562,6 +1562,17 @@ async function main() {
 
   // ── Imagery mode ──
   let imageryMode = 'day';   // default landing view — day mode
+  // Declared here (not at its original ~19280 location) because
+  // applyImageryMode() below calls _isSimMode(), and applyImageryMode()
+  // runs during main()'s own synchronous setup, before main() has reached
+  // line ~19280 whenever a click lands during one of the many awaits in
+  // between. That was a real TDZ ReferenceError crashing applyImageryMode()
+  // silently on any click that landed mid-boot — confirmed via the console
+  // error this exact call produced. _setSimMode() itself (which reads
+  // _dronePov, declared later) stays at its original location; only the
+  // pieces applyImageryMode() needs move here.
+  let _simulationMode = false;
+  function _isSimMode() { return _simulationMode === true; }
 
   // Kept for legacy — night mode no longer uses brightness dimming (was
   // crushing city lights). See the applyImageryMode('night') branch which
@@ -1582,6 +1593,26 @@ async function main() {
     viewer.scene.globe.enableLighting = true;
     nightBrightness.enabled = false;
     canvas.style.filter = '';
+    // Reset to Cesium's real default — confirmed against Cesium's own
+    // source (Scene.js: "this.light = new SunLight();"), NOT undefined.
+    // Setting this to undefined (an earlier version of this fix) most
+    // likely broke the globe's real day/night terminator shading scene
+    // wide, in every mode, which is consistent with a "full daylight in
+    // night mode" symptom that survived every other fix in this function.
+    viewer.scene.light = new Cesium.SunLight();
+
+    // TEMP DIAGNOSTIC — remove once the night-mode symptom is confirmed
+    // fixed. Reads out the exact runtime state at the moment this runs so
+    // it doesn't have to be guessed from a screenshot.
+    console.error('[applyImageryMode DIAGNOSTIC]', {
+      imageryMode,
+      isSimMode: typeof _isSimMode === 'function' ? _isSimMode() : 'n/a',
+      enableLighting: viewer.scene.globe.enableLighting,
+      bingLayerExists: !!bingLayer,
+      googlePhotorealExists: !!googlePhotoreal,
+      osmBuildingsExists: !!osmBuildings,
+      cameraHeightKm: Math.round((viewer.camera.positionCartographic?.height || 0) / 1000),
+    });
 
     if (imageryMode === 'night') {
       // Clock at November evening over Denmark — sun below horizon. This
@@ -1619,20 +1650,44 @@ async function main() {
         // stays hidden, exactly as production has always behaved.
         googlePhotoreal.show = _isSimMode();
         if (_isSimMode()) {
-          googlePhotoreal.lightColor = new Cesium.Cartesian3(0.20, 0.25, 0.35);
+          // Ambient-only lighting (imageBasedLightingFactor, capped at 1.0
+          // by Cesium) rendered as a flat grey wash — no directional
+          // variation, so real texture/geometry detail didn't show. Real
+          // sunlight is unusable here (sun is below horizon, N·L ~0
+          // everywhere). Fix: a fixed-angle custom scene light (fake
+          // moonlight, doesn't track the real sun) so surfaces actually get
+          // N·L variation again, same mechanism day mode's real sun uses.
+          // Scene-global, so it's reset to Cesium's default at the top of
+          // this function and only ever set here, Sim+Night only.
+          viewer.scene.light = new Cesium.DirectionalLight({
+            direction: Cesium.Cartesian3.normalize(
+              new Cesium.Cartesian3(-0.4, 0.5, -0.75), new Cesium.Cartesian3()),
+            intensity: 1.8,
+          });
+          googlePhotoreal.lightColor = new Cesium.Cartesian3(0.85, 0.9, 1.0);
           if (googlePhotoreal.imageBasedLighting) {
-            googlePhotoreal.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(0.0, 0.0);
+            googlePhotoreal.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(0.5, 0.5);
           }
         }
       }
       if (osmBuildings) {
         osmBuildings.show = true;
-        osmBuildings.lightColor = new Cesium.Cartesian3(0.20, 0.25, 0.35);
-        if (osmBuildings.imageBasedLighting) {
-          osmBuildings.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(0.0, 0.0);
+        // Real platform mode: exact original values, untouched.
+        // Sim platform mode: same directional-light fix as googlePhotoreal
+        // above, so the rural fallback tileset isn't jarringly black next
+        // to the now-properly-lit photoreal buildings.
+        if (_isSimMode()) {
+          osmBuildings.lightColor = new Cesium.Cartesian3(0.85, 0.9, 1.0);
+          if (osmBuildings.imageBasedLighting) {
+            osmBuildings.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(0.5, 0.5);
+          }
+        } else {
+          osmBuildings.lightColor = new Cesium.Cartesian3(0.20, 0.25, 0.35);
+          if (osmBuildings.imageBasedLighting) {
+            osmBuildings.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(0.0, 0.0);
+          }
         }
       }
-      if (googlePhotoreal) googlePhotoreal.show = false;
       if (window.__isr_sdfiLayer) window.__isr_sdfiLayer.show = false;
       nightBloom.enabled = false;
     } else if (imageryMode === 'day') {
@@ -3375,9 +3430,18 @@ async function main() {
     // Ambulances multi-dispatch like patrol packs; the akutlægebil is
     // a single faster unit. BRS rescue team is the national civil
     // protection heavy-rescue element.
+    // consequenceOnly: this unit responds to the CONSEQUENCES of an
+    // incident (casualties, fire, wreckage) and never neutralises a
+    // threat. Without it, an ambulance completing its on-scene timer
+    // falls through _resolveEngagement's kinetic branch and rewrites
+    // the case outcome to 'neutralized', crediting the kill to the
+    // ambulance. Distinct from visualVerifyOnly, which suppresses the
+    // same write but toasts "visual verify complete", wrong wording
+    // for a medical or fire unit.
     'receiver-ambulance': {
       cruiseKmh: 85, arriveAtM: 400, engageSec: 300,
       stagesAtScene: true,   // on-station state reads STAGING, not ENGAGING
+      consequenceOnly: true,
       icon: 'police-vehicle', trail: false, airborne: false,
       useRoadRouting: true, supportsMultiDispatch: true, maxUnitsPerDispatch: 5,
       billboardScale: 0.55, swarmSpacingM: 40, cordonSlotSpreadM: 18,
@@ -3386,12 +3450,14 @@ async function main() {
     'receiver-akutlaegebil': {
       cruiseKmh: 105, arriveAtM: 350, engageSec: 240,
       stagesAtScene: true,   // on-station state reads STAGING, not ENGAGING
+      consequenceOnly: true,
       icon: 'police-vehicle', trail: false, airborne: false,
       useRoadRouting: true, billboardScale: 0.55,
       label: 'Akutlægebil',
     },
     'receiver-rescue-team': {
       cruiseKmh: 70, arriveAtM: 400, engageSec: 900,
+      consequenceOnly: true,
       icon: 'sof', trail: false, airborne: false,
       useRoadRouting: true, billboardScale: 0.65,
       label: 'Rescue team',
@@ -3405,6 +3471,7 @@ async function main() {
       // the assembly point until police declare the scene safe, same
       // as medical units.
       stagesAtScene: true,
+      consequenceOnly: true,
       label: 'Brandbil',
     },
     'receiver-cyber-team': {
@@ -3741,7 +3808,19 @@ async function main() {
     if (!event) { toast('Event not found', 'err'); return null; }
     const spec = getReceiverDirectAsset(roleId, assetKey);
     if (!spec) { toast('No asset spec for that receiver action.', 'err'); return null; }
-    const base = baseForReceiverRole(roleId);
+    // Dispatchable entries in receiver_assets.js carry `name`; only the
+    // role-level profile carries `label`. Reading spec.label alone put
+    // the literal string "undefined" on the map, in the toast, and in
+    // every dispatch table and report row.
+    const specName = spec.name || spec.label || 'Response asset';
+    // Prefer the baseId the asset spec declares. baseForReceiverRole
+    // keys on role id plus a hand-kept alias map, and has no entry for
+    // amk-hovedstaden or kbr-hovedstaden, so every ambulance, physician
+    // car and fire engine fell into the static no-base branch below:
+    // materialising on top of the crash site having driven nothing,
+    // while the tooltip promised road routing.
+    const _roleSpec = assetsForReceiverRole(roleId);
+    const base = (_roleSpec?.baseId && RECEIVER_BASES[_roleSpec.baseId]) || baseForReceiverRole(roleId);
     if (!base) {
       // Static profile: no home base needed. Spawn at the incident
       // site itself so the coordination cell shows up as a static
@@ -3749,9 +3828,13 @@ async function main() {
       const targetLat = event.lastKnownPosition?.lat ?? event.lastPosition?.lat ?? event.entry?.lat ?? SITES[event.siteId]?.coordinates?.lat;
       const targetLon = event.lastKnownPosition?.lon ?? event.lastPosition?.lon ?? event.entry?.lon ?? SITES[event.siteId]?.coordinates?.lon;
       if (targetLat == null || targetLon == null) { toast('No home base or target coordinate for dispatch.', 'err'); return null; }
-      const asset = { id: `${roleId}-${assetKey}-${Date.now()}`, name: spec.label, kind: spec.kind, lat: targetLat, lon: targetLon };
-      dispatchCounterResponse(eventId, asset, opts);
-      toast(`${spec.label} activated.`, 'ok');
+      const asset = { id: `${roleId}-${assetKey}-${Date.now()}`, name: specName, kind: spec.kind, lat: targetLat, lon: targetLon };
+      // ownerRoleId was omitted on this branch while the base-resolved
+      // branch below stamps it. Every attribution surface joins on it,
+      // so a static activation was dropped from the agencies-on-case
+      // panel and from the report's contributor chapters.
+      dispatchCounterResponse(eventId, asset, { ...opts, ownerRoleId: roleId });
+      toast(`${specName} activated.`, 'ok');
       return asset;
     }
     // Real home base dispatch: asset spawns at the base coord and
@@ -3759,7 +3842,7 @@ async function main() {
     // rest (route fetch, state machine, engage timer).
     const asset = {
       id: `${roleId}-${assetKey}-${Date.now()}`,
-      name: spec.label,
+      name: specName,
       kind: spec.kind,
       lat: base.lat,
       lon: base.lon,
@@ -3769,7 +3852,7 @@ async function main() {
     // deployed X · via your request" on the requester's case-file. See
     // Chunk B #3 in the comms-flow gaps.
     dispatchCounterResponse(eventId, asset, { ...opts, ownerRoleId: roleId });
-    toast(`${spec.label} dispatched from ${base.name}.`, 'ok');
+    toast(`${specName} dispatched from ${base.name}.`, 'ok');
     return asset;
   }
 
@@ -3839,7 +3922,7 @@ async function main() {
     const targetName = targetRole.org || targetRole.label || targetRoleId;
     const msgTail = assessmentPackage?.operatorAssessment
       ? `: ${assessmentPackage.operatorAssessment}`
-      : `: ${spec.label}. ${spec.sub || ''}`;
+      : `: ${spec.name || spec.label || 'Response asset'}.`;
     const records = escalateEvent(event.id, {
       destinationIds: targetDestIds,
       payload: 'summary',
@@ -6081,6 +6164,11 @@ async function main() {
           ? `Partial neutralisation. ${downedCount} downed. Overwatch escaped.`
           : `Threat neutralised. ${downedCount} downed.`, 'ok');
       }
+    } else if (event && d.profile.consequenceOnly) {
+      // Consequence responders never neutralise. Arriving at a crash
+      // scene is not a kill, and crediting one to an ambulance would
+      // overwrite the real outcome in the case file and the report.
+      toast(`${d.assetName} on scene. Consequence response under way.`, 'info');
     } else if (event && !d.profile.visualVerifyOnly && !d.rtbCompleted) {
       // Kinetic truth beats machine assumption: a late kill (engagement
       // resolving after the event already auto-closed) supersedes the
@@ -19233,8 +19321,8 @@ async function main() {
   // are demo/scenario-only visualisations that don't reflect real
   // operator capability (we don't tap enemy drone cameras). SIM badge
   // renders on the operator chip so the mode is visible at a glance.
-  let _simulationMode = false;
-  function _isSimMode() { return _simulationMode === true; }
+  // _simulationMode / _isSimMode() now declared near the top of main()
+  // (search "Declared here" for why) — only _setSimMode stays here.
   function _setSimMode(on) {
     _simulationMode = !!on;
     document.body.classList.toggle('mode-simulation', _simulationMode);
@@ -21909,7 +21997,18 @@ async function main() {
     // Request-only assets fire receiver-request which routes the
     // request to another profile's inbox. See receiver_assets.js and
     // dispatchReceiverAsset in this file for the full flow.
-    const _receiverAssetSpec = isActive ? assetsForReceiverRole(roleId) : null;
+    // Wreckage on the ground is a live physical scene even though the
+    // detection event has closed. The consequence cascade reaches
+    // medical, fire and heavy rescue only AFTER the close, so gating
+    // their vehicles on the event being active left five agencies
+    // holding full asset kits they could never reach.
+    //
+    // Deliberately the only one of the fourteen isActive reads in this
+    // render that is relaxed. The others gate airspace notices, army
+    // and air force tasking and intelligence requests, none of which
+    // make sense against an airframe already on the ground.
+    const _wreckagePhase = Array.isArray(event.wreckages) && event.wreckages.length > 0;
+    const _receiverAssetSpec = (isActive || _wreckagePhase) ? assetsForReceiverRole(roleId) : null;
     if (_receiverAssetSpec) {
       // Dispatchable assets: fire from profile's own home base.
       // Descriptive metadata (useCases, deployTime, limitations)
