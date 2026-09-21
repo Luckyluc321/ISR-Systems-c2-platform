@@ -149,7 +149,7 @@ import {
 } from './events.js';
 import { buildPostIncidentReport, buildChainPostIncidentReport, emphasisForBranch } from './post_incident_report.js';
 import { evaluateClassificationPipeline, evaluateAttackProfileDetector } from './classification_pipeline.js';
-import { RECEIVER_BASES, baseForReceiverRole } from './receiver_bases.js';
+import { baseForReceiverRole } from './receiver_bases.js';
 import { RECEIVER_ASSETS, assetsForReceiverRole, getReceiverDirectAsset, getReceiverRequestAsset } from './receiver_assets.js';
 import {
   destinationsForSite, destinationsForEvent, getDestination, destinationTypeLabel,
@@ -1593,13 +1593,15 @@ async function main() {
     viewer.scene.globe.enableLighting = true;
     nightBrightness.enabled = false;
     canvas.style.filter = '';
-    // Reset to Cesium's real default — confirmed against Cesium's own
-    // source (Scene.js: "this.light = new SunLight();"), NOT undefined.
-    // Setting this to undefined (an earlier version of this fix) most
-    // likely broke the globe's real day/night terminator shading scene
-    // wide, in every mode, which is consistent with a "full daylight in
-    // night mode" symptom that survived every other fix in this function.
-    viewer.scene.light = new Cesium.SunLight();
+    // scene.light is deliberately NOT touched anywhere in this function.
+    // It is not a per-tileset setting: it also drives the globe surface
+    // shader (GlobeFS.glsl), and per UniformState.js:1454-1473 any light
+    // that is not a SunLight makes Cesium discard the sun position and the
+    // clock entirely. Overriding it with a fixed-direction DirectionalLight
+    // (an earlier attempt at lighting night buildings) pinned a permanent
+    // fake sun over the Atlantic and rendered Denmark in full daylight at
+    // every clock value. Light buildings via per-tileset imageBasedLighting
+    // only. Never via scene.light.
 
     // TEMP DIAGNOSTIC — remove once the night-mode symptom is confirmed
     // fixed. Reads out the exact runtime state at the moment this runs so
@@ -1611,6 +1613,8 @@ async function main() {
       bingLayerExists: !!bingLayer,
       googlePhotorealExists: !!googlePhotoreal,
       osmBuildingsExists: !!osmBuildings,
+      photorealShown: googlePhotoreal ? googlePhotoreal.show : 'n/a',
+      sceneLightIsSun: viewer.scene.light instanceof Cesium.SunLight,
       cameraHeightKm: Math.round((viewer.camera.positionCartographic?.height || 0) / 1000),
     });
 
@@ -1643,43 +1647,40 @@ async function main() {
         earthAtNightLayer.colorToAlphaThreshold = 0.15;
       }
       if (googlePhotoreal) {
-        // Sim platform mode only (config panel Real/Sim toggle): keep the
-        // real photorealistic building textures visible at night, dimmed
-        // the same way osmBuildings is dimmed below, instead of hiding
-        // them behind the flat fallback. Real platform mode is untouched —
-        // stays hidden, exactly as production has always behaved.
-        googlePhotoreal.show = _isSimMode();
+        // Sim platform mode only: keep real photorealistic building
+        // textures at night instead of the flat fallback. Real platform
+        // mode stays hidden, exactly as production has always behaved.
+        //
+        // Altitude gate is load-bearing, not an optimisation. This asset
+        // has GLOBAL coverage, and its daytime-baked root tiles render a
+        // lit shell over the whole planet at high altitude — a scene
+        // primitive, so bingLayer.brightness cannot dim it. Showing it
+        // from the globe view is what made night mode read as full
+        // daylight. Only show it once the camera is low enough that it is
+        // actually the building view. _updateNightPhotoreal re-runs this
+        // on camera move, since this function only runs on mode change.
+        _updateNightPhotoreal();
         if (_isSimMode()) {
-          // Ambient-only lighting (imageBasedLightingFactor, capped at 1.0
-          // by Cesium) rendered as a flat grey wash — no directional
-          // variation, so real texture/geometry detail didn't show. Real
-          // sunlight is unusable here (sun is below horizon, N·L ~0
-          // everywhere). Fix: a fixed-angle custom scene light (fake
-          // moonlight, doesn't track the real sun) so surfaces actually get
-          // N·L variation again, same mechanism day mode's real sun uses.
-          // Scene-global, so it's reset to Cesium's default at the top of
-          // this function and only ever set here, Sim+Night only.
-          viewer.scene.light = new Cesium.DirectionalLight({
-            direction: Cesium.Cartesian3.normalize(
-              new Cesium.Cartesian3(-0.4, 0.5, -0.75), new Cesium.Cartesian3()),
-            intensity: 1.8,
-          });
-          googlePhotoreal.lightColor = new Cesium.Cartesian3(0.85, 0.9, 1.0);
+          // Light buildings ONLY via per-tileset image-based lighting.
+          // 1.0 is Cesium's hard ceiling (ImageBasedLighting.js throws
+          // above it). lightColor is not a second lever — UniformState.js
+          // renormalises czm_lightColor to max-component 1.0, so values
+          // above 1 do nothing at all.
+          googlePhotoreal.lightColor = undefined;
           if (googlePhotoreal.imageBasedLighting) {
-            googlePhotoreal.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(0.5, 0.5);
+            googlePhotoreal.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(1.0, 1.0);
           }
         }
       }
       if (osmBuildings) {
         osmBuildings.show = true;
         // Real platform mode: exact original values, untouched.
-        // Sim platform mode: same directional-light fix as googlePhotoreal
-        // above, so the rural fallback tileset isn't jarringly black next
-        // to the now-properly-lit photoreal buildings.
+        // Sim platform mode: max ambient so the rural fallback tileset
+        // isn't jarringly black next to the lit photoreal buildings.
         if (_isSimMode()) {
-          osmBuildings.lightColor = new Cesium.Cartesian3(0.85, 0.9, 1.0);
+          osmBuildings.lightColor = undefined;
           if (osmBuildings.imageBasedLighting) {
-            osmBuildings.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(0.5, 0.5);
+            osmBuildings.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(1.0, 1.0);
           }
         } else {
           osmBuildings.lightColor = new Cesium.Cartesian3(0.20, 0.25, 0.35);
@@ -1766,6 +1767,21 @@ async function main() {
       nightBloom.enabled = false;
     }
   }
+
+  // Night + Sim only: show the photorealistic building tileset when the
+  // camera is low enough for it to actually be the building view, and hide
+  // it above that. Its daytime-baked global root tiles otherwise paint a
+  // lit shell over the whole planet and make night mode read as daylight.
+  // Every other mode is left to applyImageryMode's own branches.
+  const NIGHT_PHOTOREAL_MAX_H = 50_000;   // metres
+  function _updateNightPhotoreal() {
+    if (!googlePhotoreal) return;
+    if (imageryMode !== 'night') return;
+    if (!_isSimMode()) { googlePhotoreal.show = false; return; }
+    const h = viewer.camera.positionCartographic?.height ?? Infinity;
+    googlePhotoreal.show = h < NIGHT_PHOTOREAL_MAX_H;
+  }
+  viewer.camera.moveEnd.addEventListener(() => _updateNightPhotoreal());
 
   viewer.scene.postRender.addEventListener(() => {
     if (imageryMode !== 'auto') return;
@@ -3813,14 +3829,11 @@ async function main() {
     // the literal string "undefined" on the map, in the toast, and in
     // every dispatch table and report row.
     const specName = spec.name || spec.label || 'Response asset';
-    // Prefer the baseId the asset spec declares. baseForReceiverRole
-    // keys on role id plus a hand-kept alias map, and has no entry for
-    // amk-hovedstaden or kbr-hovedstaden, so every ambulance, physician
-    // car and fire engine fell into the static no-base branch below:
-    // materialising on top of the crash site having driven nothing,
-    // while the tooltip promised road routing.
-    const _roleSpec = assetsForReceiverRole(roleId);
-    const base = (_roleSpec?.baseId && RECEIVER_BASES[_roleSpec.baseId]) || baseForReceiverRole(roleId);
+    // baseForReceiverRole now reads the baseId each role declares beside
+    // its vehicles, so the workaround that used to live here is gone.
+    // Fixed at the source rather than at this one call site, because a
+    // second consumer made the identical mistake independently.
+    const base = baseForReceiverRole(roleId);
     if (!base) {
       // Static profile: no home base needed. Spawn at the incident
       // site itself so the coordination cell shows up as a static

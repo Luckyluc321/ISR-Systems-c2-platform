@@ -3,6 +3,12 @@
 // infrastructure incident. Every entry verified against OpenStreetMap
 // Nominatim + the agency's own website. No fabricated coordinates.
 //
+// receiver_assets.js imports nothing, so this direction creates no
+// cycle. It is imported for baseForReceiverRole below, which reads the
+// baseId each role declares beside its vehicles rather than relying on
+// a hand-kept alias table that had already drifted twice.
+import { RECEIVER_ASSETS } from './receiver_assets.js';
+//
 // Used by the receiver-side dispatch flow (main.js) to spawn asset
 // billboards at the correct home base before animating them toward
 // the incident site. Real distances feed real ETAs feed real
@@ -397,16 +403,41 @@ export const RECEIVER_BASES = {
 // spawns the asset "on arrival" without a route animation).
 export function baseForReceiverRole(roleId) {
   if (!roleId) return null;
+
+  // 1. The asset registry already declares where each role's vehicles
+  //    live. Read it first: it is the authoritative statement, kept
+  //    next to the vehicles themselves, and it cannot drift from them.
+  //
+  //    This used to be step three, behind a hand-kept alias map, and
+  //    that ordering caused two shipped bugs. The map duplicated three
+  //    mappings the asset registry already had and forgot two others,
+  //    and the two it forgot were the ambulance service and the fire
+  //    brigade. Both returned null, so their vehicles took the "no home
+  //    base" path: materialising on top of the incident having driven
+  //    nothing, while the interface promised road routing, and carrying
+  //    no owner so they vanished from the report's contributor list.
+  //    A later per-site alert resolver made the identical mistake
+  //    independently and would have dropped both agencies from every
+  //    detonation alert.
+  const declared = RECEIVER_ASSETS?.[roleId]?.baseId;
+  if (declared && RECEIVER_BASES[declared]) return RECEIVER_BASES[declared];
+
+  // 2. Role id used directly as the base key. The common case.
   if (RECEIVER_BASES[roleId]) return RECEIVER_BASES[roleId];
-  // Common aliases: some receiver role ids in roles.js use short forms
-  // (e.g. 'rigspoliti' vs the base key 'rigspolitiet'). Add mappings
-  // here as roles.js and this file stay in sync.
+
+  // 3. Aliases for roles that own a base but declare no vehicles, so
+  //    have no asset entry to read a baseId from. Do NOT add a mapping
+  //    here for a role that has vehicles: declare baseId on its asset
+  //    entry instead, where step 1 will find it and where it sits
+  //    beside the thing it describes.
   const alias = {
+    'pet': 'pet-soeborg',
+    'fe': 'fe-kastellet',
+    // Retained as a safety net. All three also declare baseId on their
+    // asset entry, so step 1 resolves them first.
     'rigspoliti': 'rigspolitiet',
     'politi-kbh': 'politi-koebenhavn',
     'politi-aks': 'aks-cta',
-    'pet': 'pet-soeborg',
-    'fe': 'fe-kastellet',
   };
   return alias[roleId] ? RECEIVER_BASES[alias[roleId]] : null;
 }
