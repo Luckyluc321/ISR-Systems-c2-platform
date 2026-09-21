@@ -20074,11 +20074,7 @@ async function main() {
   // would destroy the collapse listener and is-collapsed state bound
   // by _bindReceiverActions.
   function _monEngBodyHtml(event, activeRole) {
-    const dispatches = (event.counterDispatches || []).filter(cd => {
-      // Only show dispatches this role owns (issued from their scope)
-      const scope = _ROLE_DISPATCH_SCOPE_LOOKUP[activeRole?.id];
-      return activeRole?.kind === 'admin' || (scope && scope.has(cd.kind));
-    });
+    const dispatches = (event.counterDispatches || []).filter(cd => _roleCanSeeDispatch(cd, activeRole));
     if (!dispatches.length) return null;
 
     // Bucket dispatches by live state. counterDispatchStateFor returns
@@ -20309,8 +20305,7 @@ async function main() {
       // already been retired (state lookup returns 'complete' from the
       // event's counterDispatches trail even after entities are gone).
       if (state && state !== 'complete') return false;
-      const scope = _ROLE_DISPATCH_SCOPE_LOOKUP[activeRole?.id];
-      return activeRole?.kind === 'admin' || (scope && scope.has(cd.kind));
+      return _roleCanSeeDispatch(cd, activeRole);
     });
     if (!dispatches.length) return '';
     const blocks = dispatches.map(cd => {
@@ -20765,9 +20760,14 @@ async function main() {
       </div>`;
   }
 
-  // Shared lookup for the ROLE_DISPATCH_SCOPE map, used by Steps 3+4
-  // to filter dispatches by "did this role own it". Kept as module
-  // scope so all step renderers reference the same source of truth.
+  // Capability table: which dispatch KINDS each role is able to send.
+  //
+  // The comment here used to say this filtered dispatches by "did this
+  // role own it". It does not, and that mismatch was the bug: the table
+  // answers what a role CAN dispatch, which is a different question
+  // from what it DID dispatch. Steps 3 and 4 asked the wrong one, so a
+  // role with no entry saw none of its own units. Use
+  // _roleCanSeeDispatch below for the ownership question.
   const _ROLE_DISPATCH_SCOPE_LOOKUP = {
     'flv-skrydstrup': new Set(['helicopter-intercept']),
     'flv-karup':      new Set(['helicopter-intercept']),
@@ -20789,6 +20789,31 @@ async function main() {
     'op-energinet':   new Set([]),
     'flv-qra':        new Set(['helicopter-intercept']),
   };
+
+  // Can this role see this dispatch in the engagement steps?
+  //
+  // Ownership first. A role always sees what it dispatched itself, and
+  // that is definitional rather than a capability judgement. The
+  // capability table is only a fallback, for seeing a dispatch of a
+  // kind you could have sent but did not, which is how the counter-
+  // drone roles have always worked and which is preserved exactly.
+  //
+  // Previously both steps consulted only the capability table. Any role
+  // absent from it got `undefined` and the guard short-circuited false,
+  // so it saw none of its own units. That hid every ambulance, physician
+  // car, fire engine and rescue team from the agency that sent them,
+  // and it hid Copenhagen police patrol cars and the Aktionsstyrken
+  // vans too, which has been true for as long as those assets existed.
+  //
+  // Fixed by asking the right question rather than by adding more rows
+  // to the table, which would have to be extended again for every new
+  // agency and is already duplicated in two places.
+  function _roleCanSeeDispatch(cd, activeRole) {
+    if (activeRole?.kind === 'admin') return true;
+    if (cd?.ownerRoleId && cd.ownerRoleId === activeRole?.id) return true;
+    const scope = _ROLE_DISPATCH_SCOPE_LOOKUP[activeRole?.id];
+    return !!(scope && scope.has(cd?.kind));
+  }
 
   // ── renderResponseOverlay — RETIRED 2026-09-05 ──
   // Legacy slide-in response panel from the pre-workspace receiver
