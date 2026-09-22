@@ -94,32 +94,32 @@ export const SITE_CONTEXT = {
 
     high_value_assets: [
       // Air traffic control + navigation (4)
-      { id: 'atc_tower_syd',   name: 'Tower Syd (ATC control tower)',    location: { lat: 55.61180, lon: 12.65760 }, asset_type: 'atc_control_tower', criticality: 'critical',
+      { id: 'atc_tower_syd',   name: 'Tower Syd (ATC control tower)',    location: { lat: 55.61180, lon: 12.65760 }, asset_type: 'atc_control_tower', criticality: 'critical', verified: 'unverified',
         reason: 'Single point of airspace control. Loss = airspace closure with national-scale impact.' },
-      { id: 'ils_04L',         name: 'ILS Glideslope 04L',               location: { lat: 55.62267, lon: 12.64620 }, asset_type: 'ils_ground_installation', criticality: 'high',
+      { id: 'ils_04L',         name: 'ILS Glideslope 04L',               location: { lat: 55.62267, lon: 12.64620 }, asset_type: 'ils_ground_installation', criticality: 'high', verified: 'unverified',
         reason: 'Instrument approach guidance for primary runway. Any interference triggers ILS re-certification.' },
-      { id: 'ils_22R',         name: 'ILS Glideslope 22R',               location: { lat: 55.60800, lon: 12.63500 }, asset_type: 'ils_ground_installation', criticality: 'high',
+      { id: 'ils_22R',         name: 'ILS Glideslope 22R',               location: { lat: 55.60800, lon: 12.63500 }, asset_type: 'ils_ground_installation', criticality: 'high', verified: 'unverified',
         reason: 'Reciprocal approach guidance. Same sensitivity as 04L.' },
-      { id: 'atis_broadcast',  name: 'ATIS broadcast antenna',           location: { lat: 55.61240, lon: 12.65810 }, asset_type: 'nav_broadcast', criticality: 'medium',
+      { id: 'atis_broadcast',  name: 'ATIS broadcast antenna',           location: { lat: 55.61240, lon: 12.65810 }, asset_type: 'nav_broadcast', criticality: 'medium', verified: 'unverified',
         reason: 'Continuous weather / operations broadcast. Loss forces manual radio queries.' },
       // Maintenance + hangars (3)
-      { id: 'sas_hangar_141',  name: 'SAS Hangar 141 (maintenance)',     location: { lat: 55.61289, lon: 12.65980 }, asset_type: 'maintenance_facility', criticality: 'medium',
+      { id: 'sas_hangar_141',  name: 'SAS Hangar 141 (maintenance)',     location: { lat: 55.61289, lon: 12.65980 }, asset_type: 'maintenance_facility', criticality: 'medium', verified: 'unverified',
         reason: 'Deep maintenance of Nordic fleet. Fire risk and jet fuel storage.' },
-      { id: 'hangar_2',        name: 'Hangar 2 (widebody)',              location: { lat: 55.61360, lon: 12.66130 }, asset_type: 'maintenance_facility', criticality: 'medium',
+      { id: 'hangar_2',        name: 'Hangar 2 (widebody)',              location: { lat: 55.61360, lon: 12.66130 }, asset_type: 'maintenance_facility', criticality: 'medium', verified: 'unverified',
         reason: 'Widebody deep maintenance. Contains active aircraft during scheduled works.' },
-      { id: 'hangar_3',        name: 'Hangar 3, N Maintenance',          location: { lat: 55.62946, lon: 12.65673 }, asset_type: 'maintenance_facility', criticality: 'medium',
+      { id: 'hangar_3',        name: 'Hangar 3, N Maintenance',          location: { lat: 55.62946, lon: 12.65673 }, asset_type: 'maintenance_facility', criticality: 'medium', verified: 'unverified',
         reason: 'North apron maintenance. Adjacent to N23/N24 perimeter sensor line.' },
       // Fuel + utility (3)
-      { id: 'fuel_farm',       name: 'Fuel farm (Jet A-1 storage)',      location: { lat: 55.60400, lon: 12.65000 }, asset_type: 'fuel_storage', criticality: 'critical',
+      { id: 'fuel_farm',       name: 'Fuel farm (Jet A-1 storage)',      location: { lat: 55.60400, lon: 12.65000 }, asset_type: 'fuel_storage', criticality: 'critical', verified: 'unverified',
         reason: 'Bulk aviation fuel. Vulnerability to standoff attack; fire hazard cascades to airfield.' },
-      { id: 'fuel_hydrant_c',  name: 'Central fuel hydrant network',     location: { lat: 55.61850, lon: 12.65450 }, asset_type: 'fuel_infrastructure', criticality: 'high',
+      { id: 'fuel_hydrant_c',  name: 'Central fuel hydrant network',     location: { lat: 55.61850, lon: 12.65450 }, asset_type: 'fuel_infrastructure', criticality: 'high', verified: 'unverified',
         reason: 'Underground fuel distribution to all pier stands. Rupture cascades to airfield closure.' },
-      { id: 'main_gpu_station', name: 'Main GPU (ground power) station', location: { lat: 55.61490, lon: 12.65540 }, asset_type: 'ground_power', criticality: 'medium',
+      { id: 'main_gpu_station', name: 'Main GPU (ground power) station', location: { lat: 55.61490, lon: 12.65540 }, asset_type: 'ground_power', criticality: 'medium', verified: 'unverified',
         reason: 'Ground power supply. Loss strands parked aircraft, cascades to Tier 2 escalation.' },
       // Emergency + response (2)
-      { id: 'fire_station_n',  name: 'Airport fire station North',       location: { lat: 55.62130, lon: 12.65900 }, asset_type: 'emergency_response', criticality: 'high',
+      { id: 'fire_station_n',  name: 'Airport fire station North',       location: { lat: 55.62130, lon: 12.65900 }, asset_type: 'emergency_response', criticality: 'high', verified: 'unverified',
         reason: 'Category 10 CFR (crash fire rescue). Attack on this station degrades emergency response for any incident.' },
-      { id: 'fire_station_s',  name: 'Airport fire station South',       location: { lat: 55.60580, lon: 12.64150 }, asset_type: 'emergency_response', criticality: 'high',
+      { id: 'fire_station_s',  name: 'Airport fire station South',       location: { lat: 55.60580, lon: 12.64150 }, asset_type: 'emergency_response', criticality: 'high', verified: 'unverified',
         reason: 'Southern CFR. Covers 04R/22L runway ops.' },
       // Border + gov — Vilhelm Lauritzen Terminal (W1 stand) — OSM relation
       // 2956891, Wikidata Q121069544. VIP / state visits / royals.
@@ -325,20 +325,20 @@ export const SITE_CONTEXT = {
     generated_by: 'Agent A (stub, replaced by Mistral post-demo)',
 
     critical_areas: [
-      { id: 'sw_yard_400kv', name: '400 kV switchyard', center: { lat: 55.6410, lon: 12.6088 }, criticality: 'critical',
+      { id: 'sw_yard_400kv', name: '400 kV switchyard', center: { lat: 55.6410, lon: 12.6088 }, criticality: 'critical', verified: 'unverified',
         reason: 'Primary transmission node feeding CPH region. Fault at this bus cascades to city-scale outage.' },
-      { id: 'sw_yard_132kv', name: '132 kV switchyard', center: { lat: 55.6408, lon: 12.6082 }, criticality: 'high',
+      { id: 'sw_yard_132kv', name: '132 kV switchyard', center: { lat: 55.6408, lon: 12.6082 }, criticality: 'high', verified: 'unverified',
         reason: 'Regional distribution feed. Loss affects Amager + parts of central København.' },
-      { id: 'control_building', name: 'Control + relay building', center: { lat: 55.6412, lon: 12.6086 }, criticality: 'critical',
+      { id: 'control_building', name: 'Control + relay building', center: { lat: 55.6412, lon: 12.6086 }, criticality: 'critical', verified: 'unverified',
         reason: 'SCADA + protection relays. Loss = manual control only, national-grid coordination degraded.' },
     ],
 
     high_value_assets: [
-      { id: 'auto_tx_1', name: 'Autotransformer 1 (400/132 kV)', location: { lat: 55.6409, lon: 12.6087 }, asset_type: 'autotransformer', criticality: 'critical',
+      { id: 'auto_tx_1', name: 'Autotransformer 1 (400/132 kV)', location: { lat: 55.6409, lon: 12.6087 }, asset_type: 'autotransformer', criticality: 'critical', verified: 'unverified',
         reason: 'Large oil-filled autotransformer. Replacement lead time 12-18 months.' },
-      { id: 'auto_tx_2', name: 'Autotransformer 2 (400/132 kV)', location: { lat: 55.6411, lon: 12.6087 }, asset_type: 'autotransformer', criticality: 'critical',
+      { id: 'auto_tx_2', name: 'Autotransformer 2 (400/132 kV)', location: { lat: 55.6411, lon: 12.6087 }, asset_type: 'autotransformer', criticality: 'critical', verified: 'unverified',
         reason: 'Redundant unit. Loss of both = full regional interruption.' },
-      { id: 'reactor_bank', name: 'Shunt reactor bank', location: { lat: 55.6407, lon: 12.6090 }, asset_type: 'reactor', criticality: 'high',
+      { id: 'reactor_bank', name: 'Shunt reactor bank', location: { lat: 55.6407, lon: 12.6090 }, asset_type: 'reactor', criticality: 'high', verified: 'unverified',
         reason: 'Voltage regulation. Loss degrades grid stability during light-load conditions.' },
     ],
 
@@ -398,20 +398,20 @@ export const SITE_CONTEXT = {
     generated_by: 'Agent A (stub, replaced by Mistral post-demo)',
 
     critical_areas: [
-      { id: 'sw_yard_400kv', name: '400 kV switchyard', center: { lat: 55.03682, lon: 9.26960 }, criticality: 'critical',
+      { id: 'sw_yard_400kv', name: '400 kV switchyard', center: { lat: 55.03682, lon: 9.26960 }, criticality: 'critical', verified: 'unverified',
         reason: 'Largest 400 kV node in southern Jylland. Feeds cross-border interconnect.' },
-      { id: 'hvdc_converter', name: 'HVDC converter station (to Germany)', center: { lat: 55.0371, lon: 9.2705 }, criticality: 'critical',
+      { id: 'hvdc_converter', name: 'HVDC converter station (to Germany)', center: { lat: 55.0371, lon: 9.2705 }, criticality: 'critical', verified: 'unverified',
         reason: 'Cross-border HVDC to Kontek / German grid. Loss degrades Nordic-European power exchange.' },
-      { id: 'reactive_comp_bay', name: 'Reactive compensation bay', center: { lat: 55.0366, lon: 9.2692 }, criticality: 'high',
+      { id: 'reactive_comp_bay', name: 'Reactive compensation bay', center: { lat: 55.0366, lon: 9.2692 }, criticality: 'high', verified: 'unverified',
         reason: 'Filter + SVC installation supporting HVDC valve operation.' },
     ],
 
     high_value_assets: [
-      { id: 'hvdc_valve_hall', name: 'HVDC valve hall', location: { lat: 55.0371, lon: 9.2705 }, asset_type: 'hvdc_valve_hall', criticality: 'critical',
+      { id: 'hvdc_valve_hall', name: 'HVDC valve hall', location: { lat: 55.0371, lon: 9.2705 }, asset_type: 'hvdc_valve_hall', criticality: 'critical', verified: 'unverified',
         reason: 'Contains thyristor / IGBT valves. Highly specialised replacement, multi-year lead time.' },
-      { id: 'converter_transformer', name: 'HVDC converter transformer', location: { lat: 55.0370, lon: 9.2702 }, asset_type: 'converter_transformer', criticality: 'critical',
+      { id: 'converter_transformer', name: 'HVDC converter transformer', location: { lat: 55.0370, lon: 9.2702 }, asset_type: 'converter_transformer', criticality: 'critical', verified: 'unverified',
         reason: 'Custom-built transformer supporting HVDC valves. Fire risk from oil volume.' },
-      { id: 'auto_tx_400', name: 'Autotransformer (400/220 kV)', location: { lat: 55.0369, lon: 9.2698 }, asset_type: 'autotransformer', criticality: 'critical',
+      { id: 'auto_tx_400', name: 'Autotransformer (400/220 kV)', location: { lat: 55.0369, lon: 9.2698 }, asset_type: 'autotransformer', criticality: 'critical', verified: 'unverified',
         reason: 'Main step-down. Replacement lead time 12-18 months.' },
     ],
 
@@ -454,14 +454,14 @@ export const SITE_CONTEXT = {
     generated_by: 'Agent A (stub, replaced by Mistral post-demo)',
 
     critical_areas: [
-      { id: 'sw_yard_400kv', name: '400 kV switchyard', center: { lat: 55.45151, lon: 12.00729 }, criticality: 'critical',
+      { id: 'sw_yard_400kv', name: '400 kV switchyard', center: { lat: 55.45151, lon: 12.00729 }, criticality: 'critical', verified: 'unverified',
         reason: 'Central Zealand transmission node feeding CPH region via Amager Koblingsstation.' },
-      { id: 'control_building', name: 'Control + relay building', center: { lat: 55.4517, lon: 12.0075 }, criticality: 'critical',
+      { id: 'control_building', name: 'Control + relay building', center: { lat: 55.4517, lon: 12.0075 }, criticality: 'critical', verified: 'unverified',
         reason: 'SCADA + protection. Loss compromises regional coordination.' },
     ],
 
     high_value_assets: [
-      { id: 'auto_tx_1', name: 'Autotransformer (400/132 kV)', location: { lat: 55.4515, lon: 12.0074 }, asset_type: 'autotransformer', criticality: 'critical',
+      { id: 'auto_tx_1', name: 'Autotransformer (400/132 kV)', location: { lat: 55.4515, lon: 12.0074 }, asset_type: 'autotransformer', criticality: 'critical', verified: 'unverified',
         reason: 'Main step-down for regional distribution. Long lead time on replacement.' },
     ],
 
@@ -505,18 +505,18 @@ export const SITE_CONTEXT = {
     port_reference_point: { lat: 55.4680, lon: 8.4500 },
 
     critical_areas: [
-      { id: 'quay_deep',       name: 'Deepwater quays (4 + 5)', center: { lat: 55.467, lon: 8.450 }, criticality: 'high',
+      { id: 'quay_deep',       name: 'Deepwater quays (4 + 5)', center: { lat: 55.467, lon: 8.450 }, criticality: 'high', verified: 'unverified',
         reason: 'Heavy-lift quays for offshore wind installation vessels and diplomatic cargo.' },
-      { id: 'ow_o_and_m',      name: 'Offshore wind O&M base', center: { lat: 55.469, lon: 8.446 }, criticality: 'high',
+      { id: 'ow_o_and_m',      name: 'Offshore wind O&M base', center: { lat: 55.469, lon: 8.446 }, criticality: 'high', verified: 'unverified',
         reason: 'Servicing Horns Rev and North Sea assets. Base for Danish offshore wind fleet.' },
-      { id: 'lng_terminal_planned', name: 'LNG terminal area (planned)', center: { lat: 55.465, lon: 8.454 }, criticality: 'medium',
+      { id: 'lng_terminal_planned', name: 'LNG terminal area (planned)', center: { lat: 55.465, lon: 8.454 }, criticality: 'medium', verified: 'unverified',
         reason: 'Future LNG capacity supporting Baltic Pipe backup. Currently pre-construction.' },
     ],
 
     high_value_assets: [
-      { id: 'ow_installation_vessel', name: 'Offshore wind installation vessel (typically berthed)', location: { lat: 55.468, lon: 8.449 }, asset_type: 'specialty_vessel', criticality: 'high',
+      { id: 'ow_installation_vessel', name: 'Offshore wind installation vessel (typically berthed)', location: { lat: 55.468, lon: 8.449 }, asset_type: 'specialty_vessel', criticality: 'high', verified: 'unverified',
         reason: 'Heavy-lift jack-up vessels. Multi-hundred-million EUR asset.' },
-      { id: 'fuel_storage',        name: 'Fuel storage tanks',                        location: { lat: 55.464, lon: 8.453 }, asset_type: 'fuel_storage', criticality: 'high',
+      { id: 'fuel_storage',        name: 'Fuel storage tanks',                        location: { lat: 55.464, lon: 8.453 }, asset_type: 'fuel_storage', criticality: 'high', verified: 'unverified',
         reason: 'Marine fuel bulk storage. Fire hazard.' },
     ],
 
@@ -709,8 +709,8 @@ export const SITE_CONTEXT = {
   energinet_hovegaard: {
     site_id: 'energinet_hovegaard', name: 'Hovegård Substation', site_type: 'hv_substation',
     schema_version: '1.0', generated_at: '2026-08-05T00:00:00Z', generated_by: 'Agent A (stub)',
-    critical_areas: [{ id: 'sw_yard_400kv', name: '400 kV switchyard', center: { lat: 55.73231, lon: 12.23379 }, criticality: 'critical', reason: 'North Zealand transmission node.' }],
-    high_value_assets: [{ id: 'auto_tx_1', name: 'Autotransformer (400/132 kV)', location: { lat: 55.73231, lon: 12.23379 }, asset_type: 'autotransformer', criticality: 'critical', reason: 'Main step-down.' }],
+    critical_areas: [{ id: 'sw_yard_400kv', name: '400 kV switchyard', center: { lat: 55.73231, lon: 12.23379 }, criticality: 'critical', verified: 'unverified', reason: 'North Zealand transmission node.' }],
+    high_value_assets: [{ id: 'auto_tx_1', name: 'Autotransformer (400/132 kV)', location: { lat: 55.73231, lon: 12.23379 }, asset_type: 'autotransformer', criticality: 'critical', verified: 'unverified', reason: 'Main step-down.' }],
     sensitive_setups: [],
     normal_patterns: { operating_hours: '24/7 unmanned.', typical_ambient_activity: 'Inspection only.', civilian_drone_activity: 'None permitted.' },
     correlator_hints: { dwell_alarm_zones: [{ name: '400 kV switchyard', center: { lat: 55.73231, lon: 12.23379 }, radius_m: 180, threshold_sec: 10 }], unusual_pattern_flags: ['Any airborne contact within perimeter'] },
@@ -719,8 +719,8 @@ export const SITE_CONTEXT = {
   energinet_landerupgaard: {
     site_id: 'energinet_landerupgaard', name: 'Landerupgård Substation', site_type: 'hv_substation',
     schema_version: '1.0', generated_at: '2026-08-05T00:00:00Z', generated_by: 'Agent A (stub)',
-    critical_areas: [{ id: 'sw_yard_400kv', name: '400 kV switchyard', center: { lat: 55.56398, lon: 9.54762 }, criticality: 'critical', reason: 'Southern Jylland transmission node.' }],
-    high_value_assets: [{ id: 'auto_tx_1', name: 'Autotransformer (400/220 kV)', location: { lat: 55.56398, lon: 9.54762 }, asset_type: 'autotransformer', criticality: 'critical', reason: 'Main step-down.' }],
+    critical_areas: [{ id: 'sw_yard_400kv', name: '400 kV switchyard', center: { lat: 55.56398, lon: 9.54762 }, criticality: 'critical', verified: 'unverified', reason: 'Southern Jylland transmission node.' }],
+    high_value_assets: [{ id: 'auto_tx_1', name: 'Autotransformer (400/220 kV)', location: { lat: 55.56398, lon: 9.54762 }, asset_type: 'autotransformer', criticality: 'critical', verified: 'unverified', reason: 'Main step-down.' }],
     sensitive_setups: [],
     normal_patterns: { operating_hours: '24/7 unmanned.', typical_ambient_activity: 'Inspection only.', civilian_drone_activity: 'None permitted.' },
     correlator_hints: { dwell_alarm_zones: [{ name: '400 kV switchyard', center: { lat: 55.56398, lon: 9.54762 }, radius_m: 180, threshold_sec: 10 }], unusual_pattern_flags: ['Any airborne contact within perimeter'] },
@@ -729,8 +729,8 @@ export const SITE_CONTEXT = {
   energinet_ferslev: {
     site_id: 'energinet_ferslev', name: 'Ferslev Substation', site_type: 'hv_substation',
     schema_version: '1.0', generated_at: '2026-08-05T00:00:00Z', generated_by: 'Agent A (stub)',
-    critical_areas: [{ id: 'sw_yard_400kv', name: '400 kV switchyard', center: { lat: 56.95653, lon: 9.87912 }, criticality: 'critical', reason: 'North Jylland transmission node.' }],
-    high_value_assets: [{ id: 'auto_tx_1', name: 'Autotransformer (400/150 kV)', location: { lat: 56.95653, lon: 9.87912 }, asset_type: 'autotransformer', criticality: 'critical', reason: 'Main step-down.' }],
+    critical_areas: [{ id: 'sw_yard_400kv', name: '400 kV switchyard', center: { lat: 56.95653, lon: 9.87912 }, criticality: 'critical', verified: 'unverified', reason: 'North Jylland transmission node.' }],
+    high_value_assets: [{ id: 'auto_tx_1', name: 'Autotransformer (400/150 kV)', location: { lat: 56.95653, lon: 9.87912 }, asset_type: 'autotransformer', criticality: 'critical', verified: 'unverified', reason: 'Main step-down.' }],
     sensitive_setups: [],
     normal_patterns: { operating_hours: '24/7 unmanned.', typical_ambient_activity: 'Inspection only.', civilian_drone_activity: 'None permitted.' },
     correlator_hints: { dwell_alarm_zones: [{ name: '400 kV switchyard', center: { lat: 56.95653, lon: 9.87912 }, radius_m: 180, threshold_sec: 10 }], unusual_pattern_flags: ['Any airborne contact within perimeter'] },

@@ -1,6 +1,6 @@
 name: build
 
-# The five policy gates are the thing this exists to run.
+# The policy gates are the thing this exists to run.
 #
 # They already existed and already passed, but only when someone
 # remembered to run `npm run build` locally. That made every one of them
@@ -52,6 +52,9 @@ jobs:
 
       - name: Scene lifecycle
         run: npm run check:scene-lifecycle
+
+      - name: Site asset confidence
+        run: npm run check:site-assets
 
       - name: Production build
         run: npx vite build

@@ -5,14 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check:event-mutations && npm run check:tenant-stamping && npm run check:impact-cascade && npm run check:scene-lifecycle && vite build",
+    "build": "npm run check:event-mutations && npm run check:tenant-stamping && npm run check:impact-cascade && npm run check:scene-lifecycle && npm run check:site-assets && vite build",
     "preview": "vite preview",
     "check:event-mutations": "node scripts/check-event-mutations.mjs",
     "check:tenant-stamping": "node scripts/check-tenant-stamping.mjs",
     "check:impact-cascade": "node scripts/check-impact-cascade.mjs",
     "check:scene-lifecycle": "node scripts/check-scene-lifecycle.mjs",
     "eval": "node eval/runner.js",
-    "eval:json": "node eval/runner.js --json"
+    "eval:json": "node eval/runner.js --json",
+    "check:site-assets": "node scripts/check-site-assets.mjs"
   },
   "devDependencies": {
     "vite": "^8.1.1"
