@@ -95,8 +95,8 @@ export function renderKineticSubsection(role, event) {
       <tr class="ksub-row">
         <td class="ksub-asset">${esc(cd.assetName || cd.kind || 'unknown')}</td>
         <td class="ksub-state" data-state="${esc(cd.state || '')}">${esc((cd.state || 'unknown').replace(/_/g, ' '))}</td>
-        <td class="ksub-timing">${esc(timing || '—')}</td>
-        <td class="ksub-duration">${esc(duration || '—')}</td>
+        <td class="ksub-timing">${esc(timing || '-')}</td>
+        <td class="ksub-duration">${esc(duration || '-')}</td>
       </tr>`;
   }).join('');
 
@@ -230,7 +230,7 @@ export function renderForensicSubsection(role, event) {
             cd.dispatchedAt && `dispatched ${_fmtTime(cd.dispatchedAt)}`,
             cd.completedAt && `complete ${_fmtTime(cd.completedAt)}`,
           ].filter(Boolean).join(' · ');
-          return `<li><b>${esc(cd.assetName || cd.kind)}</b> · ${esc(cd.state || '')} · ${esc(timing || '—')}</li>`;
+          return `<li><b>${esc(cd.assetName || cd.kind)}</b> · ${esc(cd.state || '')} · ${esc(timing || '-')}</li>`;
         }).join('')}
       </ul>
     </div>` : '';
@@ -322,9 +322,65 @@ export function renderRegulatorySubsection(role, event) {
 export function renderPublicSafetySubsection(role, event) {
   if (!role || !event) return '';
   const alerts = (event.catalog?.publicAlerts || []).filter(a => a.authorRoleId === role.id);
-  if (!alerts.length) return '';
 
-  const body = `
+  // Units this role sent. Previously this chapter read public alerts
+  // only, so a fire service that sent six brandbiler to a crash and
+  // broadcast nothing produced an empty chapter, and its entire
+  // contribution was absent from the permanent record. Their dispatches
+  // are stamped PUBLIC by the dispatch-kind map, and the kinetic
+  // chapter that does render dispatches filters to KINETIC, so nothing
+  // rendered them anywhere. Mirrors the kinetic table, minus the rules
+  // of engagement block, which has no meaning for a fire or rescue unit.
+  const dispatches = (event.counterDispatches || []).filter(cd =>
+    cd.ownerRoleId === role.id && cd.archetype === ARCHETYPES.PUBLIC
+  );
+
+  if (!alerts.length && !dispatches.length) return '';
+
+  // Machine states read as combat vocabulary for a fire or rescue unit.
+  // A brandbil's arrival state is literally 'engaging', and the live
+  // interface already translates that for these kinds while the
+  // permanent record did not, so the report would have said a fire
+  // engine was engaging. 'rtb_home' would also have rendered as "rtb
+  // home", an acronym in user-facing text.
+  //
+  // Every dispatch reaching this table is consequenceOnly by
+  // definition, so the mapping is unconditional here.
+  const _PUBLIC_STATE = {
+    en_route: 'en route',
+    engaging: 'on scene',
+    complete: 'complete',
+    rtb_home: 'returning to base',
+    rtb_via_last_known: 'returning to base',
+    'holding-cordon': 'holding cordon',
+  };
+
+  const dispatchBlock = dispatches.length ? `
+    <table class="ksub-table">
+      <thead>
+        <tr><th>Unit</th><th>State</th><th>Timing</th><th>Duration</th></tr>
+      </thead>
+      <tbody>
+        ${dispatches.map(cd => {
+          const timing = [
+            cd.dispatchedAt && `dispatched ${_fmtTime(cd.dispatchedAt)}`,
+            cd.arrivedAt    && `on scene ${_fmtTime(cd.arrivedAt)}`,
+            cd.completedAt  && `complete ${_fmtTime(cd.completedAt)}`,
+            cd.rtbCompletedAt && `returned ${_fmtTime(cd.rtbCompletedAt)}`,
+          ].filter(Boolean).join(' · ');
+          const duration = _dur(cd.dispatchedAt, cd.completedAt || cd.rtbCompletedAt);
+          return `
+            <tr class="ksub-row">
+              <td class="ksub-asset">${esc(cd.assetName || cd.kind || 'unknown')}</td>
+              <td class="ksub-state" data-state="${esc(cd.state || '')}">${esc(_PUBLIC_STATE[cd.state] || (cd.state || 'unknown').replace(/[_-]/g, ' '))}</td>
+              <td class="ksub-timing">${esc(timing || '-')}</td>
+              <td class="ksub-duration">${esc(duration || '-')}</td>
+            </tr>`;
+        }).join('')}
+      </tbody>
+    </table>` : '';
+
+  const alertsBlock = alerts.length ? `
     <div class="chapter-subsec-note">
       <div class="chapter-subsec-note-hdr">Public alerts broadcast · ${alerts.length}</div>
       <ul class="chapter-subsec-note-list">
@@ -336,9 +392,16 @@ export function renderPublicSafetySubsection(role, event) {
           return `<li><span class="ksub-cat-id">${esc(a.id)}</span> ${kind}${esc(a.body || '')}${zone}${reach}${cancelled} · issued ${esc(_fmtTime(a.at))}</li>`;
         }).join('')}
       </ul>
-    </div>`;
+    </div>` : '';
 
-  return _wrap(ARCHETYPES.PUBLIC, `${alerts.length} alert${alerts.length === 1 ? '' : 's'}`, body);
+  // Summary counts both, so a fire service that dispatched but
+  // broadcast nothing no longer reads as "0 alerts".
+  const summary = [
+    dispatches.length ? `${dispatches.length} unit${dispatches.length === 1 ? '' : 's'}` : '',
+    alerts.length ? `${alerts.length} alert${alerts.length === 1 ? '' : 's'}` : '',
+  ].filter(Boolean).join(' · ');
+
+  return _wrap(ARCHETYPES.PUBLIC, summary, `${dispatchBlock}${alertsBlock}`);
 }
 
 // ── Sub-section 8 · International liaison ───────────────────────

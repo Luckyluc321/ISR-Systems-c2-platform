@@ -80,7 +80,42 @@ const RULES = [
   { match: exact('brs-kemisk'),      primary: ARCHETYPES.KINETIC,   secondary: [ARCHETYPES.REGULATORY] },
   { match: exact('brs-nukleart'),    primary: ARCHETYPES.KINETIC,   secondary: [ARCHETYPES.REGULATORY] },
   { match: exact('beredskab'),       primary: ARCHETYPES.COORD,     secondary: [] },
-  { match: prefix('brs-'),           primary: ARCHETYPES.KINETIC,   secondary: [ARCHETYPES.PUBLIC] },
+  // Beredskabsstyrelsen centres are rescue and civil protection, not a
+  // kinetic force. They were KINETIC primary, which contradicted this
+  // same file: the dispatch-kind map below already calls their rescue
+  // teams PUBLIC. The visible cost is the narrative lens. Agent B
+  // served them the kinetic directive, whose vocabulary line reads
+  // "engagement envelope, dispatchable asset, cordon, intercept vector,
+  // ROE, standoff, terminal phase, denial, seizure", to describe a
+  // heavy rescue deployment.
+  //
+  // This rule and the kbr- rule below cover 34 roles: 29 municipal
+  // brigades and 5 Beredskabsstyrelsen centres. The chemical and
+  // nuclear preparedness units have their own exact rules above and are
+  // NOT reached by these prefixes, so they stay KINETIC. That is a
+  // scoping decision, not a judgement that it is correct: the argument
+  // for reclassifying is arguably stronger for them, since "denial" and
+  // "seizure" attached to a nuclear preparedness unit read as
+  // weapons-adjacent against a detection-only product. Raised, not
+  // silently widened.
+  //
+  // NOTE, corrected after review: reclassifying does NOT fix the report.
+  // Chapter composition never reads archetype at all. renderAllSubsections
+  // maps over every archetype unconditionally and each renderer self-gates
+  // on its own data, so a role's spec has no influence on which
+  // sub-sections render. Fire engines were missing from the record purely
+  // because renderPublicSafetySubsection did not read dispatches, which is
+  // fixed there. Do not reclassify a role to fix a rendering bug.
+  //
+  // Secondary is deliberately EMPTY rather than COORD. Secondary feeds
+  // three consumers: the historical pattern panel gate, the secondary
+  // badge row on a chapter nameplate, and the "N secondary archetypes"
+  // suffix on the report chapter card. The panel is gated to
+  // intelligence, forensic and coordination archetypes, so adding COORD
+  // would silently hand that intelligence panel to all 34 of these
+  // roles, which is a visibility change nobody asked for. The other two
+  // consumers are cosmetic.
+  { match: prefix('brs-'),           primary: ARCHETYPES.PUBLIC,    secondary: [] },
 
   // Hjemmeværnet
   { match: prefix('hjv-'),           primary: ARCHETYPES.KINETIC,   secondary: [ARCHETYPES.PUBLIC] },
@@ -103,11 +138,13 @@ const RULES = [
   // Kommuner (98) — public safety + crisis staff coordination
   { match: prefix('kom-'),           primary: ARCHETYPES.PUBLIC,    secondary: [ARCHETYPES.COORD] },
 
-  // Kommunalt Beredskab — municipal fire + rescue brigades (~29). Primary
-  // action is kinetic (fire suppression, rescue extraction, hazmat first
-  // response) with public safety as secondary (evacuation coordination
-  // with kommune crisis staff).
-  { match: prefix('kbr-'),           primary: ARCHETYPES.KINETIC,   secondary: [ARCHETYPES.PUBLIC] },
+  // Kommunalt Beredskab, the municipal fire and rescue brigades (29).
+  // Same correction and same reasoning as the Beredskabsstyrelsen rule
+  // above: their brandbiler are already PUBLIC in the dispatch-kind map,
+  // so KINETIC here contradicted it. Secondary left empty for the same
+  // reason, to avoid handing the historical pattern panel to every
+  // kommune fire service.
+  { match: prefix('kbr-'),           primary: ARCHETYPES.PUBLIC,    secondary: [] },
 
   // Akutmedicinsk Kommunikationscentral — regional medical emergency
   // dispatch (5 regions). Coordinates ambulance routing + hospital

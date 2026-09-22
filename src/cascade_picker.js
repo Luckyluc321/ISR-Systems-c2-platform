@@ -224,10 +224,27 @@ export function recommendationsForEvent(event, receivers) {
     const role = receivers.find(r => r.id === rid);
     if (role) picked.set(rid, role);
   };
+  // Preferred id prefix per archetype, for slots where "any role with
+  // this archetype" is too loose. Without this the stand-in is simply
+  // the alphabetically lowest id, which is stable but arbitrary.
+  //
+  // PUBLIC is the case that matters. The slot exists to guarantee a
+  // mass-casualty evacuation-broadcast pathway, and the broadcast
+  // authority is a kommune crisis staff. When the fire services were
+  // reclassified from kinetic to public safety, brs-allinge began
+  // sorting ahead of every kom- role and silently took that slot, so a
+  // rescue centre on Bornholm displaced the kommune whose residents
+  // need telling. The cap is reached at this slot, so nothing
+  // downstream recovered it.
+  const _ARCH_PREFERRED_PREFIX = {
+    [ARCHETYPES.PUBLIC]: 'kom-',
+  };
   const _addArch = (arch) => {
     if (picked.size >= CAP) return;
-    const rep = receivers
-      .filter(r => r.archetype === arch && !picked.has(r.id))
+    const candidates = receivers.filter(r => r.archetype === arch && !picked.has(r.id));
+    const prefix = _ARCH_PREFERRED_PREFIX[arch];
+    const pool = prefix ? candidates.filter(r => (r.id || '').startsWith(prefix)) : [];
+    const rep = (pool.length ? pool : candidates)
       .sort((a, b) => (a.id || '').localeCompare(b.id || ''))[0];
     if (rep) picked.set(rep.id, rep);
   };

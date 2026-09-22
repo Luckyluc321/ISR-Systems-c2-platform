@@ -476,16 +476,16 @@ Counts below are the actual `assignArchetypes(RECEIVERS)` output as of 2026-09-1
 
 | Archetype | What it is | Kind | Role count |
 |---|---|---|---|
-| **Kinetic response** | Dispatches ground / air / maritime / specialist assets, engages, produces outcomes | thick | 182 |
+| **Kinetic response** | Dispatches ground / air / maritime / specialist assets, engages, produces outcomes | thick | 148 |
 | **Coordination & command** | Marshals cross-agency response, no direct kinetic action, situational reports + cascade decisions | thin | 42 |
 | **Intelligence & attribution** | Pattern-of-life, attribution, national-security oversight; observer by default | thin | 7 |
 | **Forensic & cyber** | Post-incident digital forensics, evidence chain of custody, attribution on captured artifacts | thin | 5 |
 | **Medical & consequence** | Casualty response, ambulance dispatch, hospital coordination, mass-casualty triage | thick | 34 |
 | **Regulatory & advisory** | Airspace / waterway control, NOTAMs, restrictions, evacuation authorities | thin | 3 |
-| **Public safety & communication** | Shelter-in-place, evacuation orders, public alerts (SMS / siren / DR), civilian coordination | thick | 98 |
+| **Public safety & communication** | Shelter-in-place, evacuation orders, public alerts (SMS / siren / DR), civilian coordination, fire and rescue response | thick | 132 |
 | **International liaison** | Cross-border cascade, allied information sharing, NATO handover, cross-Nordic coordination | thin | 15 |
 
-Kinetic is dominant because Danish emergency services default to physical-response mode (98 municipal kommunale beredskaber + 29 kbr fire brigades + politi districts + military branches). Coord = 42 covers the command layer + parent tiles + ministries. Forensic = 5 (was 1 before the 2026-09-11 audit patch) is what makes the compartment-clearance visibility policy real: Rigspoliti NC3 + NCIK + DVI, DKCERT, and Forsvar-Cyber all read each other's chapters as FULL.
+Kinetic covers politi districts, military branches and specialist units. The 29 municipal fire brigades and the 5 Beredskabsstyrelsen centres moved to public safety on 2026-09-22: their vehicles were already classified that way in the dispatch-kind map, and the kinetic narrative lens was describing heavy rescue in engagement vocabulary. Chemical and nuclear preparedness keep their own kinetic rules. Coord = 42 covers the command layer + parent tiles + ministries. Forensic = 5 (was 1 before the 2026-09-11 audit patch) is what makes the compartment-clearance visibility policy real: Rigspoliti NC3 + NCIK + DVI, DKCERT, and Forsvar-Cyber all read each other's chapters as FULL.
 
 ### Thick vs thin branches
 
@@ -511,7 +511,7 @@ Rules over prefix instead of hand-editing all 386 receivers. New roles inherit a
 | `forsvar-cyber` | Forensic | Intel |
 | `pet`, `pet-cta`, `pet-livvagt` | Intel | — |
 | `fe`, `agency-cfcs` | Intel | Forensic |
-| `brs-{centre}` (5) | Kinetic (hazmat, rescue) | Public safety |
+| `brs-{centre}` (5) | Public safety | (none) |
 | `brs-kemisk`, `brs-nukleart` | Kinetic (specialised) | Regulatory |
 | `beredskab` (HQ) | Coordination | — |
 | `region-*` (5) | Medical | Coordination |
@@ -523,7 +523,7 @@ Rules over prefix instead of hand-editing all 386 receivers. New roles inherit a
 | `agency-ener` (Energistyrelsen) | Regulatory | — |
 | `kom-*` (98 kommunes) | Public safety | Coordination |
 | `nato-*`, `nordic-*`, `allied-*` | Liaison | varies (intel for CCDCOE, kinetic for MARCOM) |
-| `kbr-*` (29 municipal fire + rescue brigades) | Kinetic | Public safety |
+| `kbr-*` (29 municipal fire + rescue brigades) | Public safety | (none) |
 | `amk-*` (5 medical dispatch centres) | Medical | Coordination |
 | `alarm-*` (1-1-2 alarm centrals) | Coordination | Medical |
 | `cert-*` (national cyber emergency response) | Forensic | Intel (for `cert-dkcert`) |
