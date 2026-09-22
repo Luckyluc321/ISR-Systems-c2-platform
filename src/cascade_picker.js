@@ -30,6 +30,22 @@
 
 import { ARCHETYPES, ARCHETYPE_LABELS } from './archetypes.js';
 
+// One warning per site and archetype, so a recommendation that runs on
+// every render does not flood the console. A missing role tag is a
+// manifest configuration gap, not a runtime error: the recommendation
+// is simply one shorter, and this names exactly what to add.
+const _warnedSiteRoles = new Set();
+function _warnMissingSiteRole(siteId, arch, tags) {
+  const key = `${siteId}:${arch}`;
+  if (_warnedSiteRoles.has(key)) return;
+  _warnedSiteRoles.add(key);
+  console.warn(
+    `[cascade] sites/${siteId}.yaml declares no receiver tagged '${tags.join("' or '")}', ` +
+    `so the ${arch} slot is left empty rather than recommending a distant agency. ` +
+    `Add the local kommune to that manifest's receivers block with role: ${tags[0]}.`
+  );
+}
+
 // Thick vs thin — the eight archetypes split by expected role
 // count in production. "Thick" archetypes collapse to a category
 // tile the operator expands on click because rendering 98 kommune
@@ -89,10 +105,16 @@ export function buildPickerGroups(event, receivers, ctx = {}) {
   const {
     alreadyOnCaseRoleIds = new Set(),
     activeRoleId = null,
+    // Threaded through to the recommender so the modal's stars agree
+    // with the recommended row above them. Without it the row resolved
+    // an archetype slot site-locally while the groups resolved it
+    // nationally, so one modal showed two different answers for the
+    // same event.
+    siteReceivers = [],
   } = ctx;
   if (!Array.isArray(receivers)) return { groups: [], onCase: [], all: [], activeRoleId };
 
-  const recSet = new Set(recommendationsForEvent(event, receivers).map(r => r.id));
+  const recSet = new Set(recommendationsForEvent(event, receivers, { siteReceivers }).map(r => r.id));
   const annotate = (role) => ({
     ...role,
     isOnCase:      alreadyOnCaseRoleIds.has(role.id),
@@ -140,8 +162,17 @@ export function buildPickerGroups(event, receivers, ctx = {}) {
 // guidance, never an auto-dispatch trigger. Operator always
 // confirms.
 
-export function recommendationsForEvent(event, receivers) {
+// opts.siteReceivers is the event site's own receivers block from its
+// manifest, used to resolve archetype slots to the LOCAL agency rather
+// than a national alphabetical winner. Optional and additive: callers
+// that omit it fall back to the national defaults below, so existing
+// call sites keep working unchanged. Deliberately passed in rather than
+// imported, because the sites registry is Vite-only and importing it
+// here would make this module unloadable outside a bundler, and so
+// untestable.
+export function recommendationsForEvent(event, receivers, opts = {}) {
   if (!event || !Array.isArray(receivers)) return [];
+  const siteReceivers = Array.isArray(opts.siteReceivers) ? opts.siteReceivers : [];
 
   const classification = event.classification || 'unknown';
   const threat = event.threat || 'unknown';
@@ -224,27 +255,91 @@ export function recommendationsForEvent(event, receivers) {
     const role = receivers.find(r => r.id === rid);
     if (role) picked.set(rid, role);
   };
-  // Preferred id prefix per archetype, for slots where "any role with
-  // this archetype" is too loose. Without this the stand-in is simply
-  // the alphabetically lowest id, which is stable but arbitrary.
+  // Resolve an archetype slot to an actual agency.
   //
-  // PUBLIC is the case that matters. The slot exists to guarantee a
-  // mass-casualty evacuation-broadcast pathway, and the broadcast
-  // authority is a kommune crisis staff. When the fire services were
-  // reclassified from kinetic to public safety, brs-allinge began
-  // sorting ahead of every kom- role and silently took that slot, so a
-  // rescue centre on Bornholm displaced the kommune whose residents
-  // need telling. The cap is reached at this slot, so nothing
-  // downstream recovered it.
-  const _ARCH_PREFERRED_PREFIX = {
-    [ARCHETYPES.PUBLIC]: 'kom-',
+  // This used to be "the alphabetically lowest role carrying that
+  // archetype", which is stable but arbitrary, and it put the choice at
+  // the mercy of agency names. Two failures came from that in one
+  // session. Reclassifying fire services as public safety let
+  // brs-allinge sort ahead of every kommune and silently take the
+  // mass-casualty broadcast slot, so a rescue centre on Bornholm
+  // displaced the authority that actually warns residents. And the
+  // slot's previous winner, kom-aabenraa, was only ever first because
+  // of its name: it sits 250 km from Copenhagen and would have been
+  // recommended for an incident at the airport.
+  //
+  // Resolution order now:
+  //   1. A role the SITE itself declares for this archetype. Manifests
+  //      already name their local responders, so Copenhagen Airport
+  //      resolves its broadcast slot to kom-taarnby rather than to
+  //      whichever kommune sorts first nationally.
+  //   2. A named national default, for events with no site receivers.
+  //   3. The old alphabetical sort, as a last resort so a new archetype
+  //      can never silently produce an empty slot.
+  //
+  // Step 1 is what makes reclassification safe: an agency's archetype no
+  // longer decides which slot it wins, so moving a role between
+  // archetypes cannot reshuffle the recommendation set.
+  // Manifest role tags that mark a receiver as serving this archetype
+  // at this site, matched against the site's own receivers block.
+  //
+  // PUBLIC only. There is deliberately no MEDICAL entry: no manifest
+  // declares a medical role tag. The complete tag vocabulary in use
+  // across all nine sites is site-owner, primary-response,
+  // emergency-response, municipal-crisis, air-response, regulator and
+  // maritime-response. An earlier draft listed 'medical' and
+  // 'ambulance' here, which matched nothing and made a dead branch read
+  // as a working feature.
+  const _ARCH_SITE_ROLE_TAGS = {
+    [ARCHETYPES.PUBLIC]: ['municipal-crisis'],
   };
+
+  // Used ONLY where no site-local answer can exist. MEDICAL has no site
+  // tag anywhere, so every site resolves here, which is exactly the
+  // behaviour before this change and is left untouched rather than
+  // silently altered. Wiring the four regional coordination centres
+  // (amk-sjaelland, amk-syddanmark, amk-midtjylland, amk-nordjylland,
+  // all registered and all currently unreachable) needs a medical tag
+  // added to the manifests and is its own change.
+  const _ARCH_NATIONAL_DEFAULT = {
+    [ARCHETYPES.MEDICAL]: 'amk-hovedstaden',
+  };
+
   const _addArch = (arch) => {
     if (picked.size >= CAP) return;
-    const candidates = receivers.filter(r => r.archetype === arch && !picked.has(r.id));
-    const prefix = _ARCH_PREFERRED_PREFIX[arch];
-    const pool = prefix ? candidates.filter(r => (r.id || '').startsWith(prefix)) : [];
-    const rep = (pool.length ? pool : candidates)
+    const available = (rid) => !picked.has(rid) && receivers.some(r => r.id === rid);
+
+    const tags = _ARCH_SITE_ROLE_TAGS[arch];
+    if (tags) {
+      for (const sr of siteReceivers) {
+        if (!sr?.id || !tags.includes(sr.role)) continue;
+        if (!available(sr.id)) continue;
+        picked.set(sr.id, receivers.find(r => r.id === sr.id));
+        return;
+      }
+      // No local answer, and for a slot like this there is no safe
+      // national one. The public-safety slot exists to reach the
+      // authority that warns residents, and that authority is local by
+      // definition. Seating a Copenhagen kommune for a North Jutland
+      // substation is the same defect that motivated this whole change,
+      // just made deliberate, and an alphabetical fallback is what put a
+      // Bornholm rescue centre in the slot in the first place.
+      //
+      // So: recommend nobody, and say why. The operator can still pick
+      // the right kommune by hand, and a missing recommendation is
+      // honest where a confident wrong one is not.
+      if (event.siteId) _warnMissingSiteRole(event.siteId, arch, tags);
+      return;
+    }
+
+    const fallbackId = _ARCH_NATIONAL_DEFAULT[arch];
+    if (fallbackId && available(fallbackId)) {
+      picked.set(fallbackId, receivers.find(r => r.id === fallbackId));
+      return;
+    }
+
+    const rep = receivers
+      .filter(r => r.archetype === arch && !picked.has(r.id))
       .sort((a, b) => (a.id || '').localeCompare(b.id || ''))[0];
     if (rep) picked.set(rep.id, rep);
   };

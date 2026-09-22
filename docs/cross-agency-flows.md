@@ -476,16 +476,18 @@ Counts below are the actual `assignArchetypes(RECEIVERS)` output as of 2026-09-1
 
 | Archetype | What it is | Kind | Role count |
 |---|---|---|---|
-| **Kinetic response** | Dispatches ground / air / maritime / specialist assets, engages, produces outcomes | thick | 148 |
+| **Kinetic response** | Dispatches ground / air / maritime / specialist assets, engages, produces outcomes | thick | 146 |
 | **Coordination & command** | Marshals cross-agency response, no direct kinetic action, situational reports + cascade decisions | thin | 42 |
 | **Intelligence & attribution** | Pattern-of-life, attribution, national-security oversight; observer by default | thin | 7 |
 | **Forensic & cyber** | Post-incident digital forensics, evidence chain of custody, attribution on captured artifacts | thin | 5 |
-| **Medical & consequence** | Casualty response, ambulance dispatch, hospital coordination, mass-casualty triage | thick | 34 |
+| **Medical & consequence** | Casualty response, ambulance dispatch, hospital coordination, mass-casualty triage, chemical and nuclear preparedness | thick | 36 |
 | **Regulatory & advisory** | Airspace / waterway control, NOTAMs, restrictions, evacuation authorities | thin | 3 |
 | **Public safety & communication** | Shelter-in-place, evacuation orders, public alerts (SMS / siren / DR), civilian coordination, fire and rescue response | thick | 132 |
 | **International liaison** | Cross-border cascade, allied information sharing, NATO handover, cross-Nordic coordination | thin | 15 |
 
-Kinetic covers politi districts, military branches and specialist units. The 29 municipal fire brigades and the 5 Beredskabsstyrelsen centres moved to public safety on 2026-09-22: their vehicles were already classified that way in the dispatch-kind map, and the kinetic narrative lens was describing heavy rescue in engagement vocabulary. Chemical and nuclear preparedness keep their own kinetic rules. Coord = 42 covers the command layer + parent tiles + ministries. Forensic = 5 (was 1 before the 2026-09-11 audit patch) is what makes the compartment-clearance visibility policy real: Rigspoliti NC3 + NCIK + DVI, DKCERT, and Forsvar-Cyber all read each other's chapters as FULL.
+Kinetic covers politi districts, military branches and specialist units. The 29 municipal fire brigades and the 5 Beredskabsstyrelsen centres moved to public safety on 2026-09-22: their vehicles were already classified that way in the dispatch-kind map, and the kinetic narrative lens was describing heavy rescue in engagement vocabulary. Chemical and nuclear preparedness moved to medical and consequence: they measure, contain and decontaminate, and the medical directive is the only one carrying decontamination vocabulary. The kinetic directive had been handing the model the words "denial" and "seizure" to describe a radiological survey.
+
+**Archetype slot resolution in the recommender.** Two of the recommender's picks name an archetype rather than an agency. Those resolve in three steps: a receiver the site itself declares with a matching `role:` tag, then a national default where no site-local answer can exist, then an alphabetical fallback. The public-safety slot is the strict case: the authority that warns residents is local by definition, so where a manifest declares no `role: municipal-crisis` receiver the slot is left EMPTY and a console warning names the site and the tag to add. Recommending a distant kommune was the original defect and an alphabetical fallback is what once put a Bornholm rescue centre in that slot. Four manifests carry the tag today (cph, billund, esbjerg, energinet_amager_koblingsstation); the five other Energinet substations need it added. The medical slot has no site tag in any manifest and so always resolves to its national default; wiring the four regional coordination centres is a separate change. Coord = 42 covers the command layer + parent tiles + ministries. Forensic = 5 (was 1 before the 2026-09-11 audit patch) is what makes the compartment-clearance visibility policy real: Rigspoliti NC3 + NCIK + DVI, DKCERT, and Forsvar-Cyber all read each other's chapters as FULL.
 
 ### Thick vs thin branches
 

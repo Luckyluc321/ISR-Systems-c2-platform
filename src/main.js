@@ -477,8 +477,8 @@ if (typeof window !== 'undefined') {
   //        window.__isr_picker.recommend(event) → array of role objects
   //        window.__isr_picker.filter(roles, 'query') → subset
   window.__isr_picker = {
-    groups:    (event, ctx = {}) => buildPickerGroups(event, RECEIVERS, ctx),
-    recommend: (event) => recommendationsForEvent(event, RECEIVERS),
+    groups:    (event, ctx = {}) => buildPickerGroups(event, RECEIVERS, { siteReceivers: SITES[event?.siteId]?.receivers, ...ctx }),
+    recommend: (event) => recommendationsForEvent(event, RECEIVERS, { siteReceivers: SITES[event?.siteId]?.receivers }),
     filter:    filterByQuery,
     THICK_ARCHETYPES,
     THIN_ARCHETYPES,
@@ -733,6 +733,7 @@ import { streamNarrativeLens, knownArchetypes as _lensKnownArchetypes, writeLens
 import { saveRecording as _idbSaveRecording, loadRecording as _idbLoadRecording, deleteRecording as _idbDeleteRecording, listRecordingIds as _idbListRecordingIds, clearAll as _idbClearAll, migrateFromLocalStorage as _idbMigrateFromLocalStorage } from './recording_store.js';
 import { fetchDrivingRoute, computeSegmentLengths, advanceAlongPolyline } from './routing.js';
 import { buildCordon, assignPatrols, clearCordonCache } from './perimeter.js';
+import { fetchInfrastructureLights, LIGHT_TYPES } from './night_infrastructure_lights.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -1646,26 +1647,37 @@ async function main() {
         earthAtNightLayer.colorToAlpha = Cesium.Color.BLACK;
         earthAtNightLayer.colorToAlphaThreshold = 0.15;
       }
+      // Owns .show for BOTH building tilesets in night mode, and keeps them
+      // mutually exclusive. Sim platform mode only shows the photoreal
+      // tileset; Real platform mode keeps it hidden exactly as production
+      // has always behaved.
+      //
+      // The altitude gate inside it is load-bearing, not an optimisation.
+      // That asset has GLOBAL coverage, and its daytime-baked root tiles
+      // paint a lit shell over the whole planet at high altitude — it's a
+      // scene primitive, so bingLayer.brightness cannot dim it. Showing it
+      // from the globe view is what made night mode read as full daylight.
+      // Re-runs on camera move, since this function only runs on mode change.
+      _updateNightPhotoreal();
       if (googlePhotoreal) {
-        // Sim platform mode only: keep real photorealistic building
-        // textures at night instead of the flat fallback. Real platform
-        // mode stays hidden, exactly as production has always behaved.
-        //
-        // Altitude gate is load-bearing, not an optimisation. This asset
-        // has GLOBAL coverage, and its daytime-baked root tiles render a
-        // lit shell over the whole planet at high altitude — a scene
-        // primitive, so bingLayer.brightness cannot dim it. Showing it
-        // from the globe view is what made night mode read as full
-        // daylight. Only show it once the camera is low enough that it is
-        // actually the building view. _updateNightPhotoreal re-runs this
-        // on camera move, since this function only runs on mode change.
-        _updateNightPhotoreal();
         if (_isSimMode()) {
-          // Light buildings ONLY via per-tileset image-based lighting.
-          // 1.0 is Cesium's hard ceiling (ImageBasedLighting.js throws
-          // above it). lightColor is not a second lever — UniformState.js
-          // renormalises czm_lightColor to max-component 1.0, so values
-          // above 1 do nothing at all.
+          // Darkening this asset CANNOT be done with lighting. It is
+          // daylight photography with the light baked into the texture,
+          // and its materials are commonly unlit, so scene.light,
+          // lightColor and imageBasedLighting are all ignored — which is
+          // why it kept rendering as full daylight at close zoom no matter
+          // what lighting values were used.
+          //
+          // The lever that does work is the tile style colour, because
+          // colorBlendMode defaults to HIGHLIGHT, documented in
+          // Cesium3DTileColorBlendMode.js as "multiplies the source colour
+          // by the feature colour". That multiply happens in the shader
+          // regardless of lighting, and being a multiply it preserves the
+          // photographic detail instead of flattening it to a solid tone.
+          // Cleared back to undefined in the day and auto branches.
+          googlePhotoreal.style = new Cesium.Cesium3DTileStyle({
+            color: "color('#424e63')",
+          });
           googlePhotoreal.lightColor = undefined;
           if (googlePhotoreal.imageBasedLighting) {
             googlePhotoreal.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(1.0, 1.0);
@@ -1673,22 +1685,39 @@ async function main() {
         }
       }
       if (osmBuildings) {
-        osmBuildings.show = true;
+        // NOTE: .show is owned by _updateNightPhotoreal() (called above),
+        // which keeps this mutually exclusive with the photoreal tileset.
+        // Do not set .show here.
+        //
         // Real platform mode: exact original values, untouched.
-        // Sim platform mode: max ambient so the rural fallback tileset
-        // isn't jarringly black next to the lit photoreal buildings.
+        // Sim platform mode: a dark style multiply rather than raw ambient.
+        // Max ambient with no tint is what rendered these as glaring white
+        // boxes — the default OSM material is near-white, so lighting alone
+        // can only pick between black and white. The style multiply sets
+        // the tone directly, same lever used on the photoreal tileset.
         if (_isSimMode()) {
+          osmBuildings.style = new Cesium.Cesium3DTileStyle({
+            color: "color('#2b3442')",
+          });
           osmBuildings.lightColor = undefined;
           if (osmBuildings.imageBasedLighting) {
             osmBuildings.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(1.0, 1.0);
           }
         } else {
+          // Explicitly cleared so a Sim -> Real switch while already in
+          // night mode cannot leave Sim's tint behind on the Real view.
+          osmBuildings.style = undefined;
           osmBuildings.lightColor = new Cesium.Cartesian3(0.20, 0.25, 0.35);
           if (osmBuildings.imageBasedLighting) {
             osmBuildings.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(0.0, 0.0);
           }
         }
       }
+      // Procedural lit windows on building facades, plus real-position
+      // infrastructure lighting (runways, taxiways, motorways, harbours).
+      // Sim only — Real platform mode keeps the untouched production look.
+      _applyCityLights(_isSimMode());
+      _updateInfraLights();
       if (window.__isr_sdfiLayer) window.__isr_sdfiLayer.show = false;
       nightBloom.enabled = false;
     } else if (imageryMode === 'day') {
@@ -1718,6 +1747,7 @@ async function main() {
       if (googlePhotoreal) {
         googlePhotoreal.show = true;
         googlePhotoreal.lightColor = undefined;
+        googlePhotoreal.style = undefined;   // clear night's darkening tint
         if (googlePhotoreal.imageBasedLighting) {
           googlePhotoreal.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(1.0, 1.0);
         }
@@ -1730,6 +1760,8 @@ async function main() {
           osmBuildings.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(1.0, 1.0);
         }
       }
+      _applyCityLights(false);   // no lit windows in daylight
+      _clearInfraLights();
       nightBloom.enabled = false;
     } else {
       viewer.clock.currentTime = Cesium.JulianDate.now();
@@ -1753,6 +1785,7 @@ async function main() {
       if (googlePhotoreal) {
         googlePhotoreal.show = true;
         googlePhotoreal.lightColor = undefined;
+        googlePhotoreal.style = undefined;   // clear night's darkening tint
         if (googlePhotoreal.imageBasedLighting) {
           googlePhotoreal.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(1.0, 1.0);
         }
@@ -1764,6 +1797,10 @@ async function main() {
           osmBuildings.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(1.0, 1.0);
         }
       }
+      // Auto mode runs on the live clock but has no day/night transition
+      // built yet, so it renders as day. No lit windows until that exists.
+      _applyCityLights(false);
+      _clearInfraLights();
       nightBloom.enabled = false;
     }
   }
@@ -1775,13 +1812,197 @@ async function main() {
   // Every other mode is left to applyImageryMode's own branches.
   const NIGHT_PHOTOREAL_MAX_H = 50_000;   // metres
   function _updateNightPhotoreal() {
-    if (!googlePhotoreal) return;
     if (imageryMode !== 'night') return;
-    if (!_isSimMode()) { googlePhotoreal.show = false; return; }
+    if (!_isSimMode()) {
+      if (googlePhotoreal) googlePhotoreal.show = false;
+      if (osmBuildings) osmBuildings.show = true;
+      return;
+    }
     const h = viewer.camera.positionCartographic?.height ?? Infinity;
-    googlePhotoreal.show = h < NIGHT_PHOTOREAL_MAX_H;
+    if (googlePhotoreal) googlePhotoreal.show = h < NIGHT_PHOTOREAL_MAX_H;
+    // VIIRS night-lights imagery is ~750 m/pixel. That reads as correct
+    // city glow from orbit and as a blurry orange smear over everything
+    // once you are down at site level, so it is gated off at the same
+    // altitude the real building view takes over.
+    if (earthAtNightLayer) earthAtNightLayer.show = h >= NIGHT_PHOTOREAL_MAX_H;
+    // Day parity: day mode shows BOTH tilesets, and that is the building
+    // look we are matching. Night differs only in being darker, which is
+    // handled by the style multiply in applyImageryMode, not by hiding a
+    // layer. An earlier attempt made these mutually exclusive — that is not
+    // what day does, and it silently removes buildings anywhere Google's
+    // coverage lacks building meshes.
+    if (osmBuildings) osmBuildings.show = true;
   }
   viewer.camera.moveEnd.addEventListener(() => _updateNightPhotoreal());
+
+  // ── Night city lights (procedural, geometry-derived) ──────────────
+  // Lit windows are synthetic by necessity: the photoreal asset is daytime
+  // photography, so there are no lit windows anywhere in the source data.
+  // This derives them from the geometry itself — no hardcoded coordinates,
+  // no per-site data, works at any site — which is what separates it from
+  // the hand-drawn CPH light strings that were removed.
+  //
+  // Two Cesium constraints drive the shader, both verified against
+  // node_modules/@cesium/engine/Source/Shaders/Model/LightingStageFS.glsl:
+  //   * unlit materials use ONLY material.diffuse — emissive is discarded.
+  //   * PBR materials at night multiply diffuse by a light that is ~0, so
+  //     diffuse alone vanishes; emissive is what survives.
+  // The tilesets mix both models, so the glow is written to BOTH. Whichever
+  // path a given tile uses picks it up, and the other write is inert.
+  //
+  // WINDOW_LIT_FRACTION / WINDOW_GLOW are the two tuning dials.
+  const WINDOW_CELL_M = 3.4;        // window pitch in metres
+  const WINDOW_LIT_FRACTION = 0.18; // share of windows lit
+  const WINDOW_GLOW = 4.0;          // boosted: the night style multiply
+                                    // darkens final colour, so the glow has
+                                    // to clear that multiply to read as lit
+  function _makeCityLightShader() {
+    return new Cesium.CustomShader({
+      uniforms: {
+        u_cell:    { type: Cesium.UniformType.FLOAT, value: WINDOW_CELL_M },
+        u_litFrac: { type: Cesium.UniformType.FLOAT, value: WINDOW_LIT_FRACTION },
+        u_glow:    { type: Cesium.UniformType.FLOAT, value: WINDOW_GLOW },
+      },
+      fragmentShaderText: `
+        void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {
+          vec3 p = fsInput.attributes.positionWC;
+          // Local up on the ellipsoid. Surface normal comes back in eye
+          // space, so rotate it into world space to compare the two.
+          vec3 up = normalize(p);
+          vec3 n  = normalize(czm_inverseViewRotation * fsInput.attributes.normalEC);
+          // 1.0 on walls, 0.0 on roofs and ground. Only walls get windows.
+          float verticality = 1.0 - abs(dot(n, up));
+          if (verticality < 0.55) { return; }
+
+          // Quantise world position into a lattice; hash each cell to decide
+          // if that window is lit. Stable across frames and tile reloads
+          // because it is derived from world position, not tile-local data.
+          vec3 cell = floor(p / u_cell);
+          float h = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+          if (h > u_litFrac) { return; }
+
+          // Slight per-window colour variation so it doesn't read as a
+          // uniform stamp — warm tungsten through to cooler fluorescent.
+          float warm = fract(h * 91.7);
+          vec3 lightColor = mix(vec3(1.0, 0.72, 0.36), vec3(0.85, 0.89, 1.0), warm * 0.45);
+          vec3 glow = lightColor * u_glow;
+
+          material.diffuse  += glow;   // unlit path
+          material.emissive += glow;   // PBR path
+        }
+      `,
+    });
+  }
+  function _applyCityLights(on) {
+    // Separate instances per tileset — Cesium regenerates shaders per model,
+    // so the two tilesets must not share one CustomShader object.
+    if (googlePhotoreal) googlePhotoreal.customShader = on ? _makeCityLightShader() : undefined;
+    if (osmBuildings) osmBuildings.customShader = on ? _makeCityLightShader() : undefined;
+  }
+
+  // ── Infrastructure lights (real positions, real geometry) ─────────
+  // Runways, taxiways, motorways, harbours — the lights that are on every
+  // night regardless of what is happening that evening. Positions come
+  // from real queried geometry per site (see night_infrastructure_lights.js),
+  // so this is correct at every site with nothing hardcoded.
+  let _infraLights = null;          // BillboardCollection
+  let _infraLightsKey = null;       // which bbox is currently loaded
+  let _infraLightsLoading = false;
+
+  // Radial-gradient sprite, generated once per colour. A flat disc reads as
+  // a dot; the gradient is what makes it read as a light source.
+  const _infraSpriteCache = new Map();
+  function _infraSprite(colorHex) {
+    if (_infraSpriteCache.has(colorHex)) return _infraSpriteCache.get(colorHex);
+    const size = 64;
+    const c = document.createElement('canvas');
+    c.width = size; c.height = size;
+    const ctx = c.getContext('2d');
+    const col = Cesium.Color.fromCssColorString(colorHex);
+    const r = Math.round(col.red * 255);
+    const g = Math.round(col.green * 255);
+    const b = Math.round(col.blue * 255);
+    const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    grad.addColorStop(0.00, 'rgba(255,255,255,1.0)');
+    grad.addColorStop(0.18, `rgba(${r},${g},${b},0.95)`);
+    grad.addColorStop(0.45, `rgba(${r},${g},${b},0.35)`);
+    grad.addColorStop(1.00, `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+    _infraSpriteCache.set(colorHex, c);
+    return c;
+  }
+
+  function _clearInfraLights() {
+    if (_infraLights) {
+      viewer.scene.primitives.remove(_infraLights);
+      _infraLights = null;
+    }
+    _infraLightsKey = null;
+  }
+
+  function _renderInfraLights(lights) {
+    _clearInfraLights();
+    if (!lights.length) return;
+    const coll = new Cesium.BillboardCollection({ scene: viewer.scene });
+    for (const l of lights) {
+      const spec = LIGHT_TYPES[l.type];
+      if (!spec) continue;
+      coll.add({
+        position: Cesium.Cartesian3.fromDegrees(l.lon, l.lat),
+        image: _infraSprite(spec.color),
+        width: spec.size * 3.2,
+        height: spec.size * 3.2,
+        // Clamped so lights sit on the ground rather than at sea level.
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+        // Only render where they make sense: gone from orbit, gone when
+        // the camera is practically on top of a single lamp.
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, NIGHT_PHOTOREAL_MAX_H * 1.5),
+      });
+    }
+    viewer.scene.primitives.add(coll);
+    _infraLights = coll;
+    console.log(`[night_lights] ${lights.length} infrastructure lights rendered`);
+  }
+
+  // Fetches lazily for the area the camera is actually looking at, once per
+  // bbox, and never blocks the frame. Rate-limited sources mean this can
+  // fail; on failure night mode simply has no infrastructure lights.
+  async function _updateInfraLights() {
+    const active = imageryMode === 'night' && _isSimMode();
+    if (!active) { _clearInfraLights(); return; }
+    const carto = viewer.camera.positionCartographic;
+    if (!carto || carto.height >= NIGHT_PHOTOREAL_MAX_H) { _clearInfraLights(); return; }
+
+    // Snap the query box to a coarse grid so small camera nudges reuse the
+    // same cached fetch instead of hammering the endpoint.
+    const lat = Cesium.Math.toDegrees(carto.latitude);
+    const lon = Cesium.Math.toDegrees(carto.longitude);
+    const PAD = 0.045;                      // ~5 km
+    const s = Math.round((lat - PAD) * 50) / 50;
+    const w = Math.round((lon - PAD) * 50) / 50;
+    const n = Math.round((lat + PAD) * 50) / 50;
+    const e = Math.round((lon + PAD) * 50) / 50;
+    const key = `${s},${w},${n},${e}`;
+    if (key === _infraLightsKey || _infraLightsLoading) return;
+
+    _infraLightsLoading = true;
+    try {
+      const lights = await fetchInfrastructureLights(s, w, n, e);
+      // The camera may have moved on, or night/sim turned off, while the
+      // request was in flight.
+      if (imageryMode !== 'night' || !_isSimMode()) return;
+      _infraLightsKey = key;
+      _renderInfraLights(lights);
+    } finally {
+      _infraLightsLoading = false;
+    }
+  }
+  // Registered here, after the state above is initialised, rather than
+  // alongside the other camera listener further up. A listener registered
+  // before its own `let` state is a temporal-dead-zone crash waiting for
+  // the first await that lets an event fire in between.
+  viewer.camera.moveEnd.addEventListener(() => _updateInfraLights());
 
   viewer.scene.postRender.addEventListener(() => {
     if (imageryMode !== 'auto') return;
@@ -15367,8 +15588,15 @@ async function main() {
     const _spec = buildPickerGroups(event, RECEIVERS, {
       alreadyOnCaseRoleIds: _alreadyOnCaseRoleIds,
       activeRoleId,
+      // Same site receivers the recommended row below uses. Without
+      // this the modal resolved its stars nationally while the row
+      // resolved site-locally, so one modal showed two answers.
+      siteReceivers: SITES[event.siteId]?.receivers,
     });
-    const _recommendations = recommendationsForEvent(event, RECEIVERS).filter(
+    // Pass the site's own receivers so an archetype slot resolves to
+    // the LOCAL agency. Without it the broadcast slot falls back to a
+    // national default rather than the kommune containing the site.
+    const _recommendations = recommendationsForEvent(event, RECEIVERS, { siteReceivers: SITES[event.siteId]?.receivers }).filter(
       r => !_alreadyOnCaseRoleIds.has(r.id) && r.id !== activeRoleId
     );
     const _selectedRoleIds = new Set();

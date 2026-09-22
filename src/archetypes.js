@@ -76,9 +76,33 @@ const RULES = [
   { match: exact('fe'),              primary: ARCHETYPES.INTEL,     secondary: [ARCHETYPES.FORENSIC] },
   { match: exact('agency-cfcs'),     primary: ARCHETYPES.INTEL,     secondary: [ARCHETYPES.FORENSIC] },
 
-  // Beredskabsstyrelsen — specialists first, then regional centres
-  { match: exact('brs-kemisk'),      primary: ARCHETYPES.KINETIC,   secondary: [ARCHETYPES.REGULATORY] },
-  { match: exact('brs-nukleart'),    primary: ARCHETYPES.KINETIC,   secondary: [ARCHETYPES.REGULATORY] },
+  // Beredskabsstyrelsen, specialists first, then regional centres.
+  //
+  // The chemical and nuclear preparedness units measure, contain and
+  // decontaminate. They were left KINETIC when the centres below were
+  // reclassified, purely to keep that change small. Moved here on
+  // review: the argument is stronger for them, not weaker. The kinetic
+  // narrative directive hands the model the words "denial" and
+  // "seizure" to describe a radiological survey, which reads as
+  // weapons-adjacent in a product whose entire position is that it
+  // observes and never acts.
+  //
+  // MEDICAL rather than PUBLIC, corrected on review. The first attempt
+  // sent them to PUBLIC alongside the fire brigades, whose lens directs
+  // the model to write message-window language for a kommune crisis
+  // staff and to omit operational detail. That is the wrong reader for
+  // a unit doing radiological survey work. The MEDICAL directive is the
+  // only one in the file carrying the right vocabulary: "casualty risk,
+  // exposure vector, triage priority, hospital-load impact,
+  // decontamination window, mass-casualty threshold". REGULATORY stays
+  // secondary because both advise on restriction and exclusion zones.
+  //
+  // Verified before moving: the kinetic cascade stand-in resolves to
+  // the brs parent either way, so nothing shifts; and neither MEDICAL
+  // nor REGULATORY is in the historical panel's visible set, so neither
+  // unit gains or loses a panel.
+  { match: exact('brs-kemisk'),      primary: ARCHETYPES.MEDICAL,   secondary: [ARCHETYPES.REGULATORY] },
+  { match: exact('brs-nukleart'),    primary: ARCHETYPES.MEDICAL,   secondary: [ARCHETYPES.REGULATORY] },
   { match: exact('beredskab'),       primary: ARCHETYPES.COORD,     secondary: [] },
   // Beredskabsstyrelsen centres are rescue and civil protection, not a
   // kinetic force. They were KINETIC primary, which contradicted this
@@ -91,13 +115,8 @@ const RULES = [
   //
   // This rule and the kbr- rule below cover 34 roles: 29 municipal
   // brigades and 5 Beredskabsstyrelsen centres. The chemical and
-  // nuclear preparedness units have their own exact rules above and are
-  // NOT reached by these prefixes, so they stay KINETIC. That is a
-  // scoping decision, not a judgement that it is correct: the argument
-  // for reclassifying is arguably stronger for them, since "denial" and
-  // "seizure" attached to a nuclear preparedness unit read as
-  // weapons-adjacent against a detection-only product. Raised, not
-  // silently widened.
+  // nuclear preparedness units are NOT reached by these prefixes; they
+  // have their own exact rules above and were moved separately.
   //
   // NOTE, corrected after review: reclassifying does NOT fix the report.
   // Chapter composition never reads archetype at all. renderAllSubsections
