@@ -106,17 +106,72 @@ That is right for the normal case, since a crash site cordon is a police
 scene by definition. But a cordon can form without any police account
 being on the event: `police-c-uas` is an operator-side counter-dispatch
 asset with `useRoadRouting: true, airborne: false`, and any such ground
-unit is promoted to `holding-cordon` on arrival. In a live event where
-the operator dispatches ground units directly and nothing ever escalates
-to police, those units hold with no release control anywhere in the
-product, because the timer is inert on live events.
+unit is promoted to `holding-cordon` on arrival.
 
-Left as-is deliberately. The fix is not an operator-side release
-control, since operators do not hold scene command and inventing one
-would contradict how the platform routes authority. The real answer is
-that a cordon forming should escalate to the responsible police district
-so a scene has an owner. That is a routing question, not a lifecycle
-one, and it is not built yet.
+**Closed for warhead impacts.** The terminal-impact cascade now
+escalates to the site's own tier-2 Politikreds alongside the consequence
+agencies, so an impact scene always has a commander who can release it.
+See "Impact cascade" below.
+
+**Still open for an operator-dispatched cordon** on an event that never
+escalates to police by any other route. The fix is not an operator-side
+release control, since operators do not hold scene command and inventing
+one would contradict how the platform routes authority. The answer is
+that a cordon forming should itself escalate to the responsible
+district, reusing `localPoliceDestinationIds`. That is a routing
+question, not a lifecycle one, and it is not built.
+
+## Impact cascade
+
+A warhead detonation auto-escalates with no human click. Until
+2026-09-22 it alerted six consequence agencies and no police, while its
+own message told those agencies the scene was not yet declared safe by
+police. Responders, no scene commander, and the code comment claimed
+police were included.
+
+The police recipient is resolved by `localPoliceDestinationIds(event)`
+in `destinations.js`, which takes the event's site destinations and
+keeps the tier-2 entry whose parent is `Politi`. Deterministic, offline,
+and correct at any site added later.
+
+It is deliberately **not** derived from `sovereign_geo_routing`. That
+module returns role ids rather than destination ids, needs a 30MB
+Datafordeler polygon pull, is never primed in a normal session, and its
+own authors marked it non-authoritative for routing. It is for display
+and audit enrichment.
+
+### A destination nobody holds is a record nobody sees
+
+Inboxes are built from `eventsForDestinations(role.destinationIds)`, so
+a destination that no role lists is an escalation written into a void.
+Seven of the nine site police destinations were in exactly that state,
+which meant resolving the right district would still have delivered
+nothing at every site but Copenhagen Airport. Each district now holds
+the sites inside it, taken from the destination's own declared
+Politikreds name rather than inferred from geography.
+
+`scripts/check-impact-cascade.mjs` asserts the whole chain by importing
+the real `destinations.js` and `roles.js` and running the real resolver,
+rather than pattern-matching source text. Text matching cannot see a
+destination that is generated at runtime, which every Amager destination
+is. It fails the build if the police leg is removed, if a covered site
+has no district, if a district is held by no role, or if a Politikreds
+name falls through `destinationParent` into `Other`.
+
+That last one was a live bug: `Sydsjællands og Lolland-Falsters Politi`
+parented as `Other` because the name list abbreviated it, so Bjæverskov
+had no police routing anywhere in the product while its destination sat
+in the table looking correct.
+
+### Still Copenhagen-shaped
+
+The six consequence recipients remain a fixed Copenhagen list. Every
+site that can detonate today is in the capital region, and the gate
+fails the build if a detonating template appears at a site outside
+`CASCADE_COVERS`, so a new site cannot silently summon Copenhagen
+hospitals. Making that list resolve per site needs the ambulance
+service, municipal fire service and rescue reinforcement for each site,
+which is configuration data, not code.
 
 ### Not in the case file yet
 

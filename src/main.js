@@ -154,7 +154,7 @@ import { RECEIVER_ASSETS, assetsForReceiverRole, getReceiverDirectAsset, getRece
 import { cordonReleaseDecisions, clearedWreckageIds, expiredGhostEventIds, sceneReleaseState } from './scene_lifecycle.js';
 import {
   destinationsForSite, destinationsForEvent, getDestination, destinationTypeLabel,
-  destinationParent, destinationShortLabel, groupByParent,
+  destinationParent, destinationShortLabel, groupByParent, localPoliceDestinationIds,
   addDestination, updateDestination, removeDestination,
   onDestinationsChange, resetDestinationsToDefault,
   CHANNEL_META, getDestinationGuidance, getAllDestinations,
@@ -13516,24 +13516,60 @@ async function main() {
           // detonation, so the system alerts the consequence chain
           // immediately (detection + alerting, never action). Medical
           // coordination, nearest akutmodtagelser, fire and rescue,
-          // heavy rescue, and police receive the case in their inbox;
-          // dispatch decisions stay with the humans in each profile.
+          // heavy rescue, and the responsible police district receive
+          // the case in their inbox; dispatch decisions stay with the
+          // humans in each profile.
+          //
+          // POLICE ARE NOT OPTIONAL HERE. This cascade tells medical
+          // and fire that the scene is not yet declared safe, and
+          // police are the only agency that can declare it safe, take
+          // scene command, and later release the scene. Until
+          // 2026-09-22 this list held consequence agencies only, so an
+          // impact produced responders with no scene commander. The
+          // comment above it claimed police were included; they were
+          // not, and the build gate did not check.
+          //
+          // Resolved from the site's own tier-2 Politikreds rather than
+          // hardcoded, so it is correct at every site including ones
+          // added later. escalateEvent dedups against existing
+          // escalations, so if the rules engine or the operator already
+          // escalated to that district this is a silent no-op.
+          const _casPoliceIds = localPoliceDestinationIds(event);
+          if (!_casPoliceIds.length) {
+            console.warn('[impact cascade] no tier-2 Politikreds destination for site', event.siteId,
+              '— consequence agencies will be alerted with no scene commander.');
+          }
           try {
+            // Hvidovre covers Amager, so it is the nearest acute
+            // hospital to both Copenhagen Airport and the Amager
+            // substation, and it was the one omitted. It has carried a
+            // destination, a home base and two vehicles throughout.
+            //
+            // Still Copenhagen-specific. Every site that can detonate
+            // today is in the capital region, and check-impact-cascade
+            // fails the build if a detonating site appears outside
+            // CASCADE_COVERS, so this cannot silently misroute a new
+            // site to Copenhagen hospitals.
+            const _casConsequenceIds = ['amk-hovedstaden', 'hospital-rigshospitalet', 'hospital-hvidovre', 'hospital-bispebjerg', 'kbr-hovedstaden', 'brs-hedehusene'];
             const _casRecords = escalateEvent(event.id, {
-              // Hvidovre covers Amager, so it is the nearest acute
-              // hospital to both Copenhagen Airport and the Amager
-              // substation, and it was the one omitted. It has carried a
-              // destination, a home base and two vehicles throughout.
-              destinationIds: ['amk-hovedstaden', 'hospital-rigshospitalet', 'hospital-hvidovre', 'hospital-bispebjerg', 'kbr-hovedstaden', 'brs-hedehusene'],
+              destinationIds: [..._casConsequenceIds, ..._casPoliceIds],
               payload: 'full',
-              message: `Warhead detonation observed at ${p.lat.toFixed(4)}N ${p.lon.toFixed(4)}E. Casualties possible. Immediate consequence response requested. Scene not yet declared safe by police.`,
+              message: `Warhead detonation observed at ${p.lat.toFixed(4)}N ${p.lon.toFixed(4)}E. Casualties possible. Immediate consequence response requested. Scene not yet declared safe: police scene command required.`,
               operator: 'AUTO-CASCADE',
               operatorRoleId: 'system-impact-cascade',
             });
             _casRecords.forEach((r, idx) => {
               setTimeout(() => updateEscalationStatus(event.id, r.id, 'delivered'), 1200 + idx * 250);
             });
-            toast('Consequence cascade sent: medical, fire and rescue alerted.', 'warn');
+            // Every other escalation path fires the adapter seam; this
+            // one did not, so impact cascades never reached the
+            // per-role escalation adapter that real customer inbox
+            // systems will register against. Fire-and-forget, guarded
+            // internally against an empty array.
+            _fireEscalationAdapterSend(event, _casRecords);
+            toast(_casPoliceIds.length
+              ? 'Consequence cascade sent: police, medical, fire and rescue alerted.'
+              : 'Consequence cascade sent: medical, fire and rescue alerted. No police district configured for this site.', 'warn');
           } catch (err) { console.warn('[impact cascade] failed:', err.message); }
           // Persistent IMPACT marker at the detonation point — same
           // pattern as the DOWNED marker so the coordinate survives on
@@ -23954,7 +23990,11 @@ async function main() {
         const ev = getEvent(eventId);
         if (!ev) { toast('Event not found', 'err'); return; }
         const dests = destinationsForEvent(ev);
-        const politiIds = dests.filter(d => d.tier === 2 && destinationParent(d) === 'Politi').map(d => d.id);
+        // Same resolver the impact cascade uses. Exported once from
+        // destinations.js rather than copied, because a police-district
+        // predicate that exists in two places is exactly the drift this
+        // codebase keeps shipping bugs from.
+        const politiIds = localPoliceDestinationIds(ev);
         if (!politiIds.length) { toast('No local Politi destination configured', 'err'); return; }
         const role = getActiveRole();
         const targetPolitiName = dests.find(d => d.id === politiIds[0])?.name || 'local Politikreds';

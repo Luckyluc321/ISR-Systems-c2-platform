@@ -331,7 +331,7 @@ export const RECEIVERS = [
     parentId: 'politi',
     org: 'Politi København', label: 'Politi København',
     person: 'S. Hansen', initials: 'SH',
-    scope: 'cph-only', destinationIds: ['cph-t2-politi'],
+    scope: 'cph-only', destinationIds: ['cph-t2-politi', 'amk-t2-politi'],   // CPH Airport, Amager Koblingsstation
     childrenIds: ['kbh-politi-rytteri'],
     description: 'Copenhagen district. Local C-UAS patrol. Rytteriafdelingen sits here (national mounted section).',
   },
@@ -345,8 +345,20 @@ export const RECEIVERS = [
   },
 
   // ── Politikredse (remaining 10 of Denmark's 12) ─────────────────
-  // Publicly stable list from politi.dk. Empty destinationIds until
-  // sites explicitly declare these districts in their receivers block.
+  // Publicly stable list from politi.dk.
+  //
+  // A district holds the tier-2 Politikreds destination of every site
+  // inside it. That link is what makes an escalation visible: inboxes
+  // are built from eventsForDestinations(role.destinationIds), so a
+  // destination no role holds is a record nobody ever sees. Seven of
+  // the nine site police destinations were unheld until 2026-09-22,
+  // which meant the terminal-impact cascade could have "alerted"
+  // police into a void at every site but Copenhagen Airport.
+  //
+  // Each link below is taken from the site destination's own declared
+  // Politikreds name in destinations.js, not inferred from geography.
+  // scripts/check-impact-cascade.mjs asserts the link for every site
+  // that can detonate.
   {
     id: 'politi-vestegn', kind: 'receiver', type: 'leaf', parentId: 'politi',
     org: 'Vestegnens Politi', label: 'Vestegnens Politi', initials: 'VP',
@@ -356,7 +368,7 @@ export const RECEIVERS = [
   {
     id: 'politi-nordsj', kind: 'receiver', type: 'leaf', parentId: 'politi',
     org: 'Nordsjællands Politi', label: 'Nordsjællands Politi', initials: 'NP',
-    scope: 'regional', destinationIds: [],
+    scope: 'regional', destinationIds: ['hvg-t2-politi'],   // Hovegaard
     description: 'North Zealand district. Covers Helsingør, Hillerød, Fredensborg.',
   },
   {
@@ -368,7 +380,7 @@ export const RECEIVERS = [
   {
     id: 'politi-sydsjaelland', kind: 'receiver', type: 'leaf', parentId: 'politi',
     org: 'Sydsjællands og Lolland-Falsters Politi', label: 'Sydsjællands og Lolland-Falsters Politi', initials: 'SL',
-    scope: 'regional', destinationIds: [],
+    scope: 'regional', destinationIds: ['bjk-t2-politi'],   // Bjaeverskov
     description: 'South Zealand + Lolland-Falster district.',
   },
   {
@@ -380,13 +392,13 @@ export const RECEIVERS = [
   {
     id: 'politi-sydsonderjyl', kind: 'receiver', type: 'leaf', parentId: 'politi',
     org: 'Syd- og Sønderjyllands Politi', label: 'Syd- og Sønderjyllands Politi', initials: 'SS',
-    scope: 'regional', destinationIds: [],
+    scope: 'regional', destinationIds: ['kas-t2-politi'],   // Kassoe
     description: 'South + South Jutland district. Covers Esbjerg, Kolding, Haderslev.',
   },
   {
     id: 'politi-sydostjyl', kind: 'receiver', type: 'leaf', parentId: 'politi',
     org: 'Sydøstjyllands Politi', label: 'Sydøstjyllands Politi', initials: 'SØ',
-    scope: 'regional', destinationIds: [],
+    scope: 'regional', destinationIds: ['ldg-t2-politi', 'bll-t2-politi'],   // Landerupgaard, Billund Airport
     description: 'Southeast Jutland district. Covers Vejle, Horsens, Fredericia (Landerupgård).',
   },
   {
@@ -404,7 +416,7 @@ export const RECEIVERS = [
   {
     id: 'politi-nordjyl', kind: 'receiver', type: 'leaf', parentId: 'politi',
     org: 'Nordjyllands Politi', label: 'Nordjyllands Politi', initials: 'NJ',
-    scope: 'regional', destinationIds: [],
+    scope: 'regional', destinationIds: ['frv-t2-politi'],   // Ferslev
     description: 'North Jutland district. Covers Aalborg, Frederikshavn, Hjørring.',
   },
   {

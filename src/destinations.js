@@ -737,6 +737,29 @@ export function destinationsForEvent(event) {
   });
 }
 
+// The responsible police district for an event, as destination ids.
+//
+// Every site declares exactly one tier-2 Politikreds, and every site's
+// domain scope includes 'ground', which is the domain a police
+// destination carries, so this resolves at every site including ones
+// added later. Deterministic and offline: it reads the same
+// hand-configured destination table the rest of the escalation system
+// reads.
+//
+// NOT derived from sovereign_geo_routing. That module returns role ids
+// rather than destination ids, needs a 30MB Datafordeler polygon pull,
+// is never primed in a normal session, and its own authors marked it
+// non-authoritative for routing in two separate files. It is for
+// display and audit enrichment, not for deciding who gets a case.
+//
+// Returns an array because the shape allows more than one, though every
+// site configured today yields exactly one.
+export function localPoliceDestinationIds(event) {
+  return destinationsForEvent(event)
+    .filter(d => d.tier === 2 && destinationParent(d) === 'Politi')
+    .map(d => d.id);
+}
+
 // Companion to destinationsForSite() — same hand-configured destinations
 // PLUS a `geoContext` object describing which kommune/politikreds/region
 // this site's coordinates fall inside. Non-authoritative for routing;
@@ -770,8 +793,16 @@ export function destinationParent(dest) {
   if (/Energinet/.test(n)) return dest.type === 'system' ? 'Energinet Systems' : 'Energinet Operations';
   // Danish agencies
   if (n.startsWith('Politi ') || /\bPolitikreds\b/.test(n)) return 'Politi';
-  // Politikreds names by district — group under 'Politi' even without prefix
-  if (/(Københavns|Nordsjællands|Vestegnens|Midt- og Vestsjællands|Sydsjællands|Fyns|Syd- og Sønderjyllands|Sydøstjyllands|Midt- og Vestjyllands|Østjyllands|Nordjyllands|Bornholms) Politi/.test(n)) return 'Politi';
+  // Politikreds names by district — group under 'Politi' even without prefix.
+  //
+  // All twelve official districts, written in full. The previous list
+  // abbreviated two of them and expected ' Politi' to follow
+  // immediately, so 'Sydsjællands og Lolland-Falsters Politi' fell
+  // through to 'Other'. That silently removed police from every
+  // routing decision for Bjæverskov, including the impact cascade and
+  // the "escalate to local Politi" action, which reported no district
+  // configured while one was sitting in the table.
+  if (/(Københavns|Københavns Vestegns|Vestegnens|Nordsjællands|Midt- og Vestsjællands|Sydsjællands og Lolland-Falsters|Fyns|Syd- og Sønderjyllands|Sydøstjyllands|Midt- og Vestjyllands|Østjyllands|Nordjyllands|Bornholms) Politi/.test(n)) return 'Politi';
   if (n.startsWith('PET')) return 'PET';
   if (n.startsWith('Rigspoliti')) return 'Rigspolitiet';
   if (n.startsWith('Forsvarets Efterretning') || /\bFE\b/.test(n)) return 'FE';
