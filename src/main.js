@@ -151,6 +151,7 @@ import { buildPostIncidentReport, buildChainPostIncidentReport, emphasisForBranc
 import { evaluateClassificationPipeline, evaluateAttackProfileDetector } from './classification_pipeline.js';
 import { baseForReceiverRole } from './receiver_bases.js';
 import { RECEIVER_ASSETS, assetsForReceiverRole, getReceiverDirectAsset, getReceiverRequestAsset } from './receiver_assets.js';
+import { cordonReleaseDecisions, clearedWreckageIds, expiredGhostEventIds } from './scene_lifecycle.js';
 import {
   destinationsForSite, destinationsForEvent, getDestination, destinationTypeLabel,
   destinationParent, destinationShortLabel, groupByParent,
@@ -733,7 +734,7 @@ import { streamNarrativeLens, knownArchetypes as _lensKnownArchetypes, writeLens
 import { saveRecording as _idbSaveRecording, loadRecording as _idbLoadRecording, deleteRecording as _idbDeleteRecording, listRecordingIds as _idbListRecordingIds, clearAll as _idbClearAll, migrateFromLocalStorage as _idbMigrateFromLocalStorage } from './recording_store.js';
 import { fetchDrivingRoute, computeSegmentLengths, advanceAlongPolyline } from './routing.js';
 import { buildCordon, assignPatrols, clearCordonCache } from './perimeter.js';
-import { fetchInfrastructureLights, LIGHT_TYPES } from './night_infrastructure_lights.js';
+import { loadSiteLights, LIGHT_STYLES, LIGHT_CLASSES } from './night_infrastructure_lights.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -1716,7 +1717,13 @@ async function main() {
       // Procedural lit windows on building facades, plus real-position
       // infrastructure lighting (runways, taxiways, motorways, harbours).
       // Sim only — Real platform mode keeps the untouched production look.
-      _applyCityLights(_isSimMode());
+      // Procedural window glow is OFF. It guesses which windows are lit,
+      // which is neither real nor asked for — the requirement is lights
+      // that are on every night in real places. Kept in the codebase
+      // because facade lighting genuinely cannot come from data (no source
+      // records which windows are lit), so if it is ever wanted back it is
+      // a one-line flip. Infrastructure lighting below is the real feature.
+      _applyCityLights(false);
       _updateInfraLights();
       if (window.__isr_sdfiLayer) window.__isr_sdfiLayer.show = false;
       nightBloom.enabled = false;
@@ -1900,108 +1907,109 @@ async function main() {
     if (osmBuildings) osmBuildings.customShader = on ? _makeCityLightShader() : undefined;
   }
 
-  // ── Infrastructure lights (real positions, real geometry) ─────────
-  // Runways, taxiways, motorways, harbours — the lights that are on every
-  // night regardless of what is happening that evening. Positions come
-  // from real queried geometry per site (see night_infrastructure_lights.js),
-  // so this is correct at every site with nothing hardcoded.
-  let _infraLights = null;          // BillboardCollection
-  let _infraLightsKey = null;       // which bbox is currently loaded
-  let _infraLightsLoading = false;
-
-  // Radial-gradient sprite, generated once per colour. A flat disc reads as
-  // a dot; the gradient is what makes it read as a light source.
-  const _infraSpriteCache = new Map();
-  function _infraSprite(colorHex) {
-    if (_infraSpriteCache.has(colorHex)) return _infraSpriteCache.get(colorHex);
-    const size = 64;
-    const c = document.createElement('canvas');
-    c.width = size; c.height = size;
-    const ctx = c.getContext('2d');
-    const col = Cesium.Color.fromCssColorString(colorHex);
-    const r = Math.round(col.red * 255);
-    const g = Math.round(col.green * 255);
-    const b = Math.round(col.blue * 255);
-    const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-    grad.addColorStop(0.00, 'rgba(255,255,255,1.0)');
-    grad.addColorStop(0.18, `rgba(${r},${g},${b},0.95)`);
-    grad.addColorStop(0.45, `rgba(${r},${g},${b},0.35)`);
-    grad.addColorStop(1.00, `rgba(${r},${g},${b},0)`);
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, size, size);
-    _infraSpriteCache.set(colorHex, c);
-    return c;
-  }
+  // ── Infrastructure lights (real geometry, baked offline) ──────────
+  // The lit street network, runways, taxiways, harbours. Geometry comes
+  // from public/night-lights/<siteId>.json, baked by
+  // scripts/bake-night-lights.mjs. Rendered as ground-clamped glow
+  // polylines rather than discrete billboards: at this altitude a real lit
+  // street reads as a fine continuous line, not a row of separate lamps.
+  let _infraPrimitives = [];
+  let _infraSiteId = null;
+  let _infraLoading = false;
 
   function _clearInfraLights() {
-    if (_infraLights) {
-      viewer.scene.primitives.remove(_infraLights);
-      _infraLights = null;
+    for (const p of _infraPrimitives) {
+      try { viewer.scene.primitives.remove(p); } catch (_) {}
     }
-    _infraLightsKey = null;
+    _infraPrimitives = [];
+    _infraSiteId = null;
   }
 
-  function _renderInfraLights(lights) {
-    _clearInfraLights();
-    if (!lights.length) return;
-    const coll = new Cesium.BillboardCollection({ scene: viewer.scene });
-    for (const l of lights) {
-      const spec = LIGHT_TYPES[l.type];
-      if (!spec) continue;
-      coll.add({
-        position: Cesium.Cartesian3.fromDegrees(l.lon, l.lat),
-        image: _infraSprite(spec.color),
-        width: spec.size * 3.2,
-        height: spec.size * 3.2,
-        // Clamped so lights sit on the ground rather than at sea level.
-        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-        // Only render where they make sense: gone from orbit, gone when
-        // the camera is practically on top of a single lamp.
-        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, NIGHT_PHOTOREAL_MAX_H * 1.5),
-      });
+  function _buildInfraPrimitive(polylines, style) {
+    const instances = [];
+    for (const flat of polylines) {
+      if (!flat || flat.length < 4) continue;
+      // Baked format is [lat, lon, lat, lon, ...]; Cesium wants lon,lat.
+      const degrees = new Array(flat.length);
+      for (let i = 0; i < flat.length; i += 2) {
+        degrees[i] = flat[i + 1];
+        degrees[i + 1] = flat[i];
+      }
+      instances.push(new Cesium.GeometryInstance({
+        geometry: new Cesium.GroundPolylineGeometry({
+          positions: Cesium.Cartesian3.fromDegreesArray(degrees),
+          width: style.width,
+        }),
+      }));
     }
-    viewer.scene.primitives.add(coll);
-    _infraLights = coll;
-    console.log(`[night_lights] ${lights.length} infrastructure lights rendered`);
+    if (!instances.length) return null;
+    return new Cesium.GroundPolylinePrimitive({
+      geometryInstances: instances,
+      appearance: new Cesium.PolylineMaterialAppearance({
+        material: Cesium.Material.fromType(Cesium.Material.PolylineGlowType, {
+          color: Cesium.Color.fromCssColorString(style.color).withAlpha(style.alpha),
+          glowPower: style.glowPower,
+          taperPower: 1.0,
+        }),
+      }),
+      // These are decorative, never pickable — keeps them out of the way of
+      // detection entity picking.
+      allowPicking: false,
+    });
   }
 
-  // Fetches lazily for the area the camera is actually looking at, once per
-  // bbox, and never blocks the frame. Rate-limited sources mean this can
-  // fail; on failure night mode simply has no infrastructure lights.
+  // Nearest configured site to the camera, so the right baked file loads.
+  function _nearestSiteId(lat, lon) {
+    let best = null;
+    let bestD = Infinity;
+    for (const [sid, site] of Object.entries(SITES)) {
+      const c = site.coordinates;
+      if (!c) continue;
+      const d = Math.hypot(c.lat - lat, (c.lon - lon) * Math.cos(lat * Math.PI / 180));
+      if (d < bestD) { bestD = d; best = sid; }
+    }
+    // ~0.25 deg ≈ 28 km. Beyond that the baked box would not cover the view.
+    return bestD < 0.25 ? best : null;
+  }
+
   async function _updateInfraLights() {
     const active = imageryMode === 'night' && _isSimMode();
     if (!active) { _clearInfraLights(); return; }
     const carto = viewer.camera.positionCartographic;
     if (!carto || carto.height >= NIGHT_PHOTOREAL_MAX_H) { _clearInfraLights(); return; }
 
-    // Snap the query box to a coarse grid so small camera nudges reuse the
-    // same cached fetch instead of hammering the endpoint.
     const lat = Cesium.Math.toDegrees(carto.latitude);
     const lon = Cesium.Math.toDegrees(carto.longitude);
-    const PAD = 0.045;                      // ~5 km
-    const s = Math.round((lat - PAD) * 50) / 50;
-    const w = Math.round((lon - PAD) * 50) / 50;
-    const n = Math.round((lat + PAD) * 50) / 50;
-    const e = Math.round((lon + PAD) * 50) / 50;
-    const key = `${s},${w},${n},${e}`;
-    if (key === _infraLightsKey || _infraLightsLoading) return;
+    const siteId = _nearestSiteId(lat, lon);
+    if (!siteId) { _clearInfraLights(); return; }
+    if (siteId === _infraSiteId || _infraLoading) return;
 
-    _infraLightsLoading = true;
+    _infraLoading = true;
     try {
-      const lights = await fetchInfrastructureLights(s, w, n, e);
-      // The camera may have moved on, or night/sim turned off, while the
-      // request was in flight.
+      const data = await loadSiteLights(siteId);
+      // Night/Sim may have been switched off, or the camera moved to another
+      // site, while the file was loading.
       if (imageryMode !== 'night' || !_isSimMode()) return;
-      _infraLightsKey = key;
-      _renderInfraLights(lights);
+      _clearInfraLights();
+      if (!data) return;
+      let total = 0;
+      for (const cls of LIGHT_CLASSES) {
+        const prim = _buildInfraPrimitive(data[cls] || [], LIGHT_STYLES[cls]);
+        if (prim) {
+          viewer.scene.primitives.add(prim);
+          _infraPrimitives.push(prim);
+          total += (data[cls] || []).length;
+        }
+      }
+      _infraSiteId = siteId;
+      console.log(`[night_lights] ${siteId}: ${total} lit ways rendered`);
     } finally {
-      _infraLightsLoading = false;
+      _infraLoading = false;
     }
   }
-  // Registered here, after the state above is initialised, rather than
-  // alongside the other camera listener further up. A listener registered
-  // before its own `let` state is a temporal-dead-zone crash waiting for
-  // the first await that lets an event fire in between.
+  // Registered after the state above is initialised — a listener registered
+  // before its own `let` state is a temporal-dead-zone crash waiting for the
+  // first await that lets an event fire in between.
   viewer.camera.moveEnd.addEventListener(() => _updateInfraLights());
 
   viewer.scene.postRender.addEventListener(() => {
@@ -4089,6 +4097,11 @@ async function main() {
       if (!d.profile?.useRoadRouting) continue;   // ground vehicles only
       if (d.profile?.airborne) continue;
       if (d.state === 'complete' || d.rtbCompleted) continue;
+      // A unit already released and driving home must not be re-pinned
+      // to a cordon: it would be handed a fresh wreckage assignment and
+      // an OSRM route it will never follow, while physically continuing
+      // to base. A unit already holding a cordon keeps the one it has.
+      if (d.state === 'rtb_home' || d.state === 'rtb_via_last_known' || d.state === 'holding-cordon') continue;
       patrolDispatches.push(d);
     }
     if (!patrolDispatches.length) return;
@@ -5047,6 +5060,14 @@ async function main() {
     entry.viaRequestFromRoleId = d.viaRequestFromRoleId || null;
     entry.archetype = d.archetype || entry.archetype || null;
     entry.rtbCompleted = !!d.rtbCompleted;
+    // Cordon stand-down. This mirror is a whitelist, and the live
+    // dispatch is deleted five seconds after it reaches base, so
+    // anything not copied here is lost from the permanent record. The
+    // reason matters most: it distinguishes a police account recording
+    // that the scene was released from a simulation timer running out,
+    // and those two must never be confused in a case file.
+    entry.cordonReleasedAt = d.cordonReleasedAt || entry.cordonReleasedAt || null;
+    entry.cordonReleaseReason = d.cordonReleaseReason || entry.cordonReleaseReason || null;
     // Append-only state history for report reconstruction. Only push
     // when the state actually changes so we don't spam the array
     // with identical entries every tick (60 Hz would balloon this).
@@ -6689,6 +6710,18 @@ async function main() {
       // the popup keeps showing "On station" but the tick loop's
       // engage timer no longer trips (rtbCompleted-style guard).
       d.state = 'holding-cordon';
+      // Stamp when the hold began so the cordon can end. Before this,
+      // nothing anywhere moved a unit out of holding-cordon: no timer,
+      // no action, no path. Every scenario with a downed airframe
+      // parked its units permanently and the downed symbol never
+      // cleared. See src/scene_lifecycle.js for the release rules.
+      // Date.now(), NOT the tick-loop `now` param. Same trap as the
+      // comment above: `now` does not exist in this function's scope,
+      // and reading it throws a ReferenceError that aborts the rAF
+      // callback before it reschedules, freezing every dispatch on the
+      // map for the session. Date.now() is also the right timebase:
+      // the sweep compares this against Date.now().
+      if (typeof d.cordonHoldSinceMs !== 'number') d.cordonHoldSinceMs = Date.now();
       if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
         if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
       return;
@@ -8108,6 +8141,144 @@ async function main() {
     }
   }
   setInterval(_sweepUnobservedActiveEvents, 2000);
+
+  // ── Scene lifecycle sweep ──────────────────────────────────────────
+  // Ends a scene: cordons stand down, the downed symbol clears, units
+  // drive home, and a closed track's entities are finally removed.
+  //
+  // Hosted on an interval rather than in the simulation tick, because
+  // the tick is exactly why the teardown never ran: closing a track
+  // stops it emitting positions, so the per-position loop never visited
+  // it again and the removal check was unreachable on every natural
+  // close. That is why a threat leaving coverage kept flying.
+  //
+  // All decisions live in src/scene_lifecycle.js, which is pure and
+  // testable. This function only applies them.
+  // Wreckage ids that have had a unit attached at some point. A cordon
+  // that never formed has not stood down, it never stood up, so its
+  // perimeter must not be swept away. Browser-local like the dispatch
+  // map it is derived from.
+  const _everHeldWreckageIds = new Set();
+
+  function _sweepSceneLifecycle() {
+    const now = Date.now();
+    const dispatches = Array.from(_counterDispatches.values());
+    for (const d of dispatches) {
+      if (d.assignedWreckageId) _everHeldWreckageIds.add(d.assignedWreckageId);
+    }
+
+    // 1. Release cordons that are due, grouped by event so the
+    //    simulation gate and the human release are read per event.
+    //
+    //    Deliberately NOT via getEvent() or visibleEvents(): both filter
+    //    by the active actor, and scene lifecycle is a rendering
+    //    concern, not a data-read one. Switching to a receiver role not
+    //    on an event would otherwise freeze that event's cordons for as
+    //    long as the role stayed active.
+    const byEvent = new Map();
+    for (const d of dispatches) {
+      if (d.state !== 'holding-cordon') continue;
+      if (!byEvent.has(d.eventId)) byEvent.set(d.eventId, []);
+      byEvent.get(d.eventId).push(d);
+    }
+    for (const [eventId, group] of byEvent) {
+      const event = EVENTS.find(e => e.id === eventId);
+      if (!event) continue;
+      const decisions = cordonReleaseDecisions(group, {
+        now,
+        // A human recording that the police released the scene. No
+        // control writes this yet, so today only the simulation
+        // fallback fires. The seam is here so the receiver action drops
+        // in without touching this logic. Live events therefore still
+        // have no release path, which is stated rather than implied.
+        sceneReleased: !!event.sceneReleasedAt,
+        simulationOnly: !!event.templateKey,
+        holdSecOverride: window.__isr_cordon?.holdSecOverride,
+      });
+      for (const { id, reason } of decisions) {
+        const d = _counterDispatches.get(id);
+        if (!d) continue;
+        d.assignedWreckageId = null;
+        d.cordonReleasedAt = new Date().toISOString();
+        d.cordonReleaseReason = reason;
+        d.state = 'rtb_home';
+        d.rtbTargetLat = d.originLat;
+        d.rtbTargetLon = d.originLon;
+        d.lastFrameTs = now;
+        // Drop the outbound route. rtb_home moves by bearing and does
+        // not follow routePositions, so leaving these would paint the
+        // old drive-out line on the map for the whole return leg.
+        if (d.routeEntity) { try { viewer.entities.remove(d.routeEntity); } catch (_) {} d.routeEntity = null; }
+        d.routePositions = null;
+        d.routeSegmentLengths = null;
+        _syncDispatchToEvent(d);
+      }
+      if (decisions.length) {
+        // Reason recorded verbatim. 'hold-elapsed' must never read as
+        // an agency decision: the platform observes, agencies decide.
+        const viaHuman = decisions.some(x => x.reason === 'scene-released');
+        addNote(eventId, viaHuman
+          ? `Scene released. ${decisions.length} unit${decisions.length === 1 ? '' : 's'} standing down and returning to base.`
+          : `Cordon hold elapsed in simulation. ${decisions.length} unit${decisions.length === 1 ? '' : 's'} standing down and returning to base.`,
+          'AUTO-CORRELATOR');
+        renderAlertStrip();
+      }
+    }
+
+    // 2. Remove the cordon perimeter once nobody is attached to that
+    //    wreckage any more. Drives off the perimeter map rather than
+    //    off events, for the same tenant reason as step 1.
+    //
+    //    This clears the PERIMETER only. The downed-airframe marker is
+    //    a separate entity in _perEventMarkers and deliberately stays:
+    //    the wreck is still on the ground after the cordon lifts.
+    const _perimeterIds = Array.from(_wreckagePerimeterEntities.keys()).map(id => ({ id }));
+    for (const wid of clearedWreckageIds(_perimeterIds, dispatches, _everHeldWreckageIds)) {
+      const ents = _wreckagePerimeterEntities.get(wid);
+      if (!ents) continue;
+      try {
+        if (ents.fill) viewer.entities.remove(ents.fill);
+        if (ents.outline) viewer.entities.remove(ents.outline);
+      } catch (err) { console.warn('[scene lifecycle] perimeter clear failed for', wid, err.message); }
+      _wreckagePerimeterEntities.delete(wid);
+    }
+
+    // 3. Remove the entities of tracks closed longer than the ghost
+    //    period. The check the tick loop could never reach.
+    let _removedAny = false;
+    for (const eventId of expiredGhostEventIds(droneState, { now: performance.now(), ghostMs: GHOST_MS })) {
+      const state = droneState.get(eventId);
+      if (!state) continue;
+      // Persist BEFORE teardown. removeDroneEntities deletes the
+      // droneState entry, and state.recording is the only copy for any
+      // close path that does not already persist: left coverage, lost
+      // contact, and the kill path all skip it. Without this, a track
+      // shorter than the 30 second in-flight persist loses its
+      // recording entirely and Replay has nothing to show, which breaks
+      // the rule that replay is available whenever sensors captured
+      // data.
+      try {
+        if (state.recording) {
+          _persistRecording(eventId);
+          const ev = EVENTS.find(e => e.id === eventId);
+          if (ev) _persistCrossCuedRecordings(ev);
+        }
+      } catch (err) { console.warn('[scene lifecycle] persist before teardown failed for', eventId, err.message); }
+      try {
+        removeDroneEntities(eventId);
+        removeLiveTrack(eventId);
+        _removedAny = true;
+      } catch (err) {
+        // Flag set only AFTER success, so a partial failure is retried
+        // next pass rather than latched and left with orphan entities.
+        console.warn('[scene lifecycle] teardown failed for', eventId, err.message);
+        continue;
+      }
+      if (droneState.get(eventId)) droneState.get(eventId)._entitiesRemoved = true;
+    }
+    if (_removedAny) updateSimButton();
+  }
+  setInterval(_sweepSceneLifecycle, 2000);
 
   // Detection envelope for a passive fused-modality sensor is modeled
   // as a cylinder: coverageRadius meters horizontal, detectionCeilingM
@@ -13430,12 +13601,12 @@ async function main() {
         state._lastPersistMs = performance.now();
       }
 
-      // Ghost period: keep markers + trail visible for GHOST_MS, then remove
-      if (state.closedAt && performance.now() - state.closedAt > GHOST_MS) {
-        removeDroneEntities(p.eventId);
-        removeLiveTrack(p.eventId);
-        updateSimButton();
-      }
+      // Ghost-period teardown used to live here and was unreachable.
+      // markTrackClosed stops a closed track emitting positions, so this
+      // per-position loop never visited it again and the check never ran
+      // on any natural close. _sweepSceneLifecycle now owns it, asking
+      // the same question on an interval that does not depend on a tick
+      // that has already stopped. Single owner, so no double removal.
     });
 
     // Detail Panel refresh for live selected event — routes through the
