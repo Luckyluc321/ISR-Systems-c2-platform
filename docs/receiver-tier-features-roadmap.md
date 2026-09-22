@@ -117,7 +117,32 @@ Archetype legend (from the receiver archetype taxonomy):
 
 **Detection-only fit:** yes.
 
-### 3.6 Attribution context
+### 3.6 Attribution context — LANDED 2026-09-22
+
+Implemented in `src/attribution.js`, rendered under the historical
+pattern panel on the case file, gated to the intel archetype. Guarded by
+`scripts/check-attribution.mjs` in the build and in CI.
+
+The implementation splits attribution into three claims that are kept
+strictly separate, because conflating them is how a detection product
+starts asserting that a state flew a drone because the airframe was
+foreign-made:
+
+- **Platform** — what the airframe is. From the classifier, which is
+  what it was trained to answer.
+- **Class origin** — who manufactures that class. A reference fact about
+  the family, explicitly not an observation of this flight, and capped
+  below the platform claim.
+- **Operator** — who flew this one. Not supportable from sensor data.
+  Only an external intelligence feed can produce this claim, and with
+  none registered the panel says there is no basis rather than omitting
+  the question.
+
+A site pattern is a fourth line and never exceeds moderate: recurrence
+at a site is not attribution of an actor. Confidence is never inherited
+between lines, and the high tier starts at 0.95 rather than 0.80,
+because a good classification is not the same as a supportable
+intelligence claim.
 
 **What:** map detected platform families to known state actors, threat groups, or operator identifiers when confidence supports it. Displayed as a chapter in the intel-tier receiver view. Every claim carries a confidence tier and provenance (NN classification, precedent match, external feed).
 

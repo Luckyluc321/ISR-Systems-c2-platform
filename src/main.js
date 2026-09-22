@@ -196,6 +196,7 @@ try {
 // rule table and docs/cross-agency-flows.md Section 7 for the taxonomy.
 import { assignArchetypes, ARCHETYPES, ARCHETYPE_LABELS, archetypeForDispatchKind, archetypeFor, getArchetypeFallbackHits } from './archetypes.js';
 import { renderHistoricalPatternPanel, getHistoricalPattern, canSeeHistoricalPattern } from './historical_pattern.js';
+import { renderAttributionPanel, getAttributionAssessment, canSeeAttribution, registerAttributionSource } from './attribution.js';
 import { resolveKineticEffect, resolveJammingEffect, WEAPON_PROFILES, TARGET_PROFILES } from './engagement_effects.js';
 // Phase 2 · 8 sub-section renderers (kinetic / coord / intel /
 // forensic / medical / regulatory / public / liaison). Pure functions
@@ -348,6 +349,22 @@ if (typeof window !== 'undefined') {
     canSee: canSeeHistoricalPattern,
     all:    allPrecedentRecords,
     clear:  clearPrecedentIndex,
+  };
+  // Attribution dev handle. Roadmap §3.6, intel archetype only.
+  //   window.__isr_attribution.assess(getEvent('ev-001'))   → claims + confidence
+  //   window.__isr_attribution.canSee(role)                 → archetype gate check
+  //   window.__isr_attribution.register(fn)                 → connect an external
+  //        intelligence feed. Contract: (event, {family}) => [{text, confidence, caveat}].
+  //        The ONLY thing that can produce an operator claim; with nothing
+  //        registered the panel says there is no basis for one, which is the
+  //        honest answer rather than an omission.
+  window.__isr_attribution = {
+    assess: (ev) => {
+      const hp = getHistoricalPattern(ev);
+      return getAttributionAssessment(ev, { priors: hp.priors, family: hp.family });
+    },
+    canSee:   canSeeAttribution,
+    register: registerAttributionSource,
   };
   // Engagement effects dev handle. Survivability + susceptibility
   // matrix inspection and what-if rolls:
@@ -20667,6 +20684,14 @@ async function main() {
       ${_renderPostIncidentReportPanel(event, activeRole)}
 
       ${renderHistoricalPatternPanel(event, activeRole, { hasReportFor: (id) => !!getEvent(id)?.postIncidentReport })}
+      ${(() => {
+        // Attribution sits directly under the historical pattern
+        // because it consumes the same priors. The family and the
+        // prior list are resolved ONCE here and passed in, so the two
+        // panels can never disagree about what platform this is.
+        const _hp = getHistoricalPattern(event);
+        return renderAttributionPanel(event, activeRole, { priors: _hp.priors, family: _hp.family });
+      })()}
 
       ${_renderAnnulHistoryBlock(event, activeRole)}
 
