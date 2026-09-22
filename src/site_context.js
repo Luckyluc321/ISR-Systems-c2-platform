@@ -598,32 +598,83 @@ export const SITE_CONTEXT = {
     site_type: 'commercial_airport',
     schema_version: '1.0',
     generated_at: '2026-08-31T00:00:00Z',
-    generated_by: 'ARP + runway orientation from Naviair AIP EKBI. Asset positions approximate — refine from OSM post-onboarding.',
+    generated_by: 'Positions verified 2026-09-22 against OpenStreetMap features and Danmarks Adresseregister, the official Danish address register. The previous set was authored approximate and was wrong by 800m to 1.4km on seven of nine assets, which on a 3km airfield named a different building every time.',
     airport_reference_point: { lat: 55.740511, lon: 9.158056 },
+    // Note: this ARP sits ~62 m east of the runway threshold midpoint
+    // and ~139 m east of the aerodrome polygon centroid. Three different
+    // definitions of "the airport's position" exist and they disagree.
+    // Left as declared because nothing currently uses it as a distance
+    // origin; pin down which definition is meant before anything does.
 
     critical_areas: [
-      { id: 'runway_09_27',           name: 'Runway 09/27 (3100m x 45m)', center: { lat: 55.74050, lon: 9.15800 }, criticality: 'critical', verified: 'high',
+      { id: 'runway_09_27',           name: 'Runway 09/27 (3100m x 45m)', center: { lat: 55.740477, lon: 9.157077 }, criticality: 'critical', verified: 'high',
+        // Midpoint of the two mapped landing thresholds (OSM nodes
+        // 4038840084 and 4038849890), each corroborated against
+        // AIP-derived data to within 6 m.
+        //
+        // The landing thresholds sit ~148 m INSIDE the physical pavement
+        // at both ends. Anything reasoning about "near the runway end"
+        // wants the pavement ends (9.132422 W / 9.181723 E), not these.
         reason: 'Single runway. Any obstruction closes the airport entirely — no parallel to fall back on.' },
-      { id: 'terminal_passenger',     name: 'Passenger terminal (T1 + T2)', center: { lat: 55.73780, lon: 9.15450 }, criticality: 'high', verified: 'approximate',
+      { id: 'terminal_passenger',     name: 'Passenger terminal (T1 + T2)', center: { lat: 55.746014, lon: 9.147362 }, criticality: 'high', verified: 'high',
+        // OSM way 96215030, aeroway=terminal. The previous coordinate
+        // was 1017 m south-east of the actual building.
         reason: '2 passenger terminals, 16 gates. Combined check-in + gates + baggage.' },
-      { id: 'apron_cargo',            name: 'Cargo apron (CHBA hub)', center: { lat: 55.73780, lon: 9.16200 }, criticality: 'high', verified: 'approximate',
+      { id: 'apron_cargo',            name: 'Cargo apron (Apron South)', center: { lat: 55.737861, lon: 9.138937 }, criticality: 'high', verified: 'medium',
+        // OSM way 401472170, a mapped and named apron. Nothing in OSM
+        // tags it as cargo; that role is inferred from its adjacency to
+        // the CHBA terminal on Eksportvej. Medium for that reason, not
+        // because the apron's position is in doubt.
         reason: 'Denmark\'s largest air cargo hub (Cargo Handling Billund Airport). International freight throughput.' },
-      { id: 'apron_ga',               name: 'GA / Business apron', center: { lat: 55.73780, lon: 9.16800 }, criticality: 'medium', verified: 'approximate',
+      { id: 'apron_ga',               name: 'GA / Business apron', center: { lat: 55.736098, lon: 9.148758 }, criticality: 'medium', verified: 'medium',
+        // OSM ways 1278173052/1278173053, mapped aprons surrounded by a
+        // hangar cluster. The general-aviation role is inferred from the
+        // Sun-Air of Scandinavia office beside them.
         reason: 'General aviation + business terminal (Sun-Air of Scandinavia base). VIP + private aircraft.' },
     ],
 
     high_value_assets: [
-      { id: 'atc_remote_tower',       name: 'Naviair Remote Tower Centre', location: { lat: 55.73900, lon: 9.15500 }, asset_type: 'atc_control_tower', criticality: 'critical', verified: 'approximate',
-        reason: 'Naviair Remote Tower Centre — first RTC in DK, provides ATC services for BLL and (in future) other regional airports. Single point of airspace control failure.' },
-      { id: 'ils_09',                 name: 'ILS Glideslope 09 (W approach)', location: { lat: 55.74050, lon: 9.13800 }, asset_type: 'ils_ground_installation', criticality: 'high', verified: 'approximate',
+      { id: 'atc_remote_tower',       name: 'ATC precinct (control tower + Naviair Remote Tower Centre)', location: { lat: 55.737575, lon: 9.167302 }, asset_type: 'atc_control_tower', criticality: 'critical', verified: 'medium',
+        // This is the EXISTING control tower structure, OSM way
+        // 254576245, which is mapped with matching tags.
+        //
+        // Billund HOSTS Naviair's Remote Tower Centre rather than being
+        // controlled from elsewhere: the centre is a modular building
+        // beside this tower, and the long-term intent is to control other
+        // Danish regional airports FROM here. The modular building's own
+        // coordinate could not be verified, and no source confirms the
+        // centre went live or that the old tower is decommissioned.
+        // Treat this point as the ATC precinct, and both the tower and
+        // the centre as status-uncertain.
+        reason: 'Single point of airspace control failure for this airport, and the host site for Naviair remote tower operations.' },
+      { id: 'ils_09',                 name: 'ILS installation, runway 09 approach', location: { lat: 55.74050, lon: 9.13800 }, asset_type: 'ils_ground_installation', criticality: 'high', verified: 'unverified',
+        // Billund has ILS on both ends, but OpenStreetMap contains no
+        // ILS feature anywhere on the field: every navigationaid node is
+        // lighting, and there is no mapped antenna. This position is the
+        // original author's estimate and has NOT been confirmed. The
+        // Danish AIP (aim.naviair.dk, AD 2 EKBI) publishes navaid
+        // coordinates to sub-second precision and is the place to source
+        // it. Kept rather than deleted because the installation is real.
         reason: 'Instrument approach guidance for runway 09.' },
-      { id: 'ils_27',                 name: 'ILS Glideslope 27 (E approach)', location: { lat: 55.74050, lon: 9.17200 }, asset_type: 'ils_ground_installation', criticality: 'high', verified: 'approximate',
+      { id: 'ils_27',                 name: 'ILS installation, runway 27 approach', location: { lat: 55.74050, lon: 9.17200 }, asset_type: 'ils_ground_installation', criticality: 'high', verified: 'unverified',
+        // Same as ils_09: real installation, unconfirmed position.
         reason: 'Instrument approach guidance for runway 27.' },
-      { id: 'fire_station_arff',      name: 'Airport fire station (ARFF)', location: { lat: 55.73900, lon: 9.15800 }, asset_type: 'emergency_response', criticality: 'high', verified: 'approximate',
+      { id: 'fire_station_arff',      name: 'Airport fire station (ARFF)', location: { lat: 55.745829, lon: 9.151182 }, asset_type: 'emergency_response', criticality: 'high', verified: 'high',
+        // OSM way 96217180, amenity=fire_station, operator=Billund
+        // Lufthavn. Previous coordinate was 871 m out.
         reason: 'ICAO-required aircraft rescue + firefighting. On-airfield location required for response time SLA.' },
-      { id: 'cargo_chba',             name: 'CHBA cargo handling facility', location: { lat: 55.73800, lon: 9.16100 }, asset_type: 'maintenance_facility', criticality: 'high', verified: 'approximate',
+      { id: 'cargo_chba',             name: 'CHBA cargo handling facility', location: { lat: 55.736927, lon: 9.144113 }, asset_type: 'maintenance_facility', criticality: 'high', verified: 'high',
+        // Eksportvej 40, from the official Danish address register and
+        // confirmed on chba.dk. An address point is a plot access point
+        // rather than a building centroid, so expect 10 to 40 m offset
+        // from the building centre.
         reason: 'Cargo Handling Billund Airport — largest DK air cargo operator. High-value goods throughput.' },
-      { id: 'cargo_bws',              name: 'Blue Water Shipping airside office', location: { lat: 55.73800, lon: 9.16500 }, asset_type: 'maintenance_facility', criticality: 'medium', verified: 'approximate',
+      { id: 'cargo_bws',              name: 'Blue Water Shipping airside office', location: { lat: 55.735378, lon: 9.150589 }, asset_type: 'maintenance_facility', criticality: 'medium', verified: 'medium',
+        // Stratusvej 12, the company's own current published address,
+        // via the Danish address register. Third-party directories still
+        // list two different Cargo Centervej addresses, so this appears
+        // to have moved. No OSM building carries the name. Re-verify
+        // before this drives operational reasoning.
         reason: 'Global freight forwarder airside operations. Specialty cargo (project logistics, oversized).' },
     ],
 
