@@ -19634,6 +19634,40 @@ async function main() {
     const mineList = tactical.filter(a => DISPATCHABLE_KINDS_MC.has(a.kind) && canDispatchMc(a.kind));
     const otherList = tactical.filter(a => DISPATCHABLE_KINDS_MC.has(a.kind) && !canDispatchMc(a.kind));
 
+    // Units this role owns outright, for roles the counter-drone table
+    // does not cover.
+    //
+    // The lists above are drawn from the tactical response bundle,
+    // which holds counter-drone options only: no ambulance, physician
+    // car, fire engine or rescue team appears in it. So a hospital fell
+    // to the empty state and was told "no assets under your
+    // jurisdiction match this threat class", which is false. It has
+    // eight ambulances. They are simply not counter-drone equipment.
+    //
+    // Deliberately NOT fixed by adding these kinds to the counter-drone
+    // table. That table is scoped by threat class, and a hospital's
+    // vehicles do not answer a threat. They answer its consequences.
+    // Reuse the receiver asset registry instead, which already keys
+    // units by owning role and already drives a working dispatch path
+    // in the case file.
+    //
+    // Gated on the role having NO counter-drone scope rather than on
+    // mineList being empty. If it keyed on the empty list, a police
+    // role facing a threat class it cannot answer would suddenly grow a
+    // panel it does not have today. Every role in the table renders
+    // exactly what it renders now, on every subject. Energinet keeps
+    // its deliberately empty Set, which is truthy, so it keeps the
+    // escalate-and-coordinate treatment that is correct for a grid
+    // operator.
+    //
+    // Same event gate as the case-file rail: a live event, or a closed
+    // one with wreckage still on the ground.
+    const _mcWreckagePhase = Array.isArray(event.wreckages) && event.wreckages.length > 0;
+    const _mcOwnSpec = (!roleScopeMc && (event.status === 'active' || _mcWreckagePhase))
+      ? assetsForReceiverRole(activeRole?.id)
+      : null;
+    const _mcOwnUnits = _mcOwnSpec?.dispatchable || [];
+
     // Rich response option card. Shows what the option INCLUDES, what
     // it's typically DEPLOYED FOR, and its TRADEOFFS — before the duty
     // officer commits. Metadata sourced from RESPONSE_OPTION_DETAILS in
@@ -19838,6 +19872,65 @@ async function main() {
 
     const ackedBadge = isAcked ? `<span style="font-size: var(--fs-2xs); color: var(--ok); letter-spacing: 0.10em; text-transform: uppercase; font-family: var(--font-mono);">✓ Acked ${ackTs ? ackTs.slice(11,19) + 'Z' : ''}</span>` : '';
 
+    // Step 2 built here rather than as a nested ternary inside the
+    // template below. Three outcomes now share that slot, and the
+    // bracket arithmetic of a three-way ternary inside a template
+    // literal is how this edit was first written and why it did not
+    // parse.
+    const _step2Html = (() => {
+      if (!(isAcked || !rec)) return '';
+
+      // Counter-drone options, unchanged.
+      if (mineList.length) {
+        return `
+        <div class="c-panel c-panel-collapsible">
+          <div class="c-panel-title" style="margin-bottom: var(--space-2);">${isAcked ? 'Step 2 · Select response option' : 'Your Response Options'}</div>
+          <div class="c-panel-body">
+          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${mineList.length} option${mineList.length === 1 ? '' : 's'} available. Multiple can be dispatched concurrently. Recommended pick is the closest by ETA.</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-3);">
+            ${mineList.map((a) => `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); border-radius: 2px; font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-dim);">○ ${_kindDisplayName(a.kind).split(' ').slice(0, 3).join(' ')}</span>`).join('')}
+          </div>
+          ${mineList.map((a, i) => dispatchRow(a, i)).join('')}
+          </div>
+        </div>`;
+      }
+
+      // Units this role owns. Wording is deliberately neutral: this
+      // panel serves a hospital, a fire service and the police tactical
+      // unit alike, so it must not reach for medical phrasing any more
+      // than for counter-drone phrasing.
+      if (_mcOwnUnits.length) {
+        const rows = _mcOwnUnits.map((a) => {
+          const name = a.name || a.label || 'Response unit';
+          const countStr = a.count && a.count > 1 ? `${a.count} available` : 'Single unit';
+          const deployStr = a.deployTime ? ` · ${a.deployTime}` : '';
+          return `
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--border);">
+              <div style="min-width: 0;">
+                <div style="font-size: var(--fs-sm); color: var(--text); font-weight: 500;">${name}</div>
+                <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-2xs); color: var(--text-dim);">${countStr}${deployStr}</div>
+              </div>
+              <button class="pl-dispatch-btn" style="flex: none; padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.06); color: #4dff9c; border: 1px solid rgba(77, 255, 156, 0.35); border-left: 2px solid #4dff9c; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.20em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="receiver-dispatch" data-id="${event.id}" data-asset-key="${a.assetKey}">Dispatch</button>
+            </div>`;
+        }).join('');
+        return `
+        <div class="c-panel c-panel-collapsible">
+          <div class="c-panel-title" style="margin-bottom: var(--space-2);">${isAcked ? 'Step 2 · Dispatch your units' : 'Your units'}</div>
+          <div class="c-panel-body">
+            <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-2);">Units under your own command, dispatched from your base. Other agencies below can be asked for anything you do not hold.</div>
+            ${rows}
+          </div>
+        </div>`;
+      }
+
+      // Genuinely nothing to offer.
+      return `
+        <div class="c-panel c-panel-collapsible">
+          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Response Options</div>
+          <div class="c-panel-body"><div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">You hold no units for this incident. Other agencies below can act.</div></div>
+        </div>`;
+    })();
+
     return `
       <div class="c-panel">
         <div class="c-section-eyebrow">Mission Console</div>
@@ -19851,21 +19944,7 @@ async function main() {
 
       ${ackGateHtml}
 
-      ${isAcked || !rec ? (mineList.length ? `
-        <div class="c-panel c-panel-collapsible">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">${isAcked ? 'Step 2 · Select response option' : 'Your Response Options'}</div>
-          <div class="c-panel-body">
-          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${mineList.length} option${mineList.length === 1 ? '' : 's'} available. Multiple can be dispatched concurrently. Recommended pick is the closest by ETA.</div>
-          <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-3);">
-            ${mineList.map((a) => `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); border-radius: 2px; font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-dim);">○ ${_kindDisplayName(a.kind).split(' ').slice(0, 3).join(' ')}</span>`).join('')}
-          </div>
-          ${mineList.map((a, i) => dispatchRow(a, i)).join('')}
-          </div>
-        </div>` : `
-        <div class="c-panel c-panel-collapsible">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Response Options</div>
-          <div class="c-panel-body"><div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">No assets under your jurisdiction match this threat class. Other agencies below can act.</div></div>
-        </div>`) : ''}
+      ${_step2Html}
 
       ${_renderStep3ActiveEngagement(event, activeRole)}
       ${_renderStepOrPlaceholder(4, 'CONFIRM OUTCOME',        _renderStep4OutcomeConfirm(event, activeRole),    event)}
