@@ -3476,6 +3476,7 @@ async function main() {
       // Prevents all cars stopping at exact same (lat, lon) after arrival.
       cordonSlotSpreadM: 18,
       label: 'Police Counter-Drone Patrol',
+      labelPlural: 'Police counter-drone patrols',
     },
     'army-isr-drone': {
       cruiseKmh: 60, arriveAtM: 300, engageSec: 6,
@@ -3535,6 +3536,7 @@ async function main() {
       useRoadRouting: true, supportsMultiDispatch: true, maxUnitsPerDispatch: 5,
       billboardScale: 0.55, swarmSpacingM: 40, cordonSlotSpreadM: 18,
       label: 'Police patrol responder',
+      labelPlural: 'Police patrol responders',
     },
     'receiver-k9-unit': {
       cruiseKmh: 70, arriveAtM: 300, engageSec: 60,
@@ -3593,6 +3595,7 @@ async function main() {
       useRoadRouting: true, supportsMultiDispatch: true, maxUnitsPerDispatch: 5,
       billboardScale: 0.55, swarmSpacingM: 40, cordonSlotSpreadM: 18,
       label: 'Ambulance',
+      labelPlural: 'Ambulancer',
     },
     'receiver-akutlaegebil': {
       cruiseKmh: 105, arriveAtM: 350, engageSec: 240,
@@ -3620,6 +3623,7 @@ async function main() {
       stagesAtScene: true,
       consequenceOnly: true,
       label: 'Brandbil',
+      labelPlural: 'Brandbiler',
     },
     'receiver-cyber-team': {
       cruiseKmh: 0, arriveAtM: null, engageSec: 60,
@@ -4027,8 +4031,14 @@ async function main() {
       // branch below stamps it. Every attribution surface joins on it,
       // so a static activation was dropped from the agencies-on-case
       // panel and from the report's contributor chapters.
-      dispatchCounterResponse(eventId, asset, { ...opts, ownerRoleId: roleId });
-      toast(`${specName} activated.`, 'ok');
+      // No own toast: dispatchCounterResponse announces the dispatch,
+      // and firing here too produced two messages for one click. The
+      // site is the origin for a static activation.
+      dispatchCounterResponse(eventId, asset, {
+        ...opts,
+        ownerRoleId: roleId,
+        originName: SITES[event.siteId]?.name || spec.label || specName,
+      });
       return asset;
     }
     // Real home base dispatch: asset spawns at the base coord and
@@ -4045,8 +4055,15 @@ async function main() {
     // provenance so the cross-tenant echo panel can tag "Aktionsstyrken
     // deployed X · via your request" on the requester's case-file. See
     // Chunk B #3 in the comms-flow gaps.
-    dispatchCounterResponse(eventId, asset, { ...opts, ownerRoleId: roleId });
-    toast(`${specName} dispatched from ${base.name}.`, 'ok');
+    // originName is the base, not the vehicle. Without it the message
+    // read "Ambulance dispatched from Ambulance", because the origin
+    // defaults to asset.name and asset.name here is the vehicle.
+    // No own toast: dispatchCounterResponse announces it once.
+    dispatchCounterResponse(eventId, asset, {
+      ...opts,
+      ownerRoleId: roleId,
+      originName: base.name,
+    });
     return asset;
   }
 
@@ -4289,9 +4306,22 @@ async function main() {
       });
     }
 
-    const originLabel = profile.cruiseKmh === 0 ? `activated at ${asset.name}` : `dispatched from ${asset.name}`;
-    const countStr = swarmSize > 1 ? `${swarmSize} interceptors ` : '';
-    toast(`${countStr}${profile.label} ${originLabel}.`, 'info');
+    // Origin is the place a unit came FROM. For a counter-drone asset
+    // taken from the response bundle, asset.name IS the station, so it
+    // reads correctly. For a receiver dispatch, asset.name is the
+    // vehicle, which produced "Ambulance dispatched from Ambulance".
+    // Callers that know their base pass originName explicitly.
+    const originName = opts.originName || asset.name;
+    const originLabel = profile.cruiseKmh === 0 ? `activated at ${originName}` : `dispatched from ${originName}`;
+    // The count phrase used to hardcode the word "interceptors" for any
+    // multi-unit send, so three ambulances announced themselves as
+    // "3 interceptors". Read the plural from the profile, which is
+    // where the singular already lives, and fall back to counting the
+    // singular rather than inventing a noun.
+    const what = swarmSize > 1
+      ? `${swarmSize} ${profile.labelPlural || `${profile.label} units`}`
+      : profile.label;
+    toast(`${what} ${originLabel}.`, 'info');
     // If wreckages already exist (patrols dispatched after the kill),
     // pin the newly-spawned ground vehicles to a cordon slot right
     // away. Defer one tick so the freshly-inserted dispatches are in
