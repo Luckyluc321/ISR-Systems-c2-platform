@@ -6890,7 +6890,18 @@ async function main() {
     if (cd?.dispatchId) {
       const live = _counterDispatches.get(cd.dispatchId);
       if (live) return live.state;
-      return cd.state || 'complete';
+      // No live dispatch means it finished and was removed five seconds
+      // after reaching base, so 'complete' is the truth.
+      //
+      // Deliberately NOT falling back to the mirrored cd.state. The
+      // mirror is written through the tenant-filtered getEvent(), so if
+      // the active role could not see the event during a unit's final
+      // rtb_home -> complete transition, the mirror froze at rtb_home.
+      // Trusting it would leave that unit stuck in the returning-to-base
+      // bucket forever and stop a multi-unit group ever reporting
+      // complete. Matches the behaviour of counterDispatchStateFor
+      // below, which this replaced at the entry-holding call sites.
+      return 'complete';
     }
     return counterDispatchStateFor(eventId, cd?.assetId);
   }

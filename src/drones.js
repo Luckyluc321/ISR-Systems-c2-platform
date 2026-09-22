@@ -663,7 +663,7 @@ export const TEMPLATES = {
   // adjacency scenario. ARP 55.7405, 9.158 verified via Naviair AIP.
   // ═══════════════════════════════════════════════════════════════════
 
-  // ── Quadcopter, hostile (low pass over passenger terminal + cargo apron) ──
+  // ── Quadcopter, hostile (low pass along the southern apron line) ──
   billund_quad_hostile: {
     siteId: 'billund',
     classification: 'hostile',
@@ -679,12 +679,20 @@ export const TEMPLATES = {
       { id: 'BLL-N07', confidence: 0.72 },   // Runway mid-W
       { id: 'BLL-N02', confidence: 0.64 },   // S apron W
     ],
-    evidence: { rfCarrier: '2.412 GHz', rfBandwidth: '20 MHz OFDM', rfMatch: 'OcuSync 89%', modality: 'RF + acoustic + visual', evidenceSize: '31.2 MB', note: 'Quadcopter low pass over passenger terminal + cargo apron. Consistent with tourist / hobbyist NOT complying with restricted airspace, escalated to hostile after refusal to descend.' },
+    evidence: { rfCarrier: '2.412 GHz', rfBandwidth: '20 MHz OFDM', rfMatch: 'OcuSync 89%', modality: 'RF + acoustic + visual', evidenceSize: '31.2 MB', note: 'Quadcopter low pass along the southern apron line, over the CHBA cargo apron and the general-aviation apron. Consistent with tourist / hobbyist NOT complying with restricted airspace, escalated to hostile after refusal to descend.' },
     waypoints: [
       { lat: 55.7360, lon: 9.13800, alt: 110, heading:  75, tSec:  0 },   // Enter SW, cruise altitude
       { lat: 55.7375, lon: 9.14700, alt:  90, heading:  70, tSec:  9 },   // Descend
       { lat: 55.7378, lon: 9.15000, alt:  75, heading:  75, tSec: 16 },   // LOW over W apron
-      { lat: 55.7378, lon: 9.15450, alt:  70, heading:  85, tSec: 24 },   // Over passenger terminal
+      // NOTE 2026-09-22: this track was laid out against Billund asset
+      // positions that were later found to be up to 1.4 km wrong. The
+      // verified passenger terminal sits on the NORTH side
+      // (55.746014, 9.147362); this southern apron line does not pass
+      // over it. The cargo story still holds: the corrected CHBA
+      // terminal and cargo apron are both within ~215 m of this path.
+      // Left as flown rather than re-routed. To make the terminal
+      // overflight real, bend the mid-track north toward 55.7460.
+      { lat: 55.7378, lon: 9.15450, alt:  70, heading:  85, tSec: 24 },   // Along southern apron line
       { lat: 55.7378, lon: 9.16000, alt:  70, heading:  90, tSec: 34 },   // Over CHBA cargo apron (highlight #3)
       { lat: 55.7378, lon: 9.16800, alt:  75, heading:  95, tSec: 44 },   // Over GA/business apron
       { lat: 55.7385, lon: 9.17500, alt:  85, heading: 110, tSec: 52 },   // Bank NE, climbing

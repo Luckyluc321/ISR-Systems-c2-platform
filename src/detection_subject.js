@@ -589,8 +589,14 @@ export function renderSubjectDigest(subject) {
   if (t.inert_biological) tflags.push('inert_biological');
   if (tflags.length) push(`Threat flags: ${tflags.join(', ')}`);
 
+  // Header only when at least one modality will actually print under
+  // it. Every line below is optional now, so an unconditional header
+  // left a dangling 'Sensor evidence:' with nothing after it in the
+  // prompt sent to the model.
   const s = subject.sensor_evidence || {};
-  push('Sensor evidence:');
+  const _hasEvidence = !!(s.rf || s.acoustic || s.visual || s.radar || s.ads_b)
+    || subject.category === 'aerial_platform' || subject.category === 'weapon';
+  if (_hasEvidence) push('Sensor evidence:');
   if (s.rf?.sensors_agreeing > 0) push(`  RF: ${s.rf.signature_match || 'match TBD'} (${pct(s.rf.confidence)}, ${s.rf.sensors_agreeing} sensor${s.rf.sensors_agreeing === 1 ? '' : 's'})`);
   else if (s.rf?.signature_match === null && subject.category === 'biological') push('  RF: no signal (biological)');
   if (s.acoustic?.sensors_agreeing > 0 && s.acoustic?.signature_match) push(`  Acoustic: ${s.acoustic.signature_match} (${pct(s.acoustic.confidence)}, ${s.acoustic.sensors_agreeing} sensor${s.acoustic.sensors_agreeing === 1 ? '' : 's'})`);

@@ -688,9 +688,11 @@ export const SITE_CONTEXT = {
         reason: 'Pre-cleared ground for mobile counter-UAS units. South side, clear zone from active runway.' },
       { id: 'cuas_stage_n',   name: 'CUAS staging area, North perimeter', location: { lat: 55.74400, lon: 9.15500 }, asset_type: 'cuas_staging', criticality: 'high',
         reason: 'North perimeter deployment point. Covers approach vectors from N/NE.' },
-      { id: 'overwatch_atc',  name: 'Overwatch position, ATC Remote Tower', location: { lat: 55.73900, lon: 9.15500 }, asset_type: 'overwatch', criticality: 'high',
-        reason: 'Elevated vantage point at RTC. Coordinated overwatch for critical response.' },
-      { id: 'qra_relay',      name: 'QRA dispatch relay (to Flyvestation Karup)', location: { lat: 55.73900, lon: 9.15500 }, asset_type: 'qra_relay', criticality: 'critical',
+      // Both sat on the pre-correction ATC guess, ~750 m from the
+      // verified ATC precinct. Moved with it.
+      { id: 'overwatch_atc',  name: 'Overwatch position, ATC precinct', location: { lat: 55.737575, lon: 9.167302 }, asset_type: 'overwatch', criticality: 'high',
+        reason: 'Elevated vantage point at the control tower. Coordinated overwatch for critical response.' },
+      { id: 'qra_relay',      name: 'QRA dispatch relay (to Flyvestation Karup)', location: { lat: 55.737575, lon: 9.167302 }, asset_type: 'qra_relay', criticality: 'critical',
         reason: 'Tier 4 escalation to Flyvestation Karup (~90km NW). Fastest air-response coordination for Jylland.' },
     ],
 
@@ -720,9 +722,15 @@ export const SITE_CONTEXT = {
 
     correlator_hints: {
       dwell_alarm_zones: [
-        { name: 'Runway centre', center: { lat: 55.74050, lon: 9.15800 }, radius_m: 300, threshold_sec: 15 },
-        { name: 'Cargo apron (CHBA)', center: { lat: 55.73780, lon: 9.16200 }, radius_m: 200, threshold_sec: 20 },
-        { name: 'Naviair Remote Tower', center: { lat: 55.73900, lon: 9.15500 }, radius_m: 150, threshold_sec: 8 },
+        // Kept in step with critical_areas / high_value_assets above.
+        // These were left behind when those were corrected on
+        // 2026-09-22 and disagreed with them by up to 1.4 km inside
+        // this one file, which would have alarmed on a zone no asset
+        // occupied.
+        { name: 'Runway centre', center: { lat: 55.740477, lon: 9.157077 }, radius_m: 300, threshold_sec: 15 },
+        { name: 'Cargo apron (CHBA)', center: { lat: 55.737861, lon: 9.138937 }, radius_m: 200, threshold_sec: 20 },
+        { name: 'Passenger terminal', center: { lat: 55.746014, lon: 9.147362 }, radius_m: 250, threshold_sec: 20 },
+        { name: 'ATC precinct', center: { lat: 55.737575, lon: 9.167302 }, radius_m: 150, threshold_sec: 8 },
       ],
       unusual_pattern_flags: [
         'Approach-corridor axis with descending altitude = ILS-interference profile',
