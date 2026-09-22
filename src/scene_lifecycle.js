@@ -87,19 +87,35 @@ export function isDispatchTerminal(d) {
 // world supplies the release, through a receiver recording it or an
 // agency's own system reporting through the dispatch adapter, and no
 // timer may invent one.
+//
+// A release is scoped PER WRECKAGE, not per event, and releasedWreckageIds
+// carries the sites released so far. An event gains wreckages one kill at
+// a time: a swarm drops a second airframe minutes after the first, and
+// _rebalancePatrolsToWreckages fans live patrols out onto it. An
+// event-level "released" flag stayed true forever, so every cordon formed
+// after the first release was dissolved on the next two-second sweep,
+// with no way for the operator to re-arm it. Police release a scene, and
+// a second crash site is a second scene.
 export function cordonReleaseDecisions(dispatches, opts = {}) {
   const {
     now = 0,
-    sceneReleased = false,
+    releasedWreckageIds = null,
     simulationOnly = true,
     holdSecOverride,
   } = opts;
+
+  const released = releasedWreckageIds instanceof Set
+    ? releasedWreckageIds
+    : new Set(releasedWreckageIds || []);
 
   const out = [];
   for (const d of dispatches || []) {
     if (!d || d.state !== 'holding-cordon') continue;
 
-    if (sceneReleased) {
+    // Reachable only with a wreckage: main.js enters 'holding-cordon'
+    // inside `if (... && d.assignedWreckageId)`. Guarded anyway so a
+    // future caller cannot silently fall through to the timer.
+    if (d.assignedWreckageId && released.has(d.assignedWreckageId)) {
       out.push({ id: d.id, reason: 'scene-released' });
       continue;
     }
@@ -111,6 +127,84 @@ export function cordonReleaseDecisions(dispatches, opts = {}) {
     if (now - since >= holdMs) out.push({ id: d.id, reason: 'hold-elapsed' });
   }
   return out;
+}
+
+// Dispatch states in which a unit is committed to a wreckage: already
+// on the perimeter, or driving to it. Exported because two callers ask
+// the same question and a second copy of this set is exactly the kind
+// of duplicated predicate that has drifted and shipped broken here
+// before.
+export const CORDON_ATTACHED_STATES = new Set(['holding-cordon', 'en_route', 'engaging']);
+
+// Should this account be offered the scene-release control, and is it
+// usable right now?
+//
+// WHY THIS EXISTS. cordonReleaseDecisions has always had two triggers,
+// but only one of them could ever fire. The compressed hold timer is
+// gated on simulationOnly, and nothing in the platform recorded a
+// release, so in a live event a cordon had no release path at all:
+// no timer, no human control, and no endurance pressure either,
+// because holding-cordon is deliberately excluded from battery drain.
+// A live cordon would have held until the browser closed. That was
+// unreachable only because no real dispatch adapter is registered yet,
+// which is the same "latent, not live" reasoning that let five dead
+// receiver inboxes and a Copenhagen-hardcoded cascade ship.
+//
+// This is the real-world mechanism, not a workaround for the timer.
+// Indsatsleder Politi holds scene command at a Danish incident and
+// releases it; every other agency stands down on that release. So the
+// control is correct in simulation too, and the timer drops to what it
+// should always have been: a fallback for an unattended scenario.
+//
+// hasSceneCommand is passed IN rather than derived from roleId here.
+// main.js already resolves the police branch through agencyBranchOf(),
+// which reads roles.js, and a prefix test in this module would be a
+// second definition of "is this the police" free to drift from it.
+//
+// Returns a plain description. Rendering and wording stay at the call
+// seam; this only answers whether, and why not.
+// Scoped per wreckage for the reason given on cordonReleaseDecisions:
+// a later crash site is a later scene, and must be releasable on its
+// own after an earlier one was released.
+//
+// Returns wreckageIds, the sites this click would release, so the call
+// seam records exactly what was decided rather than re-deriving it.
+export function sceneReleaseState({
+  hasSceneCommand = false,
+  releasedWreckageIds = null,
+  dispatches = [],
+} = {}) {
+  const released = releasedWreckageIds instanceof Set
+    ? releasedWreckageIds
+    : new Set(releasedWreckageIds || []);
+
+  const attached = (dispatches || []).filter(
+    d => d && d.assignedWreckageId && CORDON_ATTACHED_STATES.has(d.state),
+  );
+  // Only units on a site that has NOT been released count. A unit still
+  // driving to an already-released wreckage is not a reason to offer
+  // the control again.
+  const open = attached.filter(d => !released.has(d.assignedWreckageId));
+  const holding = open.filter(d => d.state === 'holding-cordon').length;
+  const wreckageIds = Array.from(new Set(open.map(d => d.assignedWreckageId)));
+
+  const empty = { offered: false, enabled: false, attachedCount: 0, holdingCount: 0, wreckageIds: [] };
+  if (!hasSceneCommand) return { ...empty, reason: 'not-scene-command' };
+  if (!open.length) {
+    return {
+      ...empty,
+      reason: attached.length ? 'already-released' : 'no-cordon',
+    };
+  }
+  // Offered while units are still EN ROUTE as well as on the perimeter.
+  // Releasing early is a legitimate decision, and because the sweep is
+  // level-triggered, a unit that arrives after the release is stood
+  // down on the next pass instead of being stranded.
+  return {
+    offered: true, enabled: true,
+    attachedCount: open.length, holdingCount: holding,
+    wreckageIds, reason: null,
+  };
 }
 
 // Wreckage cordons that have fully stood down.
@@ -134,10 +228,9 @@ export function cordonReleaseDecisions(dispatches, opts = {}) {
 // an impact scene, would be drawn and destroyed within two seconds.
 // A cordon that never formed has not stood down; it never stood up.
 export function clearedWreckageIds(wreckages, dispatches, everHeldIds) {
-  const ATTACHED = new Set(['holding-cordon', 'en_route', 'engaging']);
   const held = new Set();
   for (const d of dispatches || []) {
-    if (d && d.assignedWreckageId && ATTACHED.has(d.state)) held.add(d.assignedWreckageId);
+    if (d && d.assignedWreckageId && CORDON_ATTACHED_STATES.has(d.state)) held.add(d.assignedWreckageId);
   }
   const everHeld = everHeldIds instanceof Set ? everHeldIds : new Set(everHeldIds || []);
   return (wreckages || [])

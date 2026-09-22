@@ -133,7 +133,7 @@ import {
   // field write anywhere in this file goes through one of these.
   mutateEvent, appendEventArray, addToEventSet, setEventMapKey, setEventObjectKey,
   syncMemberTrack, setMemberStatus,
-  linkEvents, markNeutralised, recordInteraction,
+  linkEvents, markNeutralised, recordInteraction, recordSceneRelease, releasedWreckageIds,
   setDispatchOutcome, attachPostIncidentReport,
   clearNarrativeCache, setNarrativeCache,
   clearPreprocessedCache, setPreprocessedCache,
@@ -151,7 +151,7 @@ import { buildPostIncidentReport, buildChainPostIncidentReport, emphasisForBranc
 import { evaluateClassificationPipeline, evaluateAttackProfileDetector } from './classification_pipeline.js';
 import { baseForReceiverRole } from './receiver_bases.js';
 import { RECEIVER_ASSETS, assetsForReceiverRole, getReceiverDirectAsset, getReceiverRequestAsset } from './receiver_assets.js';
-import { cordonReleaseDecisions, clearedWreckageIds, expiredGhostEventIds } from './scene_lifecycle.js';
+import { cordonReleaseDecisions, clearedWreckageIds, expiredGhostEventIds, sceneReleaseState } from './scene_lifecycle.js';
 import {
   destinationsForSite, destinationsForEvent, getDestination, destinationTypeLabel,
   destinationParent, destinationShortLabel, groupByParent,
@@ -8186,12 +8186,16 @@ async function main() {
       if (!event) continue;
       const decisions = cordonReleaseDecisions(group, {
         now,
-        // A human recording that the police released the scene. No
-        // control writes this yet, so today only the simulation
-        // fallback fires. The seam is here so the receiver action drops
-        // in without touching this logic. Live events therefore still
-        // have no release path, which is stated rather than implied.
-        sceneReleased: !!event.sceneReleasedAt,
+        // Wreckage sites a human has recorded as released. Written by
+        // the 'record-scene-release' action on any police account, via
+        // recordSceneRelease() in events.js. This is the path that
+        // works in a LIVE event, where the hold timer below is
+        // deliberately inert.
+        //
+        // Per site, not per event: an event gains wreckages one kill at
+        // a time, and a cordon formed on a later crash site must not
+        // inherit an earlier site's release.
+        releasedWreckageIds: releasedWreckageIds(event),
         simulationOnly: !!event.templateKey,
         holdSecOverride: window.__isr_cordon?.holdSecOverride,
       });
@@ -22781,6 +22785,45 @@ async function main() {
       });
     }
 
+    // Scene command — release the scene.
+    //
+    // Deliberately OUTSIDE the !_receiverAssetSpec guard below. This is
+    // not an asset dispatch, it is the incident commander recording
+    // that the scene is released, so it applies to every police
+    // district whether or not it has an asset library yet.
+    //
+    // Not gated on isActive either. A cordon outlives the detection
+    // event: the drone is down and the track is closed long before the
+    // perimeter lifts, which is exactly the window in which this
+    // control is needed.
+    //
+    // Whether to offer it is decided in src/scene_lifecycle.js so the
+    // predicate lives next to the sweep that consumes it.
+    if (isPolitiBranch) {
+      const _sceneRelease = sceneReleaseState({
+        hasSceneCommand: true,
+        releasedWreckageIds: releasedWreckageIds(event),
+        dispatches: Array.from(_counterDispatches.values()).filter(d => d.eventId === event.id),
+      });
+      if (_sceneRelease.offered) {
+        const _enRoute = _sceneRelease.attachedCount - _sceneRelease.holdingCount;
+        // Named by site count when a swarm has put more than one
+        // airframe down, because releasing one crash site does not
+        // release the others.
+        const _sites = _sceneRelease.wreckageIds.length;
+        ctas.push({
+          label: _sites > 1 ? `Record ${_sites} scenes released` : 'Record scene released',
+          sub: _enRoute > 0
+            ? `${_sceneRelease.holdingCount} on cordon, ${_enRoute} still en route`
+            : `${_sceneRelease.holdingCount} unit${_sceneRelease.holdingCount === 1 ? '' : 's'} on cordon`,
+          icon: '⏻', tone: 'neutral',
+          action: 'record-scene-release',
+          category: 'case',
+          tooltip: 'Records that police scene command has released the crash site or sites currently being held. Every unit on those cordons stands down and returns to base, and units still en route stand down on arrival. A crash site that appears later is a separate scene and is released separately. Recorded in the audit trail against this account.',
+        });
+      }
+    }
+
     // Politi actors — legacy stub buttons. Only rendered when the
     // role does NOT have a defined asset library yet (older Politi
     // districts pending real asset spec). Once assetsForReceiverRole
@@ -24603,6 +24646,75 @@ async function main() {
         });
         _respondingEscId = null;
         toast('Response sent to operator', 'ok');
+        _lastReceiverViewSig = null;
+        renderReceiverView({ immediate: true });
+      }
+      // ── Scene command: release the scene ────────────────────
+      //
+      // The human release path for a cordon. Appends to
+      // event.sceneReleases[] via recordSceneRelease(), which
+      // _sweepSceneLifecycle reads on its next pass (every 2s) to
+      // stand units down through the exact same code path the
+      // simulation timer uses. Nothing about the stand-down is
+      // duplicated here.
+      //
+      // The sweep releases units in 'holding-cordon' only. A unit still
+      // driving to a released site stands down when it arrives, because
+      // the sweep is level-triggered rather than a one-shot at click
+      // time.
+      //
+      // Scoped to the crash sites being held right now. A site that
+      // appears later is a separate scene and is released separately.
+      //
+      // NOT routed through the dispatch adapter, and not in
+      // STUB_DISPATCH_ACTIONS. Dispatching sends an instruction to an
+      // agency; this records a decision that agency already made on
+      // the ground. Sending it outward would have ISR instructing
+      // police to release a scene, which inverts the whole stance.
+      else if (action === 'record-scene-release') {
+        const evtId = id || _selectedReceiverEventId || _workspaceEventId;
+        const ev = getEvent(evtId);
+        const role = getActiveRole();
+        if (!ev) { toast('Event not found.', 'err'); return; }
+        // Re-checked at click time, not trusted from the rendered
+        // button. A stale panel could offer this after another
+        // account already released the scene.
+        const state = sceneReleaseState({
+          hasSceneCommand: agencyBranchOf?.(role?.id) === 'politi',
+          releasedWreckageIds: releasedWreckageIds(ev),
+          dispatches: Array.from(_counterDispatches.values()).filter(d => d.eventId === ev.id),
+        });
+        if (!state.offered) {
+          toast(state.reason === 'already-released'
+            ? 'Every crash site being held has already been released.'
+            : 'No cordon is being held on this scene.', 'info');
+          _lastReceiverViewSig = null;
+          renderReceiverView({ immediate: true });
+          return;
+        }
+        const who = `${role?.person || role?.label || 'Scene command'} (${role?.org || role?.label || role?.id})`;
+        // Releases exactly the sites the control was offered for. A
+        // crash site that appears after this click is a separate scene
+        // and keeps its own cordon until it is released in turn.
+        recordSceneRelease(ev.id, { by: who, roleId: role?.id || null, wreckageIds: state.wreckageIds });
+        const _siteStr = state.wreckageIds.length > 1 ? `${state.wreckageIds.length} crash sites` : 'Crash site';
+        // Attributed to the account, never to AUTO-CORRELATOR. The
+        // sweep's own note says 'Scene released' without naming an
+        // agency; this is the line that records who decided it.
+        addNote(ev.id, `${_siteStr} released by police scene command. ${state.attachedCount} unit${state.attachedCount === 1 ? '' : 's'} standing down.`, who);
+        logOperatorDecision({
+          event: ev,
+          action: 'record-scene-release',
+          actionDetail: {
+            unitsAttached: state.attachedCount,
+            unitsOnCordon: state.holdingCount,
+            wreckageIds: state.wreckageIds,
+          },
+          actorRole: role?.id || 'unknown',
+        });
+        toast(`${_siteStr} released. ${state.attachedCount} unit${state.attachedCount === 1 ? '' : 's'} standing down.`, 'ok');
+        renderAlertStrip();
+        _lastConsoleSig = null;
         _lastReceiverViewSig = null;
         renderReceiverView({ immediate: true });
       }

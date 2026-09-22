@@ -1412,6 +1412,51 @@ export function markNeutralised(id, { outcome = 'neutralised', at = null, byDisp
   return e;
 }
 
+// Record that scene command released one or more wreckage sites.
+//
+// The single writer of event.sceneReleases, which src/scene_lifecycle.js
+// reads to stand cordon units down. Before this existed the only release
+// trigger was a compressed hold timer gated to simulation, so a live
+// cordon had no release path at all.
+//
+// APPEND-ONLY, and scoped per wreckage rather than per event. An event
+// gains wreckages one kill at a time, so a single permanent event-level
+// flag would dissolve every cordon formed after the first release. Each
+// call adds a record; a site already released is skipped rather than
+// re-stamped, because this is the audit record of an agency decision and
+// ISR does not get to revise one. A call that releases nothing new
+// writes nothing.
+//
+// `by` is the account that recorded the release, not the platform. The
+// distinction is the same one cordonReleaseDecisions makes between
+// 'scene-released' and 'hold-elapsed': a timer expiring is never written
+// down as an agency decision.
+export function recordSceneRelease(id, { by = null, roleId = null, wreckageIds = [], at = null } = {}) {
+  const e = EVENTS.find(x => x.id === id);
+  if (!e) return null;
+  const already = releasedWreckageIds(e);
+  const fresh = (wreckageIds || []).filter(w => w && !already.has(w));
+  if (!fresh.length) return e;
+  if (!Array.isArray(e.sceneReleases)) e.sceneReleases = [];
+  e.sceneReleases.push({
+    at: at || new Date().toISOString(),
+    by, roleId,
+    wreckageIds: fresh,
+  });
+  _listeners.forEach(fn => fn(id));
+  return e;
+}
+
+// Every wreckage site released on this event so far. The one place the
+// sceneReleases[] shape is unpacked, so readers never re-derive it.
+export function releasedWreckageIds(event) {
+  const out = new Set();
+  for (const r of event?.sceneReleases || []) {
+    for (const w of r?.wreckageIds || []) out.add(w);
+  }
+  return out;
+}
+
 // Adapter-facing: record an interaction. Used by escalation_mock,
 // dispatch_mock, and any real adapter that lands later. Keeps
 // interactions[] lifecycle in one place so the Azure Blob WORM swap
