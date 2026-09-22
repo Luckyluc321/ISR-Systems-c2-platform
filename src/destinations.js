@@ -69,7 +69,7 @@ const CONSEQUENCE_DESTINATIONS = [
     name: 'Aalborg Universitetshospital',
     contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
   { id: 'hospital-esbjerg-sygehus', siteId: null, tier: 3, type: 'agency',
-    name: 'Sydvestjysk Sygehus, Esbjerg',
+    name: 'Esbjerg Sygehus',
     contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
   { id: 'hospital-herlev', siteId: null, tier: 3, type: 'agency',
     name: 'Herlev Hospital',

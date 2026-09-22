@@ -359,6 +359,147 @@ export const RECEIVER_ASSETS = {
     requestable: [],
   },
 
+  // Acute hospitals outside the capital, added 2026-09-22. Two
+  // ambulances each, matching the pattern of the non-Rigshospitalet
+  // Copenhagen hospitals. Physician cars sit with the regional
+  // Akutmedicinsk Koordinationscenter rather than with each hospital.
+  'hospital-suh-koege': {
+    label: 'Sjællands Universitetshospital Køge',
+    baseId: 'hospital-suh-koege',
+    dispatchable: [
+      { assetKey: 'suhk-ambulance', kind: 'receiver-ambulance', name: 'Ambulance', count: 2, icon: '🚑',
+        useCases: ['Casualty transport to own akutmodtagelse', 'On-scene triage support'],
+        capabilities: { casualty_transport: true, triage: true },
+        deployTime: '6-14 minutes via real road routing',
+        limitations: 'Staging outside the cordon until police declare the scene safe.' },
+    ],
+    requestable: [],
+  },
+
+  'hospital-kolding-sygehus': {
+    label: 'Kolding Sygehus',
+    baseId: 'hospital-kolding-sygehus',
+    dispatchable: [
+      { assetKey: 'kols-ambulance', kind: 'receiver-ambulance', name: 'Ambulance', count: 2, icon: '🚑',
+        useCases: ['Casualty transport to own akutmodtagelse', 'On-scene triage support'],
+        capabilities: { casualty_transport: true, triage: true },
+        deployTime: '6-14 minutes via real road routing',
+        limitations: 'Staging outside the cordon until police declare the scene safe.' },
+    ],
+    requestable: [],
+  },
+
+  'hospital-esbjerg-sygehus': {
+    label: 'Esbjerg Sygehus',
+    baseId: 'hospital-esbjerg-sygehus',
+    dispatchable: [
+      { assetKey: 'esbs-ambulance', kind: 'receiver-ambulance', name: 'Ambulance', count: 2, icon: '🚑',
+        useCases: ['Casualty transport to own akutmodtagelse', 'On-scene triage support'],
+        capabilities: { casualty_transport: true, triage: true },
+        deployTime: '4-10 minutes via real road routing',
+        limitations: 'Staging outside the cordon until police declare the scene safe.' },
+    ],
+    requestable: [],
+  },
+
+  'hospital-aabenraa-sygehus': {
+    label: 'Sygehus Sønderjylland Aabenraa',
+    baseId: 'hospital-aabenraa-sygehus',
+    dispatchable: [
+      { assetKey: 'aabs-ambulance', kind: 'receiver-ambulance', name: 'Ambulance', count: 2, icon: '🚑',
+        useCases: ['Casualty transport to own akutmodtagelse', 'On-scene triage support'],
+        capabilities: { casualty_transport: true, triage: true },
+        deployTime: '6-14 minutes via real road routing',
+        limitations: 'Staging outside the cordon until police declare the scene safe.' },
+    ],
+    requestable: [],
+  },
+
+  'hospital-auh-aalborg': {
+    label: 'Aalborg Universitetshospital',
+    baseId: 'hospital-auh-aalborg',
+    dispatchable: [
+      { assetKey: 'aalb-ambulance', kind: 'receiver-ambulance', name: 'Ambulance', count: 2, icon: '🚑',
+        useCases: ['Casualty transport to own akutmodtagelse', 'On-scene triage support'],
+        capabilities: { casualty_transport: true, triage: true },
+        deployTime: '6-14 minutes via real road routing',
+        limitations: 'Staging outside the cordon until police declare the scene safe.' },
+    ],
+    requestable: [],
+  },
+
+  // Added 2026-09-22 alongside per-site consequence routing. Counts are
+  // deliberately modest: these are the engines a main station can put on
+  // the road for one incident, not the organisation's whole fleet.
+  'kbr-sydvestjysk': {
+    label: 'Sydvestjysk Brandvæsen',
+    baseId: 'svjb-esbjerg',
+    dispatchable: [
+      {
+        assetKey: 'svjb-brandbil',
+        kind: 'receiver-brandbil',
+        name: 'Brandbil',
+        count: 4,
+        icon: '🚒',
+        useCases: [
+          'Fire suppression at an impact or crash site',
+          'Technical rescue and first response',
+          'Scene lighting, water supply, and equipment support',
+        ],
+        capabilities: { fire_suppression: true, technical_rescue: true },
+        deployTime: '5-12 minutes via real road routing',
+        limitations: 'Stages at the assembly point until police declare the scene safe (REFIL doctrine at attack scenes).',
+      },
+    ],
+    requestable: [],
+  },
+
+  'kbr-brsj': {
+    label: 'Brand & Redning Sønderjylland',
+    baseId: 'brsj-aabenraa',
+    dispatchable: [
+      {
+        assetKey: 'brsj-brandbil',
+        kind: 'receiver-brandbil',
+        name: 'Brandbil',
+        count: 3,
+        icon: '🚒',
+        useCases: [
+          'Fire suppression at an impact or crash site',
+          'Technical rescue and first response',
+          'Scene lighting, water supply, and equipment support',
+        ],
+        capabilities: { fire_suppression: true, technical_rescue: true },
+        deployTime: '8-18 minutes via real road routing',
+        limitations: 'Stages at the assembly point until police declare the scene safe (REFIL doctrine at attack scenes).',
+      },
+    ],
+    requestable: [],
+  },
+
+  'kbr-nordjyllands': {
+    label: 'Nordjyllands Beredskab',
+    baseId: 'nobr-aalborg',
+    dispatchable: [
+      {
+        assetKey: 'nobr-brandbil',
+        kind: 'receiver-brandbil',
+        name: 'Brandbil',
+        count: 4,
+        icon: '🚒',
+        useCases: [
+          'Fire suppression at an impact or crash site',
+          'Technical rescue and first response',
+          'Scene lighting, water supply, and equipment support',
+        ],
+        capabilities: { fire_suppression: true, technical_rescue: true },
+        deployTime: '8-20 minutes via real road routing',
+        limitations: 'Stages at the assembly point until police declare the scene safe (REFIL doctrine at attack scenes).',
+      },
+    ],
+    requestable: [],
+  },
+
   'kbr-hovedstaden': {
     label: 'Hovedstadens Beredskab',
     baseId: 'hbr-hovedbrandstationen',
@@ -377,6 +518,60 @@ export const RECEIVER_ASSETS = {
         capabilities: { fire_suppression: true, technical_rescue: true },
         deployTime: '4-10 minutes via real road routing',
         limitations: 'Stages at the assembly point until police declare the scene safe (REFIL doctrine at attack scenes).',
+      },
+    ],
+    requestable: [],
+  },
+
+  // Added 2026-09-22. Same two rescue teams as Hedehusene, from the
+  // centre that actually covers each region. Both bases were already in
+  // receiver_bases.js, verified against brs.dk, and unused: the role
+  // existed, the address existed, and nothing connected them.
+  'brs-haderslev': {
+    label: 'Beredskabsstyrelsen Sydjylland (Haderslev)',
+    baseId: 'brs-sydjylland-haderslev',
+    dispatchable: [
+      {
+        assetKey: 'brsh-rescue-team',
+        kind: 'receiver-rescue-team',
+        name: 'Rescue team',
+        count: 2,
+        icon: '⛑',
+        useCases: [
+          'Heavy rescue at a structural impact site',
+          'Search of collapsed or damaged structures',
+          'Scene support for fire and hazmat conditions',
+        ],
+        capabilities: { heavy_rescue: true, structural_search: true, hazmat_support: true },
+        deployTime: '20-35 minutes via real road routing',
+        limitations: 'Not a medical unit. Works alongside ambulances and fire services.',
+      },
+    ],
+    requestable: [],
+  },
+
+  // Added 2026-09-22. Same two rescue teams as Hedehusene, from the
+  // centre that actually covers each region. Both bases were already in
+  // receiver_bases.js, verified against brs.dk, and unused: the role
+  // existed, the address existed, and nothing connected them.
+  'brs-thisted': {
+    label: 'Beredskabsstyrelsen Nordjylland (Thisted)',
+    baseId: 'brs-nordjylland-thisted',
+    dispatchable: [
+      {
+        assetKey: 'brst-rescue-team',
+        kind: 'receiver-rescue-team',
+        name: 'Rescue team',
+        count: 2,
+        icon: '⛑',
+        useCases: [
+          'Heavy rescue at a structural impact site',
+          'Search of collapsed or damaged structures',
+          'Scene support for fire and hazmat conditions',
+        ],
+        capabilities: { heavy_rescue: true, structural_search: true, hazmat_support: true },
+        deployTime: '20-35 minutes via real road routing',
+        limitations: 'Not a medical unit. Works alongside ambulances and fire services.',
       },
     ],
     requestable: [],

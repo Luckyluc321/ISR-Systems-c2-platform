@@ -1351,12 +1351,15 @@ export const RECEIVERS = [
   org: 'Vejle Sygehus', label: 'Vejle Sygehus (Sygehus Lillebælt)', initials: 'VEJ',
   scope: 'regional', destinationIds: [],
   meta: { region_parent: 'region-syd' },
-  description: 'Akuthospital, Vejle.' },
+  description: 'Vejle Sygehus. Emergency function runs 07-22; the 24-hour Fælles Akutmodtagelse for Sygehus Lillebælt is at Kolding, so this is not a valid destination for a night event.' },
   { id: 'hospital-esbjerg-sygehus', kind: 'receiver', type: 'leaf',
-  org: 'Sydvestjysk Sygehus, Esbjerg', label: 'Sydvestjysk Sygehus (Esbjerg)', initials: 'ESY',
+  // Renamed October 2022: 'Sydvestjysk Sygehus' became Esbjerg Sygehus,
+  // part of Esbjerg og Grindsted Sygehus. sydvestjysksygehus.dk now
+  // redirects. The role id is kept so nothing that references it breaks.
+  org: 'Esbjerg Sygehus', label: 'Esbjerg Sygehus', initials: 'ESY',
   scope: 'regional', destinationIds: ['hospital-esbjerg-sygehus'],
   meta: { region_parent: 'region-syd' },
-  description: 'Akuthospital, Esbjerg. Nearest acute to Port of Esbjerg.' },
+  description: 'Akuthospital, Esbjerg. Fælles Akutmodtagelse covers the Esbjerg and Grindsted sites. Nearest acute to Port of Esbjerg.' },
   { id: 'hospital-aabenraa-sygehus', kind: 'receiver', type: 'leaf',
   org: 'Sygehus Sønderjylland, Aabenraa', label: 'Sygehus Sønderjylland (Aabenraa)', initials: 'AAB',
   scope: 'regional', destinationIds: ['hospital-aabenraa-sygehus'],

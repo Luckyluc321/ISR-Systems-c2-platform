@@ -391,6 +391,91 @@ export const RECEIVER_BASES = {
     name: 'Beredskabsstyrelsen Hovedstaden, Hedelykken 10, 2640 Hedehusene',
     verified: 'OSM Nominatim + brs.dk (address point Hedelykken 10)',
   },
+  // ── Acute hospitals outside the capital ──────────────────────
+  // Added 2026-09-22. Each coordinate is an OSM house node with a
+  // matching house number, road and postcode, cross-checked against the
+  // hospital's own published akutmodtagelse address. None fell back to
+  // a street centroid.
+  //
+  // These are plot address points, not ambulance-bay doors. On a large
+  // campus the emergency entrance can sit 50 to 250 metres away, which
+  // is fine for road routing and is not door-level precision.
+  'hospital-suh-koege': {
+    lat: 55.477321, lon: 12.165950,
+    name: 'Sjællands Universitetshospital Køge, Akutafdelingen, Lykkebækvej 1, 4600 Køge',
+    verified: 'sjaellandsuniversitetshospital.dk akutafdeling kontakt + OSM house node',
+  },
+  'hospital-kolding-sygehus': {
+    lat: 55.501749, lon: 9.484188,
+    // Akutafdelingen has its own entrance, indgang 26. No separate
+    // coordinate is published for it, so this is the campus address.
+    name: 'Kolding Sygehus, Akutafdelingen (indgang 26), Sygehusvej 24, 6000 Kolding',
+    verified: 'sygehuslillebaelt.dk akutafdeling find-vej + OSM house node',
+  },
+  'hospital-esbjerg-sygehus': {
+    lat: 55.473859, lon: 8.456703,
+    // Renamed. 'Sydvestjysk Sygehus' became Esbjerg Sygehus, part of
+    // Esbjerg og Grindsted Sygehus, in October 2022;
+    // sydvestjysksygehus.dk now redirects. The Faelles Akutmodtagelse
+    // covers both the Esbjerg and Grindsted sites; this is Esbjerg.
+    name: 'Esbjerg Sygehus, Fælles Akutmodtagelse, Finsensgade 35, 6700 Esbjerg',
+    verified: 'esbjerggrindstedsygehus.dk FAM kontakt + OSM house node',
+  },
+  'hospital-aabenraa-sygehus': {
+    lat: 55.061763, lon: 9.378778,
+    name: 'Sygehus Sønderjylland Aabenraa, Fælles Akut Modtagelse, Kresten Philipsens Vej 15, 6200 Aabenraa',
+    verified: 'sygehussonderjylland.dk FAM kontakt + OSM house node',
+  },
+  'hospital-auh-aalborg': {
+    lat: 57.008624, lon: 9.996871,
+    // RELOCATED 22 March 2026. The akutmodtagelse moved from Aalborg UH
+    // Syd (Hobrovej 18-22) to Akuthuset in Hospitalsbyen and Hobrovej's
+    // emergency department closed. Routing to Hobrovej would send
+    // ambulances to a department that is no longer there.
+    //
+    // Selma Lagerloefs Vej 347 is the Akuthuset address the hospital
+    // publishes for patients going to the akutmodtagelse, not the
+    // general postal address (Hospitalsbyen 1), which is ~200 m away.
+    name: 'Aalborg Universitetshospital, Akuthuset indgang 1, Selma Lagerløfs Vej 347, 9260 Gistrup',
+    verified: 'aalborguh.rn.dk/akuthuset + flytteplan + OSM house node',
+  },
+
+  // ── Municipal fire services outside the capital ──────────────
+  // Added 2026-09-22. Every coordinate is an OpenStreetMap house node
+  // with a matching house number, not a street centroid, independently
+  // confirmed against DAWA (api.dataforsyningen.dk), the authoritative
+  // Danish address register. Agreement to six decimals in every case.
+  // These are registered access points for the plot, not apparatus-bay
+  // doors, which is the right precision for road routing.
+  'svjb-esbjerg': {
+    lat: 55.485604, lon: 8.464906,
+    name: 'Sydvestjysk Brandvæsen, Station Esbjerg, Vibevej 18, 6705 Esbjerg Ø',
+    verified: 'svjb.dk/operativ/stationer + OSM node 3037439323 + DAWA',
+  },
+  'brsj-aabenraa': {
+    lat: 55.031194, lon: 9.413771,
+    // Brand & Redning Sønderjylland publishes Kallemosen 18 as its own
+    // address and it is described as their largest station with the
+    // central workshop. An operational station record lists Pilemosen
+    // 21, roughly 47 metres away on the adjacent frontage, which reads
+    // as the same site with two address faces. Which one holds the
+    // apparatus bays could not be verified: BRSJ does not publish
+    // per-station addresses. The organisation's own published address
+    // wins.
+    name: 'Brand & Redning Sønderjylland, Kallemosen 18, 6200 Aabenraa',
+    verified: 'brsj.dk/kontakt-os + OSM node 8171511817 + DAWA',
+  },
+  'nobr-aalborg': {
+    lat: 57.042911, lon: 9.928891,
+    // Administration and the operational main station share this
+    // building, and it is the organisation's only around-the-clock
+    // crewed station. Deliberately NOT the vagtcentral at Hjulmagervej
+    // 20, which is a shared dispatch control room rather than a fire
+    // station and which company registries sometimes mislabel as the
+    // headquarters.
+    name: 'Nordjyllands Beredskab, Aalborg Brandstation, Thomas Boss Gade 6, 9000 Aalborg',
+    verified: 'nordjyllandsberedskab.dk/om-os/kontakt + OSM node 343065789 + DAWA',
+  },
   'hbr-hovedbrandstationen': {
     lat: 55.674664, lon: 12.571536,
     name: 'Hovedbrandstationen, Bag Rådhuset 3, 1550 København V',
