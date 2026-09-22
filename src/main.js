@@ -152,6 +152,7 @@ import { evaluateClassificationPipeline, evaluateAttackProfileDetector } from '.
 import { baseForReceiverRole } from './receiver_bases.js';
 import { RECEIVER_ASSETS, assetsForReceiverRole, getReceiverDirectAsset, getReceiverRequestAsset } from './receiver_assets.js';
 import { cordonReleaseDecisions, clearedWreckageIds, expiredGhostEventIds, sceneReleaseState, leavesSceneUnassisted } from './scene_lifecycle.js';
+import { consequenceAgenciesForSite } from './consequence_routing.js';
 import {
   destinationsForSite, destinationsForEvent, getDestination, destinationTypeLabel,
   destinationShortLabel, groupByParent, localPoliceDestinationIds,
@@ -13705,17 +13706,28 @@ async function main() {
               '— consequence agencies will be alerted with no scene commander.');
           }
           try {
-            // Hvidovre covers Amager, so it is the nearest acute
-            // hospital to both Copenhagen Airport and the Amager
-            // substation, and it was the one omitted. It has carried a
-            // destination, a home base and two vehicles throughout.
+            // Resolved from the site: its regional medical
+            // coordination centre, the receiving acute hospital, the
+            // municipal fire service covering its kommune, and the
+            // state rescue centre. Table and reasoning in
+            // src/consequence_routing.js.
             //
-            // Still Copenhagen-specific. Every site that can detonate
-            // today is in the capital region, and check-impact-cascade
-            // fails the build if a detonating site appears outside
-            // CASCADE_COVERS, so this cannot silently misroute a new
-            // site to Copenhagen hospitals.
-            const _casConsequenceIds = ['amk-hovedstaden', 'hospital-rigshospitalet', 'hospital-hvidovre', 'hospital-bispebjerg', 'kbr-hovedstaden', 'brs-hedehusene'];
+            // This was a fixed Copenhagen list until 2026-09-22, so a
+            // detonation at Billund Airport summoned Rigshospitalet,
+            // Hovedstadens Beredskab and Beredskabsstyrelsen Hedehusene
+            // while the services that actually cover Billund were never
+            // told. It was correct only because every site that could
+            // detonate happened to be in the capital region.
+            //
+            // Empty for a site with no routing entry, never a default
+            // set: falling back to Copenhagen is the bug being removed,
+            // and the build gate blocks a detonating site that has no
+            // entry.
+            const _casConsequenceIds = consequenceAgenciesForSite(event.siteId);
+            if (!_casConsequenceIds.length) {
+              console.warn('[impact cascade] no consequence routing for site', event.siteId,
+                '- no medical, fire or rescue agency will be alerted.');
+            }
             const _casRecords = escalateEvent(event.id, {
               destinationIds: [..._casConsequenceIds, ..._casPoliceIds],
               payload: 'full',
@@ -13732,9 +13744,9 @@ async function main() {
             // systems will register against. Fire-and-forget, guarded
             // internally against an empty array.
             _fireEscalationAdapterSend(event, _casRecords);
-            toast(_casPoliceIds.length
-              ? 'Consequence cascade sent: police, medical, fire and rescue alerted.'
-              : 'Consequence cascade sent: medical, fire and rescue alerted. No police district configured for this site.', 'warn');
+            toast(_casRecords.length
+              ? `Consequence cascade sent: ${_casRecords.length} agencies alerted, local to this site.`
+              : 'Consequence cascade: every agency was already on the case.', 'warn');
           } catch (err) { console.warn('[impact cascade] failed:', err.message); }
           // Persistent IMPACT marker at the detonation point — same
           // pattern as the DOWNED marker so the coordinate survives on

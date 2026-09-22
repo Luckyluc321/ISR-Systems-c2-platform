@@ -39,6 +39,10 @@ import { readFileSync } from 'node:fs';
 // literal (every Amager destination, for one).
 import { getDestination, localPoliceDestinationIds, getAllDestinations, destinationParent } from '../src/destinations.js';
 import { RECEIVERS } from '../src/roles.js';
+import {
+  consequenceAgenciesForSite, allConsequenceAgencyIds, sitesWithConsequenceRouting,
+  CONSEQUENCE_BY_SITE, REGION_TO_MEDICAL_COORDINATION,
+} from '../src/consequence_routing.js';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 
@@ -82,85 +86,71 @@ if (impactSites.size === 0) {
   warnings.push('No template declares terminalImpact. The consequence cascade is unreachable, so this gate is checking nothing.');
 }
 
-// ── 2. Which recipients does the cascade actually alert? ───────────
-// Two legs, and they resolve differently.
-//
-//   CONSEQUENCE  a fixed Copenhagen literal, read from source here.
-//   POLICE       resolved at runtime from the site's own tier-2
-//                Politikreds, so there is no literal to read. Checked
-//                against the real destination table in section 4b.
-const consequenceMatch = main.match(/_casConsequenceIds\s*=\s*\[([^\]]*)\]/);
-if (!consequenceMatch) {
-  errors.push("Could not find _casConsequenceIds in src/main.js. If the consequence list was refactored, update this gate to read the new shape rather than deleting it.");
+// ── 2. Is the cascade still wired to the per-site resolver? ────────
+// The recipient list is no longer a literal. It is resolved from the
+// site, so the checks below run the real resolver instead of reading
+// source text. These two assertions only confirm main.js still calls
+// it: without them the resolver could be bypassed and every check
+// below would still pass, because they verify the tables, not the call.
+if (!/const _casConsequenceIds = consequenceAgenciesForSite\(event\.siteId\);/.test(main)) {
+  errors.push(
+    "The impact cascade no longer resolves consequence agencies via consequenceAgenciesForSite(event.siteId).\n" +
+    "    It was a fixed Copenhagen list until 2026-09-22, which alerted Rigshospitalet and Hovedstadens\n" +
+    "    Beredskab for a detonation at Billund. Do not go back to a literal."
+  );
 }
-const recipients = consequenceMatch
-  ? [...consequenceMatch[1].matchAll(/'([^']+)'/g)].map((m) => m[1])
-  : [];
-
-// The police leg must still be wired into the cascade. Without this the
-// resolver could be deleted and every check below would still pass,
-// because they verify the destination table rather than the call.
 if (!/destinationIds:\s*\[\.\.\._casConsequenceIds,\s*\.\.\._casPoliceIds\]/.test(main)) {
   errors.push(
-    "The impact cascade no longer escalates to _casPoliceIds.\n" +
-    "    The cascade tells medical and fire the scene is not yet declared safe, and police are the only\n" +
-    "    agency that can declare it safe, take scene command and later release the scene. Restore the\n" +
-    "    police leg, or update this gate deliberately if the routing genuinely moved."
+    "The impact cascade no longer escalates to _casConsequenceIds and _casPoliceIds together.\n" +
+    "    Restore the legs, or update this gate deliberately if the routing genuinely moved."
   );
 }
 if (!/const _casPoliceIds = localPoliceDestinationIds\(event\);/.test(main)) {
   errors.push("The impact cascade no longer resolves the police district via localPoliceDestinationIds(event).");
 }
 
-// ── 3. The cascade is Copenhagen-only. Fail on any other site. ─────
-// This is the whole point of the gate.
-const CASCADE_COVERS = new Set(['cph', 'energinet_amager_koblingsstation']);
+// ── 3. Every detonating site must have consequence routing ─────────
+// This replaces the old CASCADE_COVERS allowlist. The cascade used to
+// be Copenhagen-only, so the gate's job was to refuse any other
+// detonating site. Now it resolves per site, so the job is to refuse a
+// site it cannot resolve.
+const ROUTED = new Set(sitesWithConsequenceRouting());
 for (const siteId of impactSites) {
-  if (CASCADE_COVERS.has(siteId)) continue;
+  if (ROUTED.has(siteId)) continue;
   errors.push(
-    `An impact template detonates at site '${siteId}', but the consequence cascade in src/main.js alerts a fixed list of Copenhagen organisations:\n` +
-    `      ${recipients.join(', ') || '(unreadable)'}\n` +
-    `    Those services would be alerted for a detonation at '${siteId}' and would route across the country.\n` +
-    `    Before shipping this scenario, configure the ambulance service, the municipal fire service and the\n` +
-    `    rescue reinforcement covering '${siteId}', then make the cascade resolve recipients from event.siteId\n` +
-    `    and add '${siteId}' to CASCADE_COVERS in this file.`
+    `An impact template detonates at site '${siteId}', but src/consequence_routing.js has no entry for it.\n` +
+    `    Nothing would be alerted: no ambulance service, no hospital, no fire service, no rescue.\n` +
+    `    Add its region, receiving acute hospital, municipal fire service and rescue centre there.\n` +
+    `    Verify the kommune against official boundary data, not by name similarity.`
   );
 }
 
-// ── 4. Every recipient must resolve end to end ─────────────────
-// destination exists, a role holds it, that role has a home base and
-// at least one vehicle. Any missing link means the alert is written
-// and never surfaced, or surfaced and not actionable.
+// ── 4. Every routed agency must resolve end to end ─────────────────
+// destination exists, a role holds it, and if that role has vehicles it
+// has a home base to drive from. Any missing link means the alert is
+// written and never surfaced, or surfaced and not actionable.
 //
-// Two id shapes exist and they must be checked differently:
-//
-//   SELF-REFERENTIAL   destination id == role id (the consequence six).
-//                      The role holds its own id.
-//   SITE-SCOPED        '{site}-t{tier}-{slug}' (police and most others).
-//                      Some OTHER role holds it, and the role id is a
-//                      different string entirely.
-//
-// The invariant that actually matters in both shapes is the same: some
-// role holds this destination id, because inboxes are built from
-// eventsForDestinations(role.destinationIds).
+// Checked for EVERY site in the routing table, not only the ones that
+// can detonate today, so a site is correct before a template there ever
+// declares terminalImpact.
 const roleHolding = (destId) =>
   RECEIVERS.find((r) => Array.isArray(r.destinationIds) && r.destinationIds.includes(destId));
 
+const recipients = allConsequenceAgencyIds();
 for (const id of recipients) {
   if (!getDestination(id)) {
-    errors.push(`Cascade recipient '${id}' has no destination in src/destinations.js. The escalation would be written to an id that resolves to nothing.`);
+    errors.push(`Consequence agency '${id}' has no destination in src/destinations.js. The escalation would be written to an id that resolves to nothing.`);
     continue;
   }
   const holder = roleHolding(id);
   if (!holder) {
     errors.push(
-      `Cascade recipient '${id}' is held by no role in src/roles.js.\n` +
-      `    The cascade escalates to '${id}', but the inbox is built from a role's destinationIds, so this\n` +
-      `    agency is alerted and shown nothing. Add '${id}' to the owning role's destinationIds.`
+      `Consequence agency '${id}' is held by no role in src/roles.js.\n` +
+      `    Inboxes are built from a role's destinationIds, so this agency is alerted and shown nothing.\n` +
+      `    Add '${id}' to its own role's destinationIds.`
     );
     continue;
   }
-  // A recipient that can be dispatched needs somewhere to drive from.
   const hasAssets = assets.includes(`'${holder.id}'`);
   if (hasAssets) {
     const baseDecl = assets.slice(assets.indexOf(`'${holder.id}'`)).match(/baseId:\s*'([^']+)'/);
@@ -171,6 +161,7 @@ for (const id of recipients) {
     }
   }
 }
+
 
 // ── 4b. The police leg, per detonating site ────────────────────
 // The police recipient is resolved at runtime, so it is verified by
@@ -189,7 +180,7 @@ for (const id of recipients) {
 // cascade declares it covers. A site in CASCADE_COVERS is one we have
 // said the cascade is correct for, so its police link must hold before
 // a template there ever declares terminalImpact, not after.
-for (const siteId of new Set([...impactSites, ...CASCADE_COVERS])) {
+for (const siteId of new Set([...impactSites, ...sitesWithConsequenceRouting()])) {
   const politiIds = localPoliceDestinationIds({ siteId, domainScope: ['ground'] });
   if (!politiIds.length) {
     errors.push(
@@ -279,20 +270,43 @@ for (const [org, ids] of _byOrg) {
   }
 }
 
-// ── 5. At least one of each capability must be alerted ─────────────
+// ── 4e. No two destinations may share an id ────────────────────────
+// Destinations are looked up by id and the lookup returns the first
+// match, so a duplicate means the answer depends on array order. This
+// happened: the Aktionsstyrken generator treated siteId null as a site
+// and minted a second 'amk-t3-aks'.
+const _seenDestIds = new Map();
+for (const d of getAllDestinations()) {
+  if (_seenDestIds.has(d.id)) {
+    errors.push(
+      `Destination id '${d.id}' is declared twice (siteId ${JSON.stringify(_seenDestIds.get(d.id))} and ` +
+      `${JSON.stringify(d.siteId)}). Lookups return the first match, so routing depends on array order.`
+    );
+  }
+  _seenDestIds.set(d.id, d.siteId);
+}
+
+// ── 5. Every routed site must cover all four capabilities ──────────
 // A detonation with no ambulance alerted is the failure this whole
 // subsystem exists to prevent.
-if (recipients.length) {
-  const hasMedical = recipients.some((id) => /^(amk|hospital)-/.test(id));
-  const hasFire = recipients.some((id) => /^kbr-/.test(id));
-  const hasRescue = recipients.some((id) => /^brs-/.test(id));
-  if (!hasMedical) errors.push('The impact cascade alerts no ambulance service or hospital. A detonation assumes casualties.');
-  if (!hasFire) errors.push('The impact cascade alerts no municipal fire service.');
-  if (!hasRescue) errors.push('The impact cascade alerts no rescue reinforcement (Beredskabsstyrelsen).');
-  // Police are NOT checked by id pattern here. They are resolved per
-  // site rather than listed, so section 4b verifies them against the
-  // real destination table for every detonating site.
+//
+// Checked against the NAMED FIELDS in the routing table, never by id
+// prefix. Amager Koblingsstation's site code is AMK, so its police
+// destination is 'amk-t2-politi'; a prefix test for an ambulance
+// service would have counted that as medical coverage and passed with
+// no ambulance in the list at all.
+for (const siteId of sitesWithConsequenceRouting()) {
+  const site = CONSEQUENCE_BY_SITE[siteId];
+  if (!REGION_TO_MEDICAL_COORDINATION[site.region]) {
+    errors.push(`Site '${siteId}' declares region '${site.region}', which maps to no Akutmedicinsk Koordinationscenter. A detonation assumes casualties.`);
+  }
+  if (!site.hospitals || !site.hospitals.length) {
+    errors.push(`Site '${siteId}' has no receiving acute hospital.`);
+  }
+  if (!site.fire) errors.push(`Site '${siteId}' has no municipal fire service.`);
+  if (!site.rescue) errors.push(`Site '${siteId}' has no rescue reinforcement (Beredskabsstyrelsen).`);
 }
+
 
 // ── Report ─────────────────────────────────────────────────────────
 if (warnings.length) {
@@ -306,6 +320,7 @@ if (errors.length) {
 
 console.log(
   `✓ Impact cascade policy satisfied. ${impactSites.size} detonating site${impactSites.size === 1 ? '' : 's'} ` +
-  `(${[...impactSites].join(', ')}), ${recipients.length} consequence recipients plus the local Politikreds, all reachable with a home base.`
+  `(${[...impactSites].join(', ')}), ${sitesWithConsequenceRouting().length} sites routed, ` +
+  `${recipients.length} consequence agencies plus each site's own Politikreds, all reachable.`
 );
 process.exit(0);

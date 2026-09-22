@@ -41,6 +41,66 @@ const CONSEQUENCE_DESTINATIONS = [
   { id: 'brs-hedehusene', siteId: null, tier: 3, type: 'agency',
     name: 'Beredskabsstyrelsen Hovedstaden (Hedehusene)',
     contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+
+  // Added 2026-09-22. Every one of these roles already existed in
+  // roles.js with no destination, so it could be named but never
+  // reached. Names are taken verbatim from each role's org field so the
+  // two cannot drift. See src/consequence_routing.js for which site
+  // each one serves.
+  { id: 'amk-nordjylland', siteId: null, tier: 3, type: 'agency',
+    name: 'Akutmedicinsk Koordinationscenter Nordjylland',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'amk-sjaelland', siteId: null, tier: 3, type: 'agency',
+    name: 'Akutmedicinsk Koordinationscenter Sjælland',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'amk-syddanmark', siteId: null, tier: 3, type: 'agency',
+    name: 'Akutmedicinsk Koordinationscenter Syddanmark',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'brs-haderslev', siteId: null, tier: 3, type: 'agency',
+    name: 'BRS Haderslev',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'brs-thisted', siteId: null, tier: 3, type: 'agency',
+    name: 'BRS Thisted',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'hospital-aabenraa-sygehus', siteId: null, tier: 3, type: 'agency',
+    name: 'Sygehus Sønderjylland, Aabenraa',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'hospital-auh-aalborg', siteId: null, tier: 3, type: 'agency',
+    name: 'Aalborg Universitetshospital',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'hospital-esbjerg-sygehus', siteId: null, tier: 3, type: 'agency',
+    name: 'Sydvestjysk Sygehus, Esbjerg',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'hospital-herlev', siteId: null, tier: 3, type: 'agency',
+    name: 'Herlev Hospital',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'hospital-kolding-sygehus', siteId: null, tier: 3, type: 'agency',
+    name: 'Kolding Sygehus',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'hospital-suh-koege', siteId: null, tier: 3, type: 'agency',
+    name: 'Sjællands Universitetshospital, Køge',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'kbr-brsj', siteId: null, tier: 3, type: 'agency',
+    name: 'Brand & Redning Sønderjylland',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'kbr-frederiksborg', siteId: null, tier: 3, type: 'agency',
+    name: 'Frederiksborg Brand & Redning',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'kbr-koege', siteId: null, tier: 3, type: 'agency',
+    name: 'Brand & Redning Køge',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'kbr-nordjyllands', siteId: null, tier: 3, type: 'agency',
+    name: 'Nordjyllands Beredskab',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'kbr-sydvestjysk', siteId: null, tier: 3, type: 'agency',
+    name: 'Sydvestjysk Brandvæsen',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'kbr-taarnby', siteId: null, tier: 3, type: 'agency',
+    name: 'Tårnby Brandvæsen',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  { id: 'kbr-trekantbrand', siteId: null, tier: 3, type: 'agency',
+    name: 'TrekantBrand',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
 ];
 
 const DESTINATIONS = [
@@ -189,9 +249,10 @@ const DESTINATIONS = [
   { id: 'esb-t5-marcom', siteId: 'esbjerg', tier: 5, type: 'agency',
     name: 'NATO Allied Maritime Command, Northwood',
     contactMethods: ['api'], availabilityStatus: 'on-shift' },
-  { id: 'esb-t5-nordefco', siteId: 'esbjerg', tier: 5, type: 'agency',
-    name: 'Nordic Defence Cooperation (NORDEFCO)',
-    contactMethods: ['api'], availabilityStatus: 'off-hours' },
+  // NORDEFCO for Esbjerg was declared inline here AND emitted by the
+  // universal tier-5 generator below, so the id existed twice and which
+  // one a lookup returned depended on array order. The generated one is
+  // canonical; this inline copy is removed.
 
   // ═══════════════════════════════════════════════════════════
   // ENERGINET · Hovegård
@@ -581,8 +642,12 @@ function _pushForSite(siteId, entries) {
   const pfx = _SITE_PREFIXES[siteId];
   if (!pfx) return;
   for (const e of entries) {
+    const id = `${pfx}-${e.suffix}`;
+    // Idempotent. A site that also declares one of these inline would
+    // otherwise end up with the id twice.
+    if (DESTINATIONS.some(d => d.id === id)) continue;
     DESTINATIONS.push({
-      id: `${pfx}-${e.suffix}`,
+      id,
       siteId, tier: e.tier, type: e.type, name: e.name,
       contactMethods: e.ch, availabilityStatus: 'on-shift',
     });
@@ -649,7 +714,14 @@ if (Array.isArray(overrides) && overrides.length) {
 // site if one doesn't already exist. Same pattern any national-role
 // service could adopt (PET, FE, Beredskabsstyrelsen national coord).
 (() => {
-  const existingSiteIds = new Set(DESTINATIONS.map(d => d.siteId));
+  // siteId null marks a SHARED destination (the consequence agencies),
+  // not a site. Including it generated an Aktionsstyrken entry for "no
+  // site", whose prefix came from the first shared destination,
+  // amk-hovedstaden. That produced id 'amk-t3-aks' with siteId null,
+  // colliding with Amager Koblingsstation's real amk-t3-aks, because
+  // that site's code is also AMK. getDestination returns the first
+  // match, so which one you got depended on array order.
+  const existingSiteIds = new Set(DESTINATIONS.map(d => d.siteId).filter(id => id != null));
   const existingAksIds = new Set(DESTINATIONS.filter(d => /-t3-aks$/.test(d.id)).map(d => d.siteId));
   for (const sid of existingSiteIds) {
     if (existingAksIds.has(sid)) continue;
