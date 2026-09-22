@@ -87,7 +87,7 @@ const CONSEQUENCE_DESTINATIONS = [
     name: 'Frederiksborg Brand & Redning',
     contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
   { id: 'kbr-koege', siteId: null, tier: 3, type: 'agency',
-    name: 'Brand & Redning Køge',
+    name: 'Brand & Redning Køge-Solrød-Stevns',
     contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
   { id: 'kbr-nordjyllands', siteId: null, tier: 3, type: 'agency',
     name: 'Nordjyllands Beredskab',

@@ -359,6 +359,99 @@ export const RECEIVER_ASSETS = {
     requestable: [],
   },
 
+  // Municipal fire services, Zealand and the Triangle. Added 2026-09-22.
+  'kbr-taarnby': {
+    label: 'Tårnby Brandvæsen',
+    baseId: 'taarnby-brandstation',
+    dispatchable: [
+      {
+        assetKey: 'tbbv-brandbil',
+        kind: 'receiver-brandbil',
+        name: 'Brandbil',
+        count: 3,
+        icon: '🚒',
+        useCases: [
+          'Fire suppression at an impact or crash site',
+          'Technical rescue and first response',
+          'Scene lighting, water supply, and equipment support',
+        ],
+        capabilities: { fire_suppression: true, technical_rescue: true },
+        deployTime: '4-9 minutes via real road routing',
+        limitations: 'Stages at the assembly point until police declare the scene safe (REFIL doctrine at attack scenes).',
+      },
+    ],
+    requestable: [],
+  },
+
+  'kbr-frederiksborg': {
+    label: 'Frederiksborg Brand & Redning',
+    baseId: 'fbbr-frederikssund',
+    dispatchable: [
+      {
+        assetKey: 'fbbr-brandbil',
+        kind: 'receiver-brandbil',
+        name: 'Brandbil',
+        count: 3,
+        icon: '🚒',
+        useCases: [
+          'Fire suppression at an impact or crash site',
+          'Technical rescue and first response',
+          'Scene lighting, water supply, and equipment support',
+        ],
+        capabilities: { fire_suppression: true, technical_rescue: true },
+        deployTime: '10-20 minutes via real road routing',
+        limitations: 'Stages at the assembly point until police declare the scene safe (REFIL doctrine at attack scenes).',
+      },
+    ],
+    requestable: [],
+  },
+
+  'kbr-koege': {
+    label: 'Brand & Redning Køge-Solrød-Stevns',
+    baseId: 'brkss-koege',
+    dispatchable: [
+      {
+        assetKey: 'brkss-brandbil',
+        kind: 'receiver-brandbil',
+        name: 'Brandbil',
+        count: 3,
+        icon: '🚒',
+        useCases: [
+          'Fire suppression at an impact or crash site',
+          'Technical rescue and first response',
+          'Scene lighting, water supply, and equipment support',
+        ],
+        capabilities: { fire_suppression: true, technical_rescue: true },
+        deployTime: '8-18 minutes via real road routing',
+        limitations: 'Stages at the assembly point until police declare the scene safe (REFIL doctrine at attack scenes).',
+      },
+    ],
+    requestable: [],
+  },
+
+  'kbr-trekantbrand': {
+    label: 'TrekantBrand',
+    baseId: 'trekantbrand-kolding',
+    dispatchable: [
+      {
+        assetKey: 'trbr-brandbil',
+        kind: 'receiver-brandbil',
+        name: 'Brandbil',
+        count: 4,
+        icon: '🚒',
+        useCases: [
+          'Fire suppression at an impact or crash site',
+          'Technical rescue and first response',
+          'Scene lighting, water supply, and equipment support',
+        ],
+        capabilities: { fire_suppression: true, technical_rescue: true },
+        deployTime: '8-30 minutes via real road routing',
+        limitations: 'Stages at the assembly point until police declare the scene safe (REFIL doctrine at attack scenes).',
+      },
+    ],
+    requestable: [],
+  },
+
   // Regional medical coordination centres, added 2026-09-22. Five
   // ambulances and one physician car each, against Hovedstaden's eight
   // and two: these coordinate a region rather than a dense capital, and

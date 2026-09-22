@@ -420,6 +420,64 @@ export const RECEIVER_BASES = {
     verified: 'dpv.rn.dk + OSM node 343017287 + DAWA',
   },
 
+  // ── Municipal fire services, Zealand and the Triangle ────────
+  // Added 2026-09-22. Same verification standard: OSM house nodes with
+  // matching house number, road and postcode, never a street centroid.
+  'taarnby-brandstation': {
+    lat: 55.631581, lon: 12.621913,
+    // Tårnby Brandvæsen's only station. It covers Tårnby kommune,
+    // Københavns Lufthavn landside and Øresundsbroen. Cross-checked
+    // against an OSM fire_station feature 7 m away, the strongest
+    // confirmation of this batch.
+    name: 'Tårnby Brandvæsen, Gl. Kirkevej 100, 2770 Kastrup',
+    verified: 'tb.taarnby.dk + OSM node 740854502 + OSM fire_station POI 7m + CVR 20310413',
+  },
+  'fbbr-frederikssund': {
+    lat: 55.844449, lon: 12.061241,
+    // Frederiksborg Brand & Redning covers five kommuner from eleven
+    // stations and publishes no "hovedstation" anywhere, so a single
+    // main station is an inference either way.
+    //
+    // Frederikssund is chosen: it is the organisation's own published
+    // and CVR-registered address, it is a real station rather than only
+    // an office, and it is the nearer of the two candidates to Hovegård,
+    // the site that routes here. The alternative is Station Hillerød
+    // (Heimdalsvej 1, 55.933217, 12.275238), the only around-the-clock
+    // crewed station and the service centre for all eleven. If this
+    // model ever cares more about guaranteed immediate turnout than
+    // about distance, Hillerød is the better origin.
+    name: 'Frederiksborg Brand & Redning, Løgismose 3, 3600 Frederikssund',
+    verified: 'fbbr.dk/kontakt + OSM node 947617229 + CVR 37222135',
+  },
+  'brkss-koege': {
+    lat: 55.474573, lon: 12.179919,
+    // Main station and administration: the entire staff, including the
+    // beredskabschef, is listed at this address by the organisation.
+    // No OSM fire_station feature exists here, so the address node is
+    // the only coordinate basis. It is an exact house node, so precision
+    // is fine, but there is no second confirmation that this building is
+    // tagged as a fire station.
+    name: 'Brand & Redning Køge-Solrød-Stevns, Station Køge, Tigervej 8, 4600 Køge',
+    verified: 'brkss.dk/om-os/organisationen + OSM node 340833639',
+  },
+  'trekantbrand-kolding': {
+    lat: 55.506381, lon: 9.452879,
+    // TrekantBrand runs two hovedstationer. Kolding holds the
+    // administration and is the nearer of the two to both sites that
+    // route here, Landerupgård and Billund. Fredericia (Prangervej 7,
+    // 55.563787, 9.744850) is the other, and holds the vagtcentral.
+    //
+    // DO NOT "CORRECT" THIS AGAINST OPENSTREETMAP. TrekantBrand moved
+    // into this purpose-built station in December 2025, and OSM's
+    // fire_station feature for Kolding still sits at the decommissioned
+    // Smedegade station 4.5 km away. Any lookup that resolves this
+    // organisation through an OSM fire_station POI lands at the wrong
+    // building. The coordinate here is the address node for Kobbervej
+    // 14, which CVR also now carries.
+    name: 'TrekantBrand, Station Kolding, Kobbervej 14, 6000 Kolding',
+    verified: 'trekantbrand.dk/kontakt + OSM node 11618669969 + CVR 37242985',
+  },
+
   // ── Acute hospitals outside the capital ──────────────────────
   // Added 2026-09-22. Each coordinate is an OSM house node with a
   // matching house number, road and postcode, cross-checked against the

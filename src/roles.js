@@ -1138,10 +1138,17 @@ export const RECEIVERS = [
   meta: { member_kommuner: ['kom-greve', 'kom-hoeje-taastrup', 'kom-ishoej', 'kom-vallensbaek'] },
   description: '§60 shared fire & rescue formed after Østsjællands Beredskab dissolved (2020).' },
   { id: 'kbr-koege', kind: 'receiver', type: 'leaf',
-  org: 'Brand & Redning Køge', label: 'Brand & Redning Køge', initials: 'BRK',
+  // The description had this backwards. The organisation was ETK Brand &
+  // Redning and has ALREADY been renamed Brand & Redning
+  // Koege-Solroed-Stevns; what happens in 2027 is incorporation as a
+  // formal fælleskommunalt §60 selskab (Køge 79%, Stevns 13%, Solrød
+  // 8%), still pending Ankestyrelsen approval. Operational firefighting
+  // is contracted to Falck, so this address is the municipal
+  // organisation rather than the employer of the crew on scene.
+  org: 'Brand & Redning Køge-Solrød-Stevns', label: 'Brand & Redning Køge-Solrød-Stevns', initials: 'BRK',
   scope: 'regional', destinationIds: ['kbr-koege'],
-  meta: { member_kommuner: ['kom-koege'] },
-  description: 'Køge kommune fire & rescue. Consolidating with Stevns + Solrød in 2027 (ETK Brand & Redning).' },
+  meta: { member_kommuner: ['kom-koege', 'kom-solroed', 'kom-stevns'] },
+  description: 'Køge, Solrød and Stevns fire & rescue, five stations. Becomes a formal §60 selskab in 2027.' },
   { id: 'kbr-roskilde', kind: 'receiver', type: 'leaf',
   org: 'Roskilde Brandvæsen', label: 'Roskilde Brandvæsen', initials: 'RBV',
   scope: 'regional', destinationIds: [],
