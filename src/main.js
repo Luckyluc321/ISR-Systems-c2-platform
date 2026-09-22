@@ -151,10 +151,10 @@ import { buildPostIncidentReport, buildChainPostIncidentReport, emphasisForBranc
 import { evaluateClassificationPipeline, evaluateAttackProfileDetector } from './classification_pipeline.js';
 import { baseForReceiverRole } from './receiver_bases.js';
 import { RECEIVER_ASSETS, assetsForReceiverRole, getReceiverDirectAsset, getReceiverRequestAsset } from './receiver_assets.js';
-import { cordonReleaseDecisions, clearedWreckageIds, expiredGhostEventIds, sceneReleaseState } from './scene_lifecycle.js';
+import { cordonReleaseDecisions, clearedWreckageIds, expiredGhostEventIds, sceneReleaseState, leavesSceneUnassisted } from './scene_lifecycle.js';
 import {
   destinationsForSite, destinationsForEvent, getDestination, destinationTypeLabel,
-  destinationParent, destinationShortLabel, groupByParent, localPoliceDestinationIds,
+  destinationShortLabel, groupByParent, localPoliceDestinationIds,
   addDestination, updateDestination, removeDestination,
   onDestinationsChange, resetDestinationsToDefault,
   CHANNEL_META, getDestinationGuidance, getAllDestinations,
@@ -4114,8 +4114,36 @@ async function main() {
     for (const d of patrolDispatches) {
       const a = assignments.get(d.id);
       if (!a) continue;
-      const prevWreckId = d.assignedWreckageId;
-      d.assignedWreckageId = a.wreckageId;
+      // Consequence responders get a SCENE assignment, not a cordon
+      // assignment. Same wreckage, same ingress standoff, different
+      // field, because 'holding-cordon' is promoted off
+      // assignedWreckageId and an ambulance must never be promoted into
+      // a police perimeter state.
+      //
+      // They still need the assignment: it is the only thing that aims
+      // them at where the airframe actually came down. Without it a unit
+      // dispatched while the drone was still flying would drive to the
+      // dispatch-time guess and stay there.
+      const isConsequence = leavesSceneUnassisted(d.profile);
+      const prevWreckId = isConsequence ? d.sceneWreckageId : d.assignedWreckageId;
+      // A responder that is ALREADY WORKING A KNOWN SCENE is not sent to
+      // a second crash site. It finishes where it is.
+      //
+      // Tested on prevWreckId, not on state alone. 'engaging' does not
+      // mean "on scene", it means "route consumed": a responder
+      // dispatched while the drone was still flying drives to the
+      // dispatch-time guess point and flips to 'engaging' on arriving
+      // THERE, with no scene assigned. That unit must still be re-aimed
+      // when the airframe actually comes down, which is the whole
+      // reason the assignment exists.
+      //
+      // And this returns BEFORE the writes below. Stamping the new
+      // wreck id and then bailing out left a responder standing at
+      // wreck A while its record claimed wreck B, which would hold B's
+      // perimeter up and let A's clear with the ambulance still on it.
+      if (isConsequence && d.state === 'engaging' && prevWreckId) continue;
+      if (isConsequence) d.sceneWreckageId = a.wreckageId;
+      else d.assignedWreckageId = a.wreckageId;
       d.targetLat = a.ingress.lat;
       d.targetLon = a.ingress.lon;
       // Only reroute if the wreckage assignment actually changed OR
@@ -4494,10 +4522,15 @@ async function main() {
     // units picker on the option card.
     if (!profile.supportsMultiDispatch && !profile.allowRepeatedDispatch) {
       for (const [, d] of _counterDispatches) {
-        if (d.eventId === eventId && d.assetId === asset.id && d.state !== 'complete') {
-          toast(`${asset.name} already dispatched.`, 'info');
-          return;
-        }
+        if (d.eventId !== eventId || d.assetId !== asset.id) continue;
+        if (d.state === 'complete') continue;
+        // A responder on its way home is available for a new call-out.
+        // Blocking it meant an ambulance that had finished at one scene
+        // could not be sent to a second one until it physically reached
+        // its station.
+        if (leavesSceneUnassisted(d.profile) && d.state === 'rtb_home') continue;
+        toast(`${asset.name} already dispatched.`, 'info');
+        return;
       }
     }
     // Choose the best available target across the event graph.
@@ -5060,6 +5093,15 @@ async function main() {
     entry.viaRequestFromRoleId = d.viaRequestFromRoleId || null;
     entry.archetype = d.archetype || entry.archetype || null;
     entry.rtbCompleted = !!d.rtbCompleted;
+    // Wreck attachment. Mirrored because the auto-close predicate reads
+    // it off the event mirror, not off the live dispatch. It was never
+    // mirrored, so the `|| !!c.assignedWreckageId` clause in that
+    // predicate was dead from the day it was written: a cordon car in
+    // 'en_route' or 'engaging' still held a dead-air event open, and
+    // only the 'holding-cordon' literal ever did the work the clause
+    // was added for.
+    entry.assignedWreckageId = d.assignedWreckageId || null;
+    entry.sceneWreckageId = d.sceneWreckageId || null;
     // Cordon stand-down. This mirror is a whitelist, and the live
     // dispatch is deleted five seconds after it reaches base, so
     // anything not copied here is lost from the permanent record. The
@@ -5245,7 +5287,17 @@ async function main() {
           d.targetAlt = cA.height;
         }
       }
-    } else if (event?.lastPosition && !targetLost && !d.assignedWreckageId) {
+    // Consequence responders are excluded from chasing the live track.
+    // They go to a fixed scene, not to wherever the drone currently is.
+    // Without this an ambulance re-aims at the flying drone every tick,
+    // which corrupts its ETA readout and, if the road route has not
+    // returned yet, actually sends it chasing an airborne track.
+    //
+    // They are re-aimed by _rebalancePatrolsToWreckages instead, which
+    // gives them d.sceneWreckageId and the ingress standoff once the
+    // airframe is down.
+    } else if (event?.lastPosition && !targetLost && !d.assignedWreckageId
+               && !d.sceneWreckageId && !leavesSceneUnassisted(d.profile)) {
       d.targetLat = event.lastPosition.lat;
       d.targetLon = event.lastPosition.lon;
       if (typeof event.lastPosition.alt === 'number') d.targetAlt = event.lastPosition.alt;
@@ -5454,7 +5506,11 @@ async function main() {
             _initiateJamFall(d);
           }
           if (getActiveRole().kind === 'receiver') renderReceiverView();
-          toast(`${d.assetName} on station. Engaging.`, 'info');
+          toast(d.profile?.stagesAtScene
+            ? `${d.assetName} staging at scene perimeter.`
+            : leavesSceneUnassisted(d.profile)
+              ? `${d.assetName} on scene. Response under way.`
+              : `${d.assetName} on station. Engaging.`, 'info');
         }
       } else {
         // Straight-line fallback (used pre-route-fetch or on OSRM fail)
@@ -5487,7 +5543,11 @@ async function main() {
           }
           if (d.profile.firesTracer) _fireMachineGunBurst(d);
           if (getActiveRole().kind === 'receiver') renderReceiverView();
-          toast(`${d.assetName} on station. Engaging.`, 'info');
+          toast(d.profile?.stagesAtScene
+            ? `${d.assetName} staging at scene perimeter.`
+            : leavesSceneUnassisted(d.profile)
+              ? `${d.assetName} on scene. Response under way.`
+              : `${d.assetName} on station. Engaging.`, 'info');
         }
       }
     } else if (d.state === 'engaging') {
@@ -5912,8 +5972,23 @@ async function main() {
       if (distM <= 120) {
         d.state = 'complete';
         d.rtbCompleted = true;
-        // Auto-record outcome as target evaded before arrival
-        if (event) {
+        // Auto-record outcome as target evaded before arrival.
+        //
+        // Only when nothing has already recorded one. This stamp is
+        // written in interceptor vocabulary, and it used to overwrite
+        // unconditionally, so every unit that drove home ended its day
+        // recorded as "Interceptor lost signal on target before
+        // intercept" regardless of what it actually did. That is wrong
+        // for a released police cordon and absurd for an ambulance
+        // leaving a mass-casualty scene.
+        //
+        // setDispatchOutcome replaces rather than merges, so the guard
+        // has to be here at the call site.
+        // Never for a consequence responder: its outcome belongs to
+        // the agency and is recorded by a human in Step 4, from
+        // _CONSEQUENCE_OUTCOMES. Stamping anything here would remove it
+        // from that list.
+        if (event && !event.dispatchOutcomes?.[d.id] && !leavesSceneUnassisted(d.profile)) {
           setDispatchOutcome(event.id, d.id, {
             outcomeId: 'target_evaded_before_arrival',
             outcomeLabel: 'Target evaded before arrival',
@@ -5922,7 +5997,9 @@ async function main() {
             confirmedBy: 'system_auto',
           });
         }
-        toast(`${d.assetName} back at base. Target signal not reacquired.`, 'info');
+        if (!leavesSceneUnassisted(d.profile)) {
+          toast(`${d.assetName} back at base. Target signal not reacquired.`, 'info');
+        }
         _resolveEngagement(d);
       }
     }
@@ -6570,7 +6647,7 @@ async function main() {
       const state = droneState.get(d.eventId);
       const groupMembers = (event.counterDispatches || []).filter(cd => cd.groupId === d.groupId);
       const groupCompletedCount = groupMembers.filter(cd => {
-        const s = counterDispatchStateFor(d.eventId, cd.assetId);
+        const s = counterDispatchStateForEntry(d.eventId, cd);
         return s === 'complete' || cd.dispatchId === d.id;   // include this one which just completed
       }).length;
       if (groupCompletedCount >= groupMembers.length && !event._interceptorGroupsCompleted?.has(d.groupId)) {
@@ -6634,7 +6711,13 @@ async function main() {
       // Consequence responders never neutralise. Arriving at a crash
       // scene is not a kill, and crediting one to an ambulance would
       // overwrite the real outcome in the case file and the report.
-      toast(`${d.assetName} on scene. Consequence response under way.`, 'info');
+      //
+      // No toast here. This branch runs at task end AND again when the
+      // unit reaches base, so it announced "on scene, consequence
+      // response under way" while the ambulance was parked at its own
+      // station, and at task end it fired in the same frame as the
+      // "response complete" message below. The departure branch further
+      // down owns the messaging for these units.
     } else if (event && !d.profile.visualVerifyOnly && !d.rtbCompleted) {
       // Kinetic truth beats machine assumption: a late kill (engagement
       // resolving after the event already auto-closed) supersedes the
@@ -6704,6 +6787,32 @@ async function main() {
         if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
       return;
     }
+    // A consequence responder has finished its on-scene task. It goes
+    // home on its own: nobody released it, because nobody stood it up
+    // as a cordon. This must come BEFORE the cordon promotion below,
+    // which tests only "ground vehicle with a wreckage" and would
+    // otherwise park an ambulance on a police perimeter until a police
+    // account released the scene.
+    //
+    // Guarded on rtbCompleted because the rtb_home arrival path calls
+    // _resolveEngagement again once the unit is back at base. Without
+    // the guard this branch would fire on arrival and send it straight
+    // back out, and the unit would never finish.
+    if (leavesSceneUnassisted(d.profile) && !d.rtbCompleted) {
+      // NO outcome is stamped here, deliberately.
+      //
+      // Step 4 only offers a dispatch for outcome confirmation while
+      // dispatchOutcomes[id] is unset. Auto-stamping one here would
+      // make _CONSEQUENCE_OUTCOMES ("No action required on arrival",
+      // "Stood down before arrival", "Handed over to another service")
+      // unreachable, and would flip outcomeConfirmed true the moment an
+      // ambulance finished, silently unlocking the post-incident
+      // handoff with no human confirmation. The agency records what
+      // happened at its own scene; the platform observes.
+      toast(`${d.assetName} response complete. Returning to base.`, 'ok');
+      _sendDispatchHome(d);
+      return;
+    }
     if (d.profile.useRoadRouting && !d.profile.airborne && d.assignedWreckageId) {
       // Ground patrol at cordon — stay parked. Turn off any remaining
       // radiation/engage visuals. State stays 'engaging' visually so
@@ -6747,6 +6856,30 @@ async function main() {
 
   // Lookup: has this asset been dispatched for this event? Returns
   // the dispatch state string or null.
+  // State of ONE specific dispatch, by its own id.
+  //
+  // counterDispatchStateFor below matches on assetId and returns the
+  // FIRST live dispatch of that asset, which is wrong whenever two
+  // call-outs of the same asset are live on one event. That became
+  // reachable when a responder driving home was allowed to be
+  // re-dispatched: a finished first call-out would read the second
+  // unit's 'en_route' and disappear from outcome confirmation until
+  // the second one also finished.
+  //
+  // Falls back to the mirrored state, which is what remains after the
+  // live dispatch is deleted five seconds past base.
+  function counterDispatchStateForEntry(eventId, cd) {
+    if (cd?.dispatchId) {
+      const live = _counterDispatches.get(cd.dispatchId);
+      if (live) return live.state;
+      return cd.state || 'complete';
+    }
+    return counterDispatchStateFor(eventId, cd?.assetId);
+  }
+
+  // State of ANY live dispatch of this asset on this event. Correct for
+  // "is this asset currently out", which is what the option cards ask.
+  // Use counterDispatchStateForEntry when you hold a specific entry.
   function counterDispatchStateFor(eventId, assetId) {
     for (const [, d] of _counterDispatches) {
       if (d.eventId === eventId && d.assetId === assetId) return d.state;
@@ -8160,11 +8293,42 @@ async function main() {
   // map it is derived from.
   const _everHeldWreckageIds = new Set();
 
+  // Put a ground unit on the road home.
+  //
+  // The one place that knows how to end a ground deployment. Two
+  // callers: a cordon released by scene command or the simulation hold
+  // timer, and a consequence responder that has finished its own
+  // on-scene task. They must not drift, because a half-applied version
+  // of this leaves the outbound route line painted across the map for
+  // the whole return leg.
+  //
+  // rtb_home moves by bearing and ignores routePositions, so the route
+  // state is dropped rather than left stale.
+  function _sendDispatchHome(d, nowMs = Date.now()) {
+    if (!d) return;
+    d.assignedWreckageId = null;
+    d.sceneWreckageId = null;
+    d.state = 'rtb_home';
+    d.rtbTargetLat = d.originLat;
+    d.rtbTargetLon = d.originLon;
+    d.lastFrameTs = nowMs;
+    if (d.routeEntity) { try { viewer.entities.remove(d.routeEntity); } catch (_) {} d.routeEntity = null; }
+    d.routePositions = null;
+    d.routeSegmentLengths = null;
+    _syncDispatchToEvent(d);
+  }
+
   function _sweepSceneLifecycle() {
     const now = Date.now();
     const dispatches = Array.from(_counterDispatches.values());
     for (const d of dispatches) {
+      // Both fields. A wreck attended only by ambulances is still a
+      // wreck that was attended, so its perimeter must be allowed to
+      // clear when they leave. Tracking only the cordon pin left the
+      // polygon on the map for the session on a consequence-only
+      // response.
       if (d.assignedWreckageId) _everHeldWreckageIds.add(d.assignedWreckageId);
+      if (d.sceneWreckageId) _everHeldWreckageIds.add(d.sceneWreckageId);
     }
 
     // 1. Release cordons that are due, grouped by event so the
@@ -8202,20 +8366,9 @@ async function main() {
       for (const { id, reason } of decisions) {
         const d = _counterDispatches.get(id);
         if (!d) continue;
-        d.assignedWreckageId = null;
         d.cordonReleasedAt = new Date().toISOString();
         d.cordonReleaseReason = reason;
-        d.state = 'rtb_home';
-        d.rtbTargetLat = d.originLat;
-        d.rtbTargetLon = d.originLon;
-        d.lastFrameTs = now;
-        // Drop the outbound route. rtb_home moves by bearing and does
-        // not follow routePositions, so leaving these would paint the
-        // old drive-out line on the map for the whole return leg.
-        if (d.routeEntity) { try { viewer.entities.remove(d.routeEntity); } catch (_) {} d.routeEntity = null; }
-        d.routePositions = null;
-        d.routeSegmentLengths = null;
-        _syncDispatchToEvent(d);
+        _sendDispatchHome(d, now);
       }
       if (decisions.length) {
         // Reason recorded verbatim. 'hold-elapsed' must never read as
@@ -12502,13 +12655,25 @@ async function main() {
           // not chasing: they must never hold a dead-air event open.
           // Field-found: AMK stayed LIVE forever with zero detections
           // because cordon cars never reach 'complete'.
+          // Consequence responders are never chasing either. They are
+          // treating casualties or fighting a fire at a fixed scene, so
+          // they must not hold a dead-air event open. Without this an
+          // event stayed LIVE with zero detections for the whole
+          // on-scene task: 5 minutes for an ambulance, 15 for a
+          // Beredskabsstyrelsen rescue team. Same failure the cordon
+          // clause above was added for.
+          //
+          // Read off the mirrored kind, because event.counterDispatches
+          // entries carry no profile.
           const noChase = !Array.isArray(event.counterDispatches)
             || event.counterDispatches.every(c =>
                  c.state === 'complete'
                  || c.state === 'holding-cordon'
                  || c.state === 'rtb_home'
                  || c.state === 'rtb_via_last_known'
-                 || !!c.assignedWreckageId);
+                 || !!c.assignedWreckageId
+                 || !!c.sceneWreckageId
+                 || leavesSceneUnassisted(CD_PROFILE[c.kind]));
           const linkedActive = Array.isArray(event.linkedEventIds)
             && event.linkedEventIds.some(lid => {
               const le = getEvent(lid);
@@ -20763,7 +20928,7 @@ async function main() {
     // the current state or 'complete' if the entity has already retired.
     const bucketed = new Map(_MON_ENG_BUCKETS.map(b => [b.key, []]));
     for (const cd of dispatches) {
-      const state = counterDispatchStateFor(event.id, cd.assetId) || 'complete';
+      const state = counterDispatchStateForEntry(event.id, cd) || 'complete';
       const bucketKey = bucketed.has(state) ? state : 'complete';
       bucketed.get(bucketKey).push(cd);
     }
@@ -20982,7 +21147,7 @@ async function main() {
     const outcomes = event.dispatchOutcomes || {};
     const dispatches = (event.counterDispatches || []).filter(cd => {
       if (outcomes[cd.dispatchId]) return false;   // already confirmed
-      const state = counterDispatchStateFor(event.id, cd.assetId);
+      const state = counterDispatchStateForEntry(event.id, cd);
       // Include completed dispatches OR dispatches whose entities have
       // already been retired (state lookup returns 'complete' from the
       // event's counterDispatches trail even after entities are gone).

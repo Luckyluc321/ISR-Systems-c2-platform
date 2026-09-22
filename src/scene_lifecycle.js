@@ -129,6 +129,32 @@ export function cordonReleaseDecisions(dispatches, opts = {}) {
   return out;
 }
 
+// Does this kind of unit finish its own job and leave, without anyone
+// releasing it?
+//
+// Yes for consequence responders: ambulances, akutlægebiler, brandbiler
+// and rescue teams. They arrive, work their task for its declared
+// duration, and drive home. Nobody stands them down, because nobody
+// stood them up as a cordon.
+//
+// No for police and military ground units. They hold a perimeter until
+// scene command releases it.
+//
+// WHY THIS EXISTS. The promotion to 'holding-cordon' tested only
+// "ground vehicle with a wreckage assigned", which is true of an
+// ambulance. So an ambulance arriving at a crash site was pinned to the
+// wreck, told the operator it was "securing wreckage perimeter", and
+// parked there until a police account released the scene. In a live
+// event with no police on the case it would have parked forever.
+// Ambulances do not secure perimeters. The code's own fire-engine
+// comment says these units stage until police declare the scene safe.
+//
+// Takes the profile rather than the dispatch so callers cannot drift on
+// where the flag lives.
+export function leavesSceneUnassisted(profile) {
+  return !!(profile && profile.consequenceOnly);
+}
+
 // Dispatch states in which a unit is committed to a wreckage: already
 // on the perimeter, or driving to it. Exported because two callers ask
 // the same question and a second copy of this set is exactly the kind
@@ -227,10 +253,21 @@ export function sceneReleaseState({
 // wreck with no cordon dispatched at all, which is the normal case for
 // an impact scene, would be drawn and destroyed within two seconds.
 // A cordon that never formed has not stood down; it never stood up.
+// Both attachment fields count here. assignedWreckageId is a cordon
+// pin; sceneWreckageId is a consequence responder attending the scene
+// without being a cordon unit. The perimeter belongs to the wreck, not
+// to the police, so it stays up while anyone is still working it and
+// comes down when the last of them leaves.
+export function wreckageAttachmentId(d) {
+  if (!d) return null;
+  return d.assignedWreckageId || d.sceneWreckageId || null;
+}
+
 export function clearedWreckageIds(wreckages, dispatches, everHeldIds) {
   const held = new Set();
   for (const d of dispatches || []) {
-    if (d && d.assignedWreckageId && CORDON_ATTACHED_STATES.has(d.state)) held.add(d.assignedWreckageId);
+    const wid = wreckageAttachmentId(d);
+    if (wid && CORDON_ATTACHED_STATES.has(d.state)) held.add(wid);
   }
   const everHeld = everHeldIds instanceof Set ? everHeldIds : new Set(everHeldIds || []);
   return (wreckages || [])

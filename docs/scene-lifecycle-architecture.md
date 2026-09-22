@@ -220,6 +220,99 @@ It is recorded in the feedback log as an `operator_action`
 (`logOperatorDecision`), and in the event audit trail attributed to the
 account that clicked it, never to `AUTO-CORRELATOR`.
 
+## Consequence responders are not cordon units
+
+Ambulances, akutlægebiler, brandbiler and rescue teams arrive, do their
+job, and drive home. Nobody stands them down, because nobody stood them
+up as a cordon. `leavesSceneUnassisted(profile)` is the predicate, keyed
+on `consequenceOnly`.
+
+Until 2026-09-22 they were treated as police cordon units. The promotion
+to `holding-cordon` tested only "ground vehicle with a wreckage
+assigned", which is true of an ambulance, so one arriving at a crash
+site was pinned to the wreck, labelled **"securing wreckage perimeter"**,
+and parked until a police account released the scene. In a live event
+with no police on the case it would have parked until the browser
+closed. The fire-engine profile's own comment says these units stage
+until police declare the scene safe. They do not hold perimeters.
+
+### Two attachment fields, on purpose
+
+| Field | Meaning | Promotes to `holding-cordon` |
+|---|---|---|
+| `assignedWreckageId` | a cordon pin, police and military ground units | yes |
+| `sceneWreckageId` | a responder attending the scene | no |
+
+Responders still need an assignment. It is the only thing that aims them
+at where the airframe actually came down: a unit dispatched while the
+drone was still flying would otherwise drive to the dispatch-time guess
+and stay there. They take the same ingress standoff, in a different
+field, so the cordon promotion cannot see them.
+
+Both fields count for **perimeter clearing**
+(`wreckageAttachmentId`). The perimeter belongs to the wreck, not to the
+police, so it stays up while anyone is working the scene and comes down
+when the last of them leaves. Counting only the cordon pin left the
+polygon on the map for the whole session on a response attended only by
+ambulances.
+
+Neither counts for the **police release control**. Attending a scene is
+not holding a cordon, and an ambulance must never make the police
+control appear or be counted in its "units on cordon" line.
+
+### What else had to move
+
+- **A responder already working a KNOWN scene is not dragged to a second
+  crash site.** Tested on whether it has a scene assigned, not on its
+  state: `engaging` means "route consumed", not "on scene". A responder
+  dispatched while the drone was still flying drives to the
+  dispatch-time guess and flips to `engaging` on arriving there, with no
+  scene assigned, and must still be re-aimed once the airframe comes
+  down.
+- **It is not re-aimed at the live air track** each tick, which would
+  corrupt its ETA and, before the road route returned, send it chasing
+  an airborne drone.
+- **It does not hold a dead-air event open.** `noChase` accepted only
+  terminal and cordon states, so an event stayed live with zero
+  detections for the whole on-scene task: five minutes for an ambulance,
+  fifteen for a rescue team. Same failure the cordon clause was added
+  for.
+- **Its arrival no longer reads as an interception.** An ambulance
+  announced "on station. Engaging." Units that stage say so; the rest
+  report a response under way.
+- **It is re-dispatchable while driving home.** A finished ambulance
+  could not be sent to a second scene until it physically reached its
+  station.
+- **No outcome is auto-stamped.** Step 4 only offers a dispatch for
+  confirmation while its outcome is unset, so stamping one would make
+  `_CONSEQUENCE_OUTCOMES` unreachable and silently unlock the
+  post-incident handoff with no human confirmation.
+
+### Two fixes that were not about responders
+
+`event.counterDispatches` never mirrored the wreck attachment, so the
+`|| !!c.assignedWreckageId` clause in the auto-close predicate read
+`undefined` and was dead from the day it was written. Only the
+`holding-cordon` literal ever did the work it was added for, which means
+a cordon car in `en_route` or `engaging` still held a dead-air event
+open. Both wreck fields are now mirrored and the clause works.
+
+`counterDispatchStateFor` matches on asset id and returns the first live
+dispatch of that asset. With two call-outs of one asset live on an
+event, a finished first call-out read the second unit's state and
+vanished from outcome confirmation. Callers holding a specific dispatch
+entry now use `counterDispatchStateForEntry`, which matches on dispatch
+id.
+
+
+The `rtb_home` arrival stamp wrote `target_evaded_before_arrival`
+unconditionally, and `setDispatchOutcome` replaces rather than merges.
+So **any** unit that drove home had its case-file outcome overwritten
+with *"Interceptor lost signal on target before intercept"*, including a
+released police cordon and an interceptor that had already recorded a
+kill. It now writes only when nothing has recorded an outcome, and never
+for a responder.
+
 ## Perimeter clearing
 
 Two conditions, both learned from shipped bugs.
