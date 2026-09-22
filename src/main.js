@@ -151,7 +151,7 @@ import { buildPostIncidentReport, buildChainPostIncidentReport, emphasisForBranc
 import { evaluateClassificationPipeline, evaluateAttackProfileDetector } from './classification_pipeline.js';
 import { baseForReceiverRole } from './receiver_bases.js';
 import { RECEIVER_ASSETS, assetsForReceiverRole, getReceiverDirectAsset, getReceiverRequestAsset } from './receiver_assets.js';
-import { cordonReleaseDecisions, clearedWreckageIds, expiredGhostEventIds, sceneReleaseState, leavesSceneUnassisted } from './scene_lifecycle.js';
+import { cordonReleaseDecisions, clearedWreckageIds, expiredGhostEventIds, sceneReleaseState, leavesSceneUnassisted, cordonNeedsSceneCommand } from './scene_lifecycle.js';
 import { consequenceAgenciesForSite } from './consequence_routing.js';
 import {
   destinationsForSite, destinationsForEvent, getDestination, destinationTypeLabel,
@@ -8293,6 +8293,11 @@ async function main() {
   // perimeter must not be swept away. Browser-local like the dispatch
   // map it is derived from.
   const _everHeldWreckageIds = new Set();
+  // Events already toasted/warned about scene command. Browser-local
+  // and only guards the NOTIFICATION; correctness of the escalation
+  // itself comes from escalateEvent's own dedup, so losing this set
+  // cannot produce duplicate escalations.
+  const _cordonCommandWarned = new Set();
 
   // Put a ground unit on the road home.
   //
@@ -8330,6 +8335,69 @@ async function main() {
       // response.
       if (d.assignedWreckageId) _everHeldWreckageIds.add(d.assignedWreckageId);
       if (d.sceneWreckageId) _everHeldWreckageIds.add(d.sceneWreckageId);
+    }
+
+    // 0. A forming cordon needs a scene commander.
+    //
+    // Escalates to the site's own Politikreds the moment a unit is
+    // pinned to a wreck. Without this, an operator could dispatch
+    // ground units to a kill on an event that never reached police, and
+    // in a live incident nothing could ever release them: the release
+    // control only appears for a police account that has the event in
+    // its inbox. Only the warhead-impact path escalated to police; the
+    // two kill paths, which are the normal case, did not.
+    //
+    // Level-triggered and safe to run every sweep. escalateEvent dedups
+    // against existing escalations and returns only NEW records, so
+    // after the first success this is a no-op.
+    //
+    // NEVER pass an assessmentPackage here. That flag makes
+    // escalateEvent bypass its own dedup and mint a fresh record on
+    // every call, which from a two-second sweep would be an escalation
+    // every two seconds for the life of the cordon.
+    const _byEventCordon = new Map();
+    for (const d of dispatches) {
+      if (!d.assignedWreckageId) continue;
+      if (!_byEventCordon.has(d.eventId)) _byEventCordon.set(d.eventId, []);
+      _byEventCordon.get(d.eventId).push(d);
+    }
+    for (const [eventId, group] of _byEventCordon) {
+      if (!cordonNeedsSceneCommand(group)) continue;
+      const event = EVENTS.find(e => e.id === eventId);
+      if (!event) continue;
+      const politiIds = localPoliceDestinationIds(event);
+      if (!politiIds.length) {
+        if (!_cordonCommandWarned.has(eventId)) {
+          _cordonCommandWarned.add(eventId);
+          console.warn('[scene command] no tier-2 Politikreds for site', event.siteId,
+            '- a cordon is forming with no account able to release it.');
+        }
+        continue;
+      }
+      // Level-triggered: ask whether they are already on the case
+      // rather than remembering that we told them.
+      const already = new Set((event.escalations || []).map(r => r.destinationId));
+      if (politiIds.every(id => already.has(id))) continue;
+      const records = escalateEvent(eventId, {
+        destinationIds: politiIds,
+        payload: 'summary',
+        message: 'Cordon forming at a downed airframe. Scene command required: this district holds the release.',
+        // Explicit system actor. The default operator is a named human,
+        // and a machine decision must not put one in the chain of
+        // custody.
+        operator: 'AUTO-CASCADE',
+        operatorRoleId: 'system-cordon-command',
+      });
+      if (!records.length) continue;
+      _fireEscalationAdapterSend(event, records);
+      // Toasted once per event, not per sweep. The escalation itself is
+      // deduped, but a toast inside a two-second loop would storm.
+      if (!_cordonCommandWarned.has(eventId)) {
+        _cordonCommandWarned.add(eventId);
+        const name = getDestination?.(politiIds[0])?.name || 'local Politikreds';
+        toast(`Cordon forming. ${name} notified to take scene command.`, 'info');
+      }
+      renderAlertStrip();
     }
 
     // 1. Release cordons that are due, grouped by event so the
@@ -21378,6 +21446,20 @@ async function main() {
             <span style="color:var(--text-dim);">Time</span><span style="color:var(--text);font-family:var(--font-mono);">${w.at || '?'}</span>
           </div>
         </details>`).join('')}` : '';
+    // Scene command decisions. Sits beside the downed airframes because
+    // it answers the question that follows them: who released the site.
+    // Rendered from the report rather than from live dispatch state, so
+    // a report opened months later still shows the decision.
+    const sceneReleases = report.scene_releases || [];
+    const sceneReleaseRows = sceneReleases.length ? `
+      <div class="c-panel-title" style="margin: var(--space-3) 0 var(--space-2); color: #8fc9a8;">Scene released · ${sceneReleases.length}</div>
+      ${sceneReleases.map(r => `
+        <div style="display:flex;gap:var(--space-3);align-items:baseline;padding:5px 0;border-top:1px solid var(--border);font-size:var(--fs-2xs);">
+          <span style="color:var(--text-dim);font-family:var(--font-mono);flex:0 0 74px;">${(r.at || '').slice(11,19)}Z</span>
+          <span style="color:#8fc9a8;font-family:var(--font-mono);flex:0 0 84px;">RELEASED</span>
+          <span style="color:var(--text);flex:1 1 auto;">${r.wreckageIds.length > 1 ? `${r.wreckageIds.length} crash sites` : 'Crash site'}</span>
+          <span style="color:var(--text-dim);flex:0 0 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:45%;">${r.by || 'scene command'}</span>
+        </div>`).join('')}` : '';
     const timelineRows = (report.timeline || []).map(t => `
       <div style="display:flex;gap:var(--space-3);padding:6px 0;border-top:1px solid var(--border);font-size:var(--fs-2xs);">
         <span style="color:var(--text-dim);font-family:var(--font-mono);flex:0 0 90px;">${(t.ts || '').slice(11,19)}Z</span>
@@ -21436,7 +21518,7 @@ async function main() {
             <div style="padding:var(--space-2);background:rgba(255,255,255,0.02);border-radius:2px;"><div class="c-label" style="color:var(--text-dim);">Outcome</div><div style="color:var(--text);font-family:var(--font-mono);">${(snap.outcome || 'closed').toUpperCase()}</div></div>
           </div>
 
-          ${timelineCount ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Timeline · ${timelineCount}</div>${downedRows}
+          ${timelineCount ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Timeline · ${timelineCount}</div>${downedRows}${sceneReleaseRows}
       ${timelineRows}</div>` : ''}
           ${(report.escalations?.length || 0) ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Dispatched to · ${report.escalations.length}</div>${escalationRows}</div>` : ''}
           ${dispatchCount ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Counter-dispatches · ${dispatchCount}</div>${dispatchRows}</div>` : ''}

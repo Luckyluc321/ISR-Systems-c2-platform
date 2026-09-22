@@ -162,6 +162,29 @@ export function leavesSceneUnassisted(profile) {
 // before.
 export const CORDON_ATTACHED_STATES = new Set(['holding-cordon', 'en_route', 'engaging']);
 
+// Is a cordon forming here, so the scene needs a commander?
+//
+// True as soon as a unit is PINNED to a wreck, not when it arrives.
+// The pin is written the moment a cordon is assigned, and the drive out
+// is exactly the window in which scene command is established, so
+// waiting for arrival leaves the district blind for the whole journey.
+//
+// Consequence responders never count. They carry sceneWreckageId rather
+// than assignedWreckageId precisely so an ambulance attending a crash
+// site is not a police matter.
+//
+// Level-triggered, like everything else in this module: it asks a
+// question about current state rather than catching a moment. That
+// matters here because the alternative hook, the transition into
+// 'holding-cordon', fires once inside a callback that can throw, and
+// this module exists because the previous edge-triggered generation
+// shipped two bugs that way.
+export function cordonNeedsSceneCommand(dispatches) {
+  return (dispatches || []).some(
+    d => d && d.assignedWreckageId && CORDON_ATTACHED_STATES.has(d.state),
+  );
+}
+
 // Should this account be offered the scene-release control, and is it
 // usable right now?
 //

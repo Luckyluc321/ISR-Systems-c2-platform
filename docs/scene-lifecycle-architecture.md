@@ -113,13 +113,9 @@ escalates to the site's own tier-2 Politikreds alongside the consequence
 agencies, so an impact scene always has a commander who can release it.
 See "Impact cascade" below.
 
-**Still open for an operator-dispatched cordon** on an event that never
-escalates to police by any other route. The fix is not an operator-side
-release control, since operators do not hold scene command and inventing
-one would contradict how the platform routes authority. The answer is
-that a cordon forming should itself escalate to the responsible
-district, reusing `localPoliceDestinationIds`. That is a routing
-question, not a lifecycle one, and it is not built.
+**Closed for every cordon.** A forming cordon now escalates to the
+site's own Politikreds by itself, so a scene always has an owner who can
+release it. See "A forming cordon summons a scene commander" below.
 
 ## Impact cascade
 
@@ -173,145 +169,62 @@ hospitals. Making that list resolve per site needs the ambulance
 service, municipal fire service and rescue reinforcement for each site,
 which is configuration data, not code.
 
-### Not in the case file yet
+### The case file records the decision
 
-`sceneReleases[]` is not carried into the Post-Incident Report, so who
-released which scene is absent from the case file, even though the
-per-dispatch `cordonReleaseReason` is mirrored onto the event for
-exactly the purpose of telling the two release causes apart in the
-record. Worth closing when the report shape is next touched.
+`scene_releases` sits in the Post-Incident Report beside the downed
+airframes, because it answers the question that follows them: who
+released the site. Each entry carries the time, the account, and which
+crash sites it covered. Every unit carries `cordonReleasedAt` and
+`cordonReleaseReason`.
 
-## Who is offered the control
+The reason is carried verbatim into the timeline and never blurred. A
+cordon that stood down because a simulation timer expired reads as "hold
+elapsed in simulation", not as an agency decision. The build gate fails
+if those two are ever collapsed into one wording.
 
-`sceneReleaseState()` decides. Offered only when all hold:
+## A forming cordon summons a scene commander
 
-| Condition | Why |
-|---|---|
-| Account is on the police branch | Scene command is a police function |
-| At least one unit attached to a wreckage | Nothing to release otherwise |
-| That wreckage site not already released | The decision is recorded once per site |
+The moment a unit is pinned to a wreck, the site's own Politikreds is
+escalated to.
 
-Attached means `holding-cordon`, `en_route` or `engaging`
-(`CORDON_ATTACHED_STATES`, exported so the perimeter sweep and the
-control share one definition rather than two that drift).
+Until 2026-09-22 only the warhead-impact path did this. The two kill
+paths, which are the normal case, did not, so an operator could dispatch
+ground units to a downed airframe on an event no police account could
+see. In a live incident nothing could then release them: the release
+control only appears for a police account with the event in its inbox.
 
-Not gated on the event still being active. A cordon outlives the
-detection event: the drone is down and the track is closed long before
-the perimeter lifts, which is exactly the window where the control is
-needed.
+**The trigger is the pin, not the arrival.** `d.assignedWreckageId` is
+written when a cordon is assigned, and the drive out is exactly the
+window in which scene command is established. Waiting for a unit to
+reach `holding-cordon` would leave the district blind for the whole
+journey, and that transition is edge-triggered inside a callback that
+can throw.
 
-The police test is passed IN as `hasSceneCommand` rather than derived
-from a role-id prefix inside the module. `main.js` resolves it through
-`agencyBranchOf()`, which reads `roles.js`; a prefix test here would be
-a second definition of "is this the police" free to drift from it.
-Duplicated predicates that drifted apart are this platform's most
-repeated bug class.
+**Not the wreck either.** A wreck with no cordon dispatched needs no
+commander, and a scene attended only by ambulances is not a police
+matter. Consequence responders carry `sceneWreckageId` rather than
+`assignedWreckageId`, so they are excluded for free.
 
-## Not a dispatch
+### Why it is safe to run every two seconds
 
-`record-scene-release` is deliberately **not** in
-`STUB_DISPATCH_ACTIONS` and does not route through the dispatch adapter.
-Dispatching sends an instruction to an agency. This records a decision
-that agency already made on the ground. Sending it outward would have
-ISR instructing police to release a scene, which inverts the platform's
-whole stance.
+`escalateEvent` dedups against existing escalations and returns only
+newly created records, so after the first success the call is a no-op.
+The sweep also checks whether the district is already on the case before
+calling, which keeps the decision level-triggered rather than
+remembering that it told them.
 
-It is recorded in the feedback log as an `operator_action`
-(`logOperatorDecision`), and in the event audit trail attributed to the
-account that clicked it, never to `AUTO-CORRELATOR`.
+**It must never pass an `assessmentPackage`.** That flag makes
+`escalateEvent` bypass its own dedup and mint a fresh record on every
+call, which from a two-second sweep would be an escalation every two
+seconds for the life of the cordon. The build gate asserts the whole
+call site contains no such argument.
 
-## Consequence responders are not cordon units
+The toast is separate and fires once per event. The escalation is
+deduped; a toast inside the sweep would storm anyway.
 
-Ambulances, akutlægebiler, brandbiler and rescue teams arrive, do their
-job, and drive home. Nobody stands them down, because nobody stood them
-up as a cordon. `leavesSceneUnassisted(profile)` is the predicate, keyed
-on `consequenceOnly`.
-
-Until 2026-09-22 they were treated as police cordon units. The promotion
-to `holding-cordon` tested only "ground vehicle with a wreckage
-assigned", which is true of an ambulance, so one arriving at a crash
-site was pinned to the wreck, labelled **"securing wreckage perimeter"**,
-and parked until a police account released the scene. In a live event
-with no police on the case it would have parked until the browser
-closed. The fire-engine profile's own comment says these units stage
-until police declare the scene safe. They do not hold perimeters.
-
-### Two attachment fields, on purpose
-
-| Field | Meaning | Promotes to `holding-cordon` |
-|---|---|---|
-| `assignedWreckageId` | a cordon pin, police and military ground units | yes |
-| `sceneWreckageId` | a responder attending the scene | no |
-
-Responders still need an assignment. It is the only thing that aims them
-at where the airframe actually came down: a unit dispatched while the
-drone was still flying would otherwise drive to the dispatch-time guess
-and stay there. They take the same ingress standoff, in a different
-field, so the cordon promotion cannot see them.
-
-Both fields count for **perimeter clearing**
-(`wreckageAttachmentId`). The perimeter belongs to the wreck, not to the
-police, so it stays up while anyone is working the scene and comes down
-when the last of them leaves. Counting only the cordon pin left the
-polygon on the map for the whole session on a response attended only by
-ambulances.
-
-Neither counts for the **police release control**. Attending a scene is
-not holding a cordon, and an ambulance must never make the police
-control appear or be counted in its "units on cordon" line.
-
-### What else had to move
-
-- **A responder already working a KNOWN scene is not dragged to a second
-  crash site.** Tested on whether it has a scene assigned, not on its
-  state: `engaging` means "route consumed", not "on scene". A responder
-  dispatched while the drone was still flying drives to the
-  dispatch-time guess and flips to `engaging` on arriving there, with no
-  scene assigned, and must still be re-aimed once the airframe comes
-  down.
-- **It is not re-aimed at the live air track** each tick, which would
-  corrupt its ETA and, before the road route returned, send it chasing
-  an airborne drone.
-- **It does not hold a dead-air event open.** `noChase` accepted only
-  terminal and cordon states, so an event stayed live with zero
-  detections for the whole on-scene task: five minutes for an ambulance,
-  fifteen for a rescue team. Same failure the cordon clause was added
-  for.
-- **Its arrival no longer reads as an interception.** An ambulance
-  announced "on station. Engaging." Units that stage say so; the rest
-  report a response under way.
-- **It is re-dispatchable while driving home.** A finished ambulance
-  could not be sent to a second scene until it physically reached its
-  station.
-- **No outcome is auto-stamped.** Step 4 only offers a dispatch for
-  confirmation while its outcome is unset, so stamping one would make
-  `_CONSEQUENCE_OUTCOMES` unreachable and silently unlock the
-  post-incident handoff with no human confirmation.
-
-### Two fixes that were not about responders
-
-`event.counterDispatches` never mirrored the wreck attachment, so the
-`|| !!c.assignedWreckageId` clause in the auto-close predicate read
-`undefined` and was dead from the day it was written. Only the
-`holding-cordon` literal ever did the work it was added for, which means
-a cordon car in `en_route` or `engaging` still held a dead-air event
-open. Both wreck fields are now mirrored and the clause works.
-
-`counterDispatchStateFor` matches on asset id and returns the first live
-dispatch of that asset. With two call-outs of one asset live on an
-event, a finished first call-out read the second unit's state and
-vanished from outcome confirmation. Callers holding a specific dispatch
-entry now use `counterDispatchStateForEntry`, which matches on dispatch
-id.
-
-
-The `rtb_home` arrival stamp wrote `target_evaded_before_arrival`
-unconditionally, and `setDispatchOutcome` replaces rather than merges.
-So **any** unit that drove home had its case-file outcome overwritten
-with *"Interceptor lost signal on target before intercept"*, including a
-released police cordon and an interceptor that had already recorded a
-kill. It now writes only when nothing has recorded an outcome, and never
-for a responder.
+The escalation is attributed to an explicit system actor. The default
+operator is a named human, and a machine decision must not put one in
+the chain of custody.
 
 ## Perimeter clearing
 

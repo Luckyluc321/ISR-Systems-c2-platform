@@ -32,6 +32,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
+import { buildPostIncidentReport } from '../src/post_incident_report.js';
 import {
   cordonReleaseDecisions,
   clearedWreckageIds,
@@ -41,6 +42,7 @@ import {
   isSceneFinished,
   CORDON_ATTACHED_STATES,
   leavesSceneUnassisted,
+  cordonNeedsSceneCommand,
 } from '../src/scene_lifecycle.js';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -262,6 +264,76 @@ check('arrival wording is not interceptor vocabulary for a responder',
 check('the interceptor outcome stamp does not overwrite an existing outcome',
   /if \(event && !event\.dispatchOutcomes\?\.\[d\.id\] && !leavesSceneUnassisted\(d\.profile\)\) \{[\s\S]{0,200}?outcomeId: 'target_evaded_before_arrival'/.test(mainSrc),
   'setDispatchOutcome replaces rather than merges, so every unit driving home was stamped "Target evaded before arrival"');
+
+console.log('\nA forming cordon summons a scene commander');
+// Only the warhead-impact path escalated to police. The two kill paths,
+// which are the normal case, did not, so an operator could dispatch
+// ground units to a wreck on an event no police account could see, and
+// in a live incident nothing could ever release them.
+check('a unit pinned to a wreck needs scene command',
+  cordonNeedsSceneCommand([unit({ state: 'en_route' })]) === true,
+  'the pin is written on assignment; the drive out is when command is established');
+check('a unit already on the perimeter needs scene command',
+  cordonNeedsSceneCommand([unit()]) === true);
+check('an ambulance attending a scene does NOT',
+  cordonNeedsSceneCommand([unit({ kind: 'receiver-ambulance', assignedWreckageId: null, sceneWreckageId: 'w1', state: 'engaging' })]) === false,
+  'consequence responders carry sceneWreckageId precisely so they are not a police matter');
+check('a unit driving home does NOT',
+  cordonNeedsSceneCommand([unit({ state: 'rtb_home', assignedWreckageId: null })]) === false);
+check('no dispatches at all does NOT',
+  cordonNeedsSceneCommand([]) === false && cordonNeedsSceneCommand(undefined) === false);
+
+console.log('\n  wiring in src/main.js');
+check('the sweep asks whether a cordon needs scene command',
+  /if \(!cordonNeedsSceneCommand\(group\)\) continue;/.test(mainSrc),
+  'without this only warhead impacts ever reach police');
+check('it escalates to the site\'s own Politikreds',
+  /const politiIds = localPoliceDestinationIds\(event\);/.test(mainSrc),
+  'resolved per site, never hardcoded');
+check('NO assessmentPackage is passed',
+  (() => {
+    // Matches the WHOLE escalateEvent call, not a fixed-size window
+    // around one line. The first version of this assertion sliced a
+    // 60-character tail and an injected assessmentPackage fell just
+    // outside it, so the mutation passed.
+    const call = mainSrc.match(/const records = escalateEvent\(eventId, \{([\s\S]*?)\n      \}\);/);
+    return !!call && !/assessmentPackage/.test(call[1]);
+  })(),
+  'assessmentPackage makes escalateEvent bypass its own dedup, which from a 2-second sweep is an escalation every 2 seconds for the life of the cordon');
+check('the escalation is attributed to a system actor, not a person',
+  /operator: 'AUTO-CASCADE',\s*\n\s*operatorRoleId: 'system-cordon-command',/.test(mainSrc),
+  'the default operator is a named human and a machine decision must not put one in the chain of custody');
+
+console.log('\nThe case file records who released the scene');
+// The release was written to the audit trail and then vanished from the
+// report the agency actually reads.
+const _pir = buildPostIncidentReport({
+  id: 'e1', siteId: 'cph',
+  sceneReleases: [{ at: '2026-01-01T10:20:00Z', by: 'K. Nielsen (Københavns Politi)', roleId: 'politi-kbh', wreckageIds: ['w1', 'w2'] }],
+  counterDispatches: [
+    { dispatchId: 'd1', assetName: 'Patrol car', state: 'rtb_home', cordonReleasedAt: '2026-01-01T10:20:01Z', cordonReleaseReason: 'scene-released' },
+    { dispatchId: 'd2', assetName: 'Cordon squad', state: 'rtb_home', cordonReleasedAt: '2026-01-01T10:25:00Z', cordonReleaseReason: 'hold-elapsed' },
+  ],
+});
+check('the report carries who released the scene',
+  _pir.scene_releases.length === 1 && /Nielsen/.test(_pir.scene_releases[0].by),
+  'an agency decision must survive into the record that agency reads');
+check('the report carries which sites a release covered',
+  _pir.scene_releases[0].wreckageIds.length === 2,
+  'a swarm drops more than one airframe and each is released separately');
+check('each unit carries how its deployment ended',
+  _pir.dispatches.every(d => d.cordonReleasedAt) &&
+  _pir.dispatches.find(d => d.assetName === 'Patrol car').cordonReleaseReason === 'scene-released');
+check('a simulation timer is NOT recorded as an agency decision',
+  (() => {
+    const row = _pir.timeline.find(t => t.kind === 'cordon-stood-down' && /Cordon squad/.test(t.detail));
+    return !!row && /hold elapsed in simulation/.test(row.detail) && !/scene released/.test(row.detail);
+  })(),
+  'a timer expiring must never read as police releasing a scene');
+check('the release appears in the timeline',
+  _pir.timeline.some(t => t.kind === 'scene-released' && /2 crash sites/.test(t.detail)));
+check('an event with no releases still builds a report',
+  buildPostIncidentReport({ id: 'e2' }).scene_releases.length === 0);
 
 console.log('\nPerimeter clearing');
 check('a wreckage nobody ever held is not cleared',

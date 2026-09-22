@@ -48,6 +48,13 @@ export function buildPostIncidentReport(event, { getDestination = null } = {}) {
         state: cd.state || null,
         outcomeLabel: event.dispatchOutcomes?.[cd.dispatchId]?.outcomeLabel || null,
         notes: event.dispatchOutcomes?.[cd.dispatchId]?.notes || null,
+        // How this unit's deployment ended. The reason matters and is
+        // carried verbatim: 'scene-released' is an agency decision,
+        // 'hold-elapsed' is a simulation timer running out. A report
+        // that blurred the two would attribute a decision to police
+        // that no police account made.
+        cordonReleasedAt: cd.cordonReleasedAt || null,
+        cordonReleaseReason: cd.cordonReleaseReason || null,
       }))
     : [];
 
@@ -113,6 +120,20 @@ export function buildPostIncidentReport(event, { getDestination = null } = {}) {
       downed_by: w.downedBy || null,
       model: w.model || null,
       is_impact_site: !!w.isImpact,
+    })),
+    // Scene command decisions. Who released which crash site, when, and
+    // under which account. Recorded per site rather than per event
+    // because a swarm drops more than one airframe and each is a
+    // separate scene released separately.
+    //
+    // This is the agency's own decision, not something the platform
+    // derived, and it belongs in the record the agency reads. It was
+    // written to the audit trail and then vanished from the report.
+    scene_releases: (event.sceneReleases || []).map(r => ({
+      at: r.at || null,
+      by: r.by || null,
+      roleId: r.roleId || null,
+      wreckageIds: Array.isArray(r.wreckageIds) ? [...r.wreckageIds] : [],
     })),
     recommendation: recommendation || null,
     detection: {
@@ -343,6 +364,33 @@ function _buildTimeline(event) {
     event.postIncidentChain.forEach(c => {
       if (c.dispatchedAt) t.push({ ts: c.dispatchedAt, kind: 'ground-dispatched', detail: `Ground handoff to ${c.destId}${c.chainParentId ? ' (chained)' : ' (root)'}` });
       if (c.resolvedAt) t.push({ ts: c.resolvedAt, kind: 'chain-resolved', detail: `${c.destId} marked resolved` });
+    });
+  }
+  if (Array.isArray(event.sceneReleases)) {
+    event.sceneReleases.forEach(r => {
+      if (!r?.at) return;
+      const n = Array.isArray(r.wreckageIds) ? r.wreckageIds.length : 0;
+      t.push({
+        ts: r.at,
+        kind: 'scene-released',
+        detail: `${n > 1 ? `${n} crash sites` : 'Crash site'} released by ${r.by || 'scene command'}`,
+      });
+    });
+  }
+  if (Array.isArray(event.counterDispatches)) {
+    event.counterDispatches.forEach(cd => {
+      if (!cd.cordonReleasedAt) return;
+      // The reason is not cosmetic here. A cordon that stood down
+      // because a simulation timer expired must never read as an
+      // agency decision in the record.
+      const via = cd.cordonReleaseReason === 'scene-released'
+        ? 'scene released'
+        : 'hold elapsed in simulation';
+      t.push({
+        ts: cd.cordonReleasedAt,
+        kind: 'cordon-stood-down',
+        detail: `${cd.assetName || cd.kind || 'Unit'} stood down (${via})`,
+      });
     });
   }
   if (event.closedAt) t.push({ ts: event.closedAt, kind: 'closed', detail: `Event closed with outcome ${event.outcome || 'unknown'}` });
