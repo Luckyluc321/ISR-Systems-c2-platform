@@ -37,9 +37,28 @@ const REPO_ROOT = path.resolve(EVAL_ROOT, '..');
 // Agents use localStorage for LRU caches. In Node there is no such
 // thing, so we install a minimal in-memory shim before any src/
 // module is imported.
-if (typeof globalThis.localStorage === 'undefined') {
+//
+// The guard tests for a USABLE localStorage, not merely a defined one.
+// Node 22 and later ship a localStorage global that throws unless the
+// process was started with --localstorage-file, so `typeof ... ===
+// 'undefined'` was false, the shim never installed, and every agent
+// cache write failed with "localStorage.setItem is not a function".
+// The agents survive it, they warn and keep the value in memory, but
+// the run drowns in stack traces.
+function _localStorageUsable() {
+  try {
+    return typeof globalThis.localStorage === 'object'
+      && globalThis.localStorage !== null
+      && typeof globalThis.localStorage.setItem === 'function';
+  } catch (_) {
+    // Node's built-in throws on property access without the flag.
+    return false;
+  }
+}
+
+if (!_localStorageUsable()) {
   const _mem = new Map();
-  globalThis.localStorage = {
+  const _shim = {
     getItem(k) { return _mem.has(k) ? _mem.get(k) : null; },
     setItem(k, v) { _mem.set(k, String(v)); },
     removeItem(k) { _mem.delete(k); },
@@ -47,6 +66,15 @@ if (typeof globalThis.localStorage === 'undefined') {
     get length() { return _mem.size; },
     key(i) { return [..._mem.keys()][i] ?? null; },
   };
+  // defineProperty, not assignment: Node exposes localStorage as a
+  // non-writable accessor, so a plain assignment is silently ignored.
+  try {
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: _shim, configurable: true, writable: true, enumerable: true,
+    });
+  } catch (err) {
+    console.warn('[eval] could not install localStorage shim:', err?.message || err);
+  }
 }
 
 // ── Step 2: env loader ───────────────────────────────────────

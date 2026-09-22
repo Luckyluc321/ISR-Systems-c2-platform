@@ -1,0 +1,74 @@
+name: build
+
+# The five policy gates are the thing this exists to run.
+#
+# They already existed and already passed, but only when someone
+# remembered to run `npm run build` locally. That made every one of them
+# optional in practice: a push that broke tenant isolation, event
+# mutation policy, impact cascade routing or the scene lifecycle would
+# land silently and be found later by a person noticing the product
+# misbehave. Gates nothing enforces are documentation.
+#
+# Deliberately NOT running the agentic eval suite here. It calls a live
+# inference endpoint, costs money per run, needs a token, and its
+# assertions are about model behaviour rather than code correctness, so
+# a red result there is a finding to read rather than a build to block.
+# Run it locally with `npm run eval`.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gates:
+    name: policy gates + build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # 22.3 or newer is required: src/sites_registry.js reads the
+          # site manifests through process.getBuiltinModule when it runs
+          # outside Vite.
+          node-version: '22'
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      # Run each gate as its own step so a failure names itself in the
+      # job summary instead of hiding inside one long build log.
+      - name: Event mutation policy
+        run: npm run check:event-mutations
+
+      - name: Tenant stamping policy
+        run: npm run check:tenant-stamping
+
+      - name: Impact cascade routing
+        run: npm run check:impact-cascade
+
+      - name: Scene lifecycle
+        run: npm run check:scene-lifecycle
+
+      - name: Production build
+        run: npx vite build
+
+      - name: Site manifests load outside Vite
+        # Guards the Node path of sites_registry.js. If it regresses,
+        # every Node-side test of anything touching events breaks, which
+        # is how the eval harness died unnoticed for nine days.
+        run: |
+          node -e "
+          import('./src/sites_registry.js').then(m => {
+            const n = Object.keys(m.SITES).length;
+            if (!n) { console.error('No sites loaded under plain Node'); process.exit(1); }
+            if (m.SITE_LOAD_ERRORS.length) {
+              console.error('Site load errors:', JSON.stringify(m.SITE_LOAD_ERRORS, null, 2));
+              process.exit(1);
+            }
+            console.log('OK:', n, 'sites loaded outside Vite');
+          }).catch(e => { console.error(e); process.exit(1); });
+          "

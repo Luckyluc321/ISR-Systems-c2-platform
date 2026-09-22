@@ -21,5 +21,8 @@
     "cesium": "^1.143.0",
     "js-yaml": "^5.4.2",
     "vite-plugin-cesium": "^1.2.23"
+  },
+  "engines": {
+    "node": ">=22.3"
   }
 }

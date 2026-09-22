@@ -542,8 +542,23 @@ export function renderSubjectDigest(subject) {
   push(`Class: ${subject.class} (${pct(subject.class_confidence)} confidence)`);
   if (subject.subclass) push(`Subclass: ${subject.subclass}`);
 
+  // EVERY SECTION BELOW IS OPTIONAL, deliberately.
+  //
+  // subjectFromEvent always fills all of them, but this renderer also
+  // runs over subjects it did not build: a stored subject from an
+  // earlier schema, or a partial one from a neural-net adapter that has
+  // not filled every sub-head yet. The contract is that a subject
+  // renders whatever it has.
+  //
+  // Guarding these one at a time as each crash appeared would have been
+  // whack-a-mole: three separate Agent B eval fixtures died here in
+  // sequence, on cardinality, then behavior, then another section, each
+  // before the model was ever called. They are all guarded in one pass
+  // instead.
   const c = subject.cardinality;
-  push(`Cardinality: ${c.kind} (${c.count_estimate} ${countNoun(subject.category, c.count_estimate)}, ${pct(c.count_confidence)} confidence)`);
+  if (c) {
+    push(`Cardinality: ${c.kind} (${c.count_estimate} ${countNoun(subject.category, c.count_estimate)}, ${pct(c.count_confidence)} confidence)`);
+  }
 
   if (subject.formation && subject.formation.kind !== FORMATION_KIND.NONE) {
     const f = subject.formation;
@@ -551,9 +566,12 @@ export function renderSubjectDigest(subject) {
   }
 
   const b = subject.behavior;
-  push(`Behavior: ${b.state} (${pct(b.state_confidence)} confidence)${b.dwell_zones.length ? `, dwelling over ${b.dwell_zones.join(', ')}` : ''}`);
+  if (b) {
+    const _dwell = Array.isArray(b.dwell_zones) ? b.dwell_zones : [];
+    push(`Behavior: ${b.state} (${pct(b.state_confidence)} confidence)${_dwell.length ? `, dwelling over ${_dwell.join(', ')}` : ''}`);
+  }
 
-  const k = subject.kinematics;
+  const k = subject.kinematics || {};
   const kparts = [];
   if (k.speed_ms != null) kparts.push(`${Math.round(k.speed_ms)} m/s`);
   if (k.altitude_m_agl != null) kparts.push(`${Math.round(k.altitude_m_agl)}m AGL`);
@@ -562,7 +580,7 @@ export function renderSubjectDigest(subject) {
   if (k.estimated_endurance_min) kparts.push(`~${k.estimated_endurance_min} min endurance envelope`);
   if (kparts.length) push(`Kinematics: ${kparts.join(', ')}`);
 
-  const t = subject.threat_profile;
+  const t = subject.threat_profile || {};
   const tflags = [];
   if (t.payload_capable) tflags.push('payload_capable');
   if (t.weaponized_signature) tflags.push('weaponized_signature');
@@ -571,7 +589,7 @@ export function renderSubjectDigest(subject) {
   if (t.inert_biological) tflags.push('inert_biological');
   if (tflags.length) push(`Threat flags: ${tflags.join(', ')}`);
 
-  const s = subject.sensor_evidence;
+  const s = subject.sensor_evidence || {};
   push('Sensor evidence:');
   if (s.rf?.sensors_agreeing > 0) push(`  RF: ${s.rf.signature_match || 'match TBD'} (${pct(s.rf.confidence)}, ${s.rf.sensors_agreeing} sensor${s.rf.sensors_agreeing === 1 ? '' : 's'})`);
   else if (s.rf?.signature_match === null && subject.category === 'biological') push('  RF: no signal (biological)');
@@ -581,7 +599,7 @@ export function renderSubjectDigest(subject) {
   if (s.ads_b) push(`  ADS-B: ${s.ads_b.icao24 || 'no ID'}${s.ads_b.callsign ? ` (${s.ads_b.callsign})` : ''}, flight plan match: ${s.ads_b.flight_plan_match}`);
   else if (subject.category === 'aerial_platform' || subject.category === 'weapon') push('  ADS-B: no transponder');
 
-  push(`NN model: ${subject.nn_meta.model_version}`);
+  if (subject.nn_meta?.model_version) push(`NN model: ${subject.nn_meta.model_version}`);
 
   return lines.join('\n');
 }

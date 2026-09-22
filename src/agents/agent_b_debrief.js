@@ -193,9 +193,18 @@ function buildDebriefMessages(event, samples, analysis, opts = {}) {
   // docs/agentic-precedent-retrieval-architecture.md.
   const precedentBlock = opts.precedentBlock;
   const dur = samples.length ? Math.round(samples[samples.length - 1].t_sec_from_event - samples[0].t_sec_from_event) : 0;
-  const primaryDwell = analysis.dwellZones.filter(d => d.pctOfFlight >= 40).slice(0, 2);
-  const notableDwell = analysis.dwellZones.filter(d => d.pctOfFlight >= 20 && d.pctOfFlight < 40).slice(0, 2);
-  const closest = analysis.touched[0];
+  // Defensive on every analysis section. A narrative generator must not
+  // crash because one optional section is absent: an event with no
+  // dwell zones and no touched areas is a perfectly ordinary transit,
+  // and a real neural-net adapter is free to emit a partial analysis.
+  // These were unguarded, so every Agent B eval fixture died on
+  // "Cannot read properties of undefined (reading 'filter')" before
+  // reaching the model.
+  const _dwellZones = Array.isArray(analysis?.dwellZones) ? analysis.dwellZones : [];
+  const _touched = Array.isArray(analysis?.touched) ? analysis.touched : [];
+  const primaryDwell = _dwellZones.filter(d => d.pctOfFlight >= 40).slice(0, 2);
+  const notableDwell = _dwellZones.filter(d => d.pctOfFlight >= 20 && d.pctOfFlight < 40).slice(0, 2);
+  const closest = _touched[0];
   const linked = event.linkedEventIds?.length || 0;
 
   // Canonical detection subject (attached by events.js). Defensive
