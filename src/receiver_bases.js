@@ -391,6 +391,35 @@ export const RECEIVER_BASES = {
     name: 'Beredskabsstyrelsen Hovedstaden, Hedelykken 10, 2640 Hedehusene',
     verified: 'OSM Nominatim + brs.dk (address point Hedelykken 10)',
   },
+  // ── Regional medical coordination centres (AMK-vagtcentraler) ─
+  // Added 2026-09-22. Each coordinate is an OSM house node confirmed
+  // against DAWA, the official Danish address register, agreeing to six
+  // decimals, and each is flagged there as precisely determined rather
+  // than derived from the street.
+  'amk-sjaelland-naestved': {
+    lat: 55.236516, lon: 11.759345,
+    // NOT Slagelse. Præhospitalt Center moved to Næstved in 2019, and
+    // the role still said Slagelse. The unit sits on the 13th floor of
+    // the tower on the Næstved Sygehus campus; this is the campus
+    // address point, about 45 m from the tower footprint.
+    name: 'Præhospitalt Center Region Sjælland, Ringstedgade 61, 13. etage, 4700 Næstved',
+    verified: 'regionsjaelland.dk AMK-vagtcentral + OSM node 925988816 + DAWA',
+  },
+  'amk-syddanmark-odense': {
+    lat: 55.375004, lon: 10.449559,
+    name: 'AMK-vagtcentralen, Præhospital Syd, Lille Tornbjerg Vej 30, 5220 Odense SØ',
+    verified: 'praehospitalsyd.dk/omrader/amk-vagtcentral + OSM node 341657704 + DAWA',
+  },
+  'amk-nordjylland-aalborg': {
+    lat: 57.040387, lon: 9.928589,
+    // The Fælles Vagtcentral, shared with Nordjyllands Beredskab and
+    // others. This is the same building some company registries
+    // mislabel as Nordjyllands Beredskab's headquarters; it is a
+    // dispatch centre, and for the medical side it is the right address.
+    name: 'AMK-vagtcentralen, Den Præhospitale Virksomhed, Hjulmagervej 20, 9000 Aalborg',
+    verified: 'dpv.rn.dk + OSM node 343017287 + DAWA',
+  },
+
   // ── Acute hospitals outside the capital ──────────────────────
   // Added 2026-09-22. Each coordinate is an OSM house node with a
   // matching house number, road and postcode, cross-checked against the

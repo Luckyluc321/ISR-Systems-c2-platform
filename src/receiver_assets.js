@@ -359,6 +359,76 @@ export const RECEIVER_ASSETS = {
     requestable: [],
   },
 
+  // Regional medical coordination centres, added 2026-09-22. Five
+  // ambulances and one physician car each, against Hovedstaden's eight
+  // and two: these coordinate a region rather than a dense capital, and
+  // the count is what one centre can commit to a single incident.
+  'amk-sjaelland': {
+    label: 'Akutmedicinsk Koordinationscenter Sjælland',
+    baseId: 'amk-sjaelland-naestved',
+    dispatchable: [
+      { assetKey: 'amks-ambulance', kind: 'receiver-ambulance', name: 'Ambulance', count: 5, icon: '🚑',
+        useCases: [
+          'Casualty transport from an impact or crash site',
+          'On-scene triage and stabilisation',
+          'Standby posture at an active threat perimeter',
+        ],
+        capabilities: { casualty_transport: true, triage: true },
+        deployTime: '8-20 minutes via real road routing',
+        limitations: 'Staging outside the cordon until the scene is declared safe by police.' },
+      { assetKey: 'amks-akutlaegebil', kind: 'receiver-akutlaegebil', name: 'Akutlægebil', count: 1, icon: '🚨',
+        useCases: ['Physician-level intervention at the scene'],
+        capabilities: { physician_on_scene: true },
+        deployTime: '7-16 minutes via real road routing',
+        limitations: 'Single vehicle, no transport capacity.' },
+    ],
+    requestable: [],
+  },
+
+  'amk-syddanmark': {
+    label: 'Akutmedicinsk Koordinationscenter Syddanmark',
+    baseId: 'amk-syddanmark-odense',
+    dispatchable: [
+      { assetKey: 'amksy-ambulance', kind: 'receiver-ambulance', name: 'Ambulance', count: 5, icon: '🚑',
+        useCases: [
+          'Casualty transport from an impact or crash site',
+          'On-scene triage and stabilisation',
+          'Standby posture at an active threat perimeter',
+        ],
+        capabilities: { casualty_transport: true, triage: true },
+        deployTime: '10-25 minutes via real road routing',
+        limitations: 'Staging outside the cordon until the scene is declared safe by police.' },
+      { assetKey: 'amksy-akutlaegebil', kind: 'receiver-akutlaegebil', name: 'Akutlægebil', count: 1, icon: '🚨',
+        useCases: ['Physician-level intervention at the scene'],
+        capabilities: { physician_on_scene: true },
+        deployTime: '9-20 minutes via real road routing',
+        limitations: 'Single vehicle, no transport capacity.' },
+    ],
+    requestable: [],
+  },
+
+  'amk-nordjylland': {
+    label: 'Akutmedicinsk Koordinationscenter Nordjylland',
+    baseId: 'amk-nordjylland-aalborg',
+    dispatchable: [
+      { assetKey: 'amkn-ambulance', kind: 'receiver-ambulance', name: 'Ambulance', count: 5, icon: '🚑',
+        useCases: [
+          'Casualty transport from an impact or crash site',
+          'On-scene triage and stabilisation',
+          'Standby posture at an active threat perimeter',
+        ],
+        capabilities: { casualty_transport: true, triage: true },
+        deployTime: '8-20 minutes via real road routing',
+        limitations: 'Staging outside the cordon until the scene is declared safe by police.' },
+      { assetKey: 'amkn-akutlaegebil', kind: 'receiver-akutlaegebil', name: 'Akutlægebil', count: 1, icon: '🚨',
+        useCases: ['Physician-level intervention at the scene'],
+        capabilities: { physician_on_scene: true },
+        deployTime: '7-16 minutes via real road routing',
+        limitations: 'Single vehicle, no transport capacity.' },
+    ],
+    requestable: [],
+  },
+
   // Acute hospitals outside the capital, added 2026-09-22. Two
   // ambulances each, matching the pattern of the non-Rigshospitalet
   // Copenhagen hospitals. Physician cars sit with the regional
