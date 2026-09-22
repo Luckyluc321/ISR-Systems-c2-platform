@@ -33,16 +33,33 @@ export const SITE_CONTEXT = {
 
     critical_areas: [
       // Runways (3) — approximate midpoints along each strip
-      { id: 'runway_04L_22R', name: 'Runway 04L/22R (primary)', center: { lat: 55.62267, lon: 12.64620 }, criticality: 'critical', verified: 'approximate',
+      // Corrected 2026-09-22. Was 2551 m away, off the runway entirely.
+      // Midpoint of the two thresholds on OSM way 361451318 (ref 04L/22R,
+      // length 3571 m), which matches the published runway length.
+      // Thresholds: 04L 55.592191/12.603521, 22R 55.616213/12.640677.
+      { id: 'runway_04L_22R', name: 'Runway 04L/22R (primary)', center: { lat: 55.604202, lon: 12.622099 }, criticality: 'critical', verified: 'high',
         reason: 'Primary arrival axis. Airborne obstruction on approach triggers go-around; ground incursion closes the runway.' },
-      { id: 'runway_04R_22L', name: 'Runway 04R/22L (parallel)', center: { lat: 55.61019, lon: 12.63982 }, criticality: 'critical', verified: 'approximate',
+      // Corrected 2026-09-22, was 801 m out. OSM way 361451319, ref 04R/22L,
+      // length 3302 m. Thresholds: 04R 55.603084/12.633033,
+      // 22L 55.625446/12.667644.
+      { id: 'runway_04R_22L', name: 'Runway 04R/22L (parallel)', center: { lat: 55.614265, lon: 12.650338 }, criticality: 'critical', verified: 'high',
         reason: 'Parallel arrival axis. Simultaneous ops with 04L; obstruction cascades to full airfield closure.' },
-      { id: 'runway_12_30',   name: 'Runway 12/30 (crosswind)',   center: { lat: 55.61643, lon: 12.65258 }, criticality: 'high', verified: 'approximate',
+      // OSM way 361451323, ref 12/30, length 2800 m. Still OPERATIONAL, used
+      // when crosswind on the parallels exceeds roughly 15-20 kt. Paved
+      // surface extends ~340 m past the 12 threshold and ~250 m past 30 as
+      // displaced threshold, so an object can be on 12/30 asphalt without
+      // being on the landing surface.
+      { id: 'runway_12_30',   name: 'Runway 12/30 (crosswind)',   center: { lat: 55.618996, lon: 12.653028 }, criticality: 'high', verified: 'high',
         reason: 'Secondary crosswind runway. Used in NE/SW wind conditions.' },
 
       // Terminal 1 — INACTIVE since 29 Mar 2015 (Wikipedia). Retained for
       // completeness but flagged; do not target for operational alerts.
-      { id: 'terminal_1', name: 'Terminal 1 (INACTIVE since 2015)', center: { lat: 55.62778, lon: 12.65030 }, criticality: 'low', verified: 'approximate', status: 'inactive',
+      // Renamed and moved 2026-09-22. TERMINAL 1 NO LONGER EXISTS as a
+      // discrete facility: domestic departures moved to T2/T3 on 29 March
+      // 2015 and the structure was absorbed into Terminal 2 as Finger A.
+      // A report must not name "Terminal 1" as the asset an object is over.
+      // OSM relation 12750718, aeroway=terminal, name=Finger A.
+      { id: 'terminal_1', name: 'Finger A / Pier A (former Terminal 1, closed 2015)', center: { lat: 55.629268, lon: 12.636324 }, criticality: 'low', verified: 'high', status: 'inactive',
         reason: 'Historic domestic terminal. Not used for scheduled passenger flights since 29 March 2015. Building physically remains.' },
 
       // Terminal 2 (international check-in) — OSM way 702120960, Wikidata Q56860009
@@ -87,7 +104,11 @@ export const SITE_CONTEXT = {
       { id: 'cargo_wfs', name: 'Worldwide Flight Services (WFS)', center: { lat: 55.61854, lon: 12.67506 }, criticality: 'medium', verified: 'high',
         source: 'https://www.openstreetmap.org/way/380058689',
         reason: '6,200 m² cargo handling. Ground handler for multiple carriers.' },
-      { id: 'cargo_postnord', name: 'PostNord mail terminal area', center: { lat: 55.62029, lon: 12.67621 }, criticality: 'medium', verified: 'approximate',
+      // Official address point Kystvejen 28 (Danmarks Adresseregister). The
+      // PostNord BUILDING is not mapped in OSM; only three PostNord
+      // flagpoles ~65 m away corroborate the location. Address high,
+      // footprint unverified.
+      { id: 'cargo_postnord', name: 'PostNord mail terminal area', center: { lat: 55.620026, lon: 12.675062 }, criticality: 'medium', verified: 'medium',
         source: 'https://www.openstreetmap.org/node/3717655615',
         reason: 'National postal sorting. Includes classified government correspondence. Bus stop tagged; precise building footprint pending on-site survey.' },
     ],
@@ -96,9 +117,22 @@ export const SITE_CONTEXT = {
       // Air traffic control + navigation (4)
       { id: 'atc_tower_syd',   name: 'Tower Syd (ATC control tower)',    location: { lat: 55.61180, lon: 12.65760 }, asset_type: 'atc_control_tower', criticality: 'critical', verified: 'unverified',
         reason: 'Single point of airspace control. Loss = airspace closure with national-scale impact.' },
-      { id: 'ils_04L',         name: 'ILS Glideslope 04L',               location: { lat: 55.62267, lon: 12.64620 }, asset_type: 'ils_ground_installation', criticality: 'high', verified: 'unverified',
+      // NOT AN ANTENNA COORDINATE. No ILS antenna is mapped anywhere at this
+      // airport. This is the airside access road named GP 04L-Vej
+      // (OSM way 37274085), which brackets the glidepath site.
+      // 
+      // It previously held the EXACT coordinate of the runway centre, which
+      // is not where a glidepath antenna sits and made two different assets
+      // share one position. A road beside the real site is wrong by tens of
+      // metres; the runway centre was wrong by kilometres.
+      // 
+      // Real coordinates live in the Naviair AIP, EKCH AD 2, which publishes
+      // navaid positions to sub-second precision.
+      { id: 'ils_04L',         name: 'ILS glidepath site 04L (access road)',               location: { lat: 55.593403, lon: 12.608983 }, asset_type: 'ils_ground_installation', criticality: 'high', verified: 'approximate',
         reason: 'Instrument approach guidance for primary runway. Any interference triggers ILS re-certification.' },
-      { id: 'ils_22R',         name: 'ILS Glideslope 22R',               location: { lat: 55.60800, lon: 12.63500 }, asset_type: 'ils_ground_installation', criticality: 'high', verified: 'unverified',
+      // Same as ils_04L: access road GP 22R Vej (OSM way 475335537), not the
+      // antenna. Source the real position from the Naviair AIP.
+      { id: 'ils_22R',         name: 'ILS glidepath site 22R (access road)',               location: { lat: 55.609419, lon: 12.633499 }, asset_type: 'ils_ground_installation', criticality: 'high', verified: 'approximate',
         reason: 'Reciprocal approach guidance. Same sensitivity as 04L.' },
       { id: 'atis_broadcast',  name: 'ATIS broadcast antenna',           location: { lat: 55.61240, lon: 12.65810 }, asset_type: 'nav_broadcast', criticality: 'medium', verified: 'unverified',
         reason: 'Continuous weather / operations broadcast. Loss forces manual radio queries.' },
@@ -107,19 +141,32 @@ export const SITE_CONTEXT = {
         reason: 'Deep maintenance of Nordic fleet. Fire risk and jet fuel storage.' },
       { id: 'hangar_2',        name: 'Hangar 2 (widebody)',              location: { lat: 55.61360, lon: 12.66130 }, asset_type: 'maintenance_facility', criticality: 'medium', verified: 'unverified',
         reason: 'Widebody deep maintenance. Contains active aircraft during scheduled works.' },
-      { id: 'hangar_3',        name: 'Hangar 3, N Maintenance',          location: { lat: 55.62946, lon: 12.65673 }, asset_type: 'maintenance_facility', criticality: 'medium', verified: 'unverified',
+      // OSM way 25604810, aeroway=hangar, name=Hangar 3. Was 147 m out.
+      { id: 'hangar_3',        name: 'Hangar 3, N Maintenance',          location: { lat: 55.629461, lon: 12.659069 }, asset_type: 'maintenance_facility', criticality: 'medium', verified: 'high',
         reason: 'North apron maintenance. Adjacent to N23/N24 perimeter sensor line.' },
       // Fuel + utility (3)
-      { id: 'fuel_farm',       name: 'Fuel farm (Jet A-1 storage)',      location: { lat: 55.60400, lon: 12.65000 }, asset_type: 'fuel_storage', criticality: 'critical', verified: 'unverified',
+      // Corrected 2026-09-22. Was 2795 m away, the worst error at this site,
+      // on the asset the site itself ranks priority 1.
+      // Braendstoflageret Koebenhavns Lufthavn I/S, CVR 24247910,
+      // Hydrantvej 10, registered with Miljoestyrelsen for mineral-oil
+      // storage above 2500 tonnes. Identity confirmed as aviation fuel, not
+      // another tank facility. This is the official address point; the tank
+      // farm FOOTPRINT is unmapped, so do not derive a boundary from it.
+      { id: 'fuel_farm',       name: 'Fuel farm (Jet A-1 storage)',      location: { lat: 55.627833, lon: 12.635868 }, asset_type: 'fuel_storage', criticality: 'critical', verified: 'high',
         reason: 'Bulk aviation fuel. Vulnerability to standoff attack; fire hazard cascades to airfield.' },
       { id: 'fuel_hydrant_c',  name: 'Central fuel hydrant network',     location: { lat: 55.61850, lon: 12.65450 }, asset_type: 'fuel_infrastructure', criticality: 'high', verified: 'unverified',
         reason: 'Underground fuel distribution to all pier stands. Rupture cascades to airfield closure.' },
       { id: 'main_gpu_station', name: 'Main GPU (ground power) station', location: { lat: 55.61490, lon: 12.65540 }, asset_type: 'ground_power', criticality: 'medium', verified: 'unverified',
         reason: 'Ground power supply. Loss strands parked aircraft, cascades to Tier 2 escalation.' },
       // Emergency + response (2)
-      { id: 'fire_station_n',  name: 'Airport fire station North',       location: { lat: 55.62130, lon: 12.65900 }, asset_type: 'emergency_response', criticality: 'high', verified: 'unverified',
+      // Renamed and moved 2026-09-22, was 1725 m out. The two named airport
+      // fire assets are WEST and SOUTHEAST, not north and south.
+      // OSM way 401571568, Kystvejen 51.
+      { id: 'fire_station_n',  name: 'Copenhagen Airport Fire & Rescue (southeast)',       location: { lat: 55.611408, lon: 12.680162 }, asset_type: 'emergency_response', criticality: 'high', verified: 'high',
         reason: 'Category 10 CFR (crash fire rescue). Attack on this station degrades emergency response for any incident.' },
-      { id: 'fire_station_s',  name: 'Airport fire station South',       location: { lat: 55.60580, lon: 12.64150 }, asset_type: 'emergency_response', criticality: 'high', verified: 'unverified',
+      // Renamed and moved 2026-09-22, was 1231 m out.
+      // OSM way 31578010, amenity=fire_station, name=Brandstation Vest.
+      { id: 'fire_station_s',  name: 'Brandstation Vest (west)',       location: { lat: 55.607135, lon: 12.622049 }, asset_type: 'emergency_response', criticality: 'high', verified: 'high',
         reason: 'Southern CFR. Covers 04R/22L runway ops.' },
       // Border + gov — Vilhelm Lauritzen Terminal (W1 stand) — OSM relation
       // 2956891, Wikidata Q121069544. VIP / state visits / royals.
@@ -267,10 +314,14 @@ export const SITE_CONTEXT = {
         { name: 'Piers A/B (Schengen departures)', center: { lat: 55.62743, lon: 12.64360 }, radius_m: 400, threshold_sec: 30 },
         { name: 'Piers C/D (mixed + non-Schengen)', center: { lat: 55.62715, lon: 12.65099 }, radius_m: 350, threshold_sec: 30 },
         { name: 'Pier F / CPH Go (low-cost)', center: { lat: 55.62574, lon: 12.65675 }, radius_m: 250, threshold_sec: 30 },
-        { name: 'Runway 04L threshold', center: { lat: 55.60400, lon: 12.63000 }, radius_m: 250, threshold_sec: 15 },
-        { name: 'Runway 04R threshold', center: { lat: 55.60800, lon: 12.63500 }, radius_m: 250, threshold_sec: 15 },
+        // Thresholds corrected 2026-09-22 to the mapped runway ends.
+        // These held positions that no longer matched any asset after
+        // the runway centres were fixed, so a dwell alarm could fire
+        // for a zone with nothing in it.
+        { name: 'Runway 04L threshold', center: { lat: 55.592191, lon: 12.603521 }, radius_m: 250, threshold_sec: 15 },
+        { name: 'Runway 04R threshold', center: { lat: 55.603084, lon: 12.633033 }, radius_m: 250, threshold_sec: 15 },
         { name: 'ATC Tower Syd', center: { lat: 55.61180, lon: 12.65760 }, radius_m: 150, threshold_sec: 20 },
-        { name: 'Fuel farm', center: { lat: 55.60400, lon: 12.65000 }, radius_m: 250, threshold_sec: 15 },
+        { name: 'Fuel farm', center: { lat: 55.627833, lon: 12.635868 }, radius_m: 250, threshold_sec: 15 },
         { name: 'Apron East (cargo, G120-G137)', center: { lat: 55.61891, lon: 12.66860 }, radius_m: 400, threshold_sec: 20 },
         { name: 'DHL / FedEx / WFS cargo terminals', center: { lat: 55.61900, lon: 12.67480 }, radius_m: 250, threshold_sec: 15 },
         { name: 'Vilhelm Lauritzen Terminal (VIP/state)', center: { lat: 55.62145, lon: 12.62964 }, radius_m: 200, threshold_sec: 10 },
