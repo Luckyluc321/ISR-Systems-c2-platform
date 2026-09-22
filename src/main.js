@@ -18228,7 +18228,7 @@ async function main() {
         </button>
         <div class="dp-pir-cta-hdr">Civil Response</div>
         <button class="dp-pir-cta ${cordonDispatched ? 'done' : ''}" data-pir="cordon" data-id="${e.id}" ${cordonDispatched ? 'disabled' : ''}>
-          ${cordonDispatched ? 'Cordon deployed · Politi København' : 'Afspær området · Politi cordon (mass dispatch)'}
+          ${cordonDispatched ? 'Cordon deployed · Københavns Politi' : 'Afspær området · Politi cordon (mass dispatch)'}
         </button>
         <button class="dp-pir-cta ${beredskabDispatched ? 'done' : ''}" data-pir="beredskab-mass" data-id="${e.id}" ${beredskabDispatched ? 'disabled' : ''}>
           ${beredskabDispatched ? 'Beredskabsstyrelsen inbound · full deployment' : 'Alert Beredskabsstyrelsen · full civil deployment'}
@@ -20238,7 +20238,7 @@ async function main() {
       'fe':             new Set(['army-isr-drone']),
       'rigspoliti':     new Set(['police-c-uas', 'counter-drone-swarm']),
       'politi-kbh':     new Set(['police-c-uas']),
-      'politi-sydvest': new Set(['police-c-uas']),
+      'politi-sydsonderjyl': new Set(['police-c-uas']),
       'op-cph-airports':new Set(['wildlife-response']),
       'op-esbjerg-port':new Set(['wildlife-response']),
       // Energinet is a grid TSO. They have NO kinetic-response capability
@@ -21628,7 +21628,7 @@ async function main() {
     'fe':             new Set(['army-isr-drone']),
     'rigspoliti':     new Set(['police-c-uas', 'counter-drone-swarm']),
     'politi-kbh':     new Set(['police-c-uas']),
-    'politi-sydvest': new Set(['police-c-uas']),
+    'politi-sydsonderjyl': new Set(['police-c-uas']),
     'op-cph-airports':new Set(['wildlife-response']),
     'op-esbjerg-port':new Set(['wildlife-response']),
     // Energinet has NO kinetic-response scope by design (grid TSO).

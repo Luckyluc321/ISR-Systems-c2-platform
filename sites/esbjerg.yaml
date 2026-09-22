@@ -76,11 +76,12 @@ stats:
   hostileEvents24h: 0
   falseAlarms24h: 2
 
-# Esbjerg falls within Politi Sydvestjylland (per politi.dk district map);
-# Syd- og Sønderjyllands covers Aabenraa + Sønderborg further south.
+# Esbjerg falls within Syd- og Sønderjyllands Politi, whose hovedstation
+# IS Esbjerg (politi.dk). A previous comment here claimed a "Politi
+# Sydvestjylland" district covering Esbjerg. No such politikreds exists.
 receivers:
   # Actors (maritime + industrial)
-  - { id: politi-sydvest,         mode: actor,    role: primary-response,    tier: 1 }
+  - { id: politi-sydsonderjyl,    mode: actor,    role: primary-response,    tier: 1 }
   - { id: brs-haderslev,          mode: actor,    role: emergency-response,  tier: 2 }
   - { id: sov-frederikshavn,      mode: actor,    role: maritime-response,   tier: 3 }
   - { id: agency-sof,             mode: actor,    role: regulator,           tier: 3 }

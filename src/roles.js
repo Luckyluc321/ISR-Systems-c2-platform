@@ -301,7 +301,6 @@ export const RECEIVERS = [
       'politi-sydsjaelland',
       'politi-bornholm',
       'politi-fyn',
-      'politi-sydvest',
       'politi-sydsonderjyl',
       'politi-sydostjyl',
       'politi-midtvestjyl',
@@ -329,21 +328,17 @@ export const RECEIVERS = [
   {
     id: 'politi-kbh', kind: 'receiver', type: 'parent',
     parentId: 'politi',
-    org: 'Politi København', label: 'Politi København',
+    // politi.dk names this district 'Københavns Politi'. The
+    // destination table already used that name while this role said
+    // 'Politi København', so the two named the same district
+    // differently. Same class of drift as the invented
+    // 'Politi Sydvestjylland'; the build gate now blocks it.
+    org: 'Københavns Politi', label: 'Københavns Politi',
     person: 'S. Hansen', initials: 'SH',
     scope: 'cph-only', destinationIds: ['cph-t2-politi', 'amk-t2-politi'],   // CPH Airport, Amager Koblingsstation
     childrenIds: ['kbh-politi-rytteri'],
     description: 'Copenhagen district. Local C-UAS patrol. Rytteriafdelingen sits here (national mounted section).',
   },
-  {
-    id: 'politi-sydvest', kind: 'receiver', type: 'leaf',
-    parentId: 'politi',
-    org: 'Politi Sydvestjylland', label: 'Politi Sydvestjylland',
-    person: 'R. Poulsen', initials: 'RP',
-    scope: 'esbjerg-only', destinationIds: ['esb-t2-politi'],
-    description: 'Sydvestjylland district. Esbjerg C-UAS patrol.',
-  },
-
   // ── Politikredse (remaining 10 of Denmark's 12) ─────────────────
   // Publicly stable list from politi.dk.
   //
@@ -374,14 +369,17 @@ export const RECEIVERS = [
   {
     id: 'politi-midtvestsjaelland', kind: 'receiver', type: 'leaf', parentId: 'politi',
     org: 'Midt- og Vestsjællands Politi', label: 'Midt- og Vestsjællands Politi', initials: 'MV',
-    scope: 'regional', destinationIds: [],
-    description: 'Central + West Zealand district. Covers Roskilde, Holbæk, Kalundborg.',
+    scope: 'regional', destinationIds: ['bjk-t2-politi'],   // Bjaeverskov (Koge Kommune)
+    description: 'Central + West Zealand district. Hovedstation Roskilde. Covers Greve, Holbæk, Kalundborg, Køge (Bjæverskov), Lejre, Odsherred, Ringsted, Roskilde, Solrød, Stevns.',
   },
   {
     id: 'politi-sydsjaelland', kind: 'receiver', type: 'leaf', parentId: 'politi',
     org: 'Sydsjællands og Lolland-Falsters Politi', label: 'Sydsjællands og Lolland-Falsters Politi', initials: 'SL',
-    scope: 'regional', destinationIds: ['bjk-t2-politi'],   // Bjaeverskov
-    description: 'South Zealand + Lolland-Falster district.',
+    // Held bjk-t2-politi until 2026-09-22. Bjaeverskov is in Koge,
+    // which politi.dk lists under Midt- og Vestsjaellands Politi, not
+    // here. Koge does not appear on this district's kommune list.
+    scope: 'regional', destinationIds: [],
+    description: 'South Zealand + Lolland-Falster district. Covers Slagelse, Sorø, Næstved, Faxe, Vordingborg, Guldborgsund, Lolland.',
   },
   {
     id: 'politi-fyn', kind: 'receiver', type: 'leaf', parentId: 'politi',
@@ -391,15 +389,24 @@ export const RECEIVERS = [
   },
   {
     id: 'politi-sydsonderjyl', kind: 'receiver', type: 'leaf', parentId: 'politi',
-    org: 'Syd- og Sønderjyllands Politi', label: 'Syd- og Sønderjyllands Politi', initials: 'SS',
-    scope: 'regional', destinationIds: ['kas-t2-politi'],   // Kassoe
-    description: 'South + South Jutland district. Covers Esbjerg, Kolding, Haderslev.',
+    org: 'Syd- og Sønderjyllands Politi', label: 'Syd- og Sønderjyllands Politi',
+    person: 'R. Poulsen', initials: 'SS',
+    // Merged 2026-09-22. A second role, politi-sydvest, carried
+    // org 'Politi Sydvestjylland' and held the Esbjerg destination.
+    // No such politikreds exists: politi.dk lists twelve and that is
+    // not one of them. Esbjerg has been part of Syd- og Sonderjyllands
+    // Politi since the 2007 politireform (the pre-reform district was
+    // 'Esbjerg Politikreds'), and Esbjerg is this district's
+    // hovedstation. Two roles for one district meant Esbjerg and
+    // Kassoe, which share a politikreds, routed to different accounts.
+    scope: 'regional', destinationIds: ['kas-t2-politi', 'esb-t2-politi'],   // Kassoe, Esbjerg Harbour
+    description: 'South + South Jutland district. Hovedstation Esbjerg. Covers Esbjerg, Aabenraa (Kassoe), Haderslev, Sonderborg, Tonder, Varde, Vejen, Fano.',
   },
   {
     id: 'politi-sydostjyl', kind: 'receiver', type: 'leaf', parentId: 'politi',
     org: 'Sydøstjyllands Politi', label: 'Sydøstjyllands Politi', initials: 'SØ',
     scope: 'regional', destinationIds: ['ldg-t2-politi', 'bll-t2-politi'],   // Landerupgaard, Billund Airport
-    description: 'Southeast Jutland district. Covers Vejle, Horsens, Fredericia (Landerupgård).',
+    description: 'Southeast Jutland district. Hovedstation Horsens. Covers Vejle, Horsens, Billund, Kolding (Landerupgård), Fredericia.',
   },
   {
     id: 'politi-midtvestjyl', kind: 'receiver', type: 'leaf', parentId: 'politi',

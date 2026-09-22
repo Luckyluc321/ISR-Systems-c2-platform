@@ -47,10 +47,10 @@
 
 export const RECEIVER_ASSETS = {
 
-  // ── Politi København (Copenhagen Police District) ────────────
+  // ── Københavns Politi (Copenhagen Police District) ──────────
 
   'politi-kbh': {
-    label: 'Politi København',
+    label: 'Københavns Politi',
     baseId: 'politi-koebenhavn',
     dispatchable: [
       {

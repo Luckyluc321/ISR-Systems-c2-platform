@@ -60,7 +60,9 @@ export const RECEIVER_BASES = {
     name: 'Holmboes Allé 2, 8700 Horsens',
     verified: 'politi.dk/sydoestjyllands-politi',
   },
-  'politi-sydsonderjylland': {
+  // Key was 'politi-sydsonderjylland' until 2026-09-22. The role is
+  // 'politi-sydsonderjyl', so this verified base resolved for nobody.
+  'politi-sydsonderjyl': {
     lat: 55.472712, lon: 8.450967,
     name: 'Kirkegade 76, 6700 Esbjerg (kredsens hovedstation)',
     verified: 'politi.dk/syd-og-soenderjyllands-politi/esbjerg-hovedpolitistation',

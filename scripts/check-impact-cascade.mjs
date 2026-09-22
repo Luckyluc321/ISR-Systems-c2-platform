@@ -229,6 +229,56 @@ for (const d of getAllDestinations()) {
   );
 }
 
+// ── 4d. The district a site routes to must BE the district named ───
+// Two errors this catches, both found live on 2026-09-22:
+//
+//   1. esb-t2-politi was named 'Politi Sydvestjylland', a district that
+//      does not exist, and was held by a second role invented for it.
+//      Esbjerg and Kassoe share a politikreds but routed to different
+//      accounts.
+//   2. bjk-t2-politi was named 'Sydsjaellands og Lolland-Falsters
+//      Politi' but Bjaeverskov is in Koge, which politi.dk lists under
+//      Midt- og Vestsjaellands Politi.
+//
+// A name and its holder drifting apart is silent: routing still
+// "works", it just reaches the wrong agency.
+// Checked for EVERY tier-2 Politikreds destination in the table, not
+// only the cascade-covered sites. Scoping this to the cascade let the
+// Bjaeverskov mismatch pass, because that site does not detonate.
+for (const dest of getAllDestinations()) {
+  if (dest.tier !== 2 || destinationParent(dest) !== 'Politi') continue;
+  const holder = roleHolding(dest.id);
+  if (!holder) {
+    errors.push(
+      `Police destination '${dest.id}' (${dest.name}) is held by no role in src/roles.js.\n` +
+      `    Inboxes are built from a role's destinationIds, so an escalation to it reaches nobody.`
+    );
+    continue;
+  }
+  const org = holder.org || holder.label || '';
+  if (org === dest.name) continue;
+  errors.push(
+    `Police destination '${dest.id}' is named '${dest.name}', but the role holding it is\n` +
+    `    '${holder.id}' (${org}). A destination and its owning role must name the SAME politikreds.\n` +
+    `    Denmark has twelve; check politi.dk before changing either side.`
+  );
+}
+
+// One role per politikreds. Two roles carrying the same district name
+// means two inboxes for one agency, and sites inside that district
+// silently split between them.
+const _byOrg = new Map();
+for (const r of RECEIVERS) {
+  if (!/ Politi$/.test(r.org || '')) continue;
+  if (!_byOrg.has(r.org)) _byOrg.set(r.org, []);
+  _byOrg.get(r.org).push(r.id);
+}
+for (const [org, ids] of _byOrg) {
+  if (ids.length > 1) {
+    errors.push(`Politikreds '${org}' is represented by ${ids.length} roles: ${ids.join(', ')}. One district, one role.`);
+  }
+}
+
 // ── 5. At least one of each capability must be alerted ─────────────
 // A detonation with no ambulance alerted is the failure this whole
 // subsystem exists to prevent.

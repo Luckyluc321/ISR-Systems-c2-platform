@@ -17,10 +17,10 @@
 
 const ASSETS = [
   // ── Politi (National Police) — 12 districts + national HQ ──
-  { id: 'politi-kbh',     name: 'Politi København',           kind: 'police',   lat: 55.6767, lon: 12.5687, response: 'Patrol dispatch' },
+  { id: 'politi-kbh',     name: 'Københavns Politi',          kind: 'police',   lat: 55.6767, lon: 12.5687, response: 'Patrol dispatch' },
   { id: 'politi-vestegn', name: 'Københavns Vestegns Politi', kind: 'police',   lat: 55.6521, lon: 12.5117, response: 'Patrol dispatch' },
   { id: 'politi-nord',    name: 'Nordsjællands Politi',       kind: 'police',   lat: 55.9384, lon: 12.3239, response: 'Patrol dispatch' },
-  { id: 'politi-sydvest', name: 'Syd- og Sønderjyllands Politi (Esbjerg)', kind: 'police', lat: 55.4671, lon: 8.4527, response: 'Patrol dispatch' },
+  { id: 'politi-sydsonderjyl', name: 'Syd- og Sønderjyllands Politi (Esbjerg)', kind: 'police', lat: 55.4671, lon: 8.4527, response: 'Patrol dispatch' },
   { id: 'politi-syd',     name: 'Sydsjællands Politi',        kind: 'police',   lat: 55.4123, lon: 11.7614, response: 'Patrol dispatch' },
   { id: 'politi-midtvest',name: 'Midt- og Vestjyllands Politi',kind:'police',   lat: 56.4585, lon: 9.4020,  response: 'Patrol dispatch' },
   { id: 'politi-oestjyl', name: 'Østjyllands Politi',         kind: 'police',   lat: 56.1567, lon: 10.2107, response: 'Patrol dispatch' },

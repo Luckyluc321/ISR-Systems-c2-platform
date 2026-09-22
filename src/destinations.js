@@ -76,7 +76,7 @@ const DESTINATIONS = [
 
   // Tier 2, local law enforcement + aviation coordination
   { id: 'cph-t2-politi', siteId: 'cph', tier: 2, type: 'agency',
-    name: 'Politi København',
+    name: 'Københavns Politi',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
   { id: 'cph-t2-pet', siteId: 'cph', tier: 2, type: 'agency',
     name: 'PET, Politiets Efterretningstjeneste',
@@ -145,7 +145,7 @@ const DESTINATIONS = [
 
   // Tier 2, local law enforcement + maritime coordination
   { id: 'esb-t2-politi', siteId: 'esbjerg', tier: 2, type: 'agency',
-    name: 'Politi Sydvestjylland',
+    name: 'Syd- og Sønderjyllands Politi',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
   { id: 'esb-t2-pet', siteId: 'esbjerg', tier: 2, type: 'agency',
     name: 'PET, Politiets Efterretningstjeneste',
@@ -259,8 +259,13 @@ const DESTINATIONS = [
     contactMethods: ['mqtt'], availabilityStatus: 'on-shift' },
 
   // Tier 2, local law enforcement
+  // Bjaeverskov is in Koge Kommune, and politi.dk lists Koge under
+  // Midt- og Vestsjaellands Politi. This entry named Sydsjaellands og
+  // Lolland-Falsters Politi, whose kommune list (Slagelse, Soro,
+  // Naestved, Faxe, Vordingborg, Guldborgsund, Lolland) does not
+  // include Koge. Corrected 2026-09-22.
   { id: 'bjk-t2-politi', siteId: 'energinet_bjaeverskov', tier: 2, type: 'agency',
-    name: 'Sydsjællands og Lolland-Falsters Politi',
+    name: 'Midt- og Vestsjællands Politi',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
   { id: 'bjk-t2-pet', siteId: 'energinet_bjaeverskov', tier: 2, type: 'agency',
     name: 'PET, Politiets Efterretningstjeneste',
@@ -530,11 +535,12 @@ const DESTINATIONS = [
 // per-site prefix + tier/agency suffix.
 // ═══════════════════════════════════════════════════════════════════
 
-// Rename existing generic Politi entries to match official Politikreds naming
-DESTINATIONS.forEach(d => {
-  if (d.id === 'cph-t2-politi') d.name = 'Københavns Politi';
-  if (d.id === 'esb-t2-politi') d.name = 'Syd- og Sønderjyllands Politi';
-});
+// Politikreds entries declare their official politi.dk name inline.
+// Until 2026-09-22 cph-t2-politi and esb-t2-politi declared one name
+// here and had it silently overwritten by a rename pass at this point
+// in the file. A declared value that a later pass rewrites is two
+// sources of truth for one field, and the second one is invisible to
+// anyone reading the table.
 
 const _SITE_PREFIXES = {
   cph: 'cph',
