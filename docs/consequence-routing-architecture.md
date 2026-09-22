@@ -136,13 +136,76 @@ got depended on array order.
 generator also emitted it. The inline copy is removed and the generator
 is now idempotent.
 
-## Still open
+## Every routed agency can dispatch
 
-The alerted agencies outside Copenhagen have **no vehicles**. They
-receive the case and can coordinate, but nothing drives on the map,
-because a dispatchable agency needs a verified station address and those
-have only been gathered for the Copenhagen set. That is the next pass.
+All 24 have a verified station and vehicles. A detonation anywhere now
+alerts local agencies that actually put vehicles on the road.
 
-This is deliberate and it is honest: the right agency is alerted, and
-dispatch is not yet modelled for it. The Mission Console shows no
-dispatch options rather than inventing some.
+Verification standard for every coordinate:
+
+- an OpenStreetMap house node with matching house number, road and
+  postcode. Never a street centroid, never a city-level fallback.
+- cross-checked against DAWA, the official Danish address register, or
+  against the organisation's own published address, or both.
+- where a second independent confirmation was not available, the base
+  comment says so rather than implying a confidence the data lacks.
+
+These are plot address points, not apparatus-bay doors. On a large
+hospital campus the emergency entrance can sit 50 to 250 metres away.
+That is the right precision for road routing and is stated rather than
+glossed.
+
+### Stale facts this pass corrected
+
+Each of these would have sent a vehicle to the wrong place.
+
+| Fact | Reality |
+|---|---|
+| Aalborg's emergency department at Hobrovej | Moved to Hospitalsbyen on 22 March 2026; Hobrovej's department closed |
+| Region Sjælland's coordination centre in Slagelse | Moved to Næstved in 2019 |
+| "Sydvestjysk Sygehus" | Renamed Esbjerg Sygehus in 2022; the old domain redirects |
+| Vejle described as a plain acute hospital | Emergency function runs 07 to 22 only, which is why Billund routes to Kolding |
+| Køge "consolidating in 2027 as ETK Brand & Redning" | Backwards. It WAS ETK and is already renamed; 2027 is incorporation as a §60 selskab |
+
+### Traps recorded in the files
+
+Two places where the obvious cross-check gives the wrong answer, written
+into the base comments so nobody "corrects" them later:
+
+- **TrekantBrand Kolding.** The service moved into a purpose-built
+  station on Kobbervej in December 2025. OpenStreetMap's fire station
+  feature for Kolding still sits at the decommissioned Smedegade
+  station 4.5 km away.
+- **Hjulmagervej 20, Aalborg.** This is the joint dispatch centre. It is
+  the correct address for the regional medical coordination centre and
+  the wrong one for Nordjyllands Beredskab's fire engines, even though
+  some company registries list it as that organisation's headquarters.
+  Both are recorded, each at its own entry.
+
+### Choices made where the data was genuinely ambiguous
+
+- **Frederiksborg Brand & Redning** publishes no main station at all.
+  Frederikssund is used: the organisation's own registered address, a
+  real station, and nearer to the site that routes there. Station
+  Hillerød is the only around-the-clock crewed station and its
+  coordinate sits in the comment for the day turnout matters more than
+  distance.
+- **TrekantBrand** runs two main stations. Kolding holds the
+  administration and is nearer to both sites routed there; Fredericia
+  holds the dispatch centre. Both coordinates are recorded.
+- **Brand & Redning Sønderjylland** publishes one address while an
+  operational record lists another 47 metres away on the adjacent
+  frontage. Which holds the apparatus bays could not be verified, so the
+  organisation's own published address wins.
+
+### Known limits
+
+- Copenhagen Airport's **airside** first response is the airport's own
+  Lufthavnsbrandvæsen, which has no role and is therefore not alerted.
+  Tårnby Brandvæsen covers the landside.
+- **Køge and TrekantBrand contract operational firefighting to Falck**,
+  so those addresses are the municipal organisation rather than the
+  employer of the crew that turns out.
+- **Frederiksborg Brand & Redning** is under municipal supervisory
+  referral with a dimensioning shortfall, so its station footprint is
+  less stable than the others.
