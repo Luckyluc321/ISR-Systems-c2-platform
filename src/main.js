@@ -4033,7 +4033,7 @@ async function main() {
       classification: event.classification,
       threat: event.threat,
       platform: 'quadcopter',
-      droneType: `${sw.model || 'Unknown platform'} (breakaway from ${event.id})`,
+      droneType: `${sw.model || 'Unknown platform'} (split from ${event.id})`,
       confidence: event.confidence,
       status: 'active',
       startTime: nowIso,
@@ -4062,7 +4062,7 @@ async function main() {
         classification: event.classification,
         class_confidence: event.confidence ?? null,
         formationOffset: { ...(sw.offset || { forward: 0, right: 0, up: 0 }) },
-        role: sw.role || 'breakaway',
+        role: sw.role || 'split',
         model: sw.model || null,
         rfMHz: sw.rfMHz || null,
         history: [{ status: 'tracked', at: nowIso, reason: 'breakaway promotion' }],
@@ -18121,9 +18121,14 @@ async function main() {
           <span class="dp-swarm-id">${d.id}</span>
           <span class="dp-swarm-model">${d.model}</span>
           <span class="dp-swarm-role">${d.role}</span>
+          <span class="dp-swarm-status">${
+            d.status === 'neutralised' ? `<span class="dp-swarm-status-downed">× DOWNED</span>`
+            : d.status === 'broken-away' ? `<span class="dp-swarm-status-breakaway">↗ SPLIT</span>`
+            : ''
+          }</span>
           ${d.status === 'neutralised'
-            ? `<span class="dp-swarm-status-downed">× DOWNED</span>`
-            : `${d.status === 'broken-away' ? `<span class="dp-swarm-status-breakaway">↗ BREAKAWAY</span>` : ''}<span class="dp-swarm-pos mono">${d.stats.lat.toFixed(4)}°N ${d.stats.lon.toFixed(4)}°E</span>
+            ? ``
+            : `<span class="dp-swarm-pos mono">${d.stats.lat.toFixed(4)}°N ${d.stats.lon.toFixed(4)}°E</span>
           <span class="dp-swarm-alt mono">${Math.round(d.stats.alt)} m</span>
           <span class="dp-swarm-hdg mono">${Math.round(d.stats.heading)}°</span>
           <span class="dp-swarm-spd mono">${(d.stats.speed || 0).toFixed(1)} m/s</span>
@@ -24047,7 +24052,11 @@ async function main() {
   // Persists across re-renders so a panel Lucas collapsed stays
   // collapsed after Mistral streams, ack lands, dispatch state
   // transitions, etc. Key is the panel title text (stable per step).
-  const _collapsedPanels = new Set();
+  // Attribution starts collapsed. It is reference material consulted
+  // when a reader questions the classification, not something to read
+  // on every case, and expanded by default it competed with the numbered
+  // response steps for attention.
+  const _collapsedPanels = new Set(['Attribution assessment']);
   function _applyCollapsedPanelState() {
     receiverView.querySelectorAll('.c-panel-collapsible').forEach(panel => {
       const titleEl = panel.querySelector(':scope > .c-panel-title');

@@ -60,6 +60,26 @@ check('a confidently-unknown platform is INSUFFICIENT, not high',
 check('no class-origin claim is made for an unresolved platform',
   !unk.claims.some(c => c.kind === 'origin'),
   'the unknown-family library entry carries boilerplate that would read as a finding');
+// The case that actually shipped. It was NOT the literal string
+// 'unknown'; it was a label simply absent from the family library, such
+// as a bare platform name. familyMetadata() falls back to the unknown
+// entry for anything off-list, so the panel rendered "Classified as
+// Unknown / unclassified" at MODERATE with 89% beside it and printed
+// the unknown entry's own do-not-fabricate warning as a finding.
+for (const label of ['quadcopter', 'fixed-wing-thing', 'Shahed', 'DJI', '']) {
+  const r = getAttributionAssessment({ id: 'e', subject: { class: label, class_confidence: 0.99 } }, { priors: [] });
+  check(`off-list label ${JSON.stringify(label)} yields no attribution`,
+    r.claims.find(c => c.kind === 'platform').confidence === CONFIDENCE.INSUFFICIENT
+    && !r.claims.some(c => c.kind === 'origin'),
+    'only membership in the family library counts as a resolved family');
+}
+check('a real library label still resolves',
+  (() => {
+    const r = getAttributionAssessment({ id: 'e', subject: { class: 'dji-quadcopter', class_confidence: 0.99 } }, { priors: [] });
+    return r.claims.find(c => c.kind === 'platform').confidence === CONFIDENCE.HIGH
+      && r.claims.some(c => c.kind === 'origin');
+  })(),
+  'the guard must not reject valid families');
 check('an event with nothing at all still produces an assessment',
   getAttributionAssessment({ id: 'e' }, {}).claims.length >= 2);
 

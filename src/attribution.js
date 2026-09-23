@@ -32,7 +32,7 @@
 // ═══════════════════════════════════════════════════════════════════
 
 import { ARCHETYPES, archetypeFor } from './archetypes.js';
-import { familyMetadata, FAMILIES } from './families.js';
+import { familyMetadata, FAMILIES, FAMILY_LIBRARY } from './families.js';
 
 // Roadmap §5 access matrix: attribution is intel-tier only. Narrower
 // than the historical pattern panel, which also serves forensic and
@@ -112,14 +112,20 @@ export function getAttributionAssessment(event, { priors = [], family: familyIn 
   // into the precedent store.
   const raw = familyIn || event?.subject?.class || event?.platformFamily || null;
 
-  // UNKNOWN is a real classifier output, not a missing value, and it
-  // must not be treated as a resolved family. familyMetadata() falls
-  // back to the UNKNOWN library entry for anything off-list, and that
-  // entry carries attribution_elaboration like any other. Without this
-  // guard an unresolved detection produced a confident "class origin"
-  // claim describing the unknown-family boilerplate, which is precisely
-  // the over-claiming this module exists to prevent.
-  const resolved = raw && raw !== FAMILIES.UNKNOWN ? raw : null;
+  // A family counts as resolved only if the library actually HAS it.
+  //
+  // Testing `raw !== FAMILIES.UNKNOWN` was not enough and shipped a
+  // live bug: the common case is not the literal string 'unknown', it
+  // is a label that is simply off-list, such as a bare platform name
+  // like 'quadcopter'. familyMetadata() falls back to the UNKNOWN entry
+  // for anything it does not recognise, and that entry carries
+  // attribution_elaboration like every other family. So an unresolved
+  // detection rendered "Classified as Unknown / unclassified" at
+  // MODERATE confidence with 89% beside it, and printed the unknown
+  // entry's own do-not-fabricate warning as if it were a finding.
+  //
+  // Membership in the library is the real question, so ask that.
+  const resolved = raw && raw !== FAMILIES.UNKNOWN && FAMILY_LIBRARY[raw] ? raw : null;
   const meta = resolved ? familyMetadata(resolved) : null;
   const family = resolved;
 
@@ -149,8 +155,8 @@ export function getAttributionAssessment(event, { priors = [], family: familyIn 
     claims.push({
       kind: 'platform',
       label: 'Platform',
-      text: raw === FAMILIES.UNKNOWN
-        ? 'Classifier returned no recognised platform family for this detection.'
+      text: raw
+        ? `Classifier output "${raw}" is not a recognised platform family. No attribution can rest on it.`
         : 'No platform family resolved for this detection.',
       confidence: CONFIDENCE.INSUFFICIENT,
       provenance: PROVENANCE.NN,
@@ -267,28 +273,36 @@ export function renderAttributionPanel(event, activeRole, opts = {}) {
   if (!canSeeAttribution(activeRole)) return '';
   const { displayName, claims, overall } = getAttributionAssessment(event, opts);
 
-  const rows = claims.map(c => `
-    <div style="padding:7px 0;border-top:1px solid var(--border);">
-      <div style="display:flex;gap:var(--space-2);align-items:baseline;">
-        <span style="color:var(--text-dim);flex:0 0 92px;font-size:var(--fs-2xs);">${_esc(c.label)}</span>
-        <span style="color:${_TIER_COLOR[c.confidence] || 'var(--text-dim)'};font-family:var(--font-mono);font-size:10px;flex:0 0 78px;text-transform:uppercase;">${_esc(c.confidence)}</span>
-        <span style="color:var(--text);flex:1 1 auto;font-size:var(--fs-2xs);line-height:1.5;">${_esc(c.text)}</span>
-      </div>
-      <div style="display:flex;gap:var(--space-2);margin-top:3px;">
-        <span style="flex:0 0 92px;"></span>
-        <span style="color:var(--text-dim);font-size:10px;flex:1 1 auto;">
-          via ${_esc(c.provenance)}${c.score != null ? ` · ${Math.round(c.score * 100)}%` : ''}${c.caveat ? ` · ${_esc(c.caveat)}` : ''}
-        </span>
-      </div>
-    </div>`).join('');
+  // Each claim is one row. The basis for it — provenance, score,
+  // caveat — lives behind the info toggle on the right rather than as a
+  // second grey line under every row. Four claims each carrying two
+  // lines turned a reference panel into a wall of text, and the detail
+  // is what you consult when you question a line, not what you read
+  // every time.
+  const rows = claims.map(c => {
+    const detail = [
+      `via ${_esc(c.provenance)}`,
+      c.score != null ? `${Math.round(c.score * 100)}% classifier confidence` : null,
+      c.caveat ? _esc(c.caveat) : null,
+    ].filter(Boolean).join(' · ');
+    return `
+    <details class="attr-claim">
+      <summary class="attr-claim-row">
+        <span class="attr-claim-label">${_esc(c.label)}</span>
+        <span class="attr-claim-tier" style="color:${_TIER_COLOR[c.confidence] || 'var(--text-dim)'};">${_esc(c.confidence)}</span>
+        <span class="attr-claim-text">${_esc(c.text)}</span>
+        <span class="attr-claim-info" title="Show the basis for this line">i</span>
+      </summary>
+      <div class="attr-claim-detail">${detail}</div>
+    </details>`;
+  }).join('');
 
   return `
-    <div class="c-panel" style="border-top: 3px solid #9d8ec9;">
+    <div class="c-panel c-panel-collapsible" style="border-top: 3px solid #9d8ec9;">
       <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #9d8ec9;">Attribution assessment</div>
       <div class="c-panel-body">
-        <div style="color:var(--text-dim);font-size:var(--fs-2xs);line-height:1.5;margin-bottom:var(--space-2);">
-          ${displayName ? `Assessed platform: <span style="color:var(--text);">${_esc(displayName)}</span>. ` : ''}Overall confidence <span style="color:${_TIER_COLOR[overall] || 'var(--text-dim)'};">${_esc(overall)}</span>.
-          Each line below states its own basis. Confidence is not inherited between lines.
+        <div class="attr-lede">
+          ${displayName ? `Assessed platform: <span style="color:var(--text);">${_esc(displayName)}</span>. ` : ''}Overall confidence <span style="color:${_TIER_COLOR[overall] || 'var(--text-dim)'};">${_esc(overall)}</span>. Confidence is not inherited between lines.
         </div>
         ${rows}
       </div>
