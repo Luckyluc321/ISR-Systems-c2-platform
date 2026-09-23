@@ -73,10 +73,17 @@ These are the places where "nearest" is not the answer.
   Beredskab.** Tårnby Brandvæsen covers the airport landside. Airside
   first response is the airport's own Lufthavnsbrandvæsen, which has no
   role in `roles.js` and so is not alerted. That is a known gap.
-- **Bjæverskov is in Region Sjælland but routes to the Hedehusene
-  rescue centre**, as its manifest declares. The repo holds a verified
-  address for Beredskabsstyrelsen Sjælland in Næstved but no role for
-  it. Kept as declared rather than inventing a role.
+- **Bjæverskov routes to Beredskabsstyrelsen Sjælland in Næstved**,
+  changed from Hedehusene on 2026-09-23 and recorded as an inference
+  rather than a cited fact. Beredskabsstyrelsen publishes no
+  kommune-level coverage: no map, no kommune list, no per-postnummer
+  assignment, and Køge's own risk dimensioning names no centre. What
+  supports Næstved is that Hedehusene's published mandate is Region
+  Hovedstaden specifically while Næstved is described only as one of the
+  departments on Zealand, and that the two are not equivalent units:
+  Næstved runs a 24-hour conscript watch with a five-minute turnout
+  while Hedehusene is a volunteer centre with no conscripts. Worth
+  confirming with Beredskabsstyrelsen directly.
 
 ## Self-referential ids, and the trap they avoid
 
@@ -198,11 +205,27 @@ into the base comments so nobody "corrects" them later:
   frontage. Which holds the apparatus bays could not be verified, so the
   organisation's own published address wins.
 
-### Known limits
+### Copenhagen Airport's own fire brigade is an operator asset
 
-- Copenhagen Airport's **airside** first response is the airport's own
-  Lufthavnsbrandvæsen, which has no role and is therefore not alerted.
-  Tårnby Brandvæsen covers the landside.
+Decided 2026-09-23. The airport's Lufthavnsbrandvæsen is **not** a
+government receiver and should not be modelled as one.
+
+It belongs to Københavns Lufthavne, who is the customer. Operators own
+and dispatch their own on-site assets, and there is already precedent:
+the airport wildlife team sits in `op-cph-airports`' own dispatch scope
+for exactly this reason. Modelling the brigade as a receiver would mean
+ISR escalating to the customer's own staff, which inverts the direction
+the whole platform routes in.
+
+So "on-site operator assets" is a small defined category, currently the
+wildlife team and the fire brigade, rather than a one-off exception.
+
+Not built yet. Today an airside crash alerts Tårnby Brandvæsen, which
+covers the landside, and the on-airfield brigade is not represented at
+all. That is a real gap, and the answer is an operator-side asset rather
+than another receiver.
+
+### Known limits
 - **Køge and TrekantBrand contract operational firefighting to Falck**,
   so those addresses are the municipal organisation rather than the
   employer of the crew that turns out.

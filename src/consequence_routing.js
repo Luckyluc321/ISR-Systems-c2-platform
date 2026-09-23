@@ -37,6 +37,20 @@
 // Region to its Akutmedicinsk Koordinationscenter. Every site manifest
 // already declares its region as a casualty-scenario observer, so this
 // mapping introduces no new geography.
+//
+// NOTE that this region mapping is correct for MEDICAL COORDINATION and
+// wrong as a general pattern. Beredskabsstyrelsen's rescue centres do
+// NOT follow region boundaries: their districts were drawn as drive-time
+// isochrones, the stated design priority was response time over
+// administrative tidiness, and three kommuner are split between two
+// centres with at least one boundary following a road rather than a
+// kommune line. Rescue is therefore declared per site below, never
+// derived from the region.
+//
+// Dispatch is also fixed-district rather than nearest-available: the
+// requesting authority calls the centre whose area the incident falls
+// in. Larger incidents stack additional centres on top rather than
+// reassigning, which is why a site declares one centre and not a list.
 export const REGION_TO_MEDICAL_COORDINATION = {
   'region-hst': 'amk-hovedstaden',
   'region-sjl': 'amk-sjaelland',
@@ -87,11 +101,26 @@ export const CONSEQUENCE_BY_SITE = {
     region: 'region-sjl',
     fire: 'kbr-koege',   // Køge kommune
     hospitals: ['hospital-suh-koege'],
-    // Region Sjælland, but the site manifest names Hedehusene and there
-    // is no role for Beredskabsstyrelsen Sjælland (Næstved), whose
-    // address sits verified but unused in receiver_bases.js. Kept as the
-    // manifest declares rather than inventing a role.
-    rescue: 'brs-hedehusene',
+    // Beredskabsstyrelsen Sjælland (Næstved), changed from Hedehusene
+    // on 2026-09-23. RECORDED AS AN INFERENCE, NOT A CITED FACT.
+    //
+    // Beredskabsstyrelsen does not publish its coverage areas at kommune
+    // level: no map, no kommune list, no per-postnummer assignment
+    // exists on brs.dk, and Køge's own risk dimensioning names no
+    // centre. So this cannot be sourced the way the police districts
+    // were.
+    //
+    // What supports Næstved: Hedehusene's published mandate is Region
+    // Hovedstaden specifically, while Næstved is described only as "one
+    // of the operative departments on Zealand". Køge is Region
+    // Sjælland. And the two are not equivalent units. Næstved runs a
+    // 24/7 conscript watch with a five-minute turnout; Hedehusene is a
+    // volunteer centre with no conscripts and a two-person watch, so it
+    // cannot deliver the same reinforcement.
+    //
+    // Confirm with Beredskabsstyrelsen directly before treating this as
+    // settled.
+    rescue: 'brs-naestved',
   },
   billund: {
     region: 'region-syd',
