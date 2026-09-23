@@ -4033,7 +4033,7 @@ async function main() {
       classification: event.classification,
       threat: event.threat,
       platform: 'quadcopter',
-      droneType: `${sw.model || 'Unknown platform'} (split from ${event.id})`,
+      droneType: `${sw.model || 'Unknown platform'} (detached from ${event.id})`,
       confidence: event.confidence,
       status: 'active',
       startTime: nowIso,
@@ -4062,7 +4062,7 @@ async function main() {
         classification: event.classification,
         class_confidence: event.confidence ?? null,
         formationOffset: { ...(sw.offset || { forward: 0, right: 0, up: 0 }) },
-        role: sw.role || 'split',
+        role: sw.role || 'detached',
         model: sw.model || null,
         rfMHz: sw.rfMHz || null,
         history: [{ status: 'tracked', at: nowIso, reason: 'breakaway promotion' }],
@@ -18123,7 +18123,7 @@ async function main() {
           <span class="dp-swarm-role">${d.role}</span>
           <span class="dp-swarm-status">${
             d.status === 'neutralised' ? `<span class="dp-swarm-status-downed">× DOWNED</span>`
-            : d.status === 'broken-away' ? `<span class="dp-swarm-status-breakaway">↗ SPLIT</span>`
+            : d.status === 'broken-away' ? `<span class="dp-swarm-status-breakaway">↗ DETACHED</span>`
             : ''
           }</span>
           ${d.status === 'neutralised'
