@@ -463,7 +463,7 @@ export const RECEIVERS = [
     id: 'brs', kind: 'receiver', type: 'parent',
     org: 'Beredskabsstyrelsen', label: 'Beredskabsstyrelsen — Danish Emergency Mgmt',
     initials: 'BR', scope: 'all-sites',
-    childrenIds: ['brs-hedehusene', 'brs-herning', 'brs-haderslev', 'brs-allinge', 'brs-thisted', 'brs-kemisk', 'brs-nukleart'],
+    childrenIds: ['brs-hedehusene', 'brs-naestved', 'brs-herning', 'brs-haderslev', 'brs-allinge', 'brs-thisted', 'brs-kemisk', 'brs-nukleart'],
     description: 'BRS umbrella. National + 5 centre + specialist units.',
   },
   {
@@ -476,6 +476,16 @@ export const RECEIVERS = [
     // so an empty one made the case unreachable to the agency it addressed.
     scope: 'regional', destinationIds: ['brs-hedehusene'],
     description: 'BRS national CBRN + rescue centre, Hedehusene (Sjælland).',
+  },
+  {
+    // Added 2026-09-22. This centre's address has been sitting in
+    // receiver_bases.js, verified against brs.dk, connected to nothing:
+    // the base existed, the role did not, so nothing could reach it.
+    // Six Beredskabsstyrelsen centres exist and only five were modelled.
+    id: 'brs-naestved', kind: 'receiver', type: 'leaf', parentId: 'brs',
+    org: 'BRS Naestved', label: 'Beredskabscenter Sjælland (Næstved)', initials: 'BN',
+    scope: 'regional', destinationIds: ['brs-naestved'],
+    description: 'BRS rescue centre, Næstved (Region Sjælland).',
   },
   {
     id: 'brs-herning', kind: 'receiver', type: 'leaf', parentId: 'brs',

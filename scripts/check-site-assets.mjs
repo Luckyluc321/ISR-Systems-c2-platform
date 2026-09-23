@@ -33,6 +33,7 @@ import { SITE_CONTEXT } from '../src/site_context.js';
 const LEVELS = new Set(['high', 'medium', 'approximate', 'unverified']);
 
 const errors = [];
+const warnings = [];
 const tally = {};
 let total = 0;
 
@@ -67,8 +68,48 @@ for (const [siteId, ctx] of Object.entries(SITE_CONTEXT)) {
       errors.push(`Site '${siteId}' asset '${a.id}' has no usable lat/lon. It would silently drop out of every distance calculation.`);
     }
   }
+
+  // Two assets at the identical coordinate cannot be told apart, so
+  // whichever the nearest-asset lookup returns first wins and the other
+  // is unreachable by name. Seen three times: CPH's ils_04L carried the
+  // runway centre, and several substations have every internal asset
+  // sitting on the site's own coordinate because nobody surveyed them.
+  //
+  // A WARNING rather than an error. A placeholder position is a
+  // legitimate state for a site that has not been surveyed yet, and the
+  // honest thing is to make it visible, not to block the build over it.
+  // It becomes an error only if it is also claimed as verified.
+  const byPos = new Map();
+  for (const { a, where } of assets) {
+    const p = a.center || a.location;
+    if (!p || typeof p.lat !== 'number') continue;
+    const key = `${p.lat.toFixed(5)},${p.lon.toFixed(5)}`;
+    if (!byPos.has(key)) byPos.set(key, []);
+    byPos.get(key).push({ id: a.id, where, verified: a.verified });
+  }
+  for (const [key, group] of byPos) {
+    if (group.length < 2) continue;
+    const claimed = group.filter(g => g.verified === 'high' || g.verified === 'medium');
+    const ids = group.map(g => g.id).join(', ');
+    if (claimed.length) {
+      errors.push(
+        `Site '${siteId}': ${claimed.length} asset(s) claim a checked position while sharing the exact\n` +
+        `    coordinate ${key} with others: ${ids}.\n` +
+        `    A verified position must be that asset's own. Nearest-asset lookups return the first match,\n` +
+        `    so the rest are unreachable by name.`
+      );
+    } else {
+      warnings.push(
+        `Site '${siteId}': ${group.length} assets share coordinate ${key} (${ids}). ` +
+        `All unverified, so this reads as a placeholder rather than a survey. They cannot be told apart until one is.`
+      );
+    }
+  }
 }
 
+if (warnings.length) {
+  for (const w of warnings) console.warn(`⚠ ${w}`);
+}
 if (errors.length) {
   console.error(`✗ Site asset policy violation. ${errors.length} issue${errors.length === 1 ? '' : 's'}:\n`);
   for (const e of errors) console.error(`  ${e}\n`);

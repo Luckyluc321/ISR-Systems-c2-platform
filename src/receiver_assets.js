@@ -740,6 +740,29 @@ export const RECEIVER_ASSETS = {
     requestable: [],
   },
 
+  'brs-naestved': {
+    label: 'Beredskabsstyrelsen Sjælland (Næstved)',
+    baseId: 'brs-sjaelland-naestved',
+    dispatchable: [
+      {
+        assetKey: 'brsn-rescue-team',
+        kind: 'receiver-rescue-team',
+        name: 'Rescue team',
+        count: 2,
+        icon: '⛑',
+        useCases: [
+          'Heavy rescue at a structural impact site',
+          'Search of collapsed or damaged structures',
+          'Scene support for fire and hazmat conditions',
+        ],
+        capabilities: { heavy_rescue: true, structural_search: true, hazmat_support: true },
+        deployTime: '20-35 minutes via real road routing',
+        limitations: 'Not a medical unit. Works alongside ambulances and fire services.',
+      },
+    ],
+    requestable: [],
+  },
+
   'brs-hedehusene': {
     label: 'Beredskabsstyrelsen Hovedstaden',
     baseId: 'brs-hedehusene',
