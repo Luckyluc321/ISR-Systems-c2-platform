@@ -69,6 +69,30 @@ for (const [siteId, ctx] of Object.entries(SITE_CONTEXT)) {
     }
   }
 
+  // Anything referencing an asset by id must reference one that exists.
+  // Renaming an asset is exactly when this breaks, and it breaks
+  // silently: a highlight or priority pointing at a deleted id simply
+  // stops matching, so the asset the site considers most important
+  // quietly drops out of whatever consumes it. Seven references went
+  // dangling the moment two sites were corrected on 2026-09-23.
+  const assetIds = new Set(assets.map(({ a }) => a.id));
+  const refs = [];
+  (function walk(node) {
+    if (!node || typeof node !== 'object') return;
+    if (Array.isArray(node)) { node.forEach(walk); return; }
+    for (const [k, v] of Object.entries(node)) {
+      if (k === 'asset_id' && typeof v === 'string') refs.push(v);
+      else walk(v);
+    }
+  })(ctx);
+  for (const ref of refs) {
+    if (assetIds.has(ref)) continue;
+    errors.push(
+      `Site '${siteId}' references asset_id '${ref}', which no longer exists in critical_areas or high_value_assets.\n` +
+      `    The reference silently stops matching, so whatever consumes it loses that asset without erroring.`
+    );
+  }
+
   // Two assets at the identical coordinate cannot be told apart, so
   // whichever the nearest-asset lookup returns first wins and the other
   // is unreachable by name. Seen three times: CPH's ils_04L carried the
