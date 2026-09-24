@@ -5432,8 +5432,13 @@ async function main() {
         toast(`${d.assetName} at fuel limit ${maxPursuitKm} km from base. Returning to base.`, 'warn');
         return;
       }
-      // Soft cap: only RTB when idle.
-      if (chaseKm >= d.profile.maxChaseKm && !hasLiveTarget) {
+      // Soft cap: only RTB when genuinely idle. "Idle" means no live
+      // target AND nothing left hunting on this event or a breakaway
+      // child of it. An interceptor whose own assignment was downed is
+      // not idle while a detached drone is still up; it just has not
+      // been re-tasked yet.
+      if (chaseKm >= d.profile.maxChaseKm && !hasLiveTarget
+          && !_hostilesRemainIncludingChildren(d.eventId)) {
         d.state = 'rtb_via_last_known';
         d.rtbTargetLat = d.curLat;
         d.rtbTargetLon = d.curLon;
@@ -6668,7 +6673,11 @@ async function main() {
         const s = counterDispatchStateForEntry(d.eventId, cd);
         return s === 'complete' || cd.dispatchId === d.id;   // include this one which just completed
       }).length;
-      if (groupCompletedCount >= groupMembers.length && !event._interceptorGroupsCompleted?.has(d.groupId)) {
+      // Not finished while a breakaway child is still airborne. Without
+      // this the group completes on the last in-formation kill and every
+      // RTB path downstream unlocks at once.
+      const _stillHunting = _hostilesRemainIncludingChildren(d.eventId);
+      if (groupCompletedCount >= groupMembers.length && !_stillHunting && !event._interceptorGroupsCompleted?.has(d.groupId)) {
         addToEventSet(event.id, '_interceptorGroupsCompleted', d.groupId);
         let downedCount = 0;
         let overwatchSurvived = false;
@@ -10922,6 +10931,25 @@ async function main() {
     _debriefCalloutState = null;
   }
 
+  // Debrief panel pose. Module-level so it survives a re-render: the
+  // narrative streams in and rebuilds the panel, and a panel that
+  // jumped back to centre screen every time would be unusable.
+  let _debriefPanelPos = null;
+  let _debriefPanelCollapsed = false;
+  let _debriefPanelHidden = false;
+
+  // D shows a hidden debrief again. Ignored while typing.
+  window.addEventListener('keydown', (ev) => {
+    if (ev.key !== 'd' && ev.key !== 'D') return;
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    const t = ev.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    const panel = document.getElementById('debrief-narrative');
+    if (!panel || !_debriefPanelHidden) return;
+    _debriefPanelHidden = false;
+    panel.hidden = false;
+  });
+
   function _debriefBuildNarrativePanel(event, narrativeHtml, moments) {
     const wrap = document.createElement('div');
     wrap.id = 'debrief-narrative';
@@ -10952,9 +10980,11 @@ async function main() {
       </div>` : '';
 
     wrap.innerHTML = `
-      <div class="dbn-header">
+      <div class="dbn-header" data-debrief-drag>
         <span class="dbn-badge">DEBRIEF</span>
         <span class="dbn-eid pl-mono">${event.id}</span>
+        <button class="dbn-ctl" id="debrief-collapse-btn" title="Collapse or expand the panel">–</button>
+        <button class="dbn-ctl" id="debrief-hide-btn" title="Hide the panel. Press D to bring it back.">✕</button>
         <button class="dbn-close" id="debrief-close-btn">Exit debrief</button>
       </div>
       ${scopeBanner}
@@ -10968,6 +10998,74 @@ async function main() {
       </div>
     `;
     document.body.appendChild(wrap);
+
+    // ── Panel controls ────────────────────────────────────────────
+    // The debrief sits over the map, and the map is the thing being
+    // debriefed. Drag it by the header, collapse it to the header
+    // alone, or hide it entirely and bring it back with D.
+    //
+    // Deliberately self-contained: listeners on this element only, no
+    // shared state, nothing that outlives the panel. Position and
+    // collapse are remembered in module-level vars so a re-render or a
+    // narrative stream does not throw the panel back to centre screen.
+    const _applyDebriefPose = () => {
+      if (_debriefPanelPos) {
+        wrap.style.left = `${_debriefPanelPos.left}px`;
+        wrap.style.top = `${_debriefPanelPos.top}px`;
+        wrap.style.bottom = 'auto';
+        wrap.style.transform = 'none';
+      }
+      wrap.classList.toggle('is-collapsed', _debriefPanelCollapsed);
+      wrap.hidden = _debriefPanelHidden;
+    };
+    _applyDebriefPose();
+
+    const _collapseBtn = wrap.querySelector('#debrief-collapse-btn');
+    _collapseBtn?.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      _debriefPanelCollapsed = !_debriefPanelCollapsed;
+      _collapseBtn.textContent = _debriefPanelCollapsed ? '+' : '–';
+      _applyDebriefPose();
+    });
+    wrap.querySelector('#debrief-hide-btn')?.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      _debriefPanelHidden = true;
+      _applyDebriefPose();
+      toast('Debrief panel hidden. Press D to show it again.', 'info');
+    });
+
+    // Drag by the header. Pointer events so it works with a trackpad,
+    // a mouse or a touch screen, and setPointerCapture so a fast drag
+    // that leaves the header does not drop the panel mid-move.
+    const _hdr = wrap.querySelector('[data-debrief-drag]');
+    let _dragFrom = null;
+    _hdr?.addEventListener('pointerdown', (ev) => {
+      if (ev.target.closest('button')) return;   // controls are not a drag handle
+      const r = wrap.getBoundingClientRect();
+      _dragFrom = { dx: ev.clientX - r.left, dy: ev.clientY - r.top };
+      _debriefPanelPos = { left: r.left, top: r.top };
+      _applyDebriefPose();
+      _hdr.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+    });
+    _hdr?.addEventListener('pointermove', (ev) => {
+      if (!_dragFrom) return;
+      // Clamped so the panel can never be dragged fully off screen and
+      // become unreachable.
+      const w = wrap.offsetWidth, h = wrap.offsetHeight;
+      _debriefPanelPos = {
+        left: Math.min(Math.max(ev.clientX - _dragFrom.dx, -w + 120), window.innerWidth - 120),
+        top: Math.min(Math.max(ev.clientY - _dragFrom.dy, 0), window.innerHeight - 40),
+      };
+      _applyDebriefPose();
+    });
+    const _endDrag = (ev) => {
+      if (!_dragFrom) return;
+      _dragFrom = null;
+      try { _hdr.releasePointerCapture(ev.pointerId); } catch (_) {}
+    };
+    _hdr?.addEventListener('pointerup', _endDrag);
+    _hdr?.addEventListener('pointercancel', _endDrag);
     document.getElementById('debrief-close-btn').addEventListener('click', stopDebrief);
     // Regenerate: clear ALL downstream caches and re-fire the full
     // pipeline (highlights → digest → preprocessing → Agent B).
@@ -12533,6 +12631,29 @@ async function main() {
   // overwatch-panic logic in the swarm tick). Narrative outcome
   // ("overwatch escaped") stays realistic — pursuit ends at
   // maxPursuitKm or coverage loss, not by hard-coded exclusion.
+  // Live hostiles on this event OR on any active event it spawned.
+  //
+  // A member that breaks formation is promoted to its own child event,
+  // and the parent's own hostile list stops being the whole picture.
+  // Interceptors are dispatched against the PARENT, so once the last
+  // in-formation drone was downed the group read as finished and the
+  // interceptors flew home while the detached drone was still being
+  // pursued. Exactly what Lucas saw on screen.
+  function _hostilesRemainIncludingChildren(eventId) {
+    if (_allDownableHostiles(eventId).length) return true;
+    const ev = EVENTS.find(e => e.id === eventId);
+    for (const lid of (ev?.linkedEventIds || [])) {
+      const child = EVENTS.find(e => e.id === lid);
+      if (!child || child.status !== 'active') continue;
+      // Only children that broke away from THIS event. A cross-linked
+      // sighting at another site is not this group's problem.
+      if (child.provenance?.breakawayOf !== eventId) continue;
+      const cs = droneState.get(lid);
+      if (cs && !cs.closedAt) return true;
+    }
+    return false;
+  }
+
   function _allDownableHostiles(eventId) {
     const st = droneState.get(eventId);
     if (!st) return [];
