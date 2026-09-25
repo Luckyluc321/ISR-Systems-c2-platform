@@ -5339,8 +5339,46 @@ async function main() {
       }
     }
 
+    // Is this unit still holding its target on its OWN sensor?
+    //
+    // Interceptors carry a seeker head (onboardSensorRangeM). The
+    // documented behaviour is that a pursuit HOLDS beyond our sensor
+    // mesh while the target is inside onboard range: the map goes dark
+    // because our sensors lost it, and the responder keeps the contact.
+    //
+    // That was never wired into the two abandon-pursuit paths below,
+    // both of which fired the moment the site mesh lost the target. A
+    // drone that broke formation and flew out of coverage therefore
+    // shook off every interceptor chasing it, and they turned for home
+    // with it still airborne. Exactly what Lucas saw.
+    //
+    // Reads the target's true position rather than its rendered one.
+    // The billboard is hidden when no site sensor sees it, which is the
+    // whole point: the seeker still has it.
+    const _onboardHoldsTarget = (() => {
+      const range = d.profile?.onboardSensorRangeM;
+      const sw = d.assignedSwarmMember;
+      if (!range || !sw || sw.neutralised) return false;
+      const cart = sw.billboard?.position?.getValue?.(Cesium.JulianDate.now());
+      if (!cart) return false;
+      const c = Cesium.Cartographic.fromCartesian(cart);
+      const tLat = Cesium.Math.toDegrees(c.latitude);
+      const tLon = Cesium.Math.toDegrees(c.longitude);
+      return haversineM(d.curLat, d.curLon, tLat, tLon) <= range;
+    })();
+
+    // While the seeker holds it, keep steering at the real position.
+    // Without this the interceptor would hold the contact and still fly
+    // at a stale coordinate, which is worse than either behaviour alone.
+    if (_onboardHoldsTarget) {
+      const cart = d.assignedSwarmMember.billboard.position.getValue(Cesium.JulianDate.now());
+      const c = Cesium.Cartographic.fromCartesian(cart);
+      d.targetLat = Cesium.Math.toDegrees(c.latitude);
+      d.targetLon = Cesium.Math.toDegrees(c.longitude);
+    }
+
     // Phase F: RTB behaviour when target lost signal before arrival
-    if (d.state === 'en_route' && targetLost && d.profile.supportsRTB) {
+    if (d.state === 'en_route' && targetLost && d.profile.supportsRTB && !_onboardHoldsTarget) {
       d.state = 'rtb_via_last_known';
       d.rtbTargetLat = d.targetLat;   // last known coord we had
       d.rtbTargetLon = d.targetLon;
@@ -5371,7 +5409,10 @@ async function main() {
         // the icon has been suppressed to keep it from rendering on top
         // of the camera. Interceptor should keep engaging normally, and
         // the operator should get to watch themselves get shot down.
-        && !d.assignedSwarmMember._povActive) {
+        && !d.assignedSwarmMember._povActive
+        // The seeker still has it. Our mesh losing the target is not
+        // the interceptor losing the target.
+        && !_onboardHoldsTarget) {
       d.state = 'rtb_via_last_known';
       // Extend the last-known target 1 km along the target's last
       // heading before signal loss. Interceptor keeps flying past
