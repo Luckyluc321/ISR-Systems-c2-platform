@@ -153,6 +153,7 @@ import { baseForReceiverRole } from './receiver_bases.js';
 import { RECEIVER_ASSETS, assetsForReceiverRole, getReceiverDirectAsset, getReceiverRequestAsset } from './receiver_assets.js';
 import { cordonReleaseDecisions, clearedWreckageIds, expiredGhostEventIds, sceneReleaseState, leavesSceneUnassisted, cordonNeedsSceneCommand } from './scene_lifecycle.js';
 import { consequenceAgenciesForSite } from './consequence_routing.js';
+import { onDispatchFix, telemetryStats as _dispatchTelemetryStats, publishDispatchFix } from './dispatch_telemetry.js';
 import {
   destinationsForSite, destinationsForEvent, getDestination, destinationTypeLabel,
   destinationShortLabel, groupByParent, localPoliceDestinationIds,
@@ -5047,6 +5048,34 @@ async function main() {
     }
   }
 
+  // Does this unit's position come from a real feed?
+  //
+  // Set by the first accepted fix for that dispatch and never unset.
+  // A unit whose tracker drops out keeps its last known position and
+  // stops moving, which is the truth, rather than silently reverting to
+  // simulated physics and inventing motion that is not happening.
+  function _telemetryIsLive(d) {
+    return d?.telemetrySource === 'live';
+  }
+
+  // Apply an agency's vehicle position. Position only: arrival,
+  // engagement and stand-down stay derived from geometry so one state
+  // machine serves both environments.
+  onDispatchFix((fix) => {
+    const d = _counterDispatches.get(fix.dispatchId);
+    if (!d) return;   // a fix for a unit we do not know about is not an error
+    if (d.telemetrySource !== 'live') {
+      d.telemetrySource = 'live';
+      console.info('[dispatch_telemetry] %s now tracked from a live feed', fix.dispatchId);
+    }
+    d.curLat = fix.lat;
+    d.curLon = fix.lon;
+    if (fix.alt != null) d.curAlt = fix.alt;
+    if (fix.heading != null) d.heading = fix.heading * Math.PI / 180;
+    d._lastFixAt = fix.receivedAt;
+    _syncDispatchToEvent(d);
+  });
+
   function _startCounterDispatchLoop() {
     if (_cdRafId) return;
     const tick = () => {
@@ -5545,7 +5574,9 @@ async function main() {
       // ceiling, the interceptor levels off at ceiling and the
       // engagement outcome later will fail with 'above ceiling'.
       const physics = _SIM_INTERCEPTOR_PHYSICS[d.kind];
-      if (isSimEvent && d.profile.airborne && physics) {
+      // Climb physics is simulated motion. A live unit's altitude comes
+      // from its own feed.
+      if (isSimEvent && !_telemetryIsLive(d) && d.profile.airborne && physics) {
         const ceiling = physics.serviceCeilingM;
         const climbRate = physics.climbRateMs;
         const desiredAlt = Math.min(d.targetAlt || 60, ceiling);
@@ -5559,7 +5590,34 @@ async function main() {
         }
       }
 
-      if (d.routePositions && d.routeSegmentLengths) {
+      if (_telemetryIsLive(d)) {
+        // LIVE. The vehicle's position is written by its agency's
+        // tracker, so nothing here advances it. Arrival is still
+        // derived from that real position against the assigned target,
+        // which keeps one state machine across both environments.
+        //
+        // Deliberately a third branch rather than a refactor of the two
+        // below. Those are the simulation path, they are what every
+        // scenario and demo runs through, and they are left
+        // byte-identical.
+        const distM = haversineM(d.curLat, d.curLon, d.targetLat, d.targetLon);
+        if (distM <= d.profile.arriveAtM) {
+          d.state = 'engaging';
+          d.arrivedTs = now;
+          d.engageStartTs = now;
+          if (d.kind === 'counter-drone-swarm') _assignInterceptorTarget(d);
+          if (d.profile.radiationCone) {
+            _createRadiationEntity(d);
+            _initiateJamFall(d);
+          }
+          if (getActiveRole().kind === 'receiver') renderReceiverView();
+          toast(d.profile?.stagesAtScene
+            ? `${d.assetName} staging at scene perimeter.`
+            : leavesSceneUnassisted(d.profile)
+              ? `${d.assetName} on scene. Response under way.`
+              : `${d.assetName} on station.`, 'info');
+        }
+      } else if (d.routePositions && d.routeSegmentLengths) {
         // Follow OSRM street network route
         const step = advanceAlongPolyline(
           d.routePositions, d.routeSegmentLengths,

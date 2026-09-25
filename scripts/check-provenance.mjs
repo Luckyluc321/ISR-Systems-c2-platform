@@ -28,6 +28,9 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import { SITES } from '../src/sites_registry.js';
 import { MockNnOutputSource, WebSocketNnOutputSource } from '../src/nn_source.js';
+import {
+  publishDispatchFix, onDispatchFix, isValidFix, telemetryStats, _resetTelemetryForTest,
+} from '../src/dispatch_telemetry.js';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const main = readFileSync(join(REPO, 'src/main.js'), 'utf8');
@@ -90,6 +93,62 @@ check('dispatch units declare where their position comes from',
 check('dispatch provenance reaches the permanent record',
   /entry\.telemetrySource = d\.telemetrySource \|\| 'sim';/.test(main),
   'the event mirror is a whitelist, so an unmirrored field never leaves the browser tab');
+
+console.log('\nA responding unit can be tracked instead of simulated');
+_resetTelemetryForTest();
+let _fix = null;
+onDispatchFix(f => { _fix = f; });
+check('a valid fix is accepted and its position carried through',
+  publishDispatchFix({ dispatchId: 'cd-1', lat: 55.618, lon: 12.647, heading: 90 }) === true
+  && _fix?.lat === 55.618 && _fix?.heading === 90);
+// The fix below CLAIMS to be simulated. It must come back live anyway.
+// Without that claim in the payload the assertion passes against a seam
+// that simply forwards whatever the wire said.
+check('a fix claiming to be simulated is stamped live anyway',
+  publishDispatchFix({ dispatchId: 'cd-1', lat: 55.62, lon: 12.65, source: 'sim' }) === true
+  && _fix?.source === 'live',
+  'provenance is stamped by the receiving edge. A feed does not get to describe its own data as simulated, '
+  + 'or a real incident could be filed as a drill');
+for (const [why, bad] of [
+  ['0,0 (the classic missing-data sentinel)', { dispatchId: 'cd-1', lat: 0, lon: 0 }],
+  ['a non-finite coordinate', { dispatchId: 'cd-1', lat: NaN, lon: 12 }],
+  ['no dispatch id', { lat: 55, lon: 12 }],
+  ['a coordinate outside the world', { dispatchId: 'cd-1', lat: 120, lon: 12 }],
+]) {
+  check(`a fix with ${why} is rejected, not clamped`, publishDispatchFix(bad) === false,
+    'coercing a malformed fix puts a vehicle where it is not, on an operator map, during an incident');
+}
+check('rejections are counted rather than thrown',
+  telemetryStats().rejected === 4 && telemetryStats().accepted === 2,
+  'a telemetry stream must not be able to take down the tick loop, and a stream quietly producing rubbish must be visible');
+check('a listener that throws does not stop delivery',
+  (() => {
+    _resetTelemetryForTest();
+    let reached = false;
+    onDispatchFix(() => { throw new Error('boom'); });
+    onDispatchFix(() => { reached = true; });
+    publishDispatchFix({ dispatchId: 'cd-2', lat: 55.6, lon: 12.6 });
+    return reached;
+  })());
+_resetTelemetryForTest();
+
+console.log('\n  wiring in src/main.js');
+check('a live unit is not moved by simulated physics',
+  /if \(_telemetryIsLive\(d\)\) \{/.test(main),
+  'the tick would otherwise overwrite the real position every frame');
+check('climb physics also stands down for a live unit',
+  /if \(isSimEvent && !_telemetryIsLive\(d\) && d\.profile\.airborne && physics\)/.test(main));
+check('the simulation path is a separate branch, not a rewrite',
+  /\} else if \(d\.routePositions && d\.routeSegmentLengths\) \{/.test(main),
+  'the road-following and straight-line branches are what every scenario runs through');
+check('a fix writes position but never state',
+  (() => {
+    const m = main.match(/onDispatchFix\(\(fix\) => \{[\s\S]*?\n  \}\);/);
+    return !!m && /d\.curLat = fix\.lat;/.test(m[0]) && !/d\.state\s*=/.test(m[0]);
+  })(),
+  'arrival and stand-down stay derived from geometry so one state machine serves both environments');
+check('a fix for an unknown dispatch is ignored, not an error',
+  /if \(!d\) return;/.test(main));
 
 console.log('\nProvenance leaves the building with the evidence');
 check('the trajectory export includes source',
