@@ -153,7 +153,8 @@ import { baseForReceiverRole } from './receiver_bases.js';
 import { RECEIVER_ASSETS, assetsForReceiverRole, getReceiverDirectAsset, getReceiverRequestAsset } from './receiver_assets.js';
 import { cordonReleaseDecisions, clearedWreckageIds, expiredGhostEventIds, sceneReleaseState, leavesSceneUnassisted, cordonNeedsSceneCommand } from './scene_lifecycle.js';
 import { consequenceAgenciesForSite } from './consequence_routing.js';
-import { onDispatchFix, telemetryStats as _dispatchTelemetryStats, publishDispatchFix } from './dispatch_telemetry.js';
+import { onDispatchFix, telemetryStats as _dispatchTelemetryStats, publishDispatchFix,
+  applyFixToUnit, reassertLivePosition, isTelemetryStale } from './dispatch_telemetry.js';
 import {
   destinationsForSite, destinationsForEvent, getDestination, destinationTypeLabel,
   destinationShortLabel, groupByParent, localPoliceDestinationIds,
@@ -5064,17 +5065,19 @@ async function main() {
   onDispatchFix((fix) => {
     const d = _counterDispatches.get(fix.dispatchId);
     if (!d) return;   // a fix for a unit we do not know about is not an error
-    if (d.telemetrySource !== 'live') {
-      d.telemetrySource = 'live';
+    if (applyFixToUnit(d, fix)) {
       console.info('[dispatch_telemetry] %s now tracked from a live feed', fix.dispatchId);
     }
-    d.curLat = fix.lat;
-    d.curLon = fix.lon;
-    if (fix.alt != null) d.curAlt = fix.alt;
-    if (fix.heading != null) d.heading = fix.heading * Math.PI / 180;
-    d._lastFixAt = fix.receivedAt;
+    d.telemetryStale = false;
     _syncDispatchToEvent(d);
   });
+
+  // The entry point a real agency adapter calls. Exposed on window for
+  // the same reason window.__isr_feedbackLog() is: without it the seam
+  // is unreachable from the running application and cannot be
+  // exercised outside Node.
+  window.__isr_dispatchFix = publishDispatchFix;
+  window.__isr_dispatchTelemetry = _dispatchTelemetryStats;
 
   function _startCounterDispatchLoop() {
     if (_cdRafId) return;
@@ -5082,6 +5085,30 @@ async function main() {
       const now = Date.now();
       for (const [, d] of _counterDispatches) {
         _tickCounterDispatch(d, now);
+        // LIVE POSITION AUTHORITY. Re-assert the last real fix over
+        // whatever the tick computed. Level-triggered on purpose: the
+        // tick writes position from four different states and
+        // interpolates altitude ahead of all of them, so gating each
+        // one would leave the next person to add physics responsible
+        // for remembering this unit is not ours to move.
+        if (reassertLivePosition(d)) {
+          if (d.profile?.trail) {
+            d.trailPositions.push(Cesium.Cartesian3.fromDegrees(
+              d.curLon, d.curLat,
+              d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
+            if (d.trailPositions.length > 500) d.trailPositions.shift();
+          }
+          // A tracker that has gone quiet leaves the unit frozen, which
+          // is the truth. Marking it stale stops that reading as a unit
+          // still driving to the scene, which would wedge the event
+          // open and let the record claim it lost its target.
+          const stale = isTelemetryStale(d, now);
+          if (stale !== d.telemetryStale) {
+            d.telemetryStale = stale;
+            if (stale) toast(`${d.assetName} position feed has gone quiet.`, 'warn');
+            _syncDispatchToEvent(d);
+          }
+        }
         // Persist live dispatch state onto event.counterDispatches so
         // consumers reading from the shared event object (multi-tab
         // cross-tenant echo panel, "Other agencies on case", future
@@ -5149,6 +5176,7 @@ async function main() {
     // Provenance rides along. This mirror is a whitelist, so anything
     // not listed here never reaches the permanent record.
     entry.telemetrySource = d.telemetrySource || 'sim';
+    entry.telemetryStale = !!d.telemetryStale;
     // Wreck attachment. Mirrored because the auto-close predicate reads
     // it off the event mirror, not off the live dispatch. It was never
     // mirrored, so the `|| !!c.assignedWreckageId` clause in that
@@ -5204,7 +5232,11 @@ async function main() {
     // minutes of flight. Skip on holding-cordon (parked ground unit
     // idling, negligible fuel use). Once battery hits low reserve
     // (15%), interceptor auto-RTBs so it can make it home.
-    if (d.enduranceMin && d.state !== 'holding-cordon' && d.state !== 'rtb_home') {
+    // Skipped for a live unit. Its endurance is a real quantity that
+    // this platform does not observe, and draining an invented battery
+    // would order a real vehicle home.
+    if (d.enduranceMin && !_telemetryIsLive(d)
+        && d.state !== 'holding-cordon' && d.state !== 'rtb_home') {
       const _battDtMin = (now - (d._battLastMs || now)) / 60000;
       d._battLastMs = now;
       d.batteryPct = Math.max(0, (d.batteryPct ?? 100) - (100 / d.enduranceMin) * _battDtMin);
@@ -5494,7 +5526,13 @@ async function main() {
     // Lucas's rule: "never head home immediately unless kill all
     // targets". Interceptors now stay in the fight through the coast
     // and past soft-cap until they run out of hostiles or fuel.
-    if ((d.state === 'en_route' || d.state === 'engaging') && d.profile.supportsRTB && d.profile.maxChaseKm) {
+    // Skipped for a live unit. These are simulation envelope constants
+    // tuned against simulated flight. Applied to a real vehicle's real
+    // position they would order a helicopter legitimately 30 km out to
+    // turn around, and the coast rule would do the same to any real
+    // unit east of that meridian.
+    if (!_telemetryIsLive(d)
+        && (d.state === 'en_route' || d.state === 'engaging') && d.profile.supportsRTB && d.profile.maxChaseKm) {
       const chaseKm = haversineM(d.curLat, d.curLon, d.originLat, d.originLon) / 1000;
       const hasLiveTarget = d.assignedSwarmMember && !d.assignedSwarmMember.neutralised;
       const maxPursuitKm = d.profile.maxPursuitKm || (d.profile.maxChaseKm * 2);
@@ -13019,6 +13057,10 @@ async function main() {
                  || c.state === 'rtb_via_last_known'
                  || !!c.assignedWreckageId
                  || !!c.sceneWreckageId
+                 // A live unit whose tracker has gone quiet is frozen
+                 // by design. Without this it reads as permanently
+                 // en route and the event can never auto-close.
+                 || c.telemetryStale === true
                  || leavesSceneUnassisted(CD_PROFILE[c.kind]));
           const linkedActive = Array.isArray(event.linkedEventIds)
             && event.linkedEventIds.some(lid => {

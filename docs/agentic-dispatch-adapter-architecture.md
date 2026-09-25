@@ -194,21 +194,39 @@ flowchart LR
 
 | May set | May NOT set |
 | --- | --- |
-| `lat`, `lon`, `alt`, `heading`. Where the unit physically is. | `state`. Arrival, engagement and stand-down stay derived from geometry against the assigned target. |
+| `lat`, `lon`, `alt`, `heading`. Where the unit physically is. | `state`. Every lifecycle transition stays derived from geometry against the assigned target. |
 
 One state machine serves both environments. A live feed that also dictated state would fork the lifecycle in two, and every downstream consumer would have to know which one it was looking at.
+
+### Position authority is level-triggered
+
+The first implementation guarded the one movement branch that handles the drive-in. That was wrong, and a review caught it. The tick loop writes position from four states, a separate block interpolates altitude ahead of all of them, and simulated battery drain and pursuit-range limits could order a real vehicle home. A guard per site also makes the next person to add physics responsible for remembering this unit is not ours to move.
+
+So the last accepted fix is re-asserted after the whole tick, in one place, at the call site in `_startCounterDispatchLoop`. Whatever the simulation computed for a live unit is overwritten, including physics that does not exist yet. Three simulation-only rules are additionally skipped outright for a live unit, because they would change its `state` rather than its position:
+
+| Rule | Why it is skipped |
+| --- | --- |
+| Battery drain and low-reserve return to base | Endurance is a real quantity this platform does not observe. Draining an invented battery would order a real vehicle home. |
+| Pursuit-range hard and soft caps | Envelope constants tuned against simulated flight. A real helicopter legitimately 30 km out would be turned around. |
+| Coast return-to-base east of 12.71°E | Same. It would fire for any real unit east of that meridian. |
+
+### A feed that goes quiet
+
+A unit with no fix for `TELEMETRY_STALE_SEC` (90 seconds) is marked `telemetryStale`. It keeps its last known position and stops moving, which is the truth.
+
+The flag exists because "stopped moving" must not read as "still driving to the scene". Without it, a unit frozen before arrival stays `en_route` forever, the auto-close predicate never resolves, the event cannot close and no Post-Incident Report is generated. For a unit that supports return to base the failure was worse: it would be flown home by simulated physics and the case file auto-stamped `target_evaded_before_arrival`, for a unit that was never lost.
 
 ### Self-configuring, so there is no switch to forget
 
 There is no per-site or per-unit flag to set. A dispatch spawns with `telemetrySource: 'sim'`. The first accepted fix for it flips that to `'live'`, and it is never unset. No feed means nothing changes, which is why wiring this cannot disturb the simulation environment.
 
-A unit whose tracker drops out keeps its last known position and stops moving. That is the truth. Reverting to simulated physics would invent motion that is not happening.
-
 In the movement tick, live is a third branch beside the two simulation branches (street-network routing and straight-line), not a refactor of them. Those two are what every scenario runs through and they are byte-identical to what shipped before this seam.
 
 ### Malformed fixes are rejected, never clamped
 
-A tracker reporting an out-of-range or non-finite coordinate is reporting that something is wrong with it. Coercing that into a plausible position would put a vehicle where it is not, on an operator's map, during an incident. Rejected: missing dispatch id, non-finite lat or lon, out-of-range lat or lon, non-finite alt or heading, and exactly `0,0`, which is overwhelmingly a missing-data sentinel rather than a vehicle in the Gulf of Guinea.
+A tracker reporting an out-of-range or non-finite coordinate is reporting that something is wrong with it. Coercing that into a plausible position would put a vehicle where it is not, on an operator's map, during an incident. Rejected: missing dispatch id, non-finite lat or lon, out-of-range lat or lon, non-finite or out-of-range alt or heading, and exactly `0,0`, which is overwhelmingly a missing-data sentinel rather than a vehicle in the Gulf of Guinea.
+
+`heading` is optional. When a feed omits it, it is derived from the bearing between consecutive fixes, because a tracker that reports position but not heading is common and the airframe would otherwise point at its dispatch bearing for the whole incident.
 
 Rejections are counted rather than thrown. A telemetry stream must not be able to take down the tick loop, and a stream that is connected but quietly producing rubbish looks identical to no stream at all without a count. `telemetryStats()` exposes accepted, rejected and subscriber counts. A listener that throws is caught so it cannot stop delivery to the others.
 
@@ -218,9 +236,17 @@ Rejections are counted rather than thrown. A telemetry stream must not be able t
 
 ### When to wire a real feed
 
-One file per agency under `src/adapters/`, calling `publishDispatchFix()` per position report, routed through the Azure sovereign proxy exactly as the outbound adapters are. No change to the tick loop, the state machine, the renderer or any view.
+One file per agency under `src/adapters/`, calling `publishDispatchFix()` per position report, routed through the Azure sovereign proxy exactly as the outbound adapters are. `window.__isr_dispatchFix(fix)` is the same entry point from the console, and `window.__isr_dispatchTelemetry()` reports accepted, rejected and subscriber counts.
 
-Covered by `scripts/check-provenance.mjs`, which asserts both the seam's behaviour and that the simulation branches are still present.
+Covered by `scripts/check-provenance.mjs`. Those assertions are behavioural, not regexes against the source: the first version of this gate asserted the shape of a guard and passed green while live altitude was being overwritten every frame.
+
+### Open before a first real feed
+
+| Item | Why it is not done yet |
+| --- | --- |
+| **Altitude datum is unspecified.** `fix.alt` is written straight to a field the renderer treats as metres above ground. Real trackers report ellipsoid height or height above mean sea level. | Needs a real customer's tracker spec to pin. A first integration will be wrong by the local terrain height and nothing currently flags it. |
+| **Not a registry.** Every sibling seam (`nn_source`, `dispatch_source`, `escalation_source`, `cooperative_traffic_source`) is `register*(key, adapter)` with a keyed lookup. This one is a global publish/subscribe singleton, so a fix carries no adapter identity and the counters are not per tenant. | Works for one feed. Should become a registry before the second, and certainly before per-tenant isolation on Azure. |
+| **`publishDispatchFix` returns a bare boolean.** Siblings return `{ status, external_id, provider, notes }`, so a caller cannot tell an out-of-range coordinate from an unknown dispatch. | Same refactor as the registry item. |
 
 ## Detection-only stance
 

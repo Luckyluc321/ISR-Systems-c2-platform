@@ -30,6 +30,7 @@ import { SITES } from '../src/sites_registry.js';
 import { MockNnOutputSource, WebSocketNnOutputSource } from '../src/nn_source.js';
 import {
   publishDispatchFix, onDispatchFix, isValidFix, telemetryStats, _resetTelemetryForTest,
+  applyFixToUnit, reassertLivePosition, isTelemetryStale, TELEMETRY_STALE_SEC,
 } from '../src/dispatch_telemetry.js';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -132,23 +133,90 @@ check('a listener that throws does not stop delivery',
   })());
 _resetTelemetryForTest();
 
+console.log('\n  a real position survives the simulation');
+// BEHAVIOURAL, not a regex against the source. The first version of
+// this gate asserted the shape of the guard in main.js and passed while
+// the behaviour was false: the guard covered one movement state out of
+// four and a separate altitude block overwrote live altitude every
+// frame regardless. Assert the outcome instead.
+{
+  const unit = { telemetrySource: 'sim', curLat: 55.0, curLon: 12.0, curAlt: 60, heading: 0 };
+  _resetTelemetryForTest();
+  onDispatchFix(f => applyFixToUnit(unit, f));
+  publishDispatchFix({ dispatchId: 'u1', lat: 55.618, lon: 12.647, alt: 120 });
+  check('a fix flips the unit to live and writes its position', unit.telemetrySource === 'live' && unit.curLat === 55.618);
+
+  // Everything the tick loop does to a unit it believes it is flying.
+  unit.curLat = 1; unit.curLon = 1; unit.curAlt = 999; unit.heading = 3;
+  const wrote = reassertLivePosition(unit);
+  check('simulated movement is overwritten by the real position',
+    wrote && unit.curLat === 55.618 && unit.curLon === 12.647,
+    'the tick writes position from four states. Re-asserting after it is what makes this hold for physics nobody has written yet');
+  check('simulated altitude is overwritten too', unit.curAlt === 120,
+    'a separate block interpolates altitude ahead of every movement branch');
+
+  // A unit nobody is tracking must be left entirely alone.
+  const simUnit = { telemetrySource: 'sim', curLat: 7, curLon: 8 };
+  check('a simulated unit is untouched by the authority pass',
+    reassertLivePosition(simUnit) === false && simUnit.curLat === 7,
+    'no feed means nothing changes, which is why wiring this cannot disturb the simulation environment');
+}
+
+console.log('\n  a feed that goes quiet fails safe');
+{
+  const unit = { telemetrySource: 'sim' };
+  applyFixToUnit(unit, { dispatchId: 'u2', lat: 55.6, lon: 12.6, receivedAt: new Date(1000000).toISOString() });
+  check('a fresh fix is not stale', isTelemetryStale(unit, 1000000 + 1000) === false);
+  // Absolute, not TELEMETRY_STALE_SEC + 5. Measuring against the
+  // constant makes the assertion a tautology that moves with it, and a
+  // threshold raised to effectively never would stay green.
+  check('a unit silent for five minutes is stale',
+    isTelemetryStale(unit, 1000000 + 300 * 1000) === true,
+    'a frozen unit reading as still en route wedges the event open and lets the record claim it lost its target');
+  check('the staleness threshold is an operationally sane duration',
+    TELEMETRY_STALE_SEC >= 30 && TELEMETRY_STALE_SEC <= 300,
+    'too short and a normal reporting gap flags a healthy unit; too long and a dead feed holds an event open');
+  check('a simulated unit is never stale', isTelemetryStale({ telemetrySource: 'sim' }, 9e12) === false);
+}
+
+console.log('\n  heading is derived when the feed omits it');
+{
+  const unit = { telemetrySource: 'sim' };
+  applyFixToUnit(unit, { dispatchId: 'u3', lat: 55.0, lon: 12.0 });
+  applyFixToUnit(unit, { dispatchId: 'u3', lat: 55.1, lon: 12.0 });   // due north
+  check('heading comes from the bearing between consecutive fixes',
+    Math.abs(unit.heading) < 0.01,
+    'a tracker reporting position but not heading is common, and the airframe would otherwise point at its dispatch bearing all incident');
+}
+_resetTelemetryForTest();
+
 console.log('\n  wiring in src/main.js');
-check('a live unit is not moved by simulated physics',
-  /if \(_telemetryIsLive\(d\)\) \{/.test(main),
-  'the tick would otherwise overwrite the real position every frame');
-check('climb physics also stands down for a live unit',
-  /if \(isSimEvent && !_telemetryIsLive\(d\) && d\.profile\.airborne && physics\)/.test(main));
-check('the simulation path is a separate branch, not a rewrite',
-  /\} else if \(d\.routePositions && d\.routeSegmentLengths\) \{/.test(main),
-  'the road-following and straight-line branches are what every scenario runs through');
+check('the authority pass runs after every dispatch tick',
+  /_tickCounterDispatch\(d, now\);[\s\S]{0,900}?reassertLivePosition\(d\)/.test(main),
+  're-asserting before the tick rather than after would be overwritten by it');
+check('simulated battery does not order a real vehicle home',
+  /if \(d\.enduranceMin && !_telemetryIsLive\(d\)/.test(main),
+  'its endurance is a real quantity this platform does not observe');
+check('simulation envelope limits are not applied to a real position',
+  /if \(!_telemetryIsLive\(d\)\n\s*&& \(d\.state === 'en_route' \|\| d\.state === 'engaging'\) && d\.profile\.supportsRTB/.test(main),
+  'a real helicopter legitimately 30 km out would otherwise be turned around');
+check('a stale live unit does not block an event from closing',
+  /c\.telemetryStale === true/.test(main));
+check('the seam is reachable from the running application',
+  /window\.__isr_dispatchFix = publishDispatchFix;/.test(main),
+  'otherwise the only consumer is this gate and the live path never executes in a browser');
 check('a fix writes position but never state',
   (() => {
     const m = main.match(/onDispatchFix\(\(fix\) => \{[\s\S]*?\n  \}\);/);
-    return !!m && /d\.curLat = fix\.lat;/.test(m[0]) && !/d\.state\s*=/.test(m[0]);
+    return !!m && !/\bstate\b/.test(m[0]);
   })(),
   'arrival and stand-down stay derived from geometry so one state machine serves both environments');
 check('a fix for an unknown dispatch is ignored, not an error',
-  /if \(!d\) return;/.test(main));
+  (() => {
+    const m = main.match(/onDispatchFix\(\(fix\) => \{[\s\S]*?\n  \}\);/);
+    return !!m && /if \(!d\) return;/.test(m[0]);
+  })(),
+  'anchored inside the subscriber. The bare pattern appears six times in main.js and matched regardless');
 
 console.log('\nProvenance leaves the building with the evidence');
 check('the trajectory export includes source',
