@@ -153,7 +153,7 @@ import { baseForReceiverRole } from './receiver_bases.js';
 import { RECEIVER_ASSETS, assetsForReceiverRole, getReceiverDirectAsset, getReceiverRequestAsset } from './receiver_assets.js';
 import { cordonReleaseDecisions, clearedWreckageIds, expiredGhostEventIds, sceneReleaseState, leavesSceneUnassisted, cordonNeedsSceneCommand } from './scene_lifecycle.js';
 import { consequenceAgenciesForSite } from './consequence_routing.js';
-import { onDispatchFix, telemetryStats as _dispatchTelemetryStats, publishDispatchFix,
+import { onDispatchFix, telemetryStats as _dispatchTelemetryStats, registerTelemetryAdapter,
   applyFixToUnit, reassertLivePosition, isTelemetryStale } from './dispatch_telemetry.js';
 import {
   destinationsForSite, destinationsForEvent, getDestination, destinationTypeLabel,
@@ -5069,14 +5069,22 @@ async function main() {
       console.info('[dispatch_telemetry] %s now tracked from a live feed', fix.dispatchId);
     }
     d.telemetryStale = false;
+    d.telemetryProvider = fix.provider || null;
     _syncDispatchToEvent(d);
   });
 
-  // The entry point a real agency adapter calls. Exposed on window for
-  // the same reason window.__isr_feedbackLog() is: without it the seam
-  // is unreachable from the running application and cannot be
-  // exercised outside Node.
-  window.__isr_dispatchFix = publishDispatchFix;
+  // A registered provider for hand-fed fixes, so the seam is reachable
+  // from the running application. Without it the only consumer is the
+  // build gate under Node and the live path never executes in a
+  // browser, which is how the first version shipped with the live unit
+  // still being flown by simulated physics.
+  //
+  // A real agency adapter registers the same way, from its own module
+  // under src/adapters/, and gets back its own publish function.
+  const _consoleFix = registerTelemetryAdapter('console', {
+    start() { /* no feed of its own. Fixes arrive from the handle below. */ },
+  });
+  window.__isr_dispatchFix = _consoleFix;
   window.__isr_dispatchTelemetry = _dispatchTelemetryStats;
 
   function _startCounterDispatchLoop() {
@@ -5177,6 +5185,7 @@ async function main() {
     // not listed here never reaches the permanent record.
     entry.telemetrySource = d.telemetrySource || 'sim';
     entry.telemetryStale = !!d.telemetryStale;
+    entry.telemetryProvider = d.telemetryProvider || null;
     // Wreck attachment. Mirrored because the auto-close predicate reads
     // it off the event mirror, not off the live dispatch. It was never
     // mirrored, so the `|| !!c.assignedWreckageId` clause in that

@@ -176,10 +176,10 @@ flowchart LR
     end
     subgraph IN[Inbound: position]
       TRK[Agency vehicle tracker] -.-> AZ2[Azure sovereign proxy]
-      AZ2 -.-> PUB["publishDispatchFix()"]
-      PUB --> VAL{isValidFix?}
-      VAL -->|no| DROP[Counted as rejected<br/>never clamped]
-      VAL -->|yes| STAMP["Stamp source: 'live'<br/>at the receiving edge"]
+      AZ2 -.-> ADP2["Registered adapter<br/>registerTelemetryAdapter(name)"]
+      ADP2 --> VAL{fixRejectionReason}
+      VAL -->|reason| DROP[Counted per provider<br/>with reason, never clamped]
+      VAL -->|null| STAMP["Stamp source: 'live'<br/>+ provider name<br/>at the receiving edge"]
       STAMP --> SUB["main.js onDispatchFix subscriber"]
       SUB --> POS[Write lat / lon / alt / heading]
       POS --> SYNC["_syncDispatchToEvent"]
@@ -234,9 +234,25 @@ Rejections are counted rather than thrown. A telemetry stream must not be able t
 
 `source: 'live'` is written by `publishDispatchFix`, never read from the payload, for the same reason `nn_source.js` stamps its own. A feed does not get to describe its own data as simulated, or a real incident could be filed as a drill. Mirrored onto the permanent event record as `entry.telemetrySource`.
 
+### Altitude needs a declared datum
+
+A tracker's altitude is meaningless without saying what it is measured from. The renderer treats a unit's altitude as metres above ground. Real vehicle trackers commonly report height above the WGS84 ellipsoid or above mean sea level, and converting needs the terrain height under the vehicle.
+
+So a fix carrying `alt` must declare `altDatum` as one of `agl`, `msl` or `ellipsoid`. An altitude with no datum is rejected outright. `agl` is applied. `msl` and `ellipsoid` are accepted, kept on the payload as `altRaw` and `altDatum`, and **not** applied, so the position is still good and only the altitude is missing. A visible gap rather than a silent error the size of the local terrain.
+
+The conversion is deliberately not written yet. It should be written against a real tracker's spec, not against a guess.
+
+### Per-provider counters and typed rejections
+
+`publishDispatchFix(provider, fix)` returns `{ status, reason, provider, dispatchId, altitudeApplied, timestamp }`, matching the sibling seams. A caller that cannot tell an out-of-range coordinate from an unknown dispatch cannot act on either.
+
+`telemetryStats()` breaks accepted and rejected counts down by provider, with a tally per rejection reason. One aggregate number cannot tell you that the ambulance service's tracker is fine and the police one is rejecting everything.
+
+An unregistered provider cannot publish at all. Refusing one is what makes the provider name on a payload mean something.
+
 ### When to wire a real feed
 
-One file per agency under `src/adapters/`, calling `publishDispatchFix()` per position report, routed through the Azure sovereign proxy exactly as the outbound adapters are. `window.__isr_dispatchFix(fix)` is the same entry point from the console, and `window.__isr_dispatchTelemetry()` reports accepted, rejected and subscriber counts.
+One file per agency under `src/adapters/`, calling its registered publish function per position report, routed through the Azure sovereign proxy exactly as the outbound adapters are. `window.__isr_dispatchFix(fix)` is a registered `console` provider for hand-fed fixes, and `window.__isr_dispatchTelemetry()` reports the per-provider counters.
 
 Covered by `scripts/check-provenance.mjs`. Those assertions are behavioural, not regexes against the source: the first version of this gate asserted the shape of a guard and passed green while live altitude was being overwritten every frame.
 
@@ -244,9 +260,7 @@ Covered by `scripts/check-provenance.mjs`. Those assertions are behavioural, not
 
 | Item | Why it is not done yet |
 | --- | --- |
-| **Altitude datum is unspecified.** `fix.alt` is written straight to a field the renderer treats as metres above ground. Real trackers report ellipsoid height or height above mean sea level. | Needs a real customer's tracker spec to pin. A first integration will be wrong by the local terrain height and nothing currently flags it. |
-| **Not a registry.** Every sibling seam (`nn_source`, `dispatch_source`, `escalation_source`, `cooperative_traffic_source`) is `register*(key, adapter)` with a keyed lookup. This one is a global publish/subscribe singleton, so a fix carries no adapter identity and the counters are not per tenant. | Works for one feed. Should become a registry before the second, and certainly before per-tenant isolation on Azure. |
-| **`publishDispatchFix` returns a bare boolean.** Siblings return `{ status, external_id, provider, notes }`, so a caller cannot tell an out-of-range coordinate from an unknown dispatch. | Same refactor as the registry item. |
+| **The `msl` and `ellipsoid` to above-ground conversion.** Both datums are accepted and their altitude is deliberately dropped rather than applied. | Needs a real tracker's spec and a Cesium terrain sample under the vehicle. Writing it against a guess is how the silent error gets reintroduced. |
 
 ## Detection-only stance
 

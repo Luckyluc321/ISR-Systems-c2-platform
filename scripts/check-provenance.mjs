@@ -31,6 +31,7 @@ import { MockNnOutputSource, WebSocketNnOutputSource } from '../src/nn_source.js
 import {
   publishDispatchFix, onDispatchFix, isValidFix, telemetryStats, _resetTelemetryForTest,
   applyFixToUnit, reassertLivePosition, isTelemetryStale, TELEMETRY_STALE_SEC,
+  registerTelemetryAdapter, listTelemetryAdapters, fixRejectionReason,
 } from '../src/dispatch_telemetry.js';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -99,36 +100,72 @@ console.log('\nA responding unit can be tracked instead of simulated');
 _resetTelemetryForTest();
 let _fix = null;
 onDispatchFix(f => { _fix = f; });
+const pub = registerTelemetryAdapter('test-agency', { start() {} });
+
+check('an adapter registers by name, like every sibling seam',
+  listTelemetryAdapters().includes('test-agency'),
+  'nn_source, dispatch_source, escalation_source and cooperative_traffic_source are all keyed registries');
+check('an unregistered provider cannot publish',
+  publishDispatchFix('nobody', { dispatchId: 'x', lat: 55, lon: 12 }).reason === 'unknown_provider',
+  'refusing one is what makes the provider on a payload mean anything');
+
 check('a valid fix is accepted and its position carried through',
-  publishDispatchFix({ dispatchId: 'cd-1', lat: 55.618, lon: 12.647, heading: 90 }) === true
+  pub({ dispatchId: 'cd-1', lat: 55.618, lon: 12.647, heading: 90 }).status === 'accepted'
   && _fix?.lat === 55.618 && _fix?.heading === 90);
+check('an accepted fix names the feed that produced it',
+  _fix?.provider === 'test-agency',
+  'on a multi-agency incident a bad position must be attributable to one feed, not to "live"');
 // The fix below CLAIMS to be simulated. It must come back live anyway.
 // Without that claim in the payload the assertion passes against a seam
 // that simply forwards whatever the wire said.
 check('a fix claiming to be simulated is stamped live anyway',
-  publishDispatchFix({ dispatchId: 'cd-1', lat: 55.62, lon: 12.65, source: 'sim' }) === true
+  pub({ dispatchId: 'cd-1', lat: 55.62, lon: 12.65, source: 'sim' }).status === 'accepted'
   && _fix?.source === 'live',
   'provenance is stamped by the receiving edge. A feed does not get to describe its own data as simulated, '
   + 'or a real incident could be filed as a drill');
-for (const [why, bad] of [
-  ['0,0 (the classic missing-data sentinel)', { dispatchId: 'cd-1', lat: 0, lon: 0 }],
-  ['a non-finite coordinate', { dispatchId: 'cd-1', lat: NaN, lon: 12 }],
-  ['no dispatch id', { lat: 55, lon: 12 }],
-  ['a coordinate outside the world', { dispatchId: 'cd-1', lat: 120, lon: 12 }],
+
+for (const [why, bad, expected] of [
+  ['0,0 (the classic missing-data sentinel)', { dispatchId: 'cd-1', lat: 0, lon: 0 }, 'null_island'],
+  ['a non-finite coordinate', { dispatchId: 'cd-1', lat: NaN, lon: 12 }, 'non_finite_coordinate'],
+  ['no dispatch id', { lat: 55, lon: 12 }, 'missing_dispatch_id'],
+  ['a coordinate outside the world', { dispatchId: 'cd-1', lat: 120, lon: 12 }, 'coordinate_out_of_range'],
+  ['a heading of 720', { dispatchId: 'cd-1', lat: 55, lon: 12, heading: 720 }, 'heading_out_of_range'],
 ]) {
-  check(`a fix with ${why} is rejected, not clamped`, publishDispatchFix(bad) === false,
-    'coercing a malformed fix puts a vehicle where it is not, on an operator map, during an incident');
+  const res = pub(bad);
+  check(`a fix with ${why} is rejected, not clamped, and says why`,
+    res.status === 'rejected' && res.reason === expected,
+    'coercing a malformed fix puts a vehicle where it is not, on an operator map, during an incident. '
+    + 'A caller that cannot tell which failure it hit cannot act on either');
 }
-check('rejections are counted rather than thrown',
-  telemetryStats().rejected === 4 && telemetryStats().accepted === 2,
-  'a telemetry stream must not be able to take down the tick loop, and a stream quietly producing rubbish must be visible');
+
+console.log('\n  altitude without a datum is refused rather than guessed');
+check('an altitude with no declared datum is rejected',
+  pub({ dispatchId: 'cd-1', lat: 55.6, lon: 12.6, alt: 120 }).reason === 'missing_altitude_datum',
+  'the renderer treats altitude as metres above ground and real trackers report ellipsoid or sea-level height. '
+  + 'Guessing is a silent error the size of the local terrain');
+check('an above-ground altitude is applied',
+  pub({ dispatchId: 'cd-1', lat: 55.6, lon: 12.6, alt: 120, altDatum: 'agl' }).altitudeApplied === true
+  && _fix?.alt === 120);
+for (const datum of ['msl', 'ellipsoid']) {
+  const res = pub({ dispatchId: 'cd-1', lat: 55.6, lon: 12.6, alt: 120, altDatum: datum });
+  check(`a ${datum} altitude is accepted but not applied until there is a conversion`,
+    res.status === 'accepted' && res.altitudeApplied === false
+    && _fix?.alt === null && _fix?.altRaw === 120 && _fix?.altDatum === datum,
+    'the position is still good. Dropping only the altitude is a visible gap rather than a silent error');
+}
+
+console.log('\n  a bad feed is visible and cannot take the loop down');
+const st = telemetryStats('test-agency');
+check('rejections are counted per provider, with reasons',
+  st.rejected === 6 && st.reasons.null_island === 1 && st.reasons.missing_altitude_datum === 1,
+  'one aggregate counter cannot tell you which agency feed is the broken one');
 check('a listener that throws does not stop delivery',
   (() => {
     _resetTelemetryForTest();
     let reached = false;
     onDispatchFix(() => { throw new Error('boom'); });
     onDispatchFix(() => { reached = true; });
-    publishDispatchFix({ dispatchId: 'cd-2', lat: 55.6, lon: 12.6 });
+    registerTelemetryAdapter('t2', { start() {} })({ dispatchId: 'cd-2', lat: 55.6, lon: 12.6 });
     return reached;
   })());
 _resetTelemetryForTest();
@@ -143,7 +180,8 @@ console.log('\n  a real position survives the simulation');
   const unit = { telemetrySource: 'sim', curLat: 55.0, curLon: 12.0, curAlt: 60, heading: 0 };
   _resetTelemetryForTest();
   onDispatchFix(f => applyFixToUnit(unit, f));
-  publishDispatchFix({ dispatchId: 'u1', lat: 55.618, lon: 12.647, alt: 120 });
+  registerTelemetryAdapter('t3', { start() {} })(
+    { dispatchId: 'u1', lat: 55.618, lon: 12.647, alt: 120, altDatum: 'agl' });
   check('a fix flips the unit to live and writes its position', unit.telemetrySource === 'live' && unit.curLat === 55.618);
 
   // Everything the tick loop does to a unit it believes it is flying.
@@ -203,8 +241,12 @@ check('simulation envelope limits are not applied to a real position',
 check('a stale live unit does not block an event from closing',
   /c\.telemetryStale === true/.test(main));
 check('the seam is reachable from the running application',
-  /window\.__isr_dispatchFix = publishDispatchFix;/.test(main),
+  /window\.__isr_dispatchFix = _consoleFix;/.test(main)
+  && /registerTelemetryAdapter\('console'/.test(main),
   'otherwise the only consumer is this gate and the live path never executes in a browser');
+check('the feed that produced a position reaches the permanent record',
+  /entry\.telemetryProvider = d\.telemetryProvider \|\| null;/.test(main),
+  'the event mirror is a whitelist, so an unmirrored field never leaves the browser tab');
 check('a fix writes position but never state',
   (() => {
     const m = main.match(/onDispatchFix\(\(fix\) => \{[\s\S]*?\n  \}\);/);

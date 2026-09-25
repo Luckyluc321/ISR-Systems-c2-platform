@@ -34,10 +34,43 @@
 // simulation computed for a live unit is simply overwritten, including
 // physics nobody has written yet.
 //
+// A REGISTRY, like every sibling seam. An adapter registers by name and
+// gets back its own publish function. That name rides every payload, so
+// on a multi-agency incident a bad position is attributable to one feed
+// rather than to "live", and the counters can say which feed is broken.
+//
 // Pure and dependency-free so it loads under plain Node and can be
 // tested without a browser. The subscriber that mutates live dispatch
 // state lives in main.js, at the seam, like every other adapter here.
 // ═══════════════════════════════════════════════════════════════════
+
+// ── Registry ────────────────────────────────────────────────────────
+// Same shape as nn_source, dispatch_source, escalation_source and
+// cooperative_traffic_source: register by key, look up by key. A fix
+// carries the provider that produced it, so on a multi-agency incident
+// a bad position is attributable to one feed rather than to "live".
+//
+// Counters are per provider for the same reason. One aggregate number
+// cannot tell you that the ambulance service's tracker is fine and the
+// police one is rejecting everything.
+const _adapters = new Map();
+
+export function registerTelemetryAdapter(name, adapter) {
+  if (!name || typeof name !== 'string') throw new Error('adapter name required');
+  if (!adapter || typeof adapter.start !== 'function') {
+    throw new Error(`telemetry adapter ${name} missing start(publish)`);
+  }
+  _adapters.set(name, { adapter, accepted: 0, rejected: 0, reasons: {} });
+  return (fix) => publishDispatchFix(name, fix);
+}
+
+export function getTelemetryAdapter(name) {
+  return _adapters.get(name)?.adapter || null;
+}
+
+export function listTelemetryAdapters() {
+  return [..._adapters.keys()];
+}
 
 const _listeners = new Set();
 
@@ -49,6 +82,21 @@ export function onDispatchFix(cb) {
   return () => _listeners.delete(cb);
 }
 
+// ── Altitude datum ──────────────────────────────────────────────────
+// A tracker's altitude is meaningless without saying what it is
+// measured from. Real vehicle trackers commonly report height above the
+// WGS84 ellipsoid or above mean sea level; the renderer here treats a
+// unit's altitude as metres above ground.
+//
+// Converting between them needs the terrain height under the vehicle,
+// which is a Cesium sample and therefore not this module's job. Until a
+// real tracker's spec says which it sends, the honest thing is to
+// demand the fix declare it and to refuse to guess. A fix that declares
+// a datum we cannot yet convert keeps its position and drops only its
+// altitude, which is a visible gap rather than a silent 40 metre error.
+export const ALT_DATUMS = new Set(['agl', 'msl', 'ellipsoid']);
+export const CONVERTIBLE_ALT_DATUMS = new Set(['agl']);
+
 // Is this a usable position?
 //
 // Rejected rather than clamped. A tracker reporting a malformed or
@@ -56,22 +104,37 @@ export function onDispatchFix(cb) {
 // and silently coercing that into a plausible position would put a
 // vehicle somewhere it is not, on an operator's map, during an
 // incident. Null Island is the classic version of this failure.
-export function isValidFix(fix) {
-  if (!fix || typeof fix !== 'object') return false;
-  if (typeof fix.dispatchId !== 'string' || !fix.dispatchId) return false;
+// Returns null when the fix is usable, otherwise a short machine
+// readable reason. Named reasons rather than a bare false so a caller
+// can tell an out-of-range coordinate from a missing dispatch id, and
+// so the per-provider counters say WHY a feed is failing.
+export function fixRejectionReason(fix) {
+  if (!fix || typeof fix !== 'object') return 'not_an_object';
+  if (typeof fix.dispatchId !== 'string' || !fix.dispatchId) return 'missing_dispatch_id';
   const { lat, lon } = fix;
-  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return false;
-  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return false;
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return 'non_finite_coordinate';
+  if (lat < -90 || lat > 90 || lon < -180 || lon > 180) return 'coordinate_out_of_range';
   // Exactly 0,0 is overwhelmingly a missing-data sentinel rather than a
   // vehicle in the Gulf of Guinea.
-  if (lat === 0 && lon === 0) return false;
-  if (fix.alt != null && !Number.isFinite(fix.alt)) return false;
-  if (fix.alt != null && (fix.alt < -500 || fix.alt > 30000)) return false;
-  if (fix.heading != null && !Number.isFinite(fix.heading)) return false;
-  // Same doctrine as the coordinate range check. A tracker reporting a
-  // heading of 720 is telling you something is wrong with it.
-  if (fix.heading != null && (fix.heading < 0 || fix.heading > 360)) return false;
-  return true;
+  if (lat === 0 && lon === 0) return 'null_island';
+  if (fix.alt != null) {
+    if (!Number.isFinite(fix.alt)) return 'non_finite_altitude';
+    if (fix.alt < -500 || fix.alt > 30000) return 'altitude_out_of_range';
+    // An altitude with no datum is the silent-error case this check
+    // exists to prevent.
+    if (!ALT_DATUMS.has(fix.altDatum)) return 'missing_altitude_datum';
+  }
+  if (fix.heading != null) {
+    if (!Number.isFinite(fix.heading)) return 'non_finite_heading';
+    // Same doctrine as the coordinate range check. A tracker reporting
+    // a heading of 720 is telling you something is wrong with it.
+    if (fix.heading < 0 || fix.heading > 360) return 'heading_out_of_range';
+  }
+  return null;
+}
+
+export function isValidFix(fix) {
+  return fixRejectionReason(fix) === null;
 }
 
 // Bearing from one point to the next, in radians, matching the
@@ -145,28 +208,48 @@ export function reassertLivePosition(unit) {
 
 // An adapter calls this when its agency reports a vehicle position.
 //
-// Returns true if the fix was accepted and published. Invalid fixes are
-// dropped and counted rather than thrown: a telemetry stream must not
-// be able to take down the tick loop, and a stream that is quietly
-// producing rubbish should be visible rather than fatal.
-let _rejected = 0;
-let _accepted = 0;
+// Returns a result object rather than a bare boolean, matching the
+// sibling adapter seams: a caller that cannot tell an out-of-range
+// coordinate from an unknown dispatch cannot do anything useful about
+// either. Invalid fixes are counted rather than thrown, because a
+// telemetry stream must not be able to take down the tick loop and a
+// stream quietly producing rubbish should be visible rather than fatal.
+export function publishDispatchFix(provider, fix) {
+  const stats = _adapters.get(provider);
+  const timestamp = new Date().toISOString();
+  if (!stats) {
+    // Refusing an unregistered provider is the point. It is what makes
+    // the provider on a payload mean something.
+    return { status: 'rejected', reason: 'unknown_provider', provider, timestamp };
+  }
+  const reason = fixRejectionReason(fix);
+  if (reason) {
+    stats.rejected++;
+    stats.reasons[reason] = (stats.reasons[reason] || 0) + 1;
+    return { status: 'rejected', reason, provider, dispatchId: fix?.dispatchId ?? null, timestamp };
+  }
+  stats.accepted++;
 
-export function publishDispatchFix(fix) {
-  if (!isValidFix(fix)) { _rejected++; return false; }
-  _accepted++;
+  // Altitude is carried only when we can place it in the frame the
+  // renderer uses. Anything else keeps its declared datum on the
+  // payload and is left for a conversion that does not exist yet.
+  const altUsable = fix.alt != null && CONVERTIBLE_ALT_DATUMS.has(fix.altDatum);
+
   const payload = {
     dispatchId: fix.dispatchId,
     lat: fix.lat,
     lon: fix.lon,
-    alt: fix.alt ?? null,
+    alt: altUsable ? fix.alt : null,
+    altRaw: fix.alt ?? null,
+    altDatum: fix.alt != null ? fix.altDatum : null,
     heading: fix.heading ?? null,
     // Stamped here, by the receiving edge, never taken from the
     // payload. A feed does not get to describe its own data as
     // simulated, for the same reason the detection seam stamps its own
     // provenance.
     source: 'live',
-    receivedAt: new Date().toISOString(),
+    provider,
+    receivedAt: timestamp,
     reportedAt: fix.reportedAt || null,
   };
   for (const cb of _listeners) {
@@ -174,18 +257,36 @@ export function publishDispatchFix(fix) {
       console.warn('[dispatch_telemetry] listener failed:', err?.message || err);
     }
   }
-  return true;
+  return {
+    status: 'accepted',
+    provider,
+    dispatchId: fix.dispatchId,
+    altitudeApplied: altUsable,
+    timestamp,
+  };
 }
 
 // Visibility for an operator or a developer asking whether a feed is
 // actually delivering. A stream that is connected but rejecting every
 // fix looks identical to no stream at all without this.
-export function telemetryStats() {
-  return { accepted: _accepted, rejected: _rejected, subscribers: _listeners.size };
+export function telemetryStats(provider) {
+  if (provider) {
+    const st = _adapters.get(provider);
+    if (!st) return null;
+    return { accepted: st.accepted, rejected: st.rejected, reasons: { ...st.reasons } };
+  }
+  const byProvider = {};
+  let accepted = 0;
+  let rejected = 0;
+  for (const [name, st] of _adapters) {
+    byProvider[name] = { accepted: st.accepted, rejected: st.rejected, reasons: { ...st.reasons } };
+    accepted += st.accepted;
+    rejected += st.rejected;
+  }
+  return { accepted, rejected, subscribers: _listeners.size, providers: byProvider };
 }
 
 export function _resetTelemetryForTest() {
   _listeners.clear();
-  _accepted = 0;
-  _rejected = 0;
+  _adapters.clear();
 }
