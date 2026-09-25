@@ -6,8 +6,12 @@ label: Esbjerg Harbour
 code: EBJ
 tenant: op-esbjerg-port
 site_type: port
-mode: live
-
+# Environment this manifest describes. Every shipped site is
+# SIMULATED: positions come from scenario templates, not from a
+# sensor feed. This said "live" on all nine sites while nothing
+# read the field, so the first code to read it would have flipped
+# the whole fleet at once.
+mode: sim
 coordinates:
   lat: 55.467
   lon: 8.450

@@ -12,8 +12,12 @@ label: Billund Airport
 code: BLL
 tenant: op-billund-airport
 site_type: airport
-mode: live
-
+# Environment this manifest describes. Every shipped site is
+# SIMULATED: positions come from scenario templates, not from a
+# sensor feed. This said "live" on all nine sites while nothing
+# read the field, so the first code to read it would have flipped
+# the whole fleet at once.
+mode: sim
 coordinates:
   lat: 55.740511
   lon: 9.158056

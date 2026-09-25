@@ -7,6 +7,14 @@
 // contract and the two implementations.
 //
 // See docs/interface-design-document.md IF-1 for the full contract.
+//
+// PROVENANCE. Every batch and every detection inside it carries
+// `source: 'sim' | 'live'`. It is not decoration. A site can be mixed,
+// with real sensors watching real airspace while a training scenario
+// runs alongside, and once those two streams touch there is no way to
+// tell them apart after the fact. An operator reading a case file, and
+// the agentic layer writing one, both have to know which observations
+// were real. Tagging is cheap now and impossible to retrofit later.
 
 import { SITES } from './sites_registry.js';
 
@@ -57,6 +65,7 @@ function _sensorConfidenceForDistance(distM, coverageRadiusM) {
 export class MockNnOutputSource {
   constructor(siteId) {
     this.siteId = siteId;
+    this.source = 'sim';
     this._listeners = new Set();
     this._started = false;
   }
@@ -78,6 +87,7 @@ export class MockNnOutputSource {
     if (!site?.sensors?.length) return;
     const batch = {
       siteId: this.siteId,
+      source: 'sim',
       tickTs: new Date().toISOString(),
       sensors: [],
     };
@@ -93,6 +103,7 @@ export class MockNnOutputSource {
           const dist = _haversineM(p.lat, p.lon, sensor.lat, sensor.lon);
           if (dist > sensor.coverageRadius) continue;
           sensorEntry.detections.push({
+            source: 'sim',
             lat: p.lat,
             lon: p.lon,
             alt: p.alt,
@@ -120,6 +131,7 @@ export class MockNnOutputSource {
 export class WebSocketNnOutputSource {
   constructor(siteId, url, opts = {}) {
     this.siteId = siteId;
+    this.source = 'live';
     this.url = url;
     this.auth = opts.auth || null;
     this._listeners = new Set();
@@ -169,6 +181,14 @@ export class WebSocketNnOutputSource {
       // this source's site. Prevents a compromised node from injecting
       // detections into another site's stream.
       if (!batch || batch.siteId !== this.siteId) return;
+      // Provenance is stamped HERE, by the source that received it, and
+      // never taken from the wire. A field node cannot declare its own
+      // data simulated, and a mislabelled batch would put fabricated
+      // observations into a real case file.
+      batch.source = 'live';
+      for (const se of (batch.sensors || [])) {
+        for (const det of (se.detections || [])) det.source = 'live';
+      }
       for (const cb of this._listeners) {
         try { cb(batch); } catch (_) { /* isolate listener errors */ }
       }

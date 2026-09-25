@@ -287,7 +287,11 @@ export function normalizeManifest(manifest) {
     // Optional runtime hints preserved on the loaded site record so
     // downstream code can read them if it cares.
     siteType: manifest.site_type || null,
-    mode:     manifest.mode      || 'live',
+    // Defaults to 'sim', not 'live'. A manifest that forgets to say
+    // which environment it describes must not be assumed to be fed by
+    // real sensors: the safe failure is a site that simulates when it
+    // should be live, never a site that claims live data it does not have.
+    mode:     manifest.mode      || 'sim',
     operatorDispatchScope:    manifest.operator_dispatch_scope || [],
     defaultCascadeRecipients: manifest.default_cascade_recipients || {},
     alwaysObservers:          manifest.always_observers || [],

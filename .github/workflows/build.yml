@@ -59,6 +59,9 @@ jobs:
       - name: Attribution honesty
         run: npm run check:attribution
 
+      - name: Provenance (sim vs live)
+        run: npm run check:provenance
+
       - name: Production build
         run: npx vite build
 

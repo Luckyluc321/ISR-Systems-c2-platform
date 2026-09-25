@@ -4654,6 +4654,12 @@ async function main() {
       kind: asset.kind,
       profile,
       state: isStatic ? 'engaging' : 'en_route',
+      // Where this unit's POSITION comes from. 'sim' means the tick
+      // loop integrates it from physics; 'live' will mean an agency
+      // tracker feed writes curLat/curLon/curAlt and the movement
+      // phases stand down. Declared at spawn so the tick never has to
+      // guess, and so a mixed scene is legible.
+      telemetrySource: 'sim',
       dispatchedTs: Date.now(),
       lastFrameTs: Date.now(),
       arrivedTs: isStatic ? Date.now() : null,
@@ -5111,6 +5117,9 @@ async function main() {
     entry.viaRequestFromRoleId = d.viaRequestFromRoleId || null;
     entry.archetype = d.archetype || entry.archetype || null;
     entry.rtbCompleted = !!d.rtbCompleted;
+    // Provenance rides along. This mirror is a whitelist, so anything
+    // not listed here never reaches the permanent record.
+    entry.telemetrySource = d.telemetrySource || 'sim';
     // Wreck attachment. Mirrored because the auto-close predicate reads
     // it off the event mirror, not off the live dispatch. It was never
     // mirrored, so the `|| !!c.assignedWreckageId` clause in that
@@ -9615,6 +9624,22 @@ async function main() {
       event_id: event.id,
       site_id: event.siteId,
       detection_state: detState,
+      // PROVENANCE. Every sample says where it came from.
+      //
+      // 'sim' here is load-bearing, not a label. The RF, acoustic and
+      // visual fields above are SYNTHESISED: the signature is always
+      // "DJI OcuSync", the acoustic fundamental is always 220 Hz, the
+      // visual match is always 0.85, and the RF power is derived from
+      // the drone's index in the formation. That is correct for a
+      // simulation and it flows straight into the debrief, the
+      // preprocessing pipeline and the agentic narrative.
+      //
+      // Without this tag a live sample and a fabricated one are
+      // indistinguishable downstream, and the agentic layer would
+      // narrate an OcuSync match on a real incident that never
+      // happened. Anything reading these fields must check `source`
+      // before asserting them as observed.
+      source: 'sim',
     };
   }
 
@@ -9942,6 +9967,10 @@ async function main() {
       'visual_match_model', 'visual_match_confidence',
       'drone_model', 'formation_role',
       'event_id', 'site_id', 'detection_state', 'sensors_detecting',
+      // Provenance travels with the evidence. A CSV handed to an agency
+      // that cannot say whether a row was observed or simulated is not
+      // evidence, and this file leaves the platform.
+      'source',
     ];
     const escape = (v) => {
       if (v == null) return '';

@@ -8,8 +8,12 @@ code: AMK
 subtitle: "132 kV switching station, Copenhagen (Irlandsvej 95)"
 tenant: op-energinet
 site_type: energy
-mode: live
-
+# Environment this manifest describes. Every shipped site is
+# SIMULATED: positions come from scenario templates, not from a
+# sensor feed. This said "live" on all nine sites while nothing
+# read the field, so the first code to read it would have flipped
+# the whole fleet at once.
+mode: sim
 coordinates:
   lat: 55.6410
   lon: 12.6088

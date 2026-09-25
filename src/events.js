@@ -227,6 +227,15 @@ export function nextEventId() {
 }
 
 export function addEvent(event) {
+  // PROVENANCE, applied on creation so every event has it and no
+  // caller can forget. Defaults to 'sim': everything the platform
+  // creates today comes from a scenario template and is simulated by
+  // construction. Only a live track source may pass 'live'.
+  //
+  // Set here rather than at the call sites because events.js owns every
+  // event field write, and because a default that lives in one place
+  // cannot drift across three creation paths.
+  if (!event.source) event.source = 'sim';
   // Phase 3 tenant stamp — immutable once written. Every downstream
   // read function filters visibility against this field. Derived from
   // the site manifest's tenant field via tenantForSite(). If the site
