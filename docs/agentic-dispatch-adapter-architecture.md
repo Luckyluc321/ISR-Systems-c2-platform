@@ -161,6 +161,67 @@ registerDispatchAdapter('politi-kbh', new PolitiKbhAdapter({
 }));
 ```
 
+## The inbound half: dispatch telemetry
+
+**Status:** `[live — src/dispatch_telemetry.js landed 2026-09-25]`
+
+Everything above carries a decision OUT to an agency. `src/dispatch_telemetry.js` carries that agency's vehicle position back IN.
+
+In the simulation environment a police car moves because the tick loop integrates physics for it. In a real deployment it moves because a real officer drove it. The platform does not model that vehicle, it tracks it.
+
+```mermaid
+flowchart LR
+    subgraph OUT[Outbound: decision]
+      CTA[Operator clicks CTA] --> ADP[Dispatch adapter] --> API[Agency system]
+    end
+    subgraph IN[Inbound: position]
+      TRK[Agency vehicle tracker] -.-> AZ2[Azure sovereign proxy]
+      AZ2 -.-> PUB["publishDispatchFix()"]
+      PUB --> VAL{isValidFix?}
+      VAL -->|no| DROP[Counted as rejected<br/>never clamped]
+      VAL -->|yes| STAMP["Stamp source: 'live'<br/>at the receiving edge"]
+      STAMP --> SUB["main.js onDispatchFix subscriber"]
+      SUB --> POS[Write lat / lon / alt / heading]
+      POS --> SYNC["_syncDispatchToEvent"]
+    end
+    API -.-> TRK
+
+    style TRK stroke-dasharray: 5 5
+    style AZ2 stroke-dasharray: 5 5
+```
+
+### What a fix may set
+
+| May set | May NOT set |
+| --- | --- |
+| `lat`, `lon`, `alt`, `heading`. Where the unit physically is. | `state`. Arrival, engagement and stand-down stay derived from geometry against the assigned target. |
+
+One state machine serves both environments. A live feed that also dictated state would fork the lifecycle in two, and every downstream consumer would have to know which one it was looking at.
+
+### Self-configuring, so there is no switch to forget
+
+There is no per-site or per-unit flag to set. A dispatch spawns with `telemetrySource: 'sim'`. The first accepted fix for it flips that to `'live'`, and it is never unset. No feed means nothing changes, which is why wiring this cannot disturb the simulation environment.
+
+A unit whose tracker drops out keeps its last known position and stops moving. That is the truth. Reverting to simulated physics would invent motion that is not happening.
+
+In the movement tick, live is a third branch beside the two simulation branches (street-network routing and straight-line), not a refactor of them. Those two are what every scenario runs through and they are byte-identical to what shipped before this seam.
+
+### Malformed fixes are rejected, never clamped
+
+A tracker reporting an out-of-range or non-finite coordinate is reporting that something is wrong with it. Coercing that into a plausible position would put a vehicle where it is not, on an operator's map, during an incident. Rejected: missing dispatch id, non-finite lat or lon, out-of-range lat or lon, non-finite alt or heading, and exactly `0,0`, which is overwhelmingly a missing-data sentinel rather than a vehicle in the Gulf of Guinea.
+
+Rejections are counted rather than thrown. A telemetry stream must not be able to take down the tick loop, and a stream that is connected but quietly producing rubbish looks identical to no stream at all without a count. `telemetryStats()` exposes accepted, rejected and subscriber counts. A listener that throws is caught so it cannot stop delivery to the others.
+
+### Provenance is stamped by the receiving edge
+
+`source: 'live'` is written by `publishDispatchFix`, never read from the payload, for the same reason `nn_source.js` stamps its own. A feed does not get to describe its own data as simulated, or a real incident could be filed as a drill. Mirrored onto the permanent event record as `entry.telemetrySource`.
+
+### When to wire a real feed
+
+One file per agency under `src/adapters/`, calling `publishDispatchFix()` per position report, routed through the Azure sovereign proxy exactly as the outbound adapters are. No change to the tick loop, the state machine, the renderer or any view.
+
+Covered by `scripts/check-provenance.mjs`, which asserts both the seam's behaviour and that the simulation branches are still present.
+
 ## Detection-only stance
 
 Adapters carry the operator's decision to the right endpoint. They DO NOT make decisions. The operator's click IS the decision. Adapter responses (accepted / rejected / error) are transport telemetry, not agent recommendations. Nothing in this seam feeds back into any agent prompt or reasoning surface.
@@ -179,6 +240,7 @@ Trigger per customer: their internal dispatch API is documented + accessible + a
 
 ## Related
 
+- `src/dispatch_telemetry.js` — the inbound seam described above.
 - `docs/agentic-architecture.md` §14 Audit / Feedback Log — the feedback_log module already records the operator-decision triple; dispatch adapter's `external_id` return value flows into that triple's `actionDetail`.
 - `docs/interface-design-document.md` IF-6.12 — `event.interactions` schema (the mock's literal `flow` value violates it; open decision).
 - `docs/interface-design-document.md` IF-9.7 — Azure sovereign proxy pattern that real adapters route through.
