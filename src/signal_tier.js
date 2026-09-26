@@ -50,7 +50,34 @@
 // otherwise. What makes it worth surfacing when present is the one
 // thing no other modality provides: the operator's own position.
 //
-// Wire contract: docs/integration-contracts.md §1 signature.rf.
+// ── The input contract already exists ───────────────────────────────
+//
+// This module does NOT define a new shape. It consumes the sample the
+// recorder already builds and the trajectory export already writes, so
+// the fields here are the CSV's column names, unchanged:
+//
+//   rf_carrier_mhz        centre frequency, MEGAHERTZ not hertz
+//   rf_bandwidth_mhz      occupied bandwidth, megahertz
+//   rf_power_dbm          received power
+//   rf_carrier_type       modulation and band as text, e.g. "OFDM 5.8 GHz"
+//   rf_match_signature    the network's signature match, e.g. "DJI OcuSync"
+//   rf_match_confidence   confidence in that match, 0 to 1
+//
+// Fields the schema does not carry yet are listed under EXTENSIONS at
+// the bottom of this file. They are named in the same convention so
+// that adding them is a schema addition rather than a translation
+// layer, and every one of them is optional here.
+//
+// PROVENANCE MATTERS ON THIS PARTICULAR PANEL. In the simulation the
+// signature fields are synthesised: rf_match_signature is always
+// "DJI OcuSync" and rf_match_confidence is always 0.89, which
+// _buildDroneSample documents at the point it writes them. So a match
+// is rendered with its provenance attached rather than asserted flat,
+// because a narrative that reports an OcuSync match on a real incident
+// that never happened is worse than one that reports nothing.
+//
+// Wire contract: docs/integration-contracts.md §1 signature.rf, and
+// the trajectory export column list in src/main.js.
 // ═══════════════════════════════════════════════════════════════════
 
 // ── Emission types ──────────────────────────────────────────────────
@@ -228,22 +255,20 @@ export function formatHz(hz) {
 
 // Describe an observed emission.
 //
-// Input is what the network reported, not what C2 inferred:
-//   {
-//     center_hz?, bandwidth_hz?, power_dbm?,
-//     emission?,           one of EMISSION, defaults to UNKNOWN
-//     hopping?,            boolean, network-reported
-//     remote_id?           decoded payload, present only when decoded
-//   }
+// Input is a recorder sample, or anything carrying the same field
+// names. Every field is optional, because a real detection is
+// frequently partial: a bearing-only radio-frequency sensor may give a
+// band and nothing else.
 //
-// Every field is optional, because a real detection is frequently
-// partial. A bearing-only radio-frequency sensor may give a band and
-// nothing else.
-export function signalTier(observed = {}) {
-  const centerHz = Number.isFinite(observed.center_hz) ? observed.center_hz : null;
+// `source` is the sample's own provenance tag ('sim' or 'live') and is
+// used to qualify the signature match, not to filter anything out.
+export function signalTier(sample = {}) {
+  const mhz = Number.isFinite(sample.rf_carrier_mhz) ? sample.rf_carrier_mhz : null;
+  const centerHz = mhz != null ? mhz * 1e6 : null;
   const band = bandForHz(centerHz);
-  const emissionType = observed.emission && EMISSION_LIBRARY[observed.emission]
-    ? observed.emission
+
+  const emissionType = sample.rf_emission && EMISSION_LIBRARY[sample.rf_emission]
+    ? sample.rf_emission
     : EMISSION.UNKNOWN;
   const emission = emissionMetadata(emissionType);
 
@@ -266,11 +291,19 @@ export function signalTier(observed = {}) {
   if (centerHz) {
     rows.push({ key: 'frequency', label: 'Centre frequency', value: formatHz(centerHz) });
   }
-  if (Number.isFinite(observed.bandwidth_hz)) {
-    rows.push({ key: 'bandwidth', label: 'Bandwidth', value: formatHz(observed.bandwidth_hz) });
+  if (Number.isFinite(sample.rf_bandwidth_mhz)) {
+    rows.push({ key: 'bandwidth', label: 'Bandwidth', value: formatHz(sample.rf_bandwidth_mhz * 1e6) });
   }
-  if (Number.isFinite(observed.power_dbm)) {
-    rows.push({ key: 'power', label: 'Received power', value: `${observed.power_dbm.toFixed(1)} dBm` });
+  if (Number.isFinite(sample.rf_power_dbm)) {
+    rows.push({ key: 'power', label: 'Received power', value: `${sample.rf_power_dbm.toFixed(1)} dBm` });
+  }
+
+  // Modulation, taken from rf_carrier_type. That field reads "OFDM
+  // 5.8 GHz", so the band half is dropped: it is already its own row
+  // above, derived from the frequency rather than from a string.
+  const modulation = _modulationFrom(sample.rf_carrier_type);
+  if (modulation) {
+    rows.push({ key: 'modulation', label: 'Modulation', value: modulation });
   }
 
   if (emissionType !== EMISSION.UNKNOWN) {
@@ -282,7 +315,7 @@ export function signalTier(observed = {}) {
     });
   }
 
-  if (observed.hopping === true) {
+  if (sample.rf_hopping === true) {
     rows.push({
       key: 'hopping',
       label: 'Frequency hopping',
@@ -293,10 +326,33 @@ export function signalTier(observed = {}) {
     });
   }
 
-  // Remote ID: present only when the network actually decoded one.
-  // Never inferred from a 2.4 GHz emission, because the overwhelming
-  // majority of 2.4 GHz traffic at any site is not Remote ID.
-  const rid = observed.remote_id || null;
+  // The network's signature match, carried with its provenance.
+  //
+  // Qualified rather than asserted when the sample is simulated,
+  // because these fields are synthesised in the simulation and flow
+  // straight into the debrief and the agentic narrative.
+  if (sample.rf_match_signature) {
+    const simulated = sample.source === 'sim';
+    const conf = Number.isFinite(sample.rf_match_confidence)
+      ? ` (${Math.round(sample.rf_match_confidence * 100)}%)`
+      : '';
+    rows.push({
+      key: 'signature_match',
+      label: simulated ? 'Signature match (simulated)' : 'Signature match',
+      value: `${sample.rf_match_signature}${conf}`,
+      note: simulated
+        ? 'This sample is simulated. The signature is generated by the scenario, not observed, '
+          + 'and must not be reported as evidence.'
+        : 'Reported by the neural network. C2 does not classify signatures.',
+    });
+  }
+
+  // Remote identification: present only when a broadcast was actually
+  // decoded. Never inferred from a 2.4 GHz emission, because the
+  // overwhelming majority of 2.4 GHz traffic at any site is not
+  // Remote ID, and because the airframes this platform exists for do
+  // not broadcast at all.
+  const rid = sample.remote_id || null;
   if (rid) {
     rows.push({
       key: 'remote_id',
@@ -304,7 +360,7 @@ export function signalTier(observed = {}) {
       value: rid.uas_id || 'Broadcast decoded, no identifier',
       note: EMISSION_LIBRARY[EMISSION.REMOTE_ID].operatorNote,
     });
-    if (rid.operator_lat != null && rid.operator_lon != null) {
+    if (Number.isFinite(rid.operator_lat) && Number.isFinite(rid.operator_lon)) {
       rows.push({
         key: 'operator_position',
         label: 'Operator position',
@@ -321,11 +377,21 @@ export function signalTier(observed = {}) {
     notability: band?.notability ?? null,
     emission: emissionType,
     emissionLabel: emission.label,
+    modulation,
     hasRemoteId: !!rid,
-    // The one-line summary for a dense row, as distinct from the panel.
+    simulatedSignature: !!sample.rf_match_signature && sample.source === 'sim',
     summary: _summarise(band, centerHz, emissionType, emission),
     rows,
   };
+}
+
+// Pull the modulation out of rf_carrier_type, which reads like
+// "OFDM 5.8 GHz". The band half is dropped because it is derived
+// properly elsewhere, from the frequency rather than from text.
+function _modulationFrom(carrierType) {
+  if (typeof carrierType !== 'string' || !carrierType.trim()) return null;
+  const m = carrierType.replace(/[\d.]+\s*(GHz|MHz|kHz)/ig, '').trim();
+  return m || null;
 }
 
 function _summarise(band, centerHz, emissionType, emission) {
@@ -345,3 +411,32 @@ export function signalTierCoverage() {
     highestHz: Math.max(...BANDS.map(b => b.to)),
   };
 }
+
+// ── Extensions ──────────────────────────────────────────────────────
+// Fields the recorder schema does not carry yet, named in its own
+// convention so that supplying them is a schema addition rather than a
+// translation layer. Every one is optional and the tier renders
+// correctly without it.
+//
+//   rf_emission     one of EMISSION. Whether the transmission is a
+//                   control uplink, a video downlink, telemetry, a
+//                   datalink, a satellite link, a Remote ID broadcast,
+//                   or nothing at all. The network knows this; the
+//                   schema has no column for it, so the Emission row
+//                   is absent today.
+//
+//   rf_hopping      boolean. Whether the emitter is changing
+//                   frequency. Characteristic of purpose-built links
+//                   rather than consumer video, which is exactly the
+//                   distinction this platform's population turns on.
+//
+//   remote_id       decoded broadcast payload, present ONLY when one
+//                   was actually decoded:
+//                     { uas_id, operator_lat, operator_lon }
+//                   The sensor node's DroneIDDetection already carries
+//                   uas_id and operator_position, so this is a matter
+//                   of routing it through, not of building anything.
+//
+// Requested as part of the same conversation as the track identity
+// ask. See Q1 in docs/open-questions.md.
+export const SCHEMA_EXTENSIONS = Object.freeze(['rf_emission', 'rf_hopping', 'remote_id']);

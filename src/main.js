@@ -5087,36 +5087,57 @@ async function main() {
   // module maps a frequency to a band, which is arithmetic, and reports
   // the emission type the network supplied.
 
-  function _hzFrom(stats, rawText) {
-    if (Number.isFinite(stats?.rfCarrierHz)) return stats.rfCarrierHz;
-    if (Number.isFinite(stats?.rfCarrierMHz)) return stats.rfCarrierMHz * 1e6;
+  // Build a recorder-shaped sample from whatever a display surface
+  // holds, so the tier consumes the SAME field names as the trajectory
+  // export rather than a parallel set invented for the screen.
+  //
+  // The roster carries rfCarrierMHz, the evidence panel carries a
+  // free-text carrier string. Both normalise to rf_carrier_mhz here,
+  // and nothing downstream has to know which surface it came from.
+  function _sampleFrom(stats, rawText) {
+    if (!stats && !rawText) return {};
     const raw = String(rawText ?? stats?.rfCarrier ?? '');
-    const ghz = raw.match(/([\d.]+)\s*GHz/i);
-    if (ghz) return parseFloat(ghz[1]) * 1e9;
-    const mhz = raw.match(/([\d.]+)\s*MHz/i);
-    if (mhz) return parseFloat(mhz[1]) * 1e6;
-    return null;
+    let mhz = null;
+    if (Number.isFinite(stats?.rf_carrier_mhz)) mhz = stats.rf_carrier_mhz;
+    else if (Number.isFinite(stats?.rfCarrierMHz)) mhz = stats.rfCarrierMHz;
+    else {
+      const ghz = raw.match(/([\d.]+)\s*GHz/i);
+      const m = raw.match(/([\d.]+)\s*MHz/i);
+      if (ghz) mhz = parseFloat(ghz[1]) * 1000;
+      else if (m) mhz = parseFloat(m[1]);
+    }
+    return {
+      rf_carrier_mhz: mhz,
+      rf_bandwidth_mhz: stats?.rf_bandwidth_mhz ?? _mhzFromText(stats?.rfBandwidth),
+      rf_power_dbm: Number.isFinite(stats?.rf_power_dbm) ? stats.rf_power_dbm : null,
+      rf_carrier_type: stats?.rf_carrier_type ?? null,
+      rf_match_signature: stats?.rf_match_signature ?? stats?.rfMatch ?? null,
+      rf_match_confidence: Number.isFinite(stats?.rf_match_confidence) ? stats.rf_match_confidence : null,
+      // A passive track emits nothing. That is a finding, not missing
+      // data, and the library has a category for it.
+      rf_emission: /passive/i.test(raw) ? _EMISSION.SILENT : (stats?.rf_emission ?? null),
+      rf_hopping: stats?.rf_hopping ?? null,
+      // Present only when the network decoded a broadcast. Never
+      // derived here from a band or a frequency.
+      remote_id: stats?.remote_id ?? null,
+      // Provenance, so a synthesised signature is labelled as one
+      // rather than asserted as evidence.
+      source: stats?.source ?? 'sim',
+    };
+  }
+
+  function _mhzFromText(v) {
+    if (Number.isFinite(v)) return v;
+    const m = String(v ?? '').match(/([\d.]+)\s*MHz/i);
+    return m ? parseFloat(m[1]) : null;
   }
 
   function _tierFor(stats, rawText) {
-    const raw = String(rawText ?? stats?.rfCarrier ?? '');
-    return _signalTier({
-      center_hz: _hzFrom(stats, rawText),
-      bandwidth_hz: Number.isFinite(stats?.rfBandwidthHz) ? stats.rfBandwidthHz : null,
-      power_dbm: Number.isFinite(stats?.rfPowerDbm) ? stats.rfPowerDbm : null,
-      // A passive track emits nothing. That is a finding, not missing
-      // data, and the library has a category for it.
-      emission: /passive/i.test(raw) ? _EMISSION.SILENT : (stats?.rfEmission || null),
-      hopping: stats?.rfHopping ?? null,
-      // Present only when the network actually decoded a broadcast.
-      // Never inferred from occupancy of a band that happens to carry it.
-      remote_id: stats?.remoteId || null,
-    });
+    return _signalTier(_sampleFrom(stats, rawText));
   }
 
   function _tierSummary(stats, rawText) {
-    const t = _tierFor(stats, rawText);
-    return t.summary || 'No radio-frequency data';
+    return _tierFor(stats, rawText).summary || 'No radio-frequency data';
   }
 
   // The hover detail. Rows are conditional, so a field nobody observed

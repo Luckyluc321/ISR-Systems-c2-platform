@@ -34,7 +34,7 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve, join } from 'node:path';
 import {
   signalTier, bandForHz, bandById, formatHz, signalTierCoverage,
-  BANDS, EMISSION, EMISSION_LIBRARY, BAND_NOTABILITY,
+  BANDS, EMISSION, EMISSION_LIBRARY, BAND_NOTABILITY, SCHEMA_EXTENSIONS,
 } from '../src/signal_tier.js';
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -79,7 +79,7 @@ for (const [label, hz, expectId] of [
 }
 check('a frequency between bands is reported as outside the library, not snapped to the nearest',
   bandForHz(3.5e9) === null
-  && signalTier({ center_hz: 3.5e9 }).rows.some(r => /Outside the reference library/.test(r.value)),
+  && signalTier({ rf_carrier_mhz: 3500 }).rows.some(r => /Outside the reference library/.test(r.value)),
   'assigning an unknown observation to whichever band is closest would be a quiet fabrication');
 check('every band declares what it carries and how notable it is',
   BANDS.every(b => b.carries && Object.values(BAND_NOTABILITY).includes(b.notability)));
@@ -97,18 +97,18 @@ check('the module maps frequency to band and nothing further',
   !/nn_family|classification|threat_estimate/.test(tierSrc));
 
 console.log('\nSame band, different meaning, because emission is a separate axis');
-const video = signalTier({ center_hz: 5.8e9, emission: EMISSION.VIDEO_DOWNLINK });
-const control = signalTier({ center_hz: 5.8e9, emission: EMISSION.CONTROL_UPLINK });
+const video = signalTier({ rf_carrier_mhz: 5800, rf_emission: EMISSION.VIDEO_DOWNLINK });
+const control = signalTier({ rf_carrier_mhz: 5800, rf_emission: EMISSION.CONTROL_UPLINK });
 check('one band with two emission types produces two different readings',
   video.summary !== control.summary && video.bandId === control.bandId,
   'the same band carries an uplink and a downlink, and those mean different things to the operator');
 check('2.4 GHz and 5.8 GHz do not read identically',
-  signalTier({ center_hz: 2.437e9 }).summary !== signalTier({ center_hz: 5.8e9 }).summary);
+  signalTier({ rf_carrier_mhz: 2437 }).summary !== signalTier({ rf_carrier_mhz: 5800 }).summary);
 check('every emission type carries an operator-facing meaning',
   Object.values(EMISSION_LIBRARY).every(e => e.label && e.meaning));
 
 console.log('\nSilence is a finding, not missing data');
-const silent = signalTier({ emission: EMISSION.SILENT });
+const silent = signalTier({ rf_emission: EMISSION.SILENT });
 check('a passive track reports no emission rather than no data',
   silent.summary === 'No emission' && silent.emission === EMISSION.SILENT,
   'several loitering types transmit nothing in cruise. Rendering that as a blank field loses the finding');
@@ -116,15 +116,15 @@ check('the silent category says why it matters',
   /cruise|behaviour|silence/i.test(EMISSION_LIBRARY[EMISSION.SILENT].operatorNote || ''));
 
 console.log('\nRemote identification appears when decoded and never otherwise');
-const plain24 = signalTier({ center_hz: 2.437e9, emission: EMISSION.CONTROL_UPLINK });
+const plain24 = signalTier({ rf_carrier_mhz: 2437, rf_emission: EMISSION.CONTROL_UPLINK });
 check('a 2.4 GHz emission alone produces no Remote ID claim',
   plain24.hasRemoteId === false
   && !plain24.rows.some(r => r.key === 'remote_id' || r.key === 'operator_position'),
   'the overwhelming majority of 2.4 GHz traffic at any site is not Remote ID. Inferring it from the '
   + 'band would manufacture an identity for an aircraft that never broadcast one');
 const withRid = signalTier({
-  center_hz: 2.437e9,
-  emission: EMISSION.REMOTE_ID,
+  rf_carrier_mhz: 2437,
+  rf_emission: EMISSION.REMOTE_ID,
   remote_id: { uas_id: '1581F4A1B2C3', operator_lat: 55.6201, operator_lon: 12.6502 },
 });
 check('a decoded broadcast surfaces the identifier', withRid.hasRemoteId === true
@@ -149,7 +149,7 @@ check('the Remote ID category is marked conditional in the library',
   EMISSION_LIBRARY[EMISSION.REMOTE_ID].conditional === true);
 
 console.log('\nA partial detection renders what it has');
-const bandOnly = signalTier({ center_hz: 2.44e9 });
+const bandOnly = signalTier({ rf_carrier_mhz: 2440 });
 check('a band with no emission type still produces a reading',
   bandOnly.rows.length >= 2 && bandOnly.summary === '2.4 GHz',
   'a bearing-only radio-frequency sensor may give a band and nothing else, which is a real observation');
@@ -166,7 +166,61 @@ check('gigahertz values render as gigahertz', formatHz(2.437e9) === '2.437 GHz')
 check('megahertz values render as megahertz', formatHz(433.92e6) === '433.92 MHz');
 check('trailing zeroes are trimmed', formatHz(5.8e9) === '5.8 GHz');
 
+console.log('\nIt consumes the recorder schema, not a parallel one');
+check('the trajectory export field names are what the tier reads',
+  (() => {
+    const t = signalTier({
+      rf_carrier_mhz: 5800, rf_bandwidth_mhz: 20, rf_power_dbm: -68,
+      rf_carrier_type: 'OFDM 5.8 GHz',
+    });
+    return t.bandId === 'ism-5800'
+      && t.rows.some(r => r.key === 'bandwidth' && r.value === '20 MHz')
+      && t.rows.some(r => r.key === 'power' && r.value === '-68.0 dBm');
+  })(),
+  'the recorder already writes these columns and the CSV already exports them. A parallel shape '
+  + 'invented for the screen would need a translation layer and would drift from the export');
+check('the carrier frequency is read as megahertz, matching the column name',
+  signalTier({ rf_carrier_mhz: 2437 }).bandId === 'ism-2400'
+  && signalTier({ rf_carrier_mhz: 2.437e9 }).bandId !== 'ism-2400',
+  'rf_carrier_mhz is megahertz. Treating it as hertz would put every detection off the table');
+check('modulation comes from rf_carrier_type with the band text stripped',
+  signalTier({ rf_carrier_type: 'OFDM 5.8 GHz' }).modulation === 'OFDM',
+  'the band belongs in its own row, derived from the frequency rather than parsed out of a string');
+check('a simulated signature match is labelled, not asserted',
+  (() => {
+    const t = signalTier({
+      rf_carrier_mhz: 2437, rf_match_signature: 'DJI OcuSync',
+      rf_match_confidence: 0.89, source: 'sim',
+    });
+    const row = t.rows.find(r => r.key === 'signature_match');
+    return t.simulatedSignature === true
+      && /simulated/i.test(row.label)
+      && /not observed|generated by the scenario/i.test(row.note);
+  })(),
+  'these fields are synthesised in the simulation: the signature is always OcuSync and the '
+  + 'confidence always 0.89. Rendering that flat would put a match nobody observed into a debrief');
+check('a live signature match is not labelled simulated',
+  (() => {
+    const t = signalTier({
+      rf_carrier_mhz: 2437, rf_match_signature: 'OcuSync 4', source: 'live',
+    });
+    return t.simulatedSignature === false
+      && !/simulated/i.test(t.rows.find(r => r.key === 'signature_match').label);
+  })());
+check('fields the schema does not carry yet are named in its convention',
+  SCHEMA_EXTENSIONS.every(f => /^[a-z][a-z0-9_]*$/.test(f))
+  && SCHEMA_EXTENSIONS.includes('rf_emission')
+  && SCHEMA_EXTENSIONS.includes('remote_id'),
+  'adding them should be a schema addition, not a translation layer');
+
 console.log('\nWiring in src/main.js');
+check('the display path passes provenance through rather than declaring it',
+  /source: stats\?\.source \?\? 'sim',/.test(main),
+  'hardcoding it would relabel every synthesised signature as observed, which is the exact failure '
+  + 'the simulated-match label exists to prevent. Defaulting to sim is the safe direction');
+check('the display path builds a recorder-shaped sample',
+  /function _sampleFrom\(/.test(main) && /rf_carrier_mhz:/.test(main),
+  'both display surfaces normalise to the export\'s field names, so neither invents its own');
 check('the roster shows band and emission, not a bare frequency',
   !/\$\{d\.stats\.rfCarrierMHz \|\| 2412\} MHz/.test(main)
   && /_tierSummary\(d\.stats\)/.test(main),
@@ -178,7 +232,7 @@ check('the evidence panel renders library rows',
 check('a passive track is routed to the silent category, not to no data',
   /passive\/i\.test\(raw\) \? _EMISSION\.SILENT/.test(main));
 check('Remote ID reaches the tier only from a decoded payload',
-  /remote_id: stats\?\.remoteId \|\| null/.test(main),
+  /remote_id: stats\?\.remote_id \?\? null/.test(main),
   'never derived in main.js from a band or a frequency');
 
 if (failures) {
