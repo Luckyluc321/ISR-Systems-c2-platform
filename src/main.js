@@ -9245,6 +9245,23 @@ async function main() {
             ...mt,
             memberId: `${spawnedId}-${mt.memberId.split('-').pop()}`,
             sourceMemberId: mt.memberId,
+            // IDENTITY IS NOT INHERITED. The spread above copies every
+            // field, and nnTrackId is the one field that must not be
+            // copied: it is assigned per object by the edge, and two
+            // member tracks carrying the same object_id is the platform
+            // asserting that one aircraft is two objects.
+            //
+            // Harmless while nnTrackId is null everywhere. The moment
+            // anything publishes a track it is not, and the resolver
+            // matches on nnTrackId and returns the first hit in EVENTS
+            // order, so the other event becomes unreachable by track.
+            //
+            // The breakaway path already does this explicitly. This one
+            // did not.
+            nnTrackId: null,
+            trackProvider: null,
+            trackNodeId: null,
+            
             kinematics: { ...mt.kinematics },
             formationOffset: { ...mt.formationOffset },
             inCoverage: false,

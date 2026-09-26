@@ -278,6 +278,21 @@ console.log('\nTwo edge nodes disagreeing is a finding, not noise');
     attachMemberTrackIdentity('TRACKGATE-1', 'no-such-member', 'OBJ-CCC') === null);
 }
 
+console.log('\nIdentity is never inherited by a derived event');
+// A cross-cued shadow event and a breakaway child both build their
+// member tracks from an existing event's. Both spread the source
+// member, and a spread copies every field including the one assigned
+// per object by the edge. Two member tracks carrying one object_id is
+// the platform asserting that one aircraft is two objects.
+for (const [what, anchor] of [
+  ['a cross-cued shadow event', /sourceMemberId: mt\.memberId,[\s\S]{0,900}?nnTrackId: null,/],
+  ['a breakaway child', /nnTrackId: null,/],
+]) {
+  check(`${what} starts with no identity of its own`, anchor.test(main),
+    'the resolver matches on nnTrackId and returns the first hit in EVENTS order, so a copied id '
+    + 'makes the other event unreachable by track');
+}
+
 console.log('\nWiring in src/main.js');
 // Anchored to a real import statement. A bare filename match also hits
 // a commented-out import, which is exactly how this assertion passed
