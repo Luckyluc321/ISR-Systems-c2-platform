@@ -125,6 +125,8 @@ Deliberately separate from `check-provenance.mjs`. The split is: provenance asks
 
 Emit `object_id` and `associated_detection` per BSI Flex 335 v2.0. One line, against a published NATO-track standard, not a design project.
 
+**Not sent yet.** Parked as Q1 in `docs/open-questions.md`. The C2 half landed first deliberately, so the conversation is "here is the socket, conform to the standard" rather than "please design a format for us".
+
 ## Related
 
 - `docs/idd-integration-brief.md` — the SAPIENT commitment this builds on.
