@@ -293,6 +293,39 @@ for (const [what, anchor] of [
     + 'makes the other event unreachable by track');
 }
 
+console.log('\nThe simulation actually publishes, so the path runs in a browser');
+check('the tick publishes a track beside the kinematics sync',
+  (main.match(/_publishSimTrack\(event,/g) || []).length >= 2,
+  'both the lead and the wingmen. A seam only the console can reach has never run where it matters');
+check('it publishes once per member, not once per tick',
+  /if \(!m \|\| m\.nnTrackId\) return;/.test(main),
+  'identity does not change, so a republish resolves through the index, returns unchanged, and '
+  + 'costs a linear scan of EVENTS for no effect');
+check('it is hung off the kinematics sync, not off the recorder',
+  (() => {
+    const i = main.indexOf('_publishSimTrack(event, state.leadSwarmMember.memberId');
+    return i > 0 && main.lastIndexOf('syncMemberTrack(event.id', i) > main.lastIndexOf('recording.timeseries.push', i);
+  })(),
+  'hanging it off the recorder would couple identity to a neutralised-lead guard that exists for '
+  + 'an unrelated reason, and identity would stop attaching after a kill');
+check('the tick publishes identity but never position',
+  (() => {
+    const m = main.match(/function _publishSimTrack\([\s\S]*?\n  \}/);
+    return !!m && /alt: null,/.test(m[0]) && !/syncMemberTrack|curLat|kinematics/.test(m[0]);
+  })(),
+  'the architecture separates identity from movement so the edge can take over one before the '
+  + 'other. A position branch growing out of this function is how that separation is lost');
+check('a formation publishes as siblings, not as unrelated objects',
+  /relatedMemberKeys: \[\]/.test(main) === false && /_memberKeysFor\(event\)/.test(main),
+  'the standard expresses "these belong to one thing" without collapsing them, which is what the '
+  + 'interceptor layer needs to target a single member');
+check('a publish failure cannot break the tick',
+  /\[track_source\] sim publish failed/.test(main));
+check('the conflict warning is emitted once per member, not per publish',
+  /_trackConflictsWarned\.has\(key\.memberId\)/.test(main),
+  'a persistent disagreement repeating at feed rate makes a shared console unusable, which is how '
+  + 'a real finding ends up scrolled past');
+
 console.log('\nWiring in src/main.js');
 // Anchored to a real import statement. A bare filename match also hits
 // a commented-out import, which is exactly how this assertion passed

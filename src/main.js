@@ -5162,6 +5162,7 @@ async function main() {
   // identities are attached rather than derived later, so the lookup is
   // never a scan over every event.
   const _memberByObjectId = new Map();
+  const _trackConflictsWarned = new Set();
 
   onTrack((t) => {
     const key = _trackMemberKeyFor(t.objectId);
@@ -5173,12 +5174,64 @@ async function main() {
     if (res?.status === 'conflict') {
       // Two edge nodes disagreeing about what is one aircraft is a real
       // finding, not noise to swallow. The first claim stands.
-      console.warn('[track_source] %s already identified as %s, refused %s from %s',
-        key.memberId, res.existing, res.offered, t.provider);
+      //
+      // Warned once per member. A persistent disagreement would
+      // otherwise repeat at feed rate and make a shared console
+      // unusable, which is how a real finding ends up being scrolled
+      // past.
+      if (!_trackConflictsWarned.has(key.memberId)) {
+        _trackConflictsWarned.add(key.memberId);
+        console.warn('[track_source] %s already identified as %s, refused %s from %s',
+          key.memberId, res.existing, res.offered, t.provider);
+      }
       return;
     }
     if (res?.status === 'attached') _memberByObjectId.set(t.objectId, key);
   });
+
+  // Publish a track for a simulation member, so the identity path runs
+  // in the browser and not only under Node in the build gate.
+  //
+  // ONCE PER MEMBER, not per tick. Identity does not change, so there
+  // is nothing to republish: the second call would resolve through the
+  // index, return 'unchanged', and do a linear scan of EVENTS for no
+  // effect. Skipping when nnTrackId is already set makes the steady
+  // state free and stops a persistent conflict warning from repeating
+  // at sample rate.
+  //
+  // Position is NOT published here and must not be. The architecture
+  // deliberately separates the two so the edge can take over identity
+  // before it takes over movement, and a position branch growing out
+  // of this function is how that separation gets lost.
+  function _publishSimTrack(event, memberId, pos, relatedMemberKeys) {
+    if (!memberId) return;
+    const m = event?.memberTracks?.find(t => t.memberId === memberId);
+    if (!m || m.nnTrackId) return;
+    try {
+      publishMockTrack(buildMockTrack({
+        memberKey: memberId,
+        siteId: event.siteId,
+        lat: pos.lat,
+        lon: pos.lon,
+        // Left null deliberately. The simulation's altitude is height
+        // above ground, which is neither datum the standard defines,
+        // and the seam refuses to convert rather than guess.
+        alt: null,
+        confidence: event.confidence,
+        relatedMemberKeys,
+        timestamp: new Date().toISOString(),
+      }));
+    } catch (err) {
+      // Never break the tick for a track publish.
+      console.warn('[track_source] sim publish failed:', err?.message || err);
+    }
+  }
+
+  // Every member of this event, so a formation publishes as siblings
+  // rather than as unrelated objects.
+  function _memberKeysFor(event) {
+    return (event?.memberTracks || []).map(t => t.memberId);
+  }
 
   // Resolve an object id to the member that holds it.
   //
@@ -13628,6 +13681,12 @@ async function main() {
                 heading: leadHdgDeg, speedMs: p.speed || 25,
                 inCoverage: _leadCovNow,
               });
+              // Identity rides the same throttle and the same
+              // neutralised guard as the kinematics sync above. Swarm
+              // events only: a non-swarm event has no memberTracks, so
+              // a publish would be accepted, counted, and attach to
+              // nothing.
+              _publishSimTrack(event, state.leadSwarmMember.memberId, p, _memberKeysFor(event));
               state._leadTrackSyncMs = nowMs;
               state._leadTrackSyncInCov = _leadCovNow;
             }
@@ -13996,6 +14055,7 @@ async function main() {
               heading: hdgDeg, speedMs,
               inCoverage: swShouldShow,
             });
+            _publishSimTrack(event, sw.memberId, pos, _memberKeysFor(event));
             sw._lastTrackSyncMs = nowMs;
             sw._trackSyncInCov = swShouldShow;
           }
