@@ -47,21 +47,27 @@ The renderer places an object at a height above ground. Real trackers report hei
 
 **Do not write this against a guess.** A wrong datum is a silent error the size of the local terrain, and it looks completely correct on screen. Dropping the altitude and keeping the position is the honest failure. SAPIENT independently reached the same conclusion and makes `datum` mandatory, which is a good sign the caution is right rather than excessive.
 
-### Q3 · Remote ID: claimed position versus measured position
+### Q3 · Remote ID is not our identity path
 
-**Owner:** unassigned · **Trigger:** first Remote ID receiver on a live site
+**Owner:** unassigned · **Trigger:** a site that needs to greenlist compliant traffic · **Priority: low**
 
-A compliant drone broadcasts its own serial and position. A hostile one broadcasts nothing, and the standard says so about itself: it *"does not purport to address identification needs for UAS that are not participating"*. EU Direct Remote ID carries no authentication message at all, so a broadcast can be fabricated with an ESP32.
+Recorded mainly so it is not mistaken for a solution to Q1.
 
-The useful consequence, which no standard covers and which is therefore open ground:
+ISR's drones do not broadcast. Field testing uses a drone without Remote ID, and adversarial and defence airframes never had a transmitter to disable. The standard says this about itself: it *"does not purport to address identification needs for UAS that are not participating in Remote ID or operators that purposefully circumvent Remote ID."*
 
-> Remote ID gives a **claimed** position. Our sensors give a **measured** bearing. Disagreement between the two is itself a detection.
+The sensor repository already scopes this correctly. Remote ID capture is *"silent against non-compliant / adversarial drones"*, while the raw-IQ path to the neural network is *"detection of non-cooperative drones (DIY, RID-disabled, military). The defensible core technology."*
 
-A spoofer on a rooftop broadcasts a position that will not match a measured angle of arrival. A drone with Remote ID disabled appears in the sensor picture with no matching broadcast. Neither case is covered by the FAA rule or by ASTM.
+**So all identity for the population we care about comes from association.** There is no free serial number to fall back on. Two consequences that are not optional:
 
-Worth noting alongside: the FAA's own field study across 4.5 million receptions found only about 14% of them Good or better, and 65% Weak or Poor. Plan against poor reception, not the range tables.
+- SAPIENT's `id` field, documented as "the tail number of aircraft", will be null for us permanently. `object_id` is the only identity and it is entirely derived.
+- Re-identification after an object leaves and re-enters coverage cannot come from kinematics. No fielded system does it that way. It has to come from the radio-frequency signature, which is the differentiating capability rather than a convenience.
 
----
+What Remote ID is still good for, whenever a site wants it:
+
+- Greenlisting the compliant majority so the remaining alerts stay credible.
+- A claimed position that can be checked against a measured bearing. A spoofer broadcasts a position that will not match an angle of arrival, and a drone with Remote ID disabled appears in the sensor picture with no matching broadcast. Neither case is covered by any standard, so it is open ground.
+
+Plan against poor reception if it is ever built: the FAA's own study across 4.5 million receptions found about 14% Good or better and 65% Weak or Poor.
 
 ## Deferred with a known trigger
 
