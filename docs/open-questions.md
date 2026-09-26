@@ -62,10 +62,12 @@ The sensor repository already scopes this correctly. Remote ID capture is *"sile
 - SAPIENT's `id` field, documented as "the tail number of aircraft", will be null for us permanently. `object_id` is the only identity and it is entirely derived.
 - Re-identification after an object leaves and re-enters coverage cannot come from kinematics. No fielded system does it that way. It has to come from the radio-frequency signature, which is the differentiating capability rather than a convenience.
 
+**Handled in C2 as of 2026-09-26.** `src/signal_tier.js` carries Remote ID as one emission category among eight. It renders only when the network reports a decoded broadcast, and is never inferred from occupancy of a band that happens to carry it. `scripts/check-signal-tier.mjs` asserts both directions.
+
 What Remote ID is still good for, whenever a site wants it:
 
 - Greenlisting the compliant majority so the remaining alerts stay credible.
-- A claimed position that can be checked against a measured bearing. A spoofer broadcasts a position that will not match an angle of arrival, and a drone with Remote ID disabled appears in the sensor picture with no matching broadcast. Neither case is covered by any standard, so it is open ground.
+- A claimed position that can be checked against a measured bearing. A spoofer broadcasts a position that will not match an angle of arrival, and a drone with Remote ID disabled appears in the sensor picture with no matching broadcast. Neither case is covered by any standard, so it is open ground. The cross-check itself is not built; the tier surfaces the operator position marked self-reported so an operator can make the comparison by eye.
 
 Plan against poor reception if it is ever built: the FAA's own study across 4.5 million receptions found about 14% Good or better and 65% Weak or Poor.
 

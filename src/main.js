@@ -153,6 +153,7 @@ import { baseForReceiverRole } from './receiver_bases.js';
 import { RECEIVER_ASSETS, assetsForReceiverRole, getReceiverDirectAsset, getReceiverRequestAsset } from './receiver_assets.js';
 import { cordonReleaseDecisions, clearedWreckageIds, expiredGhostEventIds, sceneReleaseState, leavesSceneUnassisted, cordonNeedsSceneCommand } from './scene_lifecycle.js';
 import { consequenceAgenciesForSite } from './consequence_routing.js';
+import { signalTier as _signalTier, EMISSION as _EMISSION } from './signal_tier.js';
 import { onTrack, trackStats as _trackStats, relatedObjectIds } from './track_source.js';
 // Self-registers the 'sim' track adapter on import. Importing it is what
 // makes the track path executable: a seam nothing imports is a seam that
@@ -5079,6 +5080,53 @@ async function main() {
     d.telemetryProvider = fix.provider || null;
     _syncDispatchToEvent(d);
   });
+
+  // ── Signal tier ───────────────────────────────────────────────────
+  // Reads whatever radio-frequency data a detection carries and asks
+  // src/signal_tier.js what it means. C2 does not classify here: the
+  // module maps a frequency to a band, which is arithmetic, and reports
+  // the emission type the network supplied.
+
+  function _hzFrom(stats, rawText) {
+    if (Number.isFinite(stats?.rfCarrierHz)) return stats.rfCarrierHz;
+    if (Number.isFinite(stats?.rfCarrierMHz)) return stats.rfCarrierMHz * 1e6;
+    const raw = String(rawText ?? stats?.rfCarrier ?? '');
+    const ghz = raw.match(/([\d.]+)\s*GHz/i);
+    if (ghz) return parseFloat(ghz[1]) * 1e9;
+    const mhz = raw.match(/([\d.]+)\s*MHz/i);
+    if (mhz) return parseFloat(mhz[1]) * 1e6;
+    return null;
+  }
+
+  function _tierFor(stats, rawText) {
+    const raw = String(rawText ?? stats?.rfCarrier ?? '');
+    return _signalTier({
+      center_hz: _hzFrom(stats, rawText),
+      bandwidth_hz: Number.isFinite(stats?.rfBandwidthHz) ? stats.rfBandwidthHz : null,
+      power_dbm: Number.isFinite(stats?.rfPowerDbm) ? stats.rfPowerDbm : null,
+      // A passive track emits nothing. That is a finding, not missing
+      // data, and the library has a category for it.
+      emission: /passive/i.test(raw) ? _EMISSION.SILENT : (stats?.rfEmission || null),
+      hopping: stats?.rfHopping ?? null,
+      // Present only when the network actually decoded a broadcast.
+      // Never inferred from occupancy of a band that happens to carry it.
+      remote_id: stats?.remoteId || null,
+    });
+  }
+
+  function _tierSummary(stats, rawText) {
+    const t = _tierFor(stats, rawText);
+    return t.summary || 'No radio-frequency data';
+  }
+
+  // The hover detail. Rows are conditional, so a field nobody observed
+  // does not render as "unknown" and train an operator to ignore the panel.
+  function _tierTitle(stats, rawText) {
+    return _tierFor(stats, rawText).rows
+      .map(r => `${r.label}: ${r.value}`)
+      .join(' · ')
+      .replace(/"/g, '&quot;');
+  }
 
   // ── Track identity ────────────────────────────────────────────────
   // A track arrives already knowing what it is. All this does is write
@@ -17799,15 +17847,19 @@ async function main() {
     `;
 
     const intelligenceBody = `
-      ${e.evidence?.rfCarrier ? `<div class="pl-kv">
-        <div class="pl-k">RF fingerprint</div>
+      ${e.evidence?.rfCarrier ? (() => {
+        // Rows come from the signal-tier reference library and are
+        // conditional by construction: a field nobody observed is
+        // absent rather than rendered as "unknown".
+        const _t = _tierFor(e.evidence, e.evidence.rfCarrier);
+        return `<div class="pl-kv">
+        <div class="pl-k">Radio frequency</div>
         <div class="pl-v">
-          <div class="pl-inline-row"><span>Carrier</span><span class="pl-mono">${e.evidence.rfCarrier}</span></div>
-          ${e.evidence.rfBandwidth ? `<div class="pl-inline-row"><span>Bandwidth</span><span class="pl-mono">${e.evidence.rfBandwidth}</span></div>` : ''}
+          ${_t.rows.map(r => `<div class="pl-inline-row" ${r.note ? `title="${String(r.note).replace(/"/g, '&quot;')}"` : ''}><span>${r.label}</span><span class="pl-mono">${r.value}</span></div>`).join('')}
           ${e.evidence.rfMatch ? `<div class="pl-inline-row"><span>Match</span><span class="pl-mono">${e.evidence.rfMatch}</span></div>` : ''}
           ${e.evidence.modality ? `<div class="pl-inline-row"><span>Modality</span><span class="pl-mono">${e.evidence.modality}</span></div>` : ''}
         </div>
-      </div>` : ''}
+      </div>`; })() : ''}
       ${topSensors.length ? `<div class="pl-kv">
         <div class="pl-k">Contributing sensors</div>
         <div class="pl-v">
@@ -18505,7 +18557,7 @@ async function main() {
           <span class="dp-swarm-alt mono">${Math.round(d.stats.alt)} m</span>
           <span class="dp-swarm-hdg mono">${Math.round(d.stats.heading)}°</span>
           <span class="dp-swarm-spd mono">${(d.stats.speed || 0).toFixed(1)} m/s</span>
-          <span class="dp-swarm-rf mono">${d.stats.rfCarrierMHz || 2412} MHz</span>
+          <span class="dp-swarm-rf mono" title="${_tierTitle(d.stats)}">${_tierSummary(d.stats)}</span>
           <span class="dp-swarm-conf mono">${Math.round((d.conf || 0) * 100)}%</span>`}
         </div>`;
       swarmRoster = `
@@ -18533,15 +18585,11 @@ async function main() {
           'non-identifiable': 'Non-identified platform',
         })[e.platform]
         || 'Airborne platform';
-      // Parse RF carrier MHz from evidence string (e.g. "2.412 GHz" → 2412).
-      // Passive tracks (missile) show "Passive" instead of an MHz number.
+      // Band and emission from the reference library, rather than a
+      // frequency printed on its own. "2.4 GHz · Video downlink" tells an
+      // operator something; "2412 MHz" does not.
       const _rfRaw = e.evidence?.rfCarrier || '';
-      let _rfLabel = 'N/A';
-      const _ghz = _rfRaw.match(/([\d.]+)\s*GHz/i);
-      const _mhz = _rfRaw.match(/(\d+)\s*MHz/i);
-      if (_ghz) _rfLabel = `${Math.round(parseFloat(_ghz[1]) * 1000)} MHz`;
-      else if (_mhz) _rfLabel = `${_mhz[1]} MHz`;
-      else if (/passive/i.test(_rfRaw)) _rfLabel = 'Passive';
+      const _rfLabel = _tierSummary(e.evidence, _rfRaw);
       const soloRow = `
         <div class="dp-swarm-row is-focused" data-swarm-idx="0" title="${_platformId} (${_platformModel})">
           <span class="dp-swarm-id">${_platformId}</span>
@@ -18551,7 +18599,7 @@ async function main() {
           <span class="dp-swarm-alt mono">${e.lastPosition.alt} m</span>
           <span class="dp-swarm-hdg mono">${e.lastPosition.heading}°</span>
           <span class="dp-swarm-spd mono">${(e.lastPosition.speed || 0).toFixed(1)} m/s</span>
-          <span class="dp-swarm-rf mono">${_rfLabel}</span>
+          <span class="dp-swarm-rf mono" title="${_tierTitle(e.evidence, _rfRaw)}">${_rfLabel}</span>
           <span class="dp-swarm-conf mono">${Math.round((e.confidence || 0) * 100)}%</span>
         </div>`;
       swarmRoster = `

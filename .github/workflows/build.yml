@@ -65,6 +65,9 @@ jobs:
       - name: Track identity (C2 never mints an id)
         run: npm run check:track-identity
 
+      - name: Signal tier (reference library, not a classifier)
+        run: npm run check:signal-tier
+
       - name: Production build
         run: npx vite build
 
