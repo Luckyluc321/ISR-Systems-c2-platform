@@ -62,6 +62,9 @@ jobs:
       - name: Provenance (sim vs live)
         run: npm run check:provenance
 
+      - name: Track identity (C2 never mints an id)
+        run: npm run check:track-identity
+
       - name: Production build
         run: npx vite build
 

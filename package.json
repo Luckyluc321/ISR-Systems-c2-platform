@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check:event-mutations && npm run check:tenant-stamping && npm run check:impact-cascade && npm run check:scene-lifecycle && npm run check:site-assets && npm run check:attribution && npm run check:provenance && vite build",
+    "build": "npm run check:event-mutations && npm run check:tenant-stamping && npm run check:impact-cascade && npm run check:scene-lifecycle && npm run check:site-assets && npm run check:attribution && npm run check:provenance && npm run check:track-identity && vite build",
     "preview": "vite preview",
     "check:event-mutations": "node scripts/check-event-mutations.mjs",
     "check:tenant-stamping": "node scripts/check-tenant-stamping.mjs",
@@ -15,7 +15,8 @@
     "eval:json": "node eval/runner.js --json",
     "check:site-assets": "node scripts/check-site-assets.mjs",
     "check:attribution": "node scripts/check-attribution.mjs",
-    "check:provenance": "node scripts/check-provenance.mjs"
+    "check:provenance": "node scripts/check-provenance.mjs",
+    "check:track-identity": "node scripts/check-track-identity.mjs"
   },
   "devDependencies": {
     "vite": "^8.1.1"

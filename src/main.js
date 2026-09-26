@@ -132,7 +132,7 @@ import {
   // Event mutation API (Phase 1 state-consolidation). Every event
   // field write anywhere in this file goes through one of these.
   mutateEvent, appendEventArray, addToEventSet, setEventMapKey, setEventObjectKey,
-  syncMemberTrack, setMemberStatus,
+  syncMemberTrack, setMemberStatus, attachMemberTrackIdentity,
   linkEvents, markNeutralised, recordInteraction, recordSceneRelease, releasedWreckageIds,
   setDispatchOutcome, attachPostIncidentReport,
   clearNarrativeCache, setNarrativeCache,
@@ -153,6 +153,13 @@ import { baseForReceiverRole } from './receiver_bases.js';
 import { RECEIVER_ASSETS, assetsForReceiverRole, getReceiverDirectAsset, getReceiverRequestAsset } from './receiver_assets.js';
 import { cordonReleaseDecisions, clearedWreckageIds, expiredGhostEventIds, sceneReleaseState, leavesSceneUnassisted, cordonNeedsSceneCommand } from './scene_lifecycle.js';
 import { consequenceAgenciesForSite } from './consequence_routing.js';
+import { onTrack, trackStats as _trackStats, relatedObjectIds } from './track_source.js';
+// Self-registers the 'sim' track adapter on import. Importing it is what
+// makes the track path executable: a seam nothing imports is a seam that
+// has never run, which is how the dispatch telemetry seam shipped with
+// four defects behind an unreachable branch.
+import { publishMockTrack, buildMockTrack,
+  objectIdForMember as _trackMockObjectIdForMember } from './adapters/track_mock.js';
 import { onDispatchFix, telemetryStats as _dispatchTelemetryStats, registerTelemetryAdapter,
   applyFixToUnit, reassertLivePosition, isTelemetryStale } from './dispatch_telemetry.js';
 import {
@@ -5072,6 +5079,72 @@ async function main() {
     d.telemetryProvider = fix.provider || null;
     _syncDispatchToEvent(d);
   });
+
+  // ── Track identity ────────────────────────────────────────────────
+  // A track arrives already knowing what it is. All this does is write
+  // that identity onto the member track. It does NOT move anything:
+  // position still comes from the simulation tick, or, when a real feed
+  // replaces it, from the same track's own kinematics through
+  // syncMemberTrack. Keeping identity and movement separate is what
+  // lets the edge take over one before the other.
+  //
+  // _memberByObjectId is the reverse index a live feed needs, because a
+  // track knows its object_id and nothing else. It is built here as
+  // identities are attached rather than derived later, so the lookup is
+  // never a scan over every event.
+  const _memberByObjectId = new Map();
+
+  onTrack((t) => {
+    const key = _trackMemberKeyFor(t.objectId);
+    if (!key) return;   // a track for an object we do not hold is not an error
+    const res = attachMemberTrackIdentity(key.eventId, key.memberId, t.objectId, {
+      provider: t.provider,
+      nodeId: t.nodeId,
+    });
+    if (res?.status === 'conflict') {
+      // Two edge nodes disagreeing about what is one aircraft is a real
+      // finding, not noise to swallow. The first claim stands.
+      console.warn('[track_source] %s already identified as %s, refused %s from %s',
+        key.memberId, res.existing, res.offered, t.provider);
+      return;
+    }
+    if (res?.status === 'attached') _memberByObjectId.set(t.objectId, key);
+  });
+
+  // Resolve an object id to the member that holds it.
+  //
+  // In the simulation the mock adapter derives its ids from the member
+  // key, so the mapping is recoverable. A real feed has no such
+  // shortcut and resolves through the index above, which is why both
+  // paths are here rather than the sim path only.
+  function _trackMemberKeyFor(objectId) {
+    const known = _memberByObjectId.get(objectId);
+    if (known) return known;
+    for (const ev of EVENTS) {
+      for (const m of ev.memberTracks || []) {
+        if (m.nnTrackId === objectId) return { eventId: ev.id, memberId: m.memberId };
+        if (!m.nnTrackId && _mockObjectIdFor(m.memberId) === objectId) {
+          return { eventId: ev.id, memberId: m.memberId };
+        }
+      }
+    }
+    return null;
+  }
+
+  // Only the mock can answer this. A real edge node's ids are opaque
+  // and resolve purely through the index.
+  function _mockObjectIdFor(memberKey) {
+    try {
+      return _trackMockObjectIdForMember(memberKey);
+    } catch { return null; }
+  }
+
+  // Exposed so the seam is reachable from the running application, the
+  // same reason window.__isr_dispatchFix exists.
+  window.__isr_publishTrack = publishMockTrack;
+  window.__isr_buildTrack = buildMockTrack;
+  window.__isr_trackStats = _trackStats;
+  window.__isr_trackRelated = relatedObjectIds;
 
   // A registered provider for hand-fed fixes, so the seam is reachable
   // from the running application. Without it the only consumer is the

@@ -1337,6 +1337,36 @@ export function syncMemberTrack(id, memberId, { lat, lon, alt, heading, speedMs,
   return m;
 }
 
+// Attach the identity an EDGE node assigned to this object.
+//
+// The platform does not decide which detections are one aircraft. That
+// is association, it happens at the edge with the raw signal, and what
+// arrives here is the answer. This writes that answer onto the member
+// track so everything downstream can key off a stable identity instead
+// of an array position.
+//
+// memberTracks[].nnTrackId has been the designed landing spot since the
+// swarm tracking work, documented as "NN-assigned track id when live
+// (null in sim)". It is filled here and nowhere else.
+//
+// Refuses to overwrite a DIFFERENT id that is already attached. Two
+// edge nodes claiming the same member is a real disagreement about what
+// is one aircraft, and silently taking the most recent would hide it.
+// The first claim stands and the conflict is reported to the caller.
+export function attachMemberTrackIdentity(id, memberId, objectId, { provider = null, nodeId = null } = {}) {
+  const e = EVENTS.find(x => x.id === id);
+  const m = e?.memberTracks?.find(t => t.memberId === memberId);
+  if (!m || !objectId) return null;
+  if (m.nnTrackId && m.nnTrackId !== objectId) {
+    return { status: 'conflict', existing: m.nnTrackId, offered: objectId };
+  }
+  const first = !m.nnTrackId;
+  m.nnTrackId = objectId;
+  m.trackProvider = provider;
+  m.trackNodeId = nodeId;
+  return { status: first ? 'attached' : 'unchanged', objectId };
+}
+
 // Status transition with append-only per-member history. Idempotent:
 // setting the current status again records nothing.
 export function setMemberStatus(id, memberId, status, extra = {}, { notify = true } = {}) {
