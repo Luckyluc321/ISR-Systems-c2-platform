@@ -260,6 +260,66 @@ check('a fix for an unknown dispatch is ignored, not an error',
   })(),
   'anchored inside the subscriber. The bare pattern appears six times in main.js and matched regardless');
 
+console.log('\nA recorded sample describes its own scenario, not a constant');
+// The signature fields used to be hardcoded: always 'DJI OcuSync',
+// always 0.89, always 20 MHz. source: 'sim' was honest about the value
+// being simulated, but a provenance tag does not make a wrong value
+// right, and a cruise missile with no emitter exported as a consumer
+// datalink.
+{
+  const { signatureFieldsFromEvidence, carrierMhzFrom, matchFrom } =
+    await import('../src/evidence_signature.js');
+
+  const missile = signatureFieldsFromEvidence({ rfCarrier: 'Passive, no active emitter' });
+  check('a passive track exports no carrier frequency rather than zero',
+    missile.rf_carrier_mhz === null && missile.rf_passive === true,
+    'a zero renders as "0 MHz" on an operator panel, which claims a measurement that does not '
+    + 'exist and hides passive detection, which is a capability rather than a gap');
+  // The case that makes the passive guard load-bearing. Passive
+  // coherent location works BY reading someone else's transmitter, so
+  // a passive carrier string can legitimately name a frequency that
+  // the tracked object is not emitting. Parsing it out would attribute
+  // a broadcast tower's carrier to the aircraft.
+  check('a passive carrier that names a frequency still exports none',
+    carrierMhzFrom('Passive, no active emitter, tracked via 1090 MHz reflection') === null,
+    'the frequency belongs to the illuminator, not to the object being tracked');
+  check('a passive track exports no signature match',
+    missile.rf_match_signature === null,
+    'it emitted nothing. There is no signature to have matched');
+
+  const quad = signatureFieldsFromEvidence({
+    rfCarrier: '2.412 GHz', rfBandwidth: '20 MHz OFDM', rfMatch: 'OcuSync 91%',
+  });
+  check('an authored match becomes a signature and a confidence',
+    quad.rf_match_signature === 'OcuSync' && quad.rf_match_confidence === 0.91);
+  check('an authored bandwidth and modulation are carried through',
+    quad.rf_bandwidth_mhz === 20 && quad.rf_carrier_type === 'OFDM');
+
+  check('a match with no stated confidence does not get one invented',
+    matchFrom('SAS743 A320neo, flight plan match').confidence === null,
+    'the person who wrote the scenario deliberately did not state one');
+  check('a compound carrier keeps its text alongside the number',
+    signatureFieldsFromEvidence({ rfCarrier: 'Ku band SATCOM (12.5 GHz) + PCL from DVB T reflection' })
+      .rf_carrier_text.includes('PCL'),
+    'reducing it to one number loses what it says');
+  check('an undescribed field comes out null rather than defaulted',
+    (() => {
+      const bare = signatureFieldsFromEvidence({ rfCarrier: '433 MHz LoRa telemetry' });
+      return bare.rf_bandwidth_mhz === null && bare.rf_match_confidence === null;
+    })(),
+    'a constant standing in for an unobserved value is the whole thing being removed here');
+  check('no signature constant survives in the sample builder',
+    !/rf_match_signature: 'DJI OcuSync'/.test(main)
+    && !/rf_match_confidence: 0\.89/.test(main)
+    && !/rf_bandwidth_mhz: 20,/.test(main),
+    'these five scenarios each describe a different emitter, and one constant described them all');
+  check('the sample builder reads the scenario evidence',
+    /signatureFieldsFromEvidence\(event\.evidence\)/.test(main));
+  check('the export carries the authored carrier text and the passive flag',
+    /'rf_carrier_text', 'rf_passive', 'modality',/.test(main),
+    'added alongside the numeric columns, not replacing them');
+}
+
 console.log('\nProvenance leaves the building with the evidence');
 check('the trajectory export includes source',
   /'event_id', 'site_id', 'detection_state', 'sensors_detecting',[\s\S]{0,400}?'source',/.test(main),

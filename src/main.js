@@ -154,6 +154,7 @@ import { RECEIVER_ASSETS, assetsForReceiverRole, getReceiverDirectAsset, getRece
 import { cordonReleaseDecisions, clearedWreckageIds, expiredGhostEventIds, sceneReleaseState, leavesSceneUnassisted, cordonNeedsSceneCommand } from './scene_lifecycle.js';
 import { consequenceAgenciesForSite } from './consequence_routing.js';
 import { signalTier as _signalTier, EMISSION as _EMISSION } from './signal_tier.js';
+import { signatureFieldsFromEvidence } from './evidence_signature.js';
 import { onTrack, trackStats as _trackStats, relatedObjectIds } from './track_source.js';
 // Self-registers the 'sim' track adapter on import. Importing it is what
 // makes the track path executable: a seam nothing imports is a seam that
@@ -9909,6 +9910,7 @@ async function main() {
     // already gates on altitude; this keeps the persisted trajectory
     // in sync with what the operator actually saw.
     const sensors = _computeSensorsDetecting(pos.lat, pos.lon, pos.alt);
+    const _sig = signatureFieldsFromEvidence(event.evidence);
     const detState = inCov ? 'detected' : (tipInCov ? 'tip_cued' : (tSec < 5 ? 'pre_ingress' : 'sensor_gap'));
     return {
       droneId,
@@ -9924,12 +9926,26 @@ async function main() {
       classification: event.classification,
       confidence: +(conf || event.confidence).toFixed(3),
       threat_level: event.threat,
-      rf_carrier_mhz: rfMHz,
+      // RF SIGNATURE, FROM THE SCENARIO'S OWN EVIDENCE.
+      //
+      // These six fields used to be constants: the signature was
+      // always 'DJI OcuSync', the confidence always 0.89, the
+      // bandwidth always 20 MHz, and the carrier type was picked by
+      // whether the frequency was above 5 GHz. A cruise missile with
+      // no emitter at all exported as a DJI consumer datalink.
+      //
+      // The template already describes what its sensors saw, per
+      // scenario and in detail. It is parsed here instead. A field the
+      // template does not describe comes out null, because a constant
+      // standing in for an unobserved value is the thing being
+      // removed, and source: 'sim' below does not make a wrong value
+      // right.
+      //
+      // rfMHz, the position-tick's own carrier, is the fallback when
+      // the template says nothing, so the swarm roster keeps working.
+      ..._sig,
+      rf_carrier_mhz: _sig.rf_carrier_mhz ?? (rfMHz || null),
       rf_power_dbm: -68 + (droneIdx * -2),
-      rf_carrier_type: rfMHz > 5000 ? 'OFDM 5.8 GHz' : 'OFDM 2.4 GHz',
-      rf_bandwidth_mhz: 20,
-      rf_match_signature: 'DJI OcuSync',
-      rf_match_confidence: 0.89,
       acoustic_peak_db: +(58 + (droneIdx * 1.2)).toFixed(1),
       acoustic_dominant_hz: 220,
       acoustic_signature: 'quadcopter-brushless',
@@ -10280,6 +10296,11 @@ async function main() {
       'classification', 'confidence', 'threat_level',
       'rf_carrier_mhz', 'rf_power_dbm', 'rf_carrier_type', 'rf_bandwidth_mhz',
       'rf_match_signature', 'rf_match_confidence',
+      // Added alongside the numeric fields rather than replacing them.
+      // A compound carrier ("Ku band SATCOM (12.5 GHz) + PCL from
+      // DVB T reflection") cannot be reduced to one number without
+      // losing what it says, and a passive track has no number at all.
+      'rf_carrier_text', 'rf_passive', 'modality',
       'acoustic_peak_db', 'acoustic_dominant_hz', 'acoustic_signature',
       'visual_match_model', 'visual_match_confidence',
       'drone_model', 'formation_role',
