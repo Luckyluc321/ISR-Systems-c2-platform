@@ -11212,6 +11212,9 @@ async function main() {
   // HTML gives us full CSS control, guaranteed rendering, non-overlap
   // stacking, and a proper Palantir-esque look.
   let _debriefCalloutState = null;
+  // True while debrief owns the collapsed state of the detail pillar.
+  let _debriefCollapsedDetail = false;
+
   function _debriefRenderMoments(moments) {
     const entities = [];
     const capped = moments.slice(0, 10);
@@ -11236,7 +11239,9 @@ async function main() {
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
-        properties: { debrief: true },
+        // debriefIdx maps a clicked dot back to its callout. Without it
+        // a pick knows it hit a debrief dot but not which one.
+        properties: { debrief: true, debriefIdx: dotAnchors.length },
       });
       entities.push(dot);
       dotAnchors.push(m);
@@ -11267,7 +11272,12 @@ async function main() {
 
     // 3) Per-frame position update: project 3D dot → 2D screen, place
     //    callout above with vertical stagger, draw leader line.
+    // Callouts the operator has dismissed by clicking their dot.
+    // Indices, not elements, because the update loop works by index.
+    const hidden = new Set();
+
     const scratch = new Cesium.Cartesian2();
+
     function _updatePositions() {
       const w = window.innerWidth;
       const h = window.innerHeight;
@@ -11298,6 +11308,15 @@ async function main() {
           line.setAttribute('opacity', '0');
           continue;
         }
+        // Dismissed by the operator. The dot stays, because it is the
+        // thing they click to bring the callout back.
+        if (hidden.has(p.idx)) {
+          cb.style.opacity = '0';
+          cb.style.pointerEvents = 'none';
+          line.setAttribute('opacity', '0');
+          continue;
+        }
+        cb.style.pointerEvents = '';
         const cbH = cb.offsetHeight || 70;
         let calloutY = p.win.y - BASE_OFFSET - (p.idx * STAGGER);
         // If stacking upward pushes above top bar, flip below the dot
@@ -11323,7 +11342,16 @@ async function main() {
     viewer.scene.postRender.addEventListener(_updatePositions);
     _updatePositions();
 
-    _debriefCalloutState = { layer, svg, updateFn: _updatePositions, calloutEls, lineEls };
+    _debriefCalloutState = {
+      layer, svg, updateFn: _updatePositions, calloutEls, lineEls, hidden,
+      // Called from the map click handler. Returns the new state so the
+      // caller can give the dot itself some visual feedback.
+      toggle(idx) {
+        if (hidden.has(idx)) hidden.delete(idx); else hidden.add(idx);
+        _updatePositions();
+        return !hidden.has(idx);
+      },
+    };
     return entities;
   }
 
@@ -11543,6 +11571,19 @@ async function main() {
     // CSS class on <body> is picked up by style.css rules that reduce
     // imagery brightness for the Cesium wrapper.
     document.body.classList.add('mode-analysis');
+    // The debrief panel is centred at the bottom of the viewport and the
+    // detail pillar is a fixed column on the right, so on anything but a
+    // very wide screen they overlap. Collapsing the pillar gives the
+    // debrief the width it was designed for, and the pillar's own expand
+    // arrow stays exactly where it was if the operator wants it back.
+    //
+    // Only auto-collapse a pillar that was open, and remember that we
+    // did, so exiting debrief restores what the operator had rather than
+    // leaving them to reopen something they never closed.
+    if (!document.body.classList.contains('details-collapsed')) {
+      _debriefCollapsedDetail = true;
+      window.__isr_setDetailPanelCollapsed?.(true);
+    }
     const resolved = _debriefResolveSamples(event);
     if (!resolved || !resolved.samples.length) {
       toast('No trajectory data for this event. Debrief unavailable.', 'info');
@@ -11876,6 +11917,13 @@ async function main() {
     _clearDebriefCallouts();
     _debriefState = null;
     document.body.classList.remove('mode-analysis');
+    // Restore the pillar only if debrief is what closed it and the
+    // operator has not touched it since. A manual toggle clears the flag,
+    // so we never reopen a panel someone deliberately closed.
+    if (_debriefCollapsedDetail) {
+      _debriefCollapsedDetail = false;
+      window.__isr_setDetailPanelCollapsed?.(false);
+    }
   }
   window.__isr_startDebrief = startDebrief;
   window.__isr_stopDebrief = stopDebrief;
@@ -14700,6 +14748,23 @@ async function main() {
   handler.setInputAction((movement) => {
     const picked = viewer.scene.pick(movement.position);
     if (picked && picked.id && picked.id.properties) {
+      // A debrief callout dot. Clicking it dismisses its callout;
+      // clicking again brings it back. The dot never disappears,
+      // because it is the affordance for getting the callout back.
+      const _dbgIdx = picked.id.properties.debriefIdx?.getValue?.();
+      if (_dbgIdx != null && _debriefCalloutState?.toggle) {
+        const shown = _debriefCalloutState.toggle(_dbgIdx);
+        // Feedback on the dot itself, so a dismissed moment still reads
+        // as a moment rather than as a stray point on the map.
+        if (picked.id.point) {
+          picked.id.point.outlineWidth = shown ? 2.5 : 1;
+          picked.id.point.outlineColor = shown
+            ? Cesium.Color.WHITE
+            : Cesium.Color.WHITE.withAlpha(0.45);
+          picked.id.point.pixelSize = shown ? 14 : 11;
+        }
+        return;
+      }
       const type = picked.id.properties.type?.getValue?.();
       if (type === 'sensor') {
         const siteId = picked.id.properties.siteId.getValue();
@@ -20163,8 +20228,13 @@ async function main() {
     alertToggle.textContent = collapsed ? '›' : '‹';
     document.body.classList.toggle('alerts-collapsed', collapsed);
   });
-  detailToggle.addEventListener('click', () => {
-    const collapsed = detailPanel.classList.toggle('collapsed');
+  // Extracted from the click handler so debrief can drive it too.
+  // Idempotent: setting it to the state it is already in does nothing,
+  // so callers do not have to check first.
+  function _setDetailPanelCollapsed(collapsed) {
+    const isCollapsed = detailPanel.classList.contains('collapsed');
+    if (isCollapsed === collapsed) return;
+    detailPanel.classList.toggle('collapsed', collapsed);
     detailToggle.classList.toggle('collapsed', collapsed);
     detailToggle.textContent = collapsed ? '‹' : '›';
     document.body.classList.toggle('details-collapsed', collapsed);
@@ -20180,6 +20250,15 @@ async function main() {
       if (cp) cp.style.right = `${w + 12}px`;
       detailToggle.style.right = `${w}px`;
     }
+  }
+  window.__isr_setDetailPanelCollapsed = _setDetailPanelCollapsed;
+
+  detailToggle.addEventListener('click', () => {
+    // A manual toggle takes ownership of the panel. Debrief will not
+    // restore it on exit after this, because the operator has said what
+    // they want it to be.
+    _debriefCollapsedDetail = false;
+    _setDetailPanelCollapsed(!detailPanel.classList.contains('collapsed'));
   });
   // Resize handle on the left edge — drag to widen/shrink the detail
   // panel. Width persisted to localStorage so it survives reloads.
