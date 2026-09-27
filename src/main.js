@@ -11400,9 +11400,9 @@ async function main() {
       <div class="dbn-body" data-debrief-body="${event.id}" data-debrief-reco="${event.id}">${narrativeHtml}</div>
       ${momentsList}
       <div class="dbn-footer" data-debrief-foot="${event.id}">${modelSubtitle}</div>
-      <div class="dbn-regen-row" style="display:flex;gap:8px;padding:0 var(--space-3) var(--space-3);align-items:center;">
-        <button class="dbn-regen-btn" data-debrief-regen="${event.id}" style="padding:6px 12px;background:transparent;border:1px solid var(--border);color:var(--text-dim);font-family:var(--font-mono);font-size:var(--fs-2xs);letter-spacing:0.10em;text-transform:uppercase;cursor:pointer;border-radius:2px;">Regenerate narrative</button>
-        <span class="dbn-regen-hint" style="font-family:var(--font-mono);font-size:9px;color:var(--text-dim);letter-spacing:0.08em;">Re-runs Agent B against the same event data. Use if the current read is off.</span>
+      <div class="dbn-regen-row">
+        <button class="dbn-regen-btn" data-debrief-regen="${event.id}">Regenerate narrative</button>
+        <span class="dbn-regen-hint">Re-runs Agent B against the same event data. Use if the current read is off.</span>
       </div>
     `;
     document.body.appendChild(wrap);
@@ -14130,6 +14130,18 @@ async function main() {
                 if (!sw._bwChildOorSince) sw._bwChildOorSince = nowMs;
                 if ((nowMs - sw._bwChildOorSince) / 1000 >= 30) {
                   closeEvent(childEv.id, null, { autoOutcome: 'lost contact' });
+                  // The dashed breadcrumb goes with the track.
+                  //
+                  // While a drone is outside coverage the dashed line
+                  // grows behind it, showing where an unobserved object
+                  // went. That is a simulation aid and it is honest
+                  // while the track is still open. Once the track is
+                  // closed as lost, the object is not being tracked at
+                  // all, and a line left frozen mid-ocean reads as a
+                  // position we still hold. We do not.
+                  sw._trackLost = true;
+                  if (sw.projPositions) sw.projPositions.length = 0;
+                  if (sw.projLine) sw.projLine.show = false;
                   appendEventArray(event.id, 'notes', {
                     timestamp: new Date().toISOString(),
                     author: 'AUTO-CORRELATOR',
@@ -14176,11 +14188,20 @@ async function main() {
             sw.trailPositions.push(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, _safeTrailAlt(pos.alt)));
             if (sw.trailPositions.length > 400) sw.trailPositions.shift();
             sw.projLine.show = false;
+            // Re-acquired. A track that comes back is tracked again, so
+            // the lost flag is cleared and the next coverage gap draws
+            // its breadcrumb as normal.
+            sw._trackLost = false;
             // Wipe projPositions on re-entry so the NEXT out-of-cov
             // cycle starts fresh. Otherwise the dashed projection line
             // draws a straight segment from the previous cycle's last
             // out-of-cov point across the map to the new re-exit point.
             if (sw.projPositions && sw.projPositions.length) sw.projPositions.length = 0;
+          } else if (sw._trackLost) {
+            // Closed as lost contact. The member may still be moving in
+            // the simulation, but nothing is observing it and nothing
+            // should be drawn for it.
+            sw.projLine.show = false;
           } else {
             sw.projPositions.push(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, pos.alt));
             if (sw.projPositions.length > 300) sw.projPositions.shift();

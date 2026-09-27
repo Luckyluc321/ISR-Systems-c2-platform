@@ -2409,7 +2409,10 @@ body.details-collapsed #control-panel {
   background: rgba(10, 14, 20, 0.94);
   border: 1px solid rgba(77, 210, 255, 0.25);
   border-radius: 6px;
-  padding: 14px 18px 12px;
+  /* Was 14px 18px 12px. Symmetric now: the bottom row is a control, and
+     giving it less clearance than the header read as the panel running
+     out of room. */
+  padding: 14px 18px 14px;
   color: var(--text);
   font-family: var(--font-body);
   box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55);
@@ -2492,56 +2495,68 @@ body.details-collapsed #control-panel {
 }
 .dbn-moment-note { color: var(--text); font-size: 11px; }
 .dbn-footer {
-  margin-top: 10px;
-  padding-top: 8px;
+  margin-top: 12px;
+  /* Was 8px. The footer is the smallest text in the panel at 9px and
+     italic, so it needed MORE clearance under its rule than the 11px
+     rows above it, not less. It had the least. */
+  padding-top: 12px;
   border-top: 1px dashed rgba(255, 255, 255, 0.06);
   font-size: 9px;
+  line-height: 1.5;
   color: var(--text-dim);
   font-style: italic;
 }
 
-/* Night close-up mode: DOM-level darken filter applied to the Cesium
-   container wrapper (never to the canvas itself, never via any Cesium
-   API). Applied only when night mode is active AND camera is zoomed in.
-   Removed on any mode switch. Purely browser-compositor CSS — cannot
-   corrupt Cesium's internal state. Buildings retain their init-time
-   tint; only the ground imagery reads as "darkened day". */
-#cesiumContainer.night-closeup-darken {
-  filter: brightness(0.16) contrast(1.05) saturate(0.90);
-  transition: filter 400ms ease-out;
-}
+/* Regenerate row.
+   ────────────────────────────────────────────────────────────────
+   Previously inline-styled in main.js with
+   `padding: 0 var(--space-3) var(--space-3)`, which added 12px of its
+   own horizontal padding on top of the panel's 18px. The button
+   therefore sat 30px from the panel edge while every other line in the
+   box sat at 18px, so it read as indented for no reason.
 
-/* HTML overlay canvas for night lights. Sits OUTSIDE #cesiumContainer so
-   the night-closeup-darken CSS filter above cannot dim it. Escapes the
-   filter entirely, allowing lights to render at true full brightness with
-   real radial glow. */
-#night-light-overlay-canvas {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 5;
-  display: none;
+   It also carried no top margin, so it butted directly against the
+   footer text, and its 12px bottom padding stacked on the panel's own
+   12px — dead space below, none above. Both corrected here. */
+.dbn-regen-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  /* No horizontal padding. The row aligns to the same left edge as the
+     narrative, the moments and the footer. */
+  padding: 0;
+  margin-top: 10px;
 }
-#night-light-overlay-canvas.active {
-  display: block;
+.dbn-regen-btn {
+  padding: 6px 12px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.10em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 2px;
+  transition: border-color 120ms, color 120ms;
+  flex: none;
+}
+.dbn-regen-btn:hover { border-color: var(--text-dim); color: var(--text); }
+.dbn-regen-hint {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: var(--text-dim);
+  letter-spacing: 0.08em;
+  line-height: 1.5;
 }
 
 /* Analysis mode — active during Debrief on map / Replay flight. Gently
    desaturates + lightly dims the base map so the highlighted trajectory
    + callouts read as the primary layer, without hiding the underlying
-   context (Lucas: "not much more, but a bit").
-
-   CRITICAL: the :not(.night-closeup-darken) guard preserves night mode.
-   Without it, this rule and the night-closeup-darken rule collide (same
-   specificity, this rule loaded later → this one wins → night mode
-   silently reverts to day-mode brightness during debrief/replay). */
-body.mode-analysis #cesiumContainer:not(.night-closeup-darken) {
+   context (Lucas: "not much more, but a bit"). */
+body.mode-analysis #cesiumContainer {
   filter: saturate(0.72) brightness(0.88);
   transition: filter 300ms ease-out;
-}
-body.mode-analysis #night-light-overlay-canvas {
-  opacity: 0.60;
-  transition: opacity 300ms ease-out;
 }
 
 /* Debrief callout layer — HTML overlay, sits above Cesium canvas so
