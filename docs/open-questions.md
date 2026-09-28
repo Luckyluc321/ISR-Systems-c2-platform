@@ -108,20 +108,30 @@ This is the one place in the codebase that already models "the same object, re-i
 
 ## Known-failing, not a defect
 
-### Q8 · Five eval cases fail on model output quality
+### Q8 · Eval assertion quality, and the residual model variance
 
-**Owner:** unassigned · **Trigger:** next agentic prompt pass · **Last checked:** 2026-09-26
+**Owner:** unassigned · **Trigger:** next agentic prompt pass · **Last checked:** 2026-09-28
 
-`npm run eval` → **60 pass, 5 fail, 0 error.**
+**Resolved, with a correction.** This entry previously said five cases failed "on model output quality" and that "the model is not following the prompt". That was wrong, and it was wrong in the most expensive direction: it pointed future work at the prompt when the problem was the checks.
 
-The failures are the model not following the prompt, not the harness or the platform being wrong. Two representative cases:
+Four of the five were the assertion comparing an internal identifier against operator prose:
 
-- `agent-b-precedent-cph` · `precedent_grounding` — the precedent block is supplied and ignored, so a referenced prior event is missing from the narrative.
-- `agent-b-precedent-cph` · `subject_fidelity` — the required platform family is dropped from the output.
+| Check demanded | Model wrote | Reality |
+| --- | --- | --- |
+| `loitering_munition` | "loitering munition" | Correct. Failed on an underscore. |
+| `fixed_wing` | "fixed-wing" | Correct. Failed on a hyphen. |
+| `quadcopter` | "DJI Mavic 3" | Correct, and more specific. |
+| `quadcopter` | "Matrice-class airframes" | Correct, and more specific. |
 
-Recorded here so a green build is not mistaken for a green eval. They move together with prompt work, not with code.
+A snake_case identifier cannot appear in good operator writing, so those fixtures could not have passed however good the model got. `subject_fidelity` now matches by surface form and validates that a fixture's declared family resolves to a real one in `FAMILIES`, which the old check could not do.
 
----
+The fifth was a prompt gap rather than a model gap. The precedent block told the model to "highlight pattern similarity" and never asked it to cite the event ID, so it wrote "the behaviour mirrors prior hostile events at this site" — following its instruction exactly. The prompt now asks for the ID, because a case file an agency reads should be traceable to the event it references rather than gesturing at one.
+
+**A second finding, still open.** The eval fixture carries a hand-copied duplicate of the precedent block's instruction text, so changing the production prompt in `src/precedent_retrieval.js` does not reach the eval. They were re-synced by hand on 2026-09-28 and will drift again. The fixture should build its block through the real formatter, or a check should assert the two match.
+
+**The residual variance is real and is not to be fixed by loosening checks.** Over five consecutive runs of 65 assertions, two sporadic failures appeared, both on `agent-b-precedent-cph`: once the precedent event ID was omitted, once "Terminal 2" was. Roughly one failure every two or three runs. That is genuine model nondeterminism against checks that are now correct, and it is the honest quality signal this entry was supposed to carry all along.
+
+Do not chase it by widening the assertions. Widening them is what produced four years of false green in the first place.
 
 ## Housekeeping
 

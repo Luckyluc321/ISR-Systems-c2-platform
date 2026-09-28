@@ -158,7 +158,12 @@ export function formatPrecedentBlock(result) {
     lines.push(`   ${p.record.summary}`);
   });
   lines.push('');
-  lines.push('Use these as contextual reference only. Do NOT extrapolate or recommend action based on prior outcomes. Highlight pattern similarity only if it clearly exists in the current event\'s signals.');
+  // The citation instruction is about traceability, not style. A case
+  // file that says "this mirrors prior events at this site" cannot be
+  // checked by the person reading it; one that names DET-20260814-0417
+  // can. The restriction above is unchanged: a precedent may be cited
+  // as context and never used as the basis for a recommendation.
+  lines.push('Use these as contextual reference only. Do NOT extrapolate or recommend action based on prior outcomes. Highlight pattern similarity only if it clearly exists in the current event\'s signals. If you do reference a prior event, cite its event ID exactly as written above so an operator can retrieve it.');
   return lines.join('\n');
 }
 
