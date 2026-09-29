@@ -32,17 +32,79 @@
 // largely converted to cool white LED, while older residential street
 // lighting is still warm sodium. That warm/cool split is visible in real
 // night imagery and is a large part of why it looks photographic.
+// Calibrated against real aerial night photography of Copenhagen, where
+// the city is a dense carpet of warm sodium threads covering every street
+// and the airport is unremarkable within it.
+//
+// The first tiering attempt dimmed the lower classes to create contrast,
+// which made the whole city darker than the untiered version — the exact
+// opposite of the reference. Contrast has to come from lifting the major
+// roads, never from sinking residential: residential is the overwhelming
+// majority of ways (2096 of 3500 at CPH) and therefore *is* the visible
+// city. If it is dim, there is no city.
+//
+// Colour is sodium orange throughout rather than white. Real Danish street
+// lighting reads distinctly amber from the air, and white lines were a
+// large part of why this looked like a wireframe rather than a photograph.
+// `intensity` is the important field and is deliberately unbounded.
+//
+// Alpha cannot carry brightness: it is clamped to 1.0, so a scene built
+// from alpha alone never produces a pixel above 1.0 — and HDR, ACES and
+// bloom all do nothing whatsoever below 1.0. Enabling that pipeline while
+// feeding it clamped values is why this looked flat no matter how the
+// alphas were tuned; ACES on a never-above-1.0 image is purely a darkening
+// operator. Brightness therefore rides on emission, which is unclamped.
+//
+// The spread matters as much as the absolute values. Real street lighting
+// runs from roughly 1,000 to 40,000 lumens, a 40x range; the previous
+// alphas spanned 0.85-1.00, a 1.18x range. That near-total lack of spread
+// is what "no intensity variation" meant.
 export const LIGHT_STYLES = {
-  motorway:    { color: '#fff0d4', width: 2.2, glowPower: 0.30, alpha: 0.95 },
-  primary:     { color: '#ffd9a0', width: 1.7, glowPower: 0.26, alpha: 0.82 },
-  tertiary:    { color: '#ffc078', width: 1.2, glowPower: 0.20, alpha: 0.62 },
-  residential: { color: '#ffa94d', width: 0.9, glowPower: 0.16, alpha: 0.42 },
-  runway:      { color: '#fff6e6', width: 2.6, glowPower: 0.30, alpha: 1.00 },
-  taxiway:     { color: '#5cb3ff', width: 1.9, glowPower: 0.26, alpha: 0.92 },
-  harbour:     { color: '#ffc06a', width: 1.6, glowPower: 0.24, alpha: 0.78 },
+  motorway:    { color: '#ffd9a0', width: 2.4, glowPower: 0.32, alpha: 1.00, intensity: 22 },
+  primary:     { color: '#ffc582', width: 1.9, glowPower: 0.28, alpha: 0.95, intensity: 12 },
+  tertiary:    { color: '#ffb163', width: 1.5, glowPower: 0.24, alpha: 0.90, intensity: 6 },
+  residential: { color: '#ff9f4a', width: 1.3, glowPower: 0.22, alpha: 0.85, intensity: 3 },
+  runway:      { color: '#fff6e6', width: 2.6, glowPower: 0.30, alpha: 1.00, intensity: 28 },
+  taxiway:     { color: '#5cb3ff', width: 1.9, glowPower: 0.26, alpha: 0.92, intensity: 14 },
+  harbour:     { color: '#ffb457', width: 1.7, glowPower: 0.26, alpha: 0.88, intensity: 8 },
 };
 
 export const LIGHT_CLASSES = Object.keys(LIGHT_STYLES);
+
+// ── Measured-radiance bucketing ───────────────────────────────────
+// Roads carry a per-way brightness multiplier sampled from NASA VIIRS
+// night-lights imagery (see scripts/apply-night-radiance.py), so a
+// residential street in a dense district renders brighter than the same
+// class of street on the rural fringe. Without it every neighbourhood gets
+// identical brightness, which is a large part of why this read as uniform.
+//
+// Applying it per way is not possible directly: all ways of a class batch
+// into one primitive sharing one material, so intensity is per-primitive,
+// not per-way. Bucketing into a handful of tiers gets the variation while
+// keeping the draw count trivial — visually continuous, ~5 primitives per
+// class instead of thousands.
+export const RADIANCE_TIERS = 5;
+
+export function bucketByRadiance(polylines, radiance, tiers = RADIANCE_TIERS) {
+  const ways = polylines || [];
+  if (!ways.length) return [];
+  // No measured data (un-sampled site, or an older bake): one bucket at full
+  // strength, i.e. exactly the previous uniform behaviour.
+  if (!Array.isArray(radiance) || radiance.length !== ways.length) {
+    return [{ factor: 1, polylines: ways }];
+  }
+  const groups = new Map();
+  for (let i = 0; i < ways.length; i++) {
+    const m = Math.min(1, Math.max(0, radiance[i] ?? 1));
+    // Tier index, then the tier's midpoint as the representative factor.
+    const t = Math.min(tiers - 1, Math.floor(m * tiers));
+    if (!groups.has(t)) groups.set(t, []);
+    groups.get(t).push(ways[i]);
+  }
+  return [...groups.entries()]
+    .map(([t, pl]) => ({ factor: (t + 0.5) / tiers, polylines: pl }))
+    .sort((a, b) => a.factor - b.factor);
+}
 
 const _cache = new Map();
 

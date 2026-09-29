@@ -132,8 +132,8 @@ import {
   // Event mutation API (Phase 1 state-consolidation). Every event
   // field write anywhere in this file goes through one of these.
   mutateEvent, appendEventArray, addToEventSet, setEventMapKey, setEventObjectKey,
-  syncMemberTrack, setMemberStatus, attachMemberTrackIdentity,
-  linkEvents, markNeutralised, recordInteraction, recordSceneRelease, releasedWreckageIds,
+  syncMemberTrack, setMemberStatus,
+  linkEvents, markNeutralised, recordInteraction,
   setDispatchOutcome, attachPostIncidentReport,
   clearNarrativeCache, setNarrativeCache,
   clearPreprocessedCache, setPreprocessedCache,
@@ -149,24 +149,11 @@ import {
 } from './events.js';
 import { buildPostIncidentReport, buildChainPostIncidentReport, emphasisForBranch } from './post_incident_report.js';
 import { evaluateClassificationPipeline, evaluateAttackProfileDetector } from './classification_pipeline.js';
-import { baseForReceiverRole } from './receiver_bases.js';
+import { RECEIVER_BASES, baseForReceiverRole } from './receiver_bases.js';
 import { RECEIVER_ASSETS, assetsForReceiverRole, getReceiverDirectAsset, getReceiverRequestAsset } from './receiver_assets.js';
-import { cordonReleaseDecisions, clearedWreckageIds, expiredGhostEventIds, sceneReleaseState, leavesSceneUnassisted, cordonNeedsSceneCommand } from './scene_lifecycle.js';
-import { consequenceAgenciesForSite } from './consequence_routing.js';
-import { signalTier as _signalTier, EMISSION as _EMISSION } from './signal_tier.js';
-import { signatureFieldsFromEvidence } from './evidence_signature.js';
-import { onTrack, trackStats as _trackStats, relatedObjectIds } from './track_source.js';
-// Self-registers the 'sim' track adapter on import. Importing it is what
-// makes the track path executable: a seam nothing imports is a seam that
-// has never run, which is how the dispatch telemetry seam shipped with
-// four defects behind an unreachable branch.
-import { publishMockTrack, buildMockTrack,
-  objectIdForMember as _trackMockObjectIdForMember } from './adapters/track_mock.js';
-import { onDispatchFix, telemetryStats as _dispatchTelemetryStats, registerTelemetryAdapter,
-  applyFixToUnit, reassertLivePosition, isTelemetryStale } from './dispatch_telemetry.js';
 import {
   destinationsForSite, destinationsForEvent, getDestination, destinationTypeLabel,
-  destinationShortLabel, groupByParent, localPoliceDestinationIds,
+  destinationParent, destinationShortLabel, groupByParent,
   addDestination, updateDestination, removeDestination,
   onDestinationsChange, resetDestinationsToDefault,
   CHANNEL_META, getDestinationGuidance, getAllDestinations,
@@ -207,8 +194,6 @@ try {
 // rule table and docs/cross-agency-flows.md Section 7 for the taxonomy.
 import { assignArchetypes, ARCHETYPES, ARCHETYPE_LABELS, archetypeForDispatchKind, archetypeFor, getArchetypeFallbackHits } from './archetypes.js';
 import { renderHistoricalPatternPanel, getHistoricalPattern, canSeeHistoricalPattern } from './historical_pattern.js';
-import { renderAttributionPanel, getAttributionAssessment, canSeeAttribution, registerAttributionSource } from './attribution.js';
-import { resolveKineticEffect, resolveJammingEffect, WEAPON_PROFILES, TARGET_PROFILES } from './engagement_effects.js';
 // Phase 2 · 8 sub-section renderers (kinetic / coord / intel /
 // forensic / medical / regulatory / public / liaison). Pure functions
 // (role, event) → HTMLString. Composed into contributor chapters in
@@ -361,33 +346,6 @@ if (typeof window !== 'undefined') {
     all:    allPrecedentRecords,
     clear:  clearPrecedentIndex,
   };
-  // Attribution dev handle. Roadmap §3.6, intel archetype only.
-  //   window.__isr_attribution.assess(getEvent('ev-001'))   → claims + confidence
-  //   window.__isr_attribution.canSee(role)                 → archetype gate check
-  //   window.__isr_attribution.register(fn)                 → connect an external
-  //        intelligence feed. Contract: (event, {family}) => [{text, confidence, caveat}].
-  //        The ONLY thing that can produce an operator claim; with nothing
-  //        registered the panel says there is no basis for one, which is the
-  //        honest answer rather than an omission.
-  window.__isr_attribution = {
-    assess: (ev) => {
-      const hp = getHistoricalPattern(ev);
-      return getAttributionAssessment(ev, { priors: hp.priors, family: hp.family });
-    },
-    canSee:   canSeeAttribution,
-    register: registerAttributionSource,
-  };
-  // Engagement effects dev handle. Survivability + susceptibility
-  // matrix inspection and what-if rolls:
-  //   window.__isr_effects.kinetic({weaponKind:'counter-drone-swarm', roundsFired:10, targetPlatform:'loitering-munition'})
-  //   window.__isr_effects.jamming({weaponKind:'army-c-uas', targetPlatform:'quadcopter'})
-  //   window.__isr_effects.weapons / .targets   → the tuning tables (live refs)
-  window.__isr_effects = {
-    kinetic: resolveKineticEffect,
-    jamming: resolveJammingEffect,
-    weapons: WEAPON_PROFILES,
-    targets: TARGET_PROFILES,
-  };
   // Swarm Phase 1 dev handle. Per-member source-of-truth inspection:
   //   window.__isr_members('ev-012')  → memberTracks array (live refs)
   //   console.table(window.__isr_members('ev-012').map(m => ({...m.kinematics, id: m.memberId, status: m.status, cov: m.inCoverage})))
@@ -507,8 +465,8 @@ if (typeof window !== 'undefined') {
   //        window.__isr_picker.recommend(event) → array of role objects
   //        window.__isr_picker.filter(roles, 'query') → subset
   window.__isr_picker = {
-    groups:    (event, ctx = {}) => buildPickerGroups(event, RECEIVERS, { siteReceivers: SITES[event?.siteId]?.receivers, ...ctx }),
-    recommend: (event) => recommendationsForEvent(event, RECEIVERS, { siteReceivers: SITES[event?.siteId]?.receivers }),
+    groups:    (event, ctx = {}) => buildPickerGroups(event, RECEIVERS, ctx),
+    recommend: (event) => recommendationsForEvent(event, RECEIVERS),
     filter:    filterByQuery,
     THICK_ARCHETYPES,
     THIN_ARCHETYPES,
@@ -554,20 +512,6 @@ function _sameTenant(siteIdA, siteIdB) {
   const tA = _tenantForSite(siteIdA);
   const tB = _tenantForSite(siteIdB);
   return !!tA && tA === tB;
-}
-// Site-level visibility for the active account. Admin and every
-// receiver (government response agency) see every site. Operators, who
-// are the site infrastructure owners, see only the sites their own role
-// owns. This is the map and site-list counterpart to
-// _isFullAccessRoleId, which answers the same question for trajectories.
-// Any non-operator role short-circuits to true, so admin and receiver
-// behaviour is unchanged wherever this is called.
-function _roleCanSeeSite(siteId, role = getActiveRole()) {
-  if (!role || role.kind !== 'operator') return true;
-  return Array.isArray(role.siteIds) && role.siteIds.includes(siteId);
-}
-function _visibleSiteIds(role = getActiveRole()) {
-  return Object.keys(SITES).filter(sid => _roleCanSeeSite(sid, role));
 }
 // Filter a linked-event ID list by tenant scope for the active role.
 // Operators: only see links within their own tenant (same operator's
@@ -701,7 +645,7 @@ import { activateManhattanDemo, deactivateManhattanDemo, setManhattanChase } fro
 import './adapters/cooperative_mock.js';
 import './adapters/cooperative_opensky.js';
 import { checkCooperativeTraffic } from './cooperative_traffic_reconciler.js';
-import { loadFromEvents as loadPrecedentIndex, registerEvent as registerPrecedent, hydrateFromIdb as hydratePrecedentIndex, indexSize as precedentIndexSize, getRecord as getPrecedentRecord, allRecords as allPrecedentRecords, clearIndex as clearPrecedentIndex, unregisterEvent as unregisterPrecedent, computeFeatureVector as computeEventFeatures } from './precedent_index.js';
+import { loadFromEvents as loadPrecedentIndex, registerEvent as registerPrecedent, hydrateFromIdb as hydratePrecedentIndex, indexSize as precedentIndexSize, getRecord as getPrecedentRecord, allRecords as allPrecedentRecords, clearIndex as clearPrecedentIndex, unregisterEvent as unregisterPrecedent } from './precedent_index.js';
 import { buildPrecedentBlock } from './precedent_retrieval.js';
 import { logOperatorDecision, updateFeedbackOutcome, hydrateFeedbackLog, _installConsoleHelper as _installFeedbackConsole } from './feedback_log.js';
 // Feedback-log adapters self-register on import. localStorage is the
@@ -763,8 +707,11 @@ import { streamNarrativeLens, knownArchetypes as _lensKnownArchetypes, writeLens
 import { saveRecording as _idbSaveRecording, loadRecording as _idbLoadRecording, deleteRecording as _idbDeleteRecording, listRecordingIds as _idbListRecordingIds, clearAll as _idbClearAll, migrateFromLocalStorage as _idbMigrateFromLocalStorage } from './recording_store.js';
 import { fetchDrivingRoute, computeSegmentLengths, advanceAlongPolyline } from './routing.js';
 import { buildCordon, assignPatrols, clearCordonCache } from './perimeter.js';
-import { loadSiteLights, loadNationalLights, bucketByRadiance, LIGHT_STYLES, LIGHT_CLASSES } from './night_infrastructure_lights.js';
-import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from './runway_lighting.js';
+import {
+  CPH_RUNWAYS, CPH_PERIMETER_ROADS, CPH_TAXIWAYS, CPH_RAMP_SPOTS,
+  DK_MOTORWAYS, CPH_ARTERIALS, CITY_GLOWS,
+  interpolateSegment, interpolatePath,
+} from './night_lighting.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -809,33 +756,9 @@ async function main() {
   // confirmed; adjust headingOffsetDeg (0 / 90 / 180 / 270) until
   // the nose points along the flight direction.
   window.__isr_shahed_tuning = window.__isr_shahed_tuning || {
-    // 2026-09-20: derived from the asset geometry, not eyeballed.
-    // shahed_238_drone.glb carries its nose at mesh +Z, and its root
-    // node matrix diag(1,-1,-1) flips that to glTF root -Z. The glTF
-    // 2.0 convention is nose along +Z, and Cesium's axis correction
-    // maps glTF +Z onto body +X. So this asset's nose lands on body
-    // -X. Cesium heading 0 puts body +X on EAST, not north, so a
-    // compass bearing needs a further -90. Net: 180 - 90 = 90.
-    //
-    // The previous 180 was algebraically the correct orientation with
-    // pitch and roll negated, which is why it read worst through turns
-    // and on the terminal dive rather than on straight legs.
-    headingOffsetDeg: 90,
-    // A nose on body -X also reverses Cesium's pitch and roll axes
-    // through the airframe: positive pitch would drop the nose and
-    // positive roll would lift the right wing. These flip the
-    // world-frame targets into asset space at the final boundary, so
-    // the smoothing, clamps and yaw-rate maths above stay in world
-    // semantics (positive pitch = climbing, positive roll = turning
-    // right). Models authored nose-on-+X leave both at 1.
-    pitchSign: -1,
-    rollSign: -1,
+    headingOffsetDeg: 90,      // rotate model forward axis. Try 0, 90, 180, 270 if nose points wrong direction.
     pitchOffsetDeg: 0,         // additional pitch bias (usually 0)
-    // 0.18 converged in about a quarter second, which read as the
-    // airframe snapping 90 degrees in one movement. 0.06 sweeps the
-    // same turn over roughly a second: many small corrections, same
-    // end heading.
-    headingSmoothing: 0.06,    // per-frame angular lerp toward target heading (0 = frozen, 1 = snap)
+    headingSmoothing: 0.18,    // per-frame angular lerp toward target heading (0 = frozen, 1 = snap)
     pitchSmoothing:   0.10,    // per-frame lerp toward target pitch
     rollSmoothing:    0.08,    // per-frame lerp toward target roll (bank on turns)
     bankFactor:       2.5,     // radians of roll per rad/s yaw rate
@@ -857,28 +780,12 @@ async function main() {
   // merges body + rotors). Real drones at high shutter speed show
   // frozen props anyway. Swap to a GLB with embedded prop animation
   // clips OR separately-named rotor nodes to add spinning.
-  // 2D icon bearing trim. Sub-degree alignment between the drone
-  // symbol's drawn apex and the computed course. Negative = nose
-  // counter-clockwise. Dial live on a straight leg, report the value.
-  window.__isr_icon_tuning = window.__isr_icon_tuning || { bearingTrimDeg: -2 };
-
   window.__isr_quad_tuning = window.__isr_quad_tuning || {
-    // 2026-09-20: assault_drone_concept.glb is authored to spec, pod
-    // nose on glTF root +Z, which Cesium maps to body +X. Unlike the
-    // Shahed there is no asset reversal, but the same Cesium
-    // convention applies: heading 0 puts body +X on EAST, so a compass
-    // bearing still needs -90. Hence 270, not 0.
-    //
-    // This was wrong by the same 90 degrees as the Shahed and went
-    // unnoticed because an X-frame quadcopter is close to
-    // rotationally symmetric. If the pod nose now reads backwards,
-    // the asset front is at the mast end and the value is 90.
-    headingOffsetDeg: 270,
-    // Nose on body +X, so Cesium's pitch and roll axes already run
-    // the right way through this airframe. See the Shahed rig above
-    // for why a reversed asset needs these at -1.
-    pitchSign: 1,
-    rollSign: 1,
+    // Model orientation — the assault_drone_concept GLB's authored
+    // forward axis is not 90°-rotated like the Shahed. Default 0
+    // means "trust the GLB's own forward". Dial 90/180/270 if the
+    // nose still points wrong direction after the fix.
+    headingOffsetDeg: 0,
     pitchOffsetDeg: 0,
     // Scale — the GLB reads LARGE at 1:1 (much bigger than a real
     // 40-60cm quadcopter). Real ratio: a quadcopter should be
@@ -1594,17 +1501,6 @@ async function main() {
 
   // ── Imagery mode ──
   let imageryMode = 'day';   // default landing view — day mode
-  // Declared here (not at its original ~19280 location) because
-  // applyImageryMode() below calls _isSimMode(), and applyImageryMode()
-  // runs during main()'s own synchronous setup, before main() has reached
-  // line ~19280 whenever a click lands during one of the many awaits in
-  // between. That was a real TDZ ReferenceError crashing applyImageryMode()
-  // silently on any click that landed mid-boot — confirmed via the console
-  // error this exact call produced. _setSimMode() itself (which reads
-  // _dronePov, declared later) stays at its original location; only the
-  // pieces applyImageryMode() needs move here.
-  let _simulationMode = false;
-  function _isSimMode() { return _simulationMode === true; }
 
   // Kept for legacy — night mode no longer uses brightness dimming (was
   // crushing city lights). See the applyImageryMode('night') branch which
@@ -1614,76 +1510,10 @@ async function main() {
   nightBrightness.enabled = false;
   viewer.scene.postProcessStages.add(nightBrightness);
 
-  // Bloom stage placeholder — the legacy custom stage stays disabled (its
-  // uniforms previously broke input responsiveness). Cesium's own built-in
-  // bloom on postProcessStages is used instead, driven by _setNightGrade.
+  // Bloom stage placeholder — DISABLED. Previous uniforms were crashing
+  // input responsiveness. Left as a no-op object so the applyImageryMode
+  // references (nightBloom.enabled = ...) don't throw.
   const nightBloom = { enabled: false };
-
-  // ── Night colour grade: HDR + ACES + bloom ────────────────────────
-  // This replaces a hand-painted glow layer that approximated the look of
-  // light bleeding between sources. Bloom is that effect for real: it acts
-  // on the light actually being rendered, so dense areas glow because they
-  // genuinely contain more light, not because anything was drawn there.
-  //
-  //   highDynamicRange  — without it colour is clamped to 0-1 before it is
-  //                       ever seen, which is why lights looked flat and
-  //                       posterised no matter how their values were tuned.
-  //   Tonemapper.ACES   — the filmic tonemapper Unreal uses by default.
-  //                       Bright sources roll off instead of clipping to
-  //                       white, and shadows keep colour instead of mud.
-  //   bloom             — real optical bleed between bright pixels.
-  //
-  // Scene-wide by nature, so it is applied ONLY in night + Sim and fully
-  // reverted everywhere else. Day is left exactly as it was.
-  const _defaultTonemapper = viewer.scene.postProcessStages.tonemapper;
-  function _setNightGrade(on) {
-    const stages = viewer.scene.postProcessStages;
-    try {
-      if (on && viewer.scene.highDynamicRangeSupported) {
-        viewer.scene.highDynamicRange = true;
-        stages.tonemapper = Cesium.Tonemapper.ACES;
-        stages.bloom.enabled = true;
-        // Conservative: lifts genuine light sources without smearing the
-        // whole frame. contrast/brightness pick what counts as "bright".
-        // Bloom is configured as a POINT SPREAD FUNCTION, not a highlight
-        // filter. What makes real aerial night photography read deep is
-        // atmospheric scattering plus lens veiling glare spreading every
-        // source into a wide, low-amplitude halo — it raises perceived
-        // dynamic range. High contrast with negative brightness does the
-        // opposite: it hard-thresholds to the few brightest pixels and
-        // discards the thousands of mid-brightness sources that ARE the
-        // dense inner city. 120/-0.4 passed almost nothing; even 30/-0.1
-        // was still behaving as a threshold.
-        //
-        // Low contrast + brightness at zero + wide sigma spreads nearly all
-        // scene light. This is also the honest substitute for volumetric
-        // in-scattering, which WebGL2 cannot do — Omniverse gets its city
-        // haze from froxel-grid participating media with a Henyey-Greenstein
-        // term, and Cesium has no equivalent. Not chasing that.
-        stages.bloom.uniforms.glowOnly = false;
-        stages.bloom.uniforms.contrast = 1.5;
-        stages.bloom.uniforms.brightness = 0.0;
-        stages.bloom.uniforms.delta = 1.6;
-        stages.bloom.uniforms.sigma = 6.0;
-        stages.bloom.uniforms.stepSize = 3.0;
-        // Never set previously, so the newly HDR scene had no exposure
-        // control at all. Linear multiplier here; physical engines express
-        // this as EV (exposure = 2^-EV), where a night skyline sits around
-        // EV -1 to 4 against EV 8 for a brightly lit street.
-        if (stages.exposure !== undefined) stages.exposure = 1.4;
-      } else {
-        stages.bloom.enabled = false;
-        stages.tonemapper = _defaultTonemapper;
-        viewer.scene.highDynamicRange = false;
-      }
-    } catch (err) {
-      console.error('[night_grade] failed, falling back to ungraded:', err);
-      try {
-        viewer.scene.postProcessStages.bloom.enabled = false;
-        viewer.scene.highDynamicRange = false;
-      } catch (_) {}
-    }
-  }
   function applyImageryMode() {
     const canvas = viewer.scene.canvas;
     // Common — enableLighting always on. atmosphereLightIntensity is NOT set
@@ -1691,30 +1521,6 @@ async function main() {
     viewer.scene.globe.enableLighting = true;
     nightBrightness.enabled = false;
     canvas.style.filter = '';
-    // scene.light is deliberately NOT touched anywhere in this function.
-    // It is not a per-tileset setting: it also drives the globe surface
-    // shader (GlobeFS.glsl), and per UniformState.js:1454-1473 any light
-    // that is not a SunLight makes Cesium discard the sun position and the
-    // clock entirely. Overriding it with a fixed-direction DirectionalLight
-    // (an earlier attempt at lighting night buildings) pinned a permanent
-    // fake sun over the Atlantic and rendered Denmark in full daylight at
-    // every clock value. Light buildings via per-tileset imageBasedLighting
-    // only. Never via scene.light.
-
-    // TEMP DIAGNOSTIC — remove once the night-mode symptom is confirmed
-    // fixed. Reads out the exact runtime state at the moment this runs so
-    // it doesn't have to be guessed from a screenshot.
-    console.error('[applyImageryMode DIAGNOSTIC]', {
-      imageryMode,
-      isSimMode: typeof _isSimMode === 'function' ? _isSimMode() : 'n/a',
-      enableLighting: viewer.scene.globe.enableLighting,
-      bingLayerExists: !!bingLayer,
-      googlePhotorealExists: !!googlePhotoreal,
-      osmBuildingsExists: !!osmBuildings,
-      photorealShown: googlePhotoreal ? googlePhotoreal.show : 'n/a',
-      sceneLightIsSun: viewer.scene.light instanceof Cesium.SunLight,
-      cameraHeightKm: Math.round((viewer.camera.positionCartographic?.height || 0) / 1000),
-    });
 
     if (imageryMode === 'night') {
       // Clock at November evening over Denmark — sun below horizon. This
@@ -1744,110 +1550,14 @@ async function main() {
         earthAtNightLayer.colorToAlpha = Cesium.Color.BLACK;
         earthAtNightLayer.colorToAlphaThreshold = 0.15;
       }
-      // Owns .show for BOTH building tilesets in night mode, and keeps them
-      // mutually exclusive. Sim platform mode only shows the photoreal
-      // tileset; Real platform mode keeps it hidden exactly as production
-      // has always behaved.
-      //
-      // The altitude gate inside it is load-bearing, not an optimisation.
-      // That asset has GLOBAL coverage, and its daytime-baked root tiles
-      // paint a lit shell over the whole planet at high altitude — it's a
-      // scene primitive, so bingLayer.brightness cannot dim it. Showing it
-      // from the globe view is what made night mode read as full daylight.
-      // Re-runs on camera move, since this function only runs on mode change.
-      _updateNightPhotoreal();
-      if (googlePhotoreal) {
-        if (_isSimMode()) {
-          // Darkening this asset CANNOT be done with lighting. It is
-          // daylight photography with the light baked into the texture,
-          // and its materials are commonly unlit, so scene.light,
-          // lightColor and imageBasedLighting are all ignored — which is
-          // why it kept rendering as full daylight at close zoom no matter
-          // what lighting values were used.
-          //
-          // The lever that does work is the tile style colour, because
-          // colorBlendMode defaults to HIGHLIGHT, documented in
-          // Cesium3DTileColorBlendMode.js as "multiplies the source colour
-          // by the feature colour". That multiply happens in the shader
-          // regardless of lighting, and being a multiply it preserves the
-          // photographic detail instead of flattening it to a solid tone.
-          // Cleared back to undefined in the day and auto branches.
-          googlePhotoreal.style = new Cesium.Cesium3DTileStyle({
-            color: "color('#424e63')",
-          });
-          googlePhotoreal.lightColor = undefined;
-          if (googlePhotoreal.imageBasedLighting) {
-            googlePhotoreal.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(1.0, 1.0);
-          }
-        }
-      }
+      if (googlePhotoreal) googlePhotoreal.show = false;
       if (osmBuildings) {
-        // NOTE: .show is owned by _updateNightPhotoreal() (called above),
-        // which keeps this mutually exclusive with the photoreal tileset.
-        // Do not set .show here.
-        //
-        // Real platform mode: exact original values, untouched.
-        // Sim platform mode: a dark style multiply rather than raw ambient.
-        // Max ambient with no tint is what rendered these as glaring white
-        // boxes — the default OSM material is near-white, so lighting alone
-        // can only pick between black and white. The style multiply sets
-        // the tone directly, same lever used on the photoreal tileset.
-        if (_isSimMode()) {
-          // Lit by BUILDING USE, not at random. Commercial, office, retail
-          // and industrial stock is lit all night in every large city;
-          // residential is largely dark with scattered windows. That split
-          // is recorded data — Cesium OSM Buildings carries the OSM tags
-          // through as per-feature properties — so it does not need to be
-          // guessed at the way a procedural window shader would.
-          //
-          // These are multiplies (HIGHLIGHT blend), so a lighter value
-          // keeps more of the near-white source material and reads as lit,
-          // while a dark value pushes the building down into the night.
-          // Any feature whose type is missing or unrecognised falls through
-          // to the dark default, so a wrong property name degrades to the
-          // previous all-dark look rather than breaking anything.
-          osmBuildings.style = new Cesium.Cesium3DTileStyle({
-            color: {
-              conditions: [
-                ["${feature['building']} === 'office'",      "color('#8c8468')"],
-                ["${feature['building']} === 'commercial'",  "color('#8c8468')"],
-                ["${feature['building']} === 'retail'",      "color('#8a7d5e')"],
-                ["${feature['building']} === 'industrial'",  "color('#6f6a54')"],
-                ["${feature['building']} === 'warehouse'",   "color('#6f6a54')"],
-                ["${feature['building']} === 'hotel'",       "color('#8c8468')"],
-                ["${feature['building']} === 'hospital'",    "color('#8c8468')"],
-                ["${feature['building']} === 'train_station'", "color('#8c8468')"],
-                ["${feature['building']} === 'terminal'",    "color('#948c6e')"],
-                ["true",                                     "color('#2b3442')"],
-              ],
-            },
-          });
-          osmBuildings.lightColor = undefined;
-          if (osmBuildings.imageBasedLighting) {
-            osmBuildings.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(1.0, 1.0);
-          }
-        } else {
-          // Explicitly cleared so a Sim -> Real switch while already in
-          // night mode cannot leave Sim's tint behind on the Real view.
-          osmBuildings.style = undefined;
-          osmBuildings.lightColor = new Cesium.Cartesian3(0.20, 0.25, 0.35);
-          if (osmBuildings.imageBasedLighting) {
-            osmBuildings.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(0.0, 0.0);
-          }
+        osmBuildings.show = true;
+        osmBuildings.lightColor = new Cesium.Cartesian3(0.20, 0.25, 0.35);
+        if (osmBuildings.imageBasedLighting) {
+          osmBuildings.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(0.0, 0.0);
         }
       }
-      // Procedural lit windows on building facades, plus real-position
-      // infrastructure lighting (runways, taxiways, motorways, harbours).
-      // Sim only — Real platform mode keeps the untouched production look.
-      // Procedural window glow is OFF. It guesses which windows are lit,
-      // which is neither real nor asked for — the requirement is lights
-      // that are on every night in real places. Kept in the codebase
-      // because facade lighting genuinely cannot come from data (no source
-      // records which windows are lit), so if it is ever wanted back it is
-      // a one-line flip. Infrastructure lighting below is the real feature.
-      _applyCityLights(false);
-      _setNightGrade(_isSimMode());
-      _updateInfraLights();
       if (window.__isr_sdfiLayer) window.__isr_sdfiLayer.show = false;
       nightBloom.enabled = false;
     } else if (imageryMode === 'day') {
@@ -1877,7 +1587,6 @@ async function main() {
       if (googlePhotoreal) {
         googlePhotoreal.show = true;
         googlePhotoreal.lightColor = undefined;
-        googlePhotoreal.style = undefined;   // clear night's darkening tint
         if (googlePhotoreal.imageBasedLighting) {
           googlePhotoreal.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(1.0, 1.0);
         }
@@ -1890,9 +1599,6 @@ async function main() {
           osmBuildings.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(1.0, 1.0);
         }
       }
-      _applyCityLights(false);   // no lit windows in daylight
-      _setNightGrade(false);
-      _clearInfraLights();
       nightBloom.enabled = false;
     } else {
       viewer.clock.currentTime = Cesium.JulianDate.now();
@@ -1916,7 +1622,6 @@ async function main() {
       if (googlePhotoreal) {
         googlePhotoreal.show = true;
         googlePhotoreal.lightColor = undefined;
-        googlePhotoreal.style = undefined;   // clear night's darkening tint
         if (googlePhotoreal.imageBasedLighting) {
           googlePhotoreal.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(1.0, 1.0);
         }
@@ -1928,419 +1633,604 @@ async function main() {
           osmBuildings.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(1.0, 1.0);
         }
       }
-      // Auto mode runs on the live clock but has no day/night transition
-      // built yet, so it renders as day. No lit windows until that exists.
-      _applyCityLights(false);
-      _setNightGrade(false);
-      _clearInfraLights();
       nightBloom.enabled = false;
     }
-  }
-
-  // Night + Sim only: show the photorealistic building tileset when the
-  // camera is low enough for it to actually be the building view, and hide
-  // it above that. Its daytime-baked global root tiles otherwise paint a
-  // lit shell over the whole planet and make night mode read as daylight.
-  // Every other mode is left to applyImageryMode's own branches.
-  const NIGHT_PHOTOREAL_MAX_H = 50_000;   // metres
-  function _updateNightPhotoreal() {
-    if (imageryMode !== 'night') return;
-    if (!_isSimMode()) {
-      if (googlePhotoreal) googlePhotoreal.show = false;
-      if (osmBuildings) osmBuildings.show = true;
-      return;
+    // Procedural night lights (runways, motorways, city glows) toggle
+    // with the mode. DELIBERATELY does not touch any Cesium global state
+    // (no bloom, no canvas filter, no globe/atmosphere/clock mutations,
+    // no tile style changes). Those APIs leak internal state that
+    // corrupts day mode rendering. Additive entities only.
+    if (imageryMode === 'night') {
+      _renderNightLights();
+      // Trigger close-up check immediately after applyImageryMode
+      // finishes its layer writes. If altitude < 50km, close-up config
+      // takes over (day-lit ground, dark sky). Otherwise stays "night
+      // from space" as applyImageryMode set it.
+      requestAnimationFrame(() => _updateNightCloseUp());
+    } else {
+      _clearNightLights();
+      _deactivateOverlayLights();
+      const container = document.getElementById('cesiumContainer');
+      if (container) container.classList.remove('night-closeup-darken');
+      // If we were in close-up state, reset it so day/auto mode inherit
+      // clean night-distant config (matches applyImageryMode expectations).
+      if (_nightCloseUpActive) {
+        _applyNightDistantConfig();
+        _nightCloseUpActive = false;
+      }
     }
-    const h = viewer.camera.positionCartographic?.height ?? Infinity;
-    if (googlePhotoreal) googlePhotoreal.show = h < NIGHT_PHOTOREAL_MAX_H;
-    // VIIRS night-lights imagery is ~750 m/pixel. That reads as correct
-    // city glow from orbit and as a blurry orange smear over everything
-    // once you are down at site level, so it is gated off at the same
-    // altitude the real building view takes over.
-    if (earthAtNightLayer) earthAtNightLayer.show = h >= NIGHT_PHOTOREAL_MAX_H;
-    // Day parity: day mode shows BOTH tilesets, and that is the building
-    // look we are matching. Night differs only in being darker, which is
-    // handled by the style multiply in applyImageryMode, not by hiding a
-    // layer. An earlier attempt made these mutually exclusive — that is not
-    // what day does, and it silently removes buildings anywhere Google's
-    // coverage lacks building meshes.
-    if (osmBuildings) osmBuildings.show = true;
-  }
-  viewer.camera.moveEnd.addEventListener(() => _updateNightPhotoreal());
-
-  // ── Night city lights (procedural, geometry-derived) ──────────────
-  // Lit windows are synthetic by necessity: the photoreal asset is daytime
-  // photography, so there are no lit windows anywhere in the source data.
-  // This derives them from the geometry itself — no hardcoded coordinates,
-  // no per-site data, works at any site — which is what separates it from
-  // the hand-drawn CPH light strings that were removed.
-  //
-  // Two Cesium constraints drive the shader, both verified against
-  // node_modules/@cesium/engine/Source/Shaders/Model/LightingStageFS.glsl:
-  //   * unlit materials use ONLY material.diffuse — emissive is discarded.
-  //   * PBR materials at night multiply diffuse by a light that is ~0, so
-  //     diffuse alone vanishes; emissive is what survives.
-  // The tilesets mix both models, so the glow is written to BOTH. Whichever
-  // path a given tile uses picks it up, and the other write is inert.
-  //
-  // WINDOW_LIT_FRACTION / WINDOW_GLOW are the two tuning dials.
-  const WINDOW_CELL_M = 3.4;        // window pitch in metres
-  const WINDOW_LIT_FRACTION = 0.18; // share of windows lit
-  const WINDOW_GLOW = 4.0;          // boosted: the night style multiply
-                                    // darkens final colour, so the glow has
-                                    // to clear that multiply to read as lit
-  function _makeCityLightShader() {
-    return new Cesium.CustomShader({
-      uniforms: {
-        u_cell:    { type: Cesium.UniformType.FLOAT, value: WINDOW_CELL_M },
-        u_litFrac: { type: Cesium.UniformType.FLOAT, value: WINDOW_LIT_FRACTION },
-        u_glow:    { type: Cesium.UniformType.FLOAT, value: WINDOW_GLOW },
-      },
-      fragmentShaderText: `
-        void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {
-          vec3 p = fsInput.attributes.positionWC;
-          // Local up on the ellipsoid. Surface normal comes back in eye
-          // space, so rotate it into world space to compare the two.
-          vec3 up = normalize(p);
-          vec3 n  = normalize(czm_inverseViewRotation * fsInput.attributes.normalEC);
-          // 1.0 on walls, 0.0 on roofs and ground. Only walls get windows.
-          float verticality = 1.0 - abs(dot(n, up));
-          if (verticality < 0.55) { return; }
-
-          // Quantise world position into a lattice; hash each cell to decide
-          // if that window is lit. Stable across frames and tile reloads
-          // because it is derived from world position, not tile-local data.
-          vec3 cell = floor(p / u_cell);
-          float h = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
-          if (h > u_litFrac) { return; }
-
-          // Slight per-window colour variation so it doesn't read as a
-          // uniform stamp — warm tungsten through to cooler fluorescent.
-          float warm = fract(h * 91.7);
-          vec3 lightColor = mix(vec3(1.0, 0.72, 0.36), vec3(0.85, 0.89, 1.0), warm * 0.45);
-          vec3 glow = lightColor * u_glow;
-
-          material.diffuse  += glow;   // unlit path
-          material.emissive += glow;   // PBR path
-        }
-      `,
-    });
-  }
-  function _applyCityLights(on) {
-    // Separate instances per tileset — Cesium regenerates shaders per model,
-    // so the two tilesets must not share one CustomShader object.
-    if (googlePhotoreal) googlePhotoreal.customShader = on ? _makeCityLightShader() : undefined;
-    if (osmBuildings) osmBuildings.customShader = on ? _makeCityLightShader() : undefined;
   }
 
-  // ── Infrastructure lights (real geometry, baked offline) ──────────
-  // The lit street network, runways, taxiways, harbours. Geometry comes
-  // from public/night-lights/<siteId>.json, baked by
-  // scripts/bake-night-lights.mjs. Rendered as ground-clamped glow
-  // polylines rather than discrete billboards: at this altitude a real lit
-  // street reads as a fine continuous line, not a row of separate lamps.
-  let _infraPrimitives = [];
-  let _infraTickers = [];      // preRender callbacks driving charted flashes
-  let _infraSiteId = null;
-  let _infraLoading = false;
+  // ═══════════════════════════════════════════════════════════════════
+  // Night-mode procedural lighting + altitude-driven imagery blend
+  // ───────────────────────────────────────────────────────────────────
+  // Runways / taxiways / arterials / motorway strings / city glows are
+  // added as Cesium entities and removed when night mode is deactivated.
+  // Imagery blend: at high altitude the darkened Bing + Earth-at-Night
+  // reads as "night from space". At low altitude the SDFI Danish
+  // orthophoto (day imagery, dimmed) fades in so the operator can see
+  // real terrain detail — buildings, runways, waterways — as a
+  // "night-lit terrain" view. Lights populated procedurally on top.
+  // ═══════════════════════════════════════════════════════════════════
+  const _nightLightEntities = [];
 
-  function _clearInfraLights() {
-    // Listeners first — a ticker left registered after its primitive is
-    // gone would keep firing against destroyed objects on every frame.
-    for (const t of _infraTickers) {
-      try { viewer.scene.preRender.removeEventListener(t); } catch (_) {}
-    }
-    _infraTickers = [];
-    for (const p of _infraPrimitives) {
-      try { viewer.scene.primitives.remove(p); } catch (_) {}
-    }
-    _infraPrimitives = [];
-    _infraSiteId = null;
+  function _clearNightLights() {
+    for (const e of _nightLightEntities) viewer.entities.remove(e);
+    _nightLightEntities.length = 0;
   }
 
-  // Small round lamp sprite, cached per colour. Billboards rather than
-  // PointPrimitives because PointPrimitive has no heightReference and so
-  // cannot be clamped to terrain: its position is absolute ellipsoid
-  // height, which in Denmark sits ~36 m below the actual ground (geoid
-  // separation). From directly overhead that is invisible, but from a low
-  // oblique angle — drone POV — the vertical error projects sideways and
-  // the whole lighting pattern appears offset from the runway.
-  const _lampSpriteCache = new Map();
-  function _lampSprite(colorHex) {
-    if (_lampSpriteCache.has(colorHex)) return _lampSpriteCache.get(colorHex);
-    const size = 32;
+  // Radial-gradient glow images for point lights. Cached per (color, size) so
+  // we don't regenerate the canvas on every entity. White-hot core + colored
+  // halo fading to transparent — reads as an actual glowing light source
+  // instead of a flat colored disk (which is what Cesium `point` primitives
+  // look like — hence the previous "vague yellow dots" appearance).
+  const _lightGlowCache = new Map();
+  function _lightGlowImage(colorHex) {
+    if (_lightGlowCache.has(colorHex)) return _lightGlowCache.get(colorHex);
+    const size = 128;
     const c = document.createElement('canvas');
     c.width = size; c.height = size;
     const ctx = c.getContext('2d');
+    const cx = size / 2;
+    const cy = size / 2;
     const col = Cesium.Color.fromCssColorString(colorHex);
     const r = Math.round(col.red * 255);
     const g = Math.round(col.green * 255);
     const b = Math.round(col.blue * 255);
-    const grad = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
-    grad.addColorStop(0.00, 'rgba(255,255,255,1)');
-    grad.addColorStop(0.30, `rgba(${r},${g},${b},0.95)`);
-    grad.addColorStop(0.65, `rgba(${r},${g},${b},0.30)`);
-    grad.addColorStop(1.00, `rgba(${r},${g},${b},0)`);
+    const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, cx);
+    grad.addColorStop(0.00, `rgba(255, 255, 255, 1.0)`);   // white-hot core
+    grad.addColorStop(0.15, `rgba(255, 255, 255, 0.95)`);  // core spreads
+    grad.addColorStop(0.30, `rgba(${r}, ${g}, ${b}, 0.85)`); // colored inner halo
+    grad.addColorStop(0.55, `rgba(${r}, ${g}, ${b}, 0.35)`); // soft mid halo
+    grad.addColorStop(0.80, `rgba(${r}, ${g}, ${b}, 0.10)`); // faint outer glow
+    grad.addColorStop(1.00, `rgba(${r}, ${g}, ${b}, 0)`);    // fully transparent edge
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, size, size);
-    _lampSpriteCache.set(colorHex, c);
+    _lightGlowCache.set(colorHex, c);
     return c;
   }
 
-  // Cesium's stock PolylineGlow writes emission already, but everything
-  // reaching it is bounded by a colour whose alpha caps at 1.0, so the
-  // result never exceeds 1.0 and the HDR/ACES/bloom chain has nothing to
-  // work on. This is the same shader with one addition: emission is scaled
-  // by an unbounded `intensity`, which is what actually puts values above
-  // 1.0 into the float HDR target so bloom and tonemapping can respond.
-  // Uniform declarations are generated by Cesium from `uniforms` and must
-  // NOT be repeated in the source.
-  function _nightGlowMaterial(style) {
-    return new Cesium.Material({
-      fabric: {
-        type: `IsrNightGlow_${style.color.replace('#', '')}_${style.intensity}`,
-        uniforms: {
-          color: Cesium.Color.fromCssColorString(style.color).withAlpha(style.alpha),
-          glowPower: style.glowPower,
-          intensity: style.intensity ?? 1.0,
-        },
-        source: `
-          czm_material czm_getMaterial(czm_materialInput materialInput) {
-            czm_material material = czm_getDefaultMaterial(materialInput);
-            vec2 st = materialInput.st;
-            float glow = glowPower / abs(st.t - 0.5) - (glowPower / 0.5);
-            vec4 fragColor;
-            fragColor.rgb = max(vec3(glow - 1.0 + color.rgb), color.rgb);
-            fragColor.a = clamp(0.0, 1.0, glow) * color.a;
-            fragColor = czm_gammaCorrect(fragColor);
-            material.emission = fragColor.rgb * intensity;
-            material.alpha = fragColor.a;
-            return material;
-          }
-        `,
+  function _addLightPoint(lat, lon, color, pixelSize, alpha = 1) {
+    // Billboard-based light. Ground-clamped so it sits on actual terrain
+    // (no more sea-level offset that made lights drift over planes when
+    // camera tilts down). Depth test enabled so buildings/aircraft in front
+    // of the light properly occlude it.
+    return viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lon, lat),
+      billboard: {
+        image: _lightGlowImage(color),
+        // Billboard is a radial gradient — displayed size includes the halo,
+        // so bump up ~2.5× the intended "hot core" pixel size so the visible
+        // bright center matches the old point sizing while the halo extends
+        // beyond it.
+        width: pixelSize * 2.8,
+        height: pixelSize * 2.8,
+        color: Cesium.Color.WHITE.withAlpha(alpha),
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
       },
+      properties: { nightLight: true },
     });
   }
 
-  function _buildInfraPrimitive(polylines, style) {
-    const instances = [];
-    for (const flat of polylines) {
-      if (!flat || flat.length < 4) continue;
-      // Baked format is [lat, lon, lat, lon, ...]; Cesium wants lon,lat.
-      const degrees = new Array(flat.length);
-      for (let i = 0; i < flat.length; i += 2) {
-        degrees[i] = flat[i + 1];
-        degrees[i + 1] = flat[i];
-      }
-      instances.push(new Cesium.GeometryInstance({
-        geometry: new Cesium.GroundPolylineGeometry({
-          positions: Cesium.Cartesian3.fromDegreesArray(degrees),
-          width: style.width,
+  function _addLightPolyline(path, color, width, alpha = 0.7) {
+    // PolylineGlowMaterialProperty gives the road/runway line an actual
+    // glowing bloom appearance (bright core, faded halo along the length)
+    // instead of a flat colored stripe.
+    const positions = Cesium.Cartesian3.fromDegreesArray(path.flatMap(p => [p[1], p[0]]));
+    return viewer.entities.add({
+      polyline: {
+        positions,
+        width,
+        material: new Cesium.PolylineGlowMaterialProperty({
+          glowPower: 0.30,
+          taperPower: 1.0,
+          color: Cesium.Color.fromCssColorString(color).withAlpha(alpha),
         }),
-      }));
-    }
-    if (!instances.length) return null;
-    return new Cesium.GroundPolylinePrimitive({
-      geometryInstances: instances,
-      appearance: new Cesium.PolylineMaterialAppearance({
-        material: _nightGlowMaterial(style),
-      }),
-      // These are decorative, never pickable — keeps them out of the way of
-      // detection entity picking.
-      allowPicking: false,
+        clampToGround: true,
+      },
+      properties: { nightLight: true },
     });
   }
 
-  // Nearest configured site to the camera, so the right baked file loads.
-  function _nearestSiteId(lat, lon) {
-    let best = null;
-    let bestD = Infinity;
-    for (const [sid, site] of Object.entries(SITES)) {
-      const c = site.coordinates;
-      if (!c) continue;
-      const d = Math.hypot(c.lat - lat, (c.lon - lon) * Math.cos(lat * Math.PI / 180));
-      if (d < bestD) { bestD = d; best = sid; }
-    }
-    // ~0.25 deg ≈ 28 km. Beyond that the baked box would not cover the view.
-    return bestD < 0.25 ? best : null;
+  // Lazily-generated radial-gradient PNG for city glow billboards. Bright
+  // amber center fading to fully transparent edge. Much softer than a
+  // solid ellipse (which read as a flat orange disk). Sized in metres
+  // per city via billboard `scale` at add time.
+  let _cityGlowImage = null;
+  function _cityGlowRadialImage() {
+    if (_cityGlowImage) return _cityGlowImage;
+    const size = 256;
+    const c = document.createElement('canvas');
+    c.width = size; c.height = size;
+    const ctx = c.getContext('2d');
+    const g = ctx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+    g.addColorStop(0, 'rgba(255, 200, 120, 0.55)');
+    g.addColorStop(0.3, 'rgba(255, 180, 100, 0.30)');
+    g.addColorStop(0.6, 'rgba(255, 160, 80, 0.12)');
+    g.addColorStop(1, 'rgba(255, 140, 60, 0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, size, size);
+    _cityGlowImage = c;
+    return c;
   }
 
-  async function _updateInfraLights() {
-    const active = imageryMode === 'night' && _isSimMode();
-    if (!active) { _clearInfraLights(); return; }
-    const carto = viewer.camera.positionCartographic;
-    if (!carto || carto.height >= NIGHT_PHOTOREAL_MAX_H) { _clearInfraLights(); return; }
+  function _addCityGlow(lat, lon, radiusKm, intensity) {
+    // Radial-gradient billboard with distance-display gating. Visible at
+    // national/regional zoom (>15km altitude), hidden at close zoom so it
+    // doesn't drown the airport view in orange soup. Scale in pixels sized
+    // roughly to the glow radius at typical viewing altitude.
+    return viewer.entities.add({
+      position: Cesium.Cartesian3.fromDegrees(lon, lat, 0),
+      billboard: {
+        image: _cityGlowRadialImage(),
+        // Billboard sizes in metres via `sizeInMeters` — makes glow scale
+        // naturally as the camera moves closer or further
+        sizeInMeters: true,
+        width: radiusKm * 2000,   // diameter in metres
+        height: radiusKm * 2000,
+        color: Cesium.Color.WHITE.withAlpha(intensity),
+        // Only render when camera altitude is between 15km and 5000km.
+        // Hides the glow when zoomed in close (no orange soup) and when
+        // zoomed way out (globe view).
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(15_000, 5_000_000),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+      properties: { nightLight: true },
+    });
+  }
 
-    const lat = Cesium.Math.toDegrees(carto.latitude);
-    const lon = Cesium.Math.toDegrees(carto.longitude);
-    const siteId = _nearestSiteId(lat, lon);
-    if (!siteId) { _clearInfraLights(); return; }
-    if (siteId === _infraSiteId || _infraLoading) return;
+  function _renderNightLights() {
+    _clearNightLights();
+    // Sizes bumped substantially so lights survive the CSS filter
+    // (brightness 0.16 = they need to be ~2× normal size to still read
+    // as bright points against the darkened ground).
+    for (const rw of CPH_RUNWAYS) {
+      _nightLightEntities.push(_addLightPolyline(rw.path, rw.color, 4, 1.0));
+      const densePoints = interpolatePath(rw.path, rw.light_spacing_m);
+      for (const [lat, lon] of densePoints) {
+        _nightLightEntities.push(_addLightPoint(lat, lon, rw.color, 6, 1.0));
+      }
+    }
+    for (const road of CPH_PERIMETER_ROADS) {
+      const [start, end] = road.endpoints;
+      const points = interpolateSegment(start[0], start[1], end[0], end[1], road.light_spacing_m);
+      for (const [lat, lon] of points) {
+        _nightLightEntities.push(_addLightPoint(lat, lon, road.color, 4, 0.95));
+      }
+    }
+    for (const tw of CPH_TAXIWAYS) {
+      _nightLightEntities.push(_addLightPolyline(tw.path, '#ffcc88', 2.5, 0.95));
+      const densePoints = interpolatePath(tw.path, 30);
+      for (const [lat, lon] of densePoints) {
+        _nightLightEntities.push(_addLightPoint(lat, lon, '#ffcc88', 5, 1.0));
+      }
+    }
+    for (const spot of CPH_RAMP_SPOTS) {
+      _nightLightEntities.push(_addLightPoint(spot.lat, spot.lon, '#ffe8a3', 10, 1.0));
+    }
+    // Motorways + arterials both bumped substantially so all Danish
+    // roads visibly light up like the airport does.
+    for (const mw of DK_MOTORWAYS) {
+      _nightLightEntities.push(_addLightPolyline(mw.points, '#ffa040', 3.5, 1.0));
+    }
+    for (const art of CPH_ARTERIALS) {
+      _nightLightEntities.push(_addLightPolyline(art.points, '#ffd28a', 3.0, 1.0));
+    }
+    // City glows — soft radial halos over major Danish population centres
+    for (const c of CITY_GLOWS) {
+      _nightLightEntities.push(_addCityGlow(c.lat, c.lon, c.radius_km, c.intensity));
+    }
+    console.log(`[Night lights] rendered ${_nightLightEntities.length} entities across airport, motorways, arterials, and city glows`);
+  }
 
-    _infraLoading = true;
+  // ═══════════════════════════════════════════════════════════════════
+  // HTML overlay lights — TRUE glowing lights OUTSIDE the CSS filter
+  // ───────────────────────────────────────────────────────────────────
+  // Cesium entities inside #cesiumContainer are dimmed by the
+  // night-closeup-darken CSS filter (that's how the ground reads dark).
+  // To make lights actually SHINE we render them to a canvas that lives
+  // OUTSIDE #cesiumContainer (sibling element), unaffected by the filter.
+  //
+  // Per-frame: viewer.scene.postRender fires after Cesium draws. For each
+  // 3D light position we project to 2D window coords and draw a radial
+  // gradient. Occluded points (behind the earth) are skipped via
+  // EllipsoidalOccluder. Additive blending ('lighter') sums brightness
+  // where lights overlap — matches real bloom behaviour.
+  //
+  // Zero Cesium global state touched. Zero forbidden APIs. Additive-only.
+  // ═══════════════════════════════════════════════════════════════════
+  let _overlayCanvas = null;
+  let _overlayCtx = null;
+  let _overlayLights = [];
+  let _overlayPostRenderCb = null;
+  let _overlayResizeCb = null;
+
+  // Small deterministic PRNG so per-light jitter is stable across reloads
+  // (no flicker on rebuild). Seed = light index.
+  function _lightRand(seed) {
+    const x = Math.sin(seed * 12.9898 + 78.233) * 43758.5453;
+    return x - Math.floor(x);
+  }
+  // Per-category ground heights matched to real-world terrain +
+  // googlePhotoreal rendering. Numbers picked so lights sit ON the
+  // visible ground plane at drone POV, minimizing parallax drift as
+  // camera tilts. Won't be perfect everywhere (real elevations vary
+  // by tens of meters across DK), but eliminates airport-area drift
+  // which is the demo money shot. NEVER use clampToHeightMostDetailed
+  // (that's what froze the browser previously — banned).
+  const GROUND_H_CPH_AIRPORT = 8;    // CPH ~5m real + safety, photoreal ~5-8m
+  const GROUND_H_CPH_DOWNTOWN = 12;  // Copenhagen inner-city arterials
+  const GROUND_H_MOTORWAY = 10;      // DK motorway average (varies 0-50m)
+  const GROUND_H_GLOW = 8;           // City glows — height doesn't matter much
+
+  function _pushJitteredLight(lat, lon, color, baseSize, baseAlpha, groundH, extra = {}) {
+    const idx = _overlayLights.length;
+    const jLat = (_lightRand(idx * 3.1) - 0.5) * 0.00006;
+    const jLon = (_lightRand(idx * 5.7) - 0.5) * 0.00006;
+    const sizeVar = 0.7 + _lightRand(idx * 7.3) * 0.6;   // 0.7 - 1.3
+    const alphaVar = 0.65 + _lightRand(idx * 11.1) * 0.35; // 0.65 - 1.0
+    _overlayLights.push({
+      cart3: Cesium.Cartesian3.fromDegrees(lon + jLon, lat + jLat, groundH),
+      color, size: baseSize * sizeVar, alpha: Math.min(1, baseAlpha * alphaVar),
+      ...extra,
+    });
+  }
+
+  function _buildOverlayLights() {
+    _overlayLights = [];
+    for (const rw of CPH_RUNWAYS) {
+      const points = interpolatePath(rw.path, rw.light_spacing_m);
+      for (const [lat, lon] of points) {
+        _pushJitteredLight(lat, lon, rw.color, 3, 1.0, GROUND_H_CPH_AIRPORT);
+      }
+    }
+    for (const road of CPH_PERIMETER_ROADS) {
+      const [start, end] = road.endpoints;
+      const points = interpolateSegment(start[0], start[1], end[0], end[1], Math.max(road.light_spacing_m, 90));
+      for (const [lat, lon] of points) {
+        _pushJitteredLight(lat, lon, road.color, 2, 0.85, GROUND_H_CPH_AIRPORT);
+      }
+    }
+    for (const tw of CPH_TAXIWAYS) {
+      const points = interpolatePath(tw.path, 55);
+      for (const [lat, lon] of points) {
+        _pushJitteredLight(lat, lon, '#ffcc88', 2, 0.9, GROUND_H_CPH_AIRPORT);
+      }
+    }
+    for (const spot of CPH_RAMP_SPOTS) {
+      _pushJitteredLight(spot.lat, spot.lon, '#ffe8a3', 5, 1.0, GROUND_H_CPH_AIRPORT);
+    }
+    for (const mw of DK_MOTORWAYS) {
+      const points = interpolatePath(mw.points, 60);
+      for (const [lat, lon] of points) {
+        _pushJitteredLight(lat, lon, '#ffa040', 2.5, 0.9, GROUND_H_MOTORWAY);
+      }
+    }
+    for (const art of CPH_ARTERIALS) {
+      const points = interpolatePath(art.points, 40);
+      for (const [lat, lon] of points) {
+        _pushJitteredLight(lat, lon, '#ffd28a', 2, 0.85, GROUND_H_CPH_DOWNTOWN);
+      }
+    }
+    for (const c of CITY_GLOWS) {
+      _overlayLights.push({
+        cart3: Cesium.Cartesian3.fromDegrees(c.lon, c.lat, GROUND_H_GLOW),
+        color: '#ffc080', size: 40, alpha: 0.55 * c.intensity,
+        isGlow: true, glowRadiusKm: c.radius_km,
+      });
+    }
+    console.log(`[Overlay lights] precomputed ${_overlayLights.length} jittered light points`);
+  }
+
+  function _ensureOverlayCanvas() {
+    if (_overlayCanvas) return;
+    _overlayCanvas = document.getElementById('night-light-overlay-canvas');
+    if (!_overlayCanvas) return;
+    _overlayCtx = _overlayCanvas.getContext('2d');
+    _resizeOverlayCanvas();
+  }
+
+  function _resizeOverlayCanvas() {
+    if (!_overlayCanvas || !_overlayCtx) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    _overlayCanvas.width = Math.round(w * dpr);
+    _overlayCanvas.height = Math.round(h * dpr);
+    _overlayCanvas.style.width = w + 'px';
+    _overlayCanvas.style.height = h + 'px';
+    _overlayCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  // One-shot async: sample REAL Cesium World Terrain elevation at every
+  // light position, replace each light's cart3 with (terrain height +
+  // 0.5m safety lift). Same API pattern the sensor terrain-anchor pass
+  // uses (line ~1067). sampleTerrainMostDetailed loads terrain tiles
+  // ONLY (lightweight, not the 3D-tile depth readback that froze earlier).
+  // Result: lights anchored to actual DK terrain elevation, drift
+  // dramatically reduced at drone POV.
+  let _overlayLightsTerrainSampled = false;
+  async function _sampleOverlayLightsTerrain() {
+    if (_overlayLightsTerrainSampled) return;
+    if (!viewer.terrainProvider) return;
+    if (typeof Cesium.sampleTerrainMostDetailed !== 'function') return;
+    _overlayLightsTerrainSampled = true;
     try {
-      const [data, national] = await Promise.all([
-        loadSiteLights(siteId),
-        loadNationalLights(),
-      ]);
-      // Night/Sim may have been switched off, or the camera moved to another
-      // site, while the file was loading.
-      if (imageryMode !== 'night' || !_isSimMode()) return;
-      _clearInfraLights();
-      if (!data && !national) return;
-      let total = 0;
-
-      // National major network first, so the lit world continues past the
-      // edge of this site's baked box instead of stopping at a hard line.
-      if (national) {
-        for (const cls of ['motorway', 'primary']) {
-          const prim = _buildInfraPrimitive(national[cls] || [], LIGHT_STYLES[cls]);
-          if (prim) {
-            viewer.scene.primitives.add(prim);
-            _infraPrimitives.push(prim);
-            total += (national[cls] || []).length;
-          }
+      const carts = _overlayLights.map(l => {
+        const c = Cesium.Cartographic.fromCartesian(l.cart3);
+        return Cesium.Cartographic.fromRadians(c.longitude, c.latitude);
+      });
+      const sampled = await Cesium.sampleTerrainMostDetailed(viewer.terrainProvider, carts);
+      const LIFT_M = 0.5;
+      let ok = 0;
+      sampled.forEach((cart, i) => {
+        if (cart && cart.height != null && !isNaN(cart.height)) {
+          const light = _overlayLights[i];
+          light.cart3 = Cesium.Cartesian3.fromRadians(
+            cart.longitude, cart.latitude, cart.height + LIFT_M
+          );
+          ok++;
         }
-      }
-      if (!data) { _infraSiteId = siteId; return; }
-
-      for (const cls of LIGHT_CLASSES) {
-        // Runway and taxiway centrelines are not drawn as glow lines —
-        // they get real per-lamp Annex 14 lighting below instead.
-        if (cls === 'runway' || cls === 'taxiway') continue;
-        const style = LIGHT_STYLES[cls];
-        // Split by measured VIIRS radiance so the same class of street is
-        // brighter downtown than on the rural fringe. Falls back to a single
-        // full-strength bucket when a site has no sampled radiance.
-        for (const bucket of bucketByRadiance(data[cls], data.radiance?.[cls])) {
-          const prim = _buildInfraPrimitive(bucket.polylines, {
-            ...style,
-            intensity: style.intensity * bucket.factor,
-          });
-          if (prim) {
-            viewer.scene.primitives.add(prim);
-            _infraPrimitives.push(prim);
-            total += bucket.polylines.length;
-          }
-        }
-      }
-
-      // Runway lighting: individual lamps at ICAO Annex 14 geometry.
-      // Discrete points are correct here, unlike streets — at approach
-      // altitude you genuinely do resolve individual runway lights, and
-      // the colour pattern (green thresholds, red ends, red/white
-      // centreline, approach bars running out past the threshold) is what
-      // makes an airport identifiable rather than a lit rectangle.
-      const rwLights = [
-        ...runwayLightsForSite(data.runway || []),
-        ...taxiwayLightsForSite(data.taxiway || []),
-      ];
-      if (rwLights.length) {
-        // Billboards, not PointPrimitives: only billboards support
-        // heightReference, and without terrain clamping every lamp sits at
-        // absolute ellipsoid height — ~36 m under the ground in Denmark —
-        // which reads as a lateral offset from any low oblique angle.
-        const pts = new Cesium.BillboardCollection({ scene: viewer.scene });
-        for (const l of rwLights) {
-          // In real aerial night photography an airport is a lit AREA, not
-          // a rope of beads. Lamps stay small and shrink with distance so
-          // the city remains the loudest thing in frame, not the runway.
-          const small = (l.type === 'approach' || l.type === 'taxiEdge' || l.type === 'taxiCentre');
-          const px = small ? 3.0 : 4.0;
-          pts.add({
-            position: Cesium.Cartesian3.fromDegrees(l.lon, l.lat),
-            image: _lampSprite(RUNWAY_LIGHT_COLORS[l.type] || '#ffffff'),
-            width: px,
-            height: px,
-            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-            scaleByDistance: new Cesium.NearFarScalar(1000, 1.5, 25_000, 0.45),
-            translucencyByDistance: new Cesium.NearFarScalar(40_000, 1.0, 55_000, 0.0),
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          });
-        }
-        viewer.scene.primitives.add(pts);
-        _infraPrimitives.push(pts);
-        total += rwLights.length;
-        console.error(`[night_lights] ${rwLights.length} aerodrome lamps generated`);
-      }
-
-      // ── IALA navigation lights + Annex 14 Ch.6 obstacle lighting ──
-      // Charted marine lights carry their real colour and flash character,
-      // so these blink at their actual period rather than an invented one.
-      // Region A convention: red to port, green to starboard, entering.
-      const navPts = [];
-      for (const s of data.seamark || []) {
-        const colour = (s.c || '').toLowerCase();
-        const hex = colour.includes('green') ? '#27e06a'
-          : colour.includes('red') ? '#ff3b30'
-          : colour.includes('yellow') ? '#ffd23d'
-          : '#fff4d6';
-        navPts.push({ lat: s.lat, lon: s.lon, hex, size: 5.0, period: s.p || 0, height: 4 });
-      }
-      // Annex 14 Ch.6 requires obstacle lighting on tall structures, not on
-      // every pylon. The query returns all power towers, and ordinary
-      // distribution pylons carry no lights — rendering them put red dots
-      // across the entire city. Only structures with a tagged height at or
-      // above the threshold are lit.
-      const OBSTACLE_MIN_HEIGHT_M = 45;
-      for (const o of data.obstacle || []) {
-        if (!(o.h >= OBSTACLE_MIN_HEIGHT_M)) continue;
-        navPts.push({ lat: o.lat, lon: o.lon, hex: '#ff2a20', size: 4.2, period: 0, height: o.h });
-      }
-      if (navPts.length) {
-        // Billboards for the same reason as the aerodrome lamps: these need
-        // to be referenced to the ground, not to the ellipsoid. A buoy at
-        // "4 m" would otherwise sit 36 m under the sea surface.
-        // RELATIVE_TO_GROUND so an obstacle light still sits at the real
-        // height of its mast rather than on the ground at its base.
-        const nav = new Cesium.BillboardCollection({ scene: viewer.scene });
-        const entries = [];
-        for (const p of navPts) {
-          const prim = nav.add({
-            position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.height),
-            image: _lampSprite(p.hex),
-            width: p.size * 1.6,
-            height: p.size * 1.6,
-            heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
-            scaleByDistance: new Cesium.NearFarScalar(800, 1.6, 15_000, 0.8),
-            // Navigation marks are legible detail close in and pure noise
-            // at regional view, so they are held to the altitude where a
-            // viewer could actually be reading them.
-            distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 18_000),
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          });
-          if (p.period > 0) entries.push({ prim, period: p.period });
-        }
-        viewer.scene.primitives.add(nav);
-        _infraPrimitives.push(nav);
-        total += navPts.length;
-
-        // Flash at the charted period. Driven off the render loop rather
-        // than a timer so it stops cleanly when the primitive is removed.
-        if (entries.length) {
-          const startMs = performance.now();
-          const tick = () => {
-            if (nav.isDestroyed?.()) return;
-            const t = (performance.now() - startMs) / 1000;
-            for (const e of entries) {
-              const on = (t % e.period) < Math.min(1.0, e.period * 0.25);
-              e.prim.color = e.prim.color.withAlpha(on ? 1.0 : 0.12);
-            }
-          };
-          viewer.scene.preRender.addEventListener(tick);
-          _infraTickers.push(tick);
-        }
-        console.error(`[night_lights] ${navPts.length} navigation/obstacle lights (${entries.length} flashing)`);
-      }
-      _infraSiteId = siteId;
-      console.error(`[night_lights] ${siteId}: ${total} lit ways rendered`);
-    } finally {
-      _infraLoading = false;
+      });
+      console.log(`[Overlay lights] terrain-anchored ${ok}/${sampled.length} lights (real DK elevation)`);
+      viewer.scene.requestRender();
+    } catch (err) {
+      console.warn('[Overlay lights] terrain sample failed:', err);
+      _overlayLightsTerrainSampled = false; // allow retry
     }
   }
-  // Registered after the state above is initialised — a listener registered
-  // before its own `let` state is a temporal-dead-zone crash waiting for the
-  // first await that lets an event fire in between.
-  viewer.camera.moveEnd.addEventListener(() => _updateInfraLights());
+
+  function _activateOverlayLights() {
+    _ensureOverlayCanvas();
+    if (!_overlayCanvas) return;
+    if (_overlayLights.length === 0) _buildOverlayLights();
+    _overlayCanvas.classList.add('active');
+    if (!_overlayPostRenderCb) {
+      _overlayPostRenderCb = () => _drawOverlayLights();
+      viewer.scene.postRender.addEventListener(_overlayPostRenderCb);
+    }
+    if (!_overlayResizeCb) {
+      _overlayResizeCb = () => { _resizeOverlayCanvas(); viewer.scene.requestRender(); };
+      window.addEventListener('resize', _overlayResizeCb);
+    }
+    viewer.scene.requestRender();
+    // Kick off terrain anchor. Runs once, then lights are frozen at real
+    // Danish terrain elevation forever (survives POV changes, tilts, etc).
+    _sampleOverlayLightsTerrain();
+  }
+
+  function _deactivateOverlayLights() {
+    if (_overlayCanvas) {
+      _overlayCanvas.classList.remove('active');
+      if (_overlayCtx) {
+        _overlayCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+      }
+    }
+    if (_overlayPostRenderCb) {
+      viewer.scene.postRender.removeEventListener(_overlayPostRenderCb);
+      _overlayPostRenderCb = null;
+    }
+    if (_overlayResizeCb) {
+      window.removeEventListener('resize', _overlayResizeCb);
+      _overlayResizeCb = null;
+    }
+  }
+
+  const _overlayScratch2 = new Cesium.Cartesian2();
+  function _drawOverlayLights() {
+    if (!_overlayCtx || !_overlayCanvas) return;
+    const w = window.innerWidth;
+    const h = window.innerHeight;
+    _overlayCtx.clearRect(0, 0, w, h);
+
+    const cameraPos = viewer.camera.positionWC;
+    const cameraAlt = viewer.camera.positionCartographic?.height || 100000;
+    const occluder = new Cesium.EllipsoidalOccluder(Cesium.Ellipsoid.WGS84, cameraPos);
+    const scene = viewer.scene;
+
+    // Additive blend — overlapping lights sum brightness (real bloom look)
+    _overlayCtx.globalCompositeOperation = 'lighter';
+
+    for (const light of _overlayLights) {
+      if (!occluder.isPointVisible(light.cart3)) continue;
+      // worldToWindowCoordinates is the newer API; fall back to wgs84 name for older builds
+      const winPos = (Cesium.SceneTransforms.worldToWindowCoordinates || Cesium.SceneTransforms.wgs84ToWindowCoordinates)
+                       .call(Cesium.SceneTransforms, scene, light.cart3, _overlayScratch2);
+      if (!winPos) continue;
+      const x = winPos.x;
+      const y = winPos.y;
+      if (x < -100 || x > w + 100 || y < -100 || y > h + 100) continue;
+
+      let renderSize = light.size;
+      if (light.isGlow) {
+        // City halo — scale down as camera zooms in (soft ambient sky glow at distance)
+        renderSize = Math.min(220, 6000 * light.glowRadiusKm / Math.max(cameraAlt, 20000));
+      }
+      _drawGlowPoint(_overlayCtx, x, y, renderSize, light.color, light.alpha);
+    }
+
+    _overlayCtx.globalCompositeOperation = 'source-over';
+  }
+
+  function _drawGlowPoint(ctx, x, y, size, colorHex, alpha) {
+    const col = Cesium.Color.fromCssColorString(colorHex);
+    const r = Math.round(col.red * 255);
+    const g = Math.round(col.green * 255);
+    const b = Math.round(col.blue * 255);
+    // Halo width tightened from 3.5× to 2.4× base size. Same brightness
+    // + saturation — only the OUTER falloff is narrowed so lights read as
+    // distinct points instead of merging into a yellow blob mid-runway.
+    const halo = size * 2.4;
+    const grad = ctx.createRadialGradient(x, y, 0, x, y, halo);
+    grad.addColorStop(0.00, `rgba(255,255,255,${(0.95 * alpha).toFixed(3)})`);
+    grad.addColorStop(0.08, `rgba(255,255,255,${(0.80 * alpha).toFixed(3)})`);
+    grad.addColorStop(0.22, `rgba(${r},${g},${b},${(0.65 * alpha).toFixed(3)})`);
+    grad.addColorStop(0.50, `rgba(${r},${g},${b},${(0.22 * alpha).toFixed(3)})`);
+    grad.addColorStop(0.80, `rgba(${r},${g},${b},${(0.05 * alpha).toFixed(3)})`);
+    grad.addColorStop(1.00, `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(x - halo, y - halo, halo * 2, halo * 2);
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Night close-up mode (safe retry — DOM-only darken)
+  // ───────────────────────────────────────────────────────────────────
+  // When night mode is active AND camera altitude < 15km, apply:
+  //   1. Imagery layer alpha/brightness/show toggles for Bing / SDFI /
+  //      EarthAtNight — these are the SAME properties applyImageryMode
+  //      already flips per mode, so they self-heal on any user toggle.
+  //   2. CSS filter on #cesiumContainer wrapper (NOT the canvas, NOT
+  //      via any Cesium API) — purely browser-compositor darkening.
+  // Buildings kept dark (their init-time tint + IBL stay untouched).
+  //
+  // Explicitly NEVER touching: bloom, canvas.style.filter, tile styles,
+  // osmBuildings.lightColor/IBL, globe.enableLighting/atmosphere/clock.
+  // Those APIs leaked corruption into day mode in previous attempts.
+  //
+  // Reset happens automatically when user toggles day/auto — applyImageryMode
+  // fully resets Bing/SDFI/EarthAtNight to that mode's values.
+  // ═══════════════════════════════════════════════════════════════════
+  // Night close-up (STEP 1): below 50km altitude in night mode, render
+  // buildings + ground exactly like day mode does. Sky stays night-dark
+  // (via skyAtmosphere brightness + night clock). Procedural lights
+  // continue on top. NO darkening filter yet — that's step 2 once this
+  // baseline is confirmed working.
+  //
+  // The trick to "dark sky + lit ground": night clock (sun below horizon
+  // → dark sky) + enableLighting=false (globe surface flat-lit, ignores
+  // sun position → ground fully visible).
+  //
+  // Every write has a paired reverse in _applyNightDistantConfig().
+  // NEVER touches bloom (was corruption source) or canvas.style.filter.
+  let _nightCloseUpActive = false;
+  function _updateNightCloseUp() {
+    if (imageryMode !== 'night') {
+      if (_nightCloseUpActive) {
+        _applyNightDistantConfig();
+        _nightCloseUpActive = false;
+      }
+      const container = document.getElementById('cesiumContainer');
+      if (container) container.classList.remove('night-closeup-darken');
+      _deactivateOverlayLights();
+      return;
+    }
+    const h = viewer.camera.positionCartographic?.height || 0;
+    const closeUp = h < 50_000;
+    const container = document.getElementById('cesiumContainer');
+    if (closeUp && !_nightCloseUpActive) {
+      _applyNightCloseUpConfig();
+      _nightCloseUpActive = true;
+      if (container) container.classList.add('night-closeup-darken');
+      _activateOverlayLights();
+    } else if (!closeUp && _nightCloseUpActive) {
+      _applyNightDistantConfig();
+      _nightCloseUpActive = false;
+      if (container) container.classList.remove('night-closeup-darken');
+      _deactivateOverlayLights();
+    }
+  }
+
+  function _applyNightCloseUpConfig() {
+    // Replicates EVERY visual property day mode uses, INLINE (does not
+    // call applyImageryMode) so future day-mode edits don't propagate
+    // here and vice versa. Sky pushed EXTRA dark here (below night's
+    // baseline -0.4) so it reads as fully-night at close-up in
+    // combination with the DOM darken filter. Reversed in distant.
+    viewer.scene.globe.enableLighting = false;
+    viewer.scene.skyAtmosphere.brightnessShift = -0.85;   // was -0.4 (night baseline)
+    viewer.scene.skyAtmosphere.saturationShift = -0.4;    // was -0.2
+    viewer.scene.globe.atmosphereLightIntensity = 1.0;    // was 3.0
+    // Imagery brightness = darken THE IMAGERY LAYER at the GPU level
+    // (BEFORE Cesium composites entities on top). Result: ground reads as
+    // night-dark, but our light entities (points/polylines/billboards)
+    // draw at full brightness on top → real "lights punching through
+    // dark ground" effect. No CSS filter needed.
+    // Imagery layers back to day-full brightness. CSS filter on the
+    // container does the visual darkening (safer — cannot corrupt tile
+    // state the way osmBuildings IBL toggling did).
+    if (bingLayer) {
+      bingLayer.show = true;
+      bingLayer.alpha = 1.0;
+      bingLayer.brightness = 1.0;
+      bingLayer.saturation = 1.0;
+    }
+    if (earthAtNightLayer) {
+      earthAtNightLayer.show = false;
+      earthAtNightLayer.alpha = 0;
+      earthAtNightLayer.brightness = 1.0;
+      earthAtNightLayer.dayAlpha = 1.0;
+      earthAtNightLayer.nightAlpha = 1.0;
+    }
+    if (window.__isr_sdfiLayer) {
+      window.__isr_sdfiLayer.show = true;
+      window.__isr_sdfiLayer.alpha = 1.0;
+      window.__isr_sdfiLayer.brightness = 1.0;
+    }
+    if (googlePhotoreal) {
+      googlePhotoreal.show = true;
+      googlePhotoreal.lightColor = undefined;
+      if (googlePhotoreal.imageBasedLighting) {
+        googlePhotoreal.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(1.0, 1.0);
+      }
+    }
+    // osmBuildings deliberately NOT touched. Toggling its
+    // imageBasedLighting / lightColor across mode transitions is what
+    // corrupted the tileset (parts of buildings rendering as white
+    // untextured shells). Left at whatever state applyImageryMode set.
+    // Hide the city-glow BILLBOARDS at close zoom — they were the "big
+    // orange blubber" showing up over the day-rendered ground at
+    // intermediate zoom (distance-display 15km threshold wasn't enough).
+    for (const e of _nightLightEntities) {
+      if (e.billboard && e.properties?.getValue?.()?.nightLight) {
+        e.show = false;
+      }
+    }
+  }
+
+  function _applyNightDistantConfig() {
+    // Every close-up write above reversed to original night config.
+    // osmBuildings deliberately NOT touched (see close-up config note).
+    viewer.scene.globe.enableLighting = true;
+    viewer.scene.skyAtmosphere.brightnessShift = -0.4;    // night baseline
+    viewer.scene.skyAtmosphere.saturationShift = -0.2;
+    viewer.scene.globe.atmosphereLightIntensity = 3.0;
+    if (bingLayer) bingLayer.brightness = 0.15;
+    if (earthAtNightLayer) {
+      earthAtNightLayer.show = true;
+      earthAtNightLayer.alpha = 1.0;
+    }
+    if (window.__isr_sdfiLayer) window.__isr_sdfiLayer.show = false;
+    if (googlePhotoreal) {
+      googlePhotoreal.show = false;
+    }
+    // Restore city glow billboard visibility for the distant view
+    for (const e of _nightLightEntities) {
+      if (e.billboard && e.properties?.getValue?.()?.nightLight) {
+        e.show = true;
+      }
+    }
+  }
+  viewer.camera.moveEnd.addEventListener(() => _updateNightCloseUp());
 
   viewer.scene.postRender.addEventListener(() => {
     if (imageryMode !== 'auto') return;
@@ -2432,11 +2322,6 @@ async function main() {
           }),
           clampToGround: true,
         },
-        // siteId lets applySiteScopeVisibility find this entity later.
-        // Sensors and coverage rings already carried it; the boundary,
-        // perimeter and sub-line families did not, so nothing could ask
-        // them which site they belonged to.
-        properties: { type: 'site-boundary', siteId: site.id },
       });
     }
 
@@ -2457,7 +2342,6 @@ async function main() {
             outline: false,
             heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
           },
-          properties: { type: 'site-perimeter', siteId: site.id },
         });
         // Dashed outline — matches CPH airport siteBoundary weight for
         // consistent site-boundary reading across all site types.
@@ -2475,7 +2359,6 @@ async function main() {
             }),
             clampToGround: true,
           },
-          properties: { type: 'site-perimeter', siteId: site.id },
         });
       });
     }
@@ -2494,7 +2377,6 @@ async function main() {
             }),
             clampToGround: true,
           },
-          properties: { type: 'site-subline', siteId: site.id },
         });
       });
     }
@@ -2558,27 +2440,10 @@ async function main() {
     }
   }
 
-  // Render all sites. Every site is drawn once here regardless of who
-  // is signed in, then applySiteScopeVisibility below hides the ones
-  // the active account does not own. Rendering is not repeated on role
-  // switch, so the sweep is what keeps the globe honest.
+  // Render all sites
   for (const siteKey of Object.keys(SITES)) {
     renderSite(SITES[siteKey]);
   }
-
-  // Account scope on the globe. Hides every entity belonging to a site
-  // the active account does not own. Admin and every receiver are a
-  // no-op here: _roleCanSeeSite returns true for any non-operator role.
-  // entity.show = false removes an entity from picking as well as from
-  // render, so a hidden sensor also stops being clickable.
-  function applySiteScopeVisibility() {
-    for (const e of viewer.entities.values) {
-      const sid = e.properties?.siteId?.getValue?.();
-      if (!sid) continue;
-      e.show = _roleCanSeeSite(sid);
-    }
-  }
-  applySiteScopeVisibility();
 
   // ── Lock all sensor positions to absolute Cartesian3 ──
   // Sample terrain height once, then set entity positions with a small
@@ -2653,10 +2518,7 @@ async function main() {
   function renderRollupMarkers() {
     for (const entity of rollupEntities.values()) viewer.entities.remove(entity);
     rollupEntities.clear();
-    // Filtered at the source rather than swept afterwards: this path
-    // already re-runs on role switch, so an operator never sees another
-    // owner's site name appear at country zoom.
-    for (const siteId of _visibleSiteIds()) {
+    for (const siteId of Object.keys(SITES)) {
       const site = SITES[siteId];
       const s = rollupState(siteId);
       const label = s.count ? `${site.name}  ·  ${s.count} live` : site.name;
@@ -3133,137 +2995,6 @@ async function main() {
     ctx.fillRect(13, 35, 4, 6);
     ctx.fillRect(39, 17, 4, 6);
     ctx.fillRect(39, 35, 4, 6);
-
-    return c;
-  }
-
-  // ── Consequence responder icons ────────────────────────────────────
-  // Medical, fire and heavy rescue units were all drawn with the police
-  // vehicle or the special forces glyph, because those were the only
-  // ground shapes that existed. An ambulance rendered as a police car
-  // with a counter-drone jamming antenna on its roof.
-  //
-  // All three are top-down like policeVehicleIcon above, same 56px
-  // canvas and same wheel treatment, so they read as one family. The
-  // distinguishing mark carries the meaning: a cross, a ladder, a
-  // lifting frame.
-
-  // Ambulance and physician car. Van proportions, cross on the roof,
-  // and deliberately no roof antenna: these carry no jamming equipment.
-  function ambulanceIcon(hex) {
-    const c = document.createElement('canvas');
-    c.width = 56; c.height = 56;
-    const ctx = c.getContext('2d');
-
-    ctx.fillStyle = hex;
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.roundRect(16, 9, 24, 40, 3);
-    ctx.fill(); ctx.stroke();
-
-    // Windscreen and rear window
-    ctx.fillStyle = 'rgba(6, 8, 11, 0.55)';
-    ctx.beginPath(); ctx.roundRect(19, 12, 18, 6, 1); ctx.fill();
-    ctx.beginPath(); ctx.roundRect(19, 40, 18, 6, 1); ctx.fill();
-
-    // Roof cross. White on the body colour for contrast at small sizes.
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(26, 23, 4, 14);
-    ctx.fillRect(21, 28, 14, 4);
-
-    ctx.fillStyle = 'rgba(6, 8, 11, 0.8)';
-    ctx.fillRect(13, 15, 4, 6);
-    ctx.fillRect(13, 37, 4, 6);
-    ctx.fillRect(39, 15, 4, 6);
-    ctx.fillRect(39, 37, 4, 6);
-
-    return c;
-  }
-
-  // Municipal fire engine. Longer than an ambulance, ladder down the
-  // roof, three axles.
-  function fireEngineIcon(hex) {
-    const c = document.createElement('canvas');
-    c.width = 56; c.height = 56;
-    const ctx = c.getContext('2d');
-
-    ctx.fillStyle = hex;
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.roundRect(15, 6, 26, 44, 3);
-    ctx.fill(); ctx.stroke();
-
-    // Cab at the front only; the rest is body.
-    ctx.fillStyle = 'rgba(6, 8, 11, 0.55)';
-    ctx.beginPath(); ctx.roundRect(18, 9, 20, 6, 1); ctx.fill();
-
-    // Ladder: two rails with rungs between them.
-    ctx.strokeStyle = 'rgba(6, 8, 11, 0.8)';
-    ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    ctx.moveTo(22, 20); ctx.lineTo(22, 46);
-    ctx.moveTo(34, 20); ctx.lineTo(34, 46);
-    ctx.stroke();
-    ctx.lineWidth = 1.2;
-    for (let y = 23; y <= 44; y += 5) {
-      ctx.beginPath(); ctx.moveTo(22, y); ctx.lineTo(34, y); ctx.stroke();
-    }
-
-    ctx.fillStyle = 'rgba(6, 8, 11, 0.8)';
-    ctx.fillRect(12, 13, 4, 6);
-    ctx.fillRect(12, 30, 4, 6);
-    ctx.fillRect(12, 40, 4, 6);
-    ctx.fillRect(40, 13, 4, 6);
-    ctx.fillRect(40, 30, 4, 6);
-    ctx.fillRect(40, 40, 4, 6);
-
-    return c;
-  }
-
-  // Heavy rescue unit. Boxy body with side equipment lockers and a
-  // lifting frame on the roof, which is what distinguishes it from a
-  // fire engine at a glance.
-  function rescueTeamIcon(hex) {
-    const c = document.createElement('canvas');
-    c.width = 56; c.height = 56;
-    const ctx = c.getContext('2d');
-
-    ctx.fillStyle = hex;
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.roundRect(15, 8, 26, 41, 2);
-    ctx.fill(); ctx.stroke();
-
-    ctx.fillStyle = 'rgba(6, 8, 11, 0.55)';
-    ctx.beginPath(); ctx.roundRect(18, 11, 20, 6, 1); ctx.fill();
-
-    // Side equipment lockers.
-    ctx.strokeStyle = 'rgba(6, 8, 11, 0.7)';
-    ctx.lineWidth = 1;
-    for (let y = 23; y <= 43; y += 7) {
-      ctx.beginPath(); ctx.moveTo(16, y); ctx.lineTo(21, y); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(35, y); ctx.lineTo(40, y); ctx.stroke();
-    }
-
-    // Lifting frame: an A shape over the rear deck.
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.6;
-    ctx.beginPath();
-    ctx.moveTo(23, 44); ctx.lineTo(28, 24); ctx.lineTo(33, 44);
-    ctx.stroke();
-    ctx.lineWidth = 1.2;
-    ctx.beginPath();
-    ctx.moveTo(25, 36); ctx.lineTo(31, 36);
-    ctx.stroke();
-
-    ctx.fillStyle = 'rgba(6, 8, 11, 0.8)';
-    ctx.fillRect(12, 15, 4, 6);
-    ctx.fillRect(12, 38, 4, 6);
-    ctx.fillRect(40, 15, 4, 6);
-    ctx.fillRect(40, 38, 4, 6);
 
     return c;
   }
@@ -4008,19 +3739,16 @@ async function main() {
   const CD_PROFILE = {
     'helicopter-intercept': {
       cruiseKmh: 250, arriveAtM: 500, engageSec: 8,
-      onboardSensorRangeM: 800,   // EO/IR turret, longest onboard reach
       icon: 'helicopter', trail: true, airborne: true,
       label: 'Helicopter intercept',
     },
     'army-c-uas': {
       cruiseKmh: 0, arriveAtM: null, engageSec: 12,
-      onboardSensorRangeM: 1500,   // RF detection array, static emplacement
       icon: 'jammer', trail: false, airborne: false, radiationCone: true,
       label: 'Army Counter-Drone Jammer',
     },
     'police-c-uas': {
       cruiseKmh: 80, arriveAtM: 500, engageSec: 10,
-      onboardSensorRangeM: 350,   // vehicle-mounted detector + visual
       icon: 'police-vehicle', trail: false, airborne: false, radiationCone: true,
       useRoadRouting: true,   // ground vehicle → follow real streets via OSRM
       supportsMultiDispatch: true,   // more than one patrol from same base is doctrine
@@ -4035,11 +3763,9 @@ async function main() {
       // Prevents all cars stopping at exact same (lat, lon) after arrival.
       cordonSlotSpreadM: 18,
       label: 'Police Counter-Drone Patrol',
-      labelPlural: 'Police counter-drone patrols',
     },
     'army-isr-drone': {
       cruiseKmh: 60, arriveAtM: 300, engageSec: 6,
-      onboardSensorRangeM: 600,   // ISR optics package
       icon: 'quadcopter', trail: true, airborne: true,
       visualVerifyOnly: true,   // does NOT neutralise on its own
       label: 'ISR drone (visual verify)',
@@ -4056,7 +3782,6 @@ async function main() {
     },
     'counter-drone-swarm': {
       cruiseKmh: 120, arriveAtM: 200, engageSec: 4,
-      onboardSensorRangeM: 400,   // interceptor seeker head
       icon: 'counter-drone-interceptor', trail: true, airborne: true,
       swarmSize: 3,              // 3 interceptor drones per dispatch
       swarmSpacingM: 130,        // wider triangle so icons read as distinct pack
@@ -4095,7 +3820,6 @@ async function main() {
       useRoadRouting: true, supportsMultiDispatch: true, maxUnitsPerDispatch: 5,
       billboardScale: 0.55, swarmSpacingM: 40, cordonSlotSpreadM: 18,
       label: 'Police patrol responder',
-      labelPlural: 'Police patrol responders',
     },
     'receiver-k9-unit': {
       cruiseKmh: 70, arriveAtM: 300, engageSec: 60,
@@ -4132,111 +3856,12 @@ async function main() {
       icon: 'sof', trail: false, airborne: false,
       label: 'National coordination cell',
     },
-    // ── Medical + rescue response (impact / mass-casualty scenes) ──
-    // Plain names per operational reality: ambulances and the
-    // emergency doctor car (akutlægebil) deploy to a point of impact.
-    // Ambulances multi-dispatch like patrol packs; the akutlægebil is
-    // a single faster unit. BRS rescue team is the national civil
-    // protection heavy-rescue element.
-    // consequenceOnly: this unit responds to the CONSEQUENCES of an
-    // incident (casualties, fire, wreckage) and never neutralises a
-    // threat. Without it, an ambulance completing its on-scene timer
-    // falls through _resolveEngagement's kinetic branch and rewrites
-    // the case outcome to 'neutralized', crediting the kill to the
-    // ambulance. Distinct from visualVerifyOnly, which suppresses the
-    // same write but toasts "visual verify complete", wrong wording
-    // for a medical or fire unit.
-    'receiver-ambulance': {
-      cruiseKmh: 85, arriveAtM: 400, engageSec: 300,
-      stagesAtScene: true,   // on-station state reads STAGING, not ENGAGING
-      consequenceOnly: true,
-      icon: 'ambulance', trail: false, airborne: false,
-      useRoadRouting: true, supportsMultiDispatch: true, maxUnitsPerDispatch: 5,
-      billboardScale: 0.55, swarmSpacingM: 40, cordonSlotSpreadM: 18,
-      label: 'Ambulance',
-      labelPlural: 'Ambulancer',
-    },
-    'receiver-akutlaegebil': {
-      cruiseKmh: 105, arriveAtM: 350, engageSec: 240,
-      stagesAtScene: true,   // on-station state reads STAGING, not ENGAGING
-      consequenceOnly: true,
-      icon: 'ambulance', trail: false, airborne: false,
-      useRoadRouting: true, billboardScale: 0.55,
-      label: 'Akutlægebil',
-    },
-    'receiver-rescue-team': {
-      cruiseKmh: 70, arriveAtM: 400, engageSec: 900,
-      consequenceOnly: true,
-      icon: 'rescue-unit', trail: false, airborne: false,
-      useRoadRouting: true, billboardScale: 0.65,
-      label: 'Rescue team',
-    },
-    'receiver-brandbil': {
-      cruiseKmh: 75, arriveAtM: 350, engageSec: 600,
-      icon: 'fire-engine', trail: false, airborne: false,
-      useRoadRouting: true, supportsMultiDispatch: true, maxUnitsPerDispatch: 4,
-      billboardScale: 0.6, swarmSpacingM: 40, cordonSlotSpreadM: 18,
-      // Danish doctrine at attack scenes (REFIL): fire units stage at
-      // the assembly point until police declare the scene safe, same
-      // as medical units.
-      stagesAtScene: true,
-      consequenceOnly: true,
-      label: 'Brandbil',
-      labelPlural: 'Brandbiler',
-    },
     'receiver-cyber-team': {
       cruiseKmh: 0, arriveAtM: null, engageSec: 60,
       icon: 'sof', trail: false, airborne: false,
       label: 'National cyber crime team',
     },
   };
-
-  // Plain display name for a dispatch kind, for anything an operator
-  // reads. RESPONSE_OPTION_DETAILS carries rich copy for the eleven
-  // counter-drone options; none of the eleven receiver kinds has an
-  // entry there, so every one of them fell through to the raw internal
-  // key. A hospital's dispatch card was headed "receiver-ambulance".
-  //
-  // CD_PROFILE already declares a correct plain label for all eleven,
-  // sitting beside the profile it describes, so read that rather than
-  // duplicating eleven entries into another table that would then need
-  // keeping in sync. The final fallback only runs for a kind that has
-  // neither, and title-cases rather than printing a slug.
-  function _kindDisplayName(kind) {
-    if (!kind) return 'Response unit';
-    return RESPONSE_OPTION_DETAILS?.[kind]?.displayName
-      || CD_PROFILE?.[kind]?.label
-      || String(kind).replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-  }
-
-  // Outcomes an operator can record against a dispatch once it is done.
-  //
-  // outcomesForKind returns an empty list for every receiver kind, and
-  // the caller then fell back to a single option reading "Engagement
-  // complete". An ambulance does not have an engagement. A hospital was
-  // being asked to confirm that its ambulance's engagement was
-  // complete, which is both wrong and exactly the vocabulary that must
-  // not appear near a medical or fire unit.
-  //
-  // Consequence responders get outcomes that describe what actually
-  // happens at a scene. Everything else keeps the engagement default.
-  const _CONSEQUENCE_OUTCOMES = [
-    { id: 'complete', label: 'Response complete' },
-    { id: 'no_action_required', label: 'No action required on arrival' },
-    { id: 'stood_down', label: 'Stood down before arrival' },
-    { id: 'handed_over', label: 'Handed over to another service' },
-  ];
-  function _outcomeOptionsForKind(kind) {
-    const declared = outcomesForKind(kind);
-    if (declared.length) return declared;
-    // Any unit that cannot neutralise should not be asked about an
-    // engagement. consequenceOnly covers medical and fire; the older
-    // visualVerifyOnly marks a profile documented as "does NOT
-    // neutralise on its own" and belongs in the same branch.
-    const _p = CD_PROFILE?.[kind];
-    if (_p?.consequenceOnly || _p?.visualVerifyOnly) return _CONSEQUENCE_OUTCOMES;
-    return [{ id: 'complete', label: 'Engagement complete' }];
-  }
 
   // Simulation-only physics constants. In live operations the platform
   // receives real telemetry from actual assets via adapters (per
@@ -4323,102 +3948,6 @@ async function main() {
   // airborne interceptors. Each patrol gets pinned to a specific
   // wreckage id + ingress heading, then re-routed via OSRM from its
   // current live position.
-  // ── Swarm Phase 2: breakaway promotion ─────────────────────────
-  // A member that leaves the formation (sustained deviation beyond
-  // its slot offset + threshold) promotes to its OWN child event with
-  // full lifecycle and provenance. The parent's member track flips to
-  // 'broken-away' with a pointer; both events cross-link. The child
-  // is a TRACKING event — the render (billboard, trail, coverage
-  // gating) stays with the parent's swarm wrapper, and the child's
-  // lastPosition/detected mirror the member each tick. Detection-only
-  // throughout: promotion creates tracking context, never action.
-  // Tuning: window.__isr_breakaway.
-  window.__isr_breakaway = { distM: 500, graceSec: 10 };
-
-  function _promoteBreakawayMember(event, sw, pos, hdgDeg, speedMs) {
-    const childId = nextEventId();
-    const nowIso = new Date().toISOString();
-    const inCov = _shouldAutoDetect(pos.lat, pos.lon, pos.alt);
-    const child = {
-      id: childId,
-      siteId: event.siteId,
-      classification: event.classification,
-      threat: event.threat,
-      platform: 'quadcopter',
-      droneType: `${sw.model || 'Unknown platform'} (detached from ${event.id})`,
-      confidence: event.confidence,
-      status: 'active',
-      startTime: nowIso,
-      endTime: null,
-      duration: 0,
-      entry: null, exit: null,
-      lastPosition: { lat: pos.lat, lon: pos.lon, alt: pos.alt, heading: hdgDeg, speed: speedMs, timestamp: nowIso },
-      contributingSensors: [],
-      evidence: event.evidence ? { ...event.evidence } : null,
-      notes: [{
-        timestamp: nowIso,
-        author: 'AUTO-CORRELATOR',
-        text: `Member ${sw.memberId || sw.role} broke formation from ${event.id}. Promoted to independent track.`,
-      }],
-      templateKey: null,
-      multiSiteTrack: true,
-      detected: inCov,
-      droneCount: 1,
-      memberTracks: [{
-        memberId: `${childId}-m0`,
-        sourceMemberId: sw.memberId || null,
-        nnTrackId: null,
-        kinematics: { lat: pos.lat, lon: pos.lon, alt: pos.alt, heading: hdgDeg, speedMs },
-        inCoverage: inCov,
-        status: 'tracked',
-        classification: event.classification,
-        class_confidence: event.confidence ?? null,
-        formationOffset: { ...(sw.offset || { forward: 0, right: 0, up: 0 }) },
-        role: sw.role || 'detached',
-        model: sw.model || null,
-        rfMHz: sw.rfMHz || null,
-        history: [{ status: 'tracked', at: nowIso, reason: 'breakaway promotion' }],
-      }],
-      provenance: { breakawayOf: event.id, sourceMemberId: sw.memberId || null, promotedAt: nowIso },
-      linkedEventIds: [event.id],
-      spawnTs: Date.now(),
-    };
-    addEvent(child);
-    appendEventArray(event.id, 'linkedEventIds', childId);
-    appendEventArray(event.id, 'notes', {
-      timestamp: nowIso,
-      author: 'AUTO-CORRELATOR',
-      text: `Member ${sw.role || sw.memberId} broke formation. Tracking independently as ${childId}.`,
-      type: 'breakaway',
-    });
-    if (sw.memberId) setMemberStatus(event.id, sw.memberId, 'broken-away', { childEventId: childId, reason: 'sustained formation deviation' });
-    sw._breakawayChildId = childId;
-    toast(`Formation break · ${sw.model || 'member'} tracking independently as ${childId}.`, 'warn');
-    renderAlertStrip();
-    return child;
-  }
-
-  // Onboard-sensor pursuit: does any active response unit still hold
-  // the target with its OWN sensors? Per-model range lives in
-  // CD_PROFILE.onboardSensorRangeM (new response models plug in by
-  // declaring theirs). Deliberately independent of the site sensor
-  // mesh: the C2 map renders only what OUR sensors see, so a pursuit
-  // held on a responder's seeker keeps the event alive without making
-  // the target visible — the operator just sees the responder turn.
-  function _onboardTrackMaintained(event, p) {
-    const lat = p?.lat ?? event?.lastPosition?.lat;
-    const lon = p?.lon ?? event?.lastPosition?.lon;
-    if (lat == null || lon == null) return false;
-    for (const [, cd] of _counterDispatches) {
-      if (cd.eventId !== event.id) continue;
-      if (cd.state !== 'en_route' && cd.state !== 'engaging') continue;
-      const rangeM = cd.profile?.onboardSensorRangeM;
-      if (!rangeM) continue;
-      if (haversineM(cd.curLat, cd.curLon, lat, lon) <= rangeM) return true;
-    }
-    return false;
-  }
-
   function _rebalancePatrolsToWreckages(event) {
     if (!event || !Array.isArray(event.wreckages) || !event.wreckages.length) return;
     const patrolDispatches = [];
@@ -4427,11 +3956,6 @@ async function main() {
       if (!d.profile?.useRoadRouting) continue;   // ground vehicles only
       if (d.profile?.airborne) continue;
       if (d.state === 'complete' || d.rtbCompleted) continue;
-      // A unit already released and driving home must not be re-pinned
-      // to a cordon: it would be handed a fresh wreckage assignment and
-      // an OSRM route it will never follow, while physically continuing
-      // to base. A unit already holding a cordon keeps the one it has.
-      if (d.state === 'rtb_home' || d.state === 'rtb_via_last_known' || d.state === 'holding-cordon') continue;
       patrolDispatches.push(d);
     }
     if (!patrolDispatches.length) return;
@@ -4444,36 +3968,8 @@ async function main() {
     for (const d of patrolDispatches) {
       const a = assignments.get(d.id);
       if (!a) continue;
-      // Consequence responders get a SCENE assignment, not a cordon
-      // assignment. Same wreckage, same ingress standoff, different
-      // field, because 'holding-cordon' is promoted off
-      // assignedWreckageId and an ambulance must never be promoted into
-      // a police perimeter state.
-      //
-      // They still need the assignment: it is the only thing that aims
-      // them at where the airframe actually came down. Without it a unit
-      // dispatched while the drone was still flying would drive to the
-      // dispatch-time guess and stay there.
-      const isConsequence = leavesSceneUnassisted(d.profile);
-      const prevWreckId = isConsequence ? d.sceneWreckageId : d.assignedWreckageId;
-      // A responder that is ALREADY WORKING A KNOWN SCENE is not sent to
-      // a second crash site. It finishes where it is.
-      //
-      // Tested on prevWreckId, not on state alone. 'engaging' does not
-      // mean "on scene", it means "route consumed": a responder
-      // dispatched while the drone was still flying drives to the
-      // dispatch-time guess point and flips to 'engaging' on arriving
-      // THERE, with no scene assigned. That unit must still be re-aimed
-      // when the airframe actually comes down, which is the whole
-      // reason the assignment exists.
-      //
-      // And this returns BEFORE the writes below. Stamping the new
-      // wreck id and then bailing out left a responder standing at
-      // wreck A while its record claimed wreck B, which would hold B's
-      // perimeter up and let A's clear with the ambulance still on it.
-      if (isConsequence && d.state === 'engaging' && prevWreckId) continue;
-      if (isConsequence) d.sceneWreckageId = a.wreckageId;
-      else d.assignedWreckageId = a.wreckageId;
+      const prevWreckId = d.assignedWreckageId;
+      d.assignedWreckageId = a.wreckageId;
       d.targetLat = a.ingress.lat;
       d.targetLon = a.ingress.lon;
       // Only reroute if the wreckage assignment actually changed OR
@@ -4565,9 +4061,6 @@ async function main() {
       case 'helicopter':               return helicopterIcon(GREEN_COUNTER_HEX);
       case 'jammer':                   return jammerIcon(GREEN_COUNTER_HEX);
       case 'police-vehicle':           return policeVehicleIcon(GREEN_COUNTER_HEX);
-      case 'ambulance':                return ambulanceIcon(GREEN_COUNTER_HEX);
-      case 'fire-engine':              return fireEngineIcon(GREEN_COUNTER_HEX);
-      case 'rescue-unit':              return rescueTeamIcon(GREEN_COUNTER_HEX);
       case 'quadcopter':               return quadcopterIcon(GREEN_COUNTER_HEX);
       case 'sof':                      return sofIcon(GREEN_COUNTER_HEX);
       case 'counter-drone-interceptor':return interceptorDroneIcon(GREEN_COUNTER_HEX);
@@ -4601,15 +4094,6 @@ async function main() {
     if (!event) { toast('Event not found', 'err'); return null; }
     const spec = getReceiverDirectAsset(roleId, assetKey);
     if (!spec) { toast('No asset spec for that receiver action.', 'err'); return null; }
-    // Dispatchable entries in receiver_assets.js carry `name`; only the
-    // role-level profile carries `label`. Reading spec.label alone put
-    // the literal string "undefined" on the map, in the toast, and in
-    // every dispatch table and report row.
-    const specName = spec.name || spec.label || 'Response asset';
-    // baseForReceiverRole now reads the baseId each role declares beside
-    // its vehicles, so the workaround that used to live here is gone.
-    // Fixed at the source rather than at this one call site, because a
-    // second consumer made the identical mistake independently.
     const base = baseForReceiverRole(roleId);
     if (!base) {
       // Static profile: no home base needed. Spawn at the incident
@@ -4618,19 +4102,9 @@ async function main() {
       const targetLat = event.lastKnownPosition?.lat ?? event.lastPosition?.lat ?? event.entry?.lat ?? SITES[event.siteId]?.coordinates?.lat;
       const targetLon = event.lastKnownPosition?.lon ?? event.lastPosition?.lon ?? event.entry?.lon ?? SITES[event.siteId]?.coordinates?.lon;
       if (targetLat == null || targetLon == null) { toast('No home base or target coordinate for dispatch.', 'err'); return null; }
-      const asset = { id: `${roleId}-${assetKey}-${Date.now()}`, name: specName, kind: spec.kind, lat: targetLat, lon: targetLon };
-      // ownerRoleId was omitted on this branch while the base-resolved
-      // branch below stamps it. Every attribution surface joins on it,
-      // so a static activation was dropped from the agencies-on-case
-      // panel and from the report's contributor chapters.
-      // No own toast: dispatchCounterResponse announces the dispatch,
-      // and firing here too produced two messages for one click. The
-      // site is the origin for a static activation.
-      dispatchCounterResponse(eventId, asset, {
-        ...opts,
-        ownerRoleId: roleId,
-        originName: SITES[event.siteId]?.name || spec.label || specName,
-      });
+      const asset = { id: `${roleId}-${assetKey}-${Date.now()}`, name: spec.label, kind: spec.kind, lat: targetLat, lon: targetLon };
+      dispatchCounterResponse(eventId, asset, opts);
+      toast(`${spec.label} activated.`, 'ok');
       return asset;
     }
     // Real home base dispatch: asset spawns at the base coord and
@@ -4638,7 +4112,7 @@ async function main() {
     // rest (route fetch, state machine, engage timer).
     const asset = {
       id: `${roleId}-${assetKey}-${Date.now()}`,
-      name: specName,
+      name: spec.label,
       kind: spec.kind,
       lat: base.lat,
       lon: base.lon,
@@ -4647,15 +4121,8 @@ async function main() {
     // provenance so the cross-tenant echo panel can tag "Aktionsstyrken
     // deployed X · via your request" on the requester's case-file. See
     // Chunk B #3 in the comms-flow gaps.
-    // originName is the base, not the vehicle. Without it the message
-    // read "Ambulance dispatched from Ambulance", because the origin
-    // defaults to asset.name and asset.name here is the vehicle.
-    // No own toast: dispatchCounterResponse announces it once.
-    dispatchCounterResponse(eventId, asset, {
-      ...opts,
-      ownerRoleId: roleId,
-      originName: base.name,
-    });
+    dispatchCounterResponse(eventId, asset, { ...opts, ownerRoleId: roleId });
+    toast(`${spec.label} dispatched from ${base.name}.`, 'ok');
     return asset;
   }
 
@@ -4676,6 +4143,7 @@ async function main() {
     if (!Array.isArray(records) || !records.length) return;
     records.forEach((r, idx) => {
       setTimeout(() => updateEscalationStatus(eventId, r.id, 'delivered'), 1500 + idx * 300);
+      setTimeout(() => updateEscalationStatus(eventId, r.id, 'read'), 4500 + idx * 500);
     });
   }
 
@@ -4725,7 +4193,7 @@ async function main() {
     const targetName = targetRole.org || targetRole.label || targetRoleId;
     const msgTail = assessmentPackage?.operatorAssessment
       ? `: ${assessmentPackage.operatorAssessment}`
-      : `: ${spec.name || spec.label || 'Response asset'}.`;
+      : `: ${spec.label}. ${spec.sub || ''}`;
     const records = escalateEvent(event.id, {
       destinationIds: targetDestIds,
       payload: 'summary',
@@ -4852,15 +4320,10 @@ async function main() {
     // units picker on the option card.
     if (!profile.supportsMultiDispatch && !profile.allowRepeatedDispatch) {
       for (const [, d] of _counterDispatches) {
-        if (d.eventId !== eventId || d.assetId !== asset.id) continue;
-        if (d.state === 'complete') continue;
-        // A responder on its way home is available for a new call-out.
-        // Blocking it meant an ambulance that had finished at one scene
-        // could not be sent to a second one until it physically reached
-        // its station.
-        if (leavesSceneUnassisted(d.profile) && d.state === 'rtb_home') continue;
-        toast(`${asset.name} already dispatched.`, 'info');
-        return;
+        if (d.eventId === eventId && d.assetId === asset.id && d.state !== 'complete') {
+          toast(`${asset.name} already dispatched.`, 'info');
+          return;
+        }
       }
     }
     // Choose the best available target across the event graph.
@@ -4903,22 +4366,9 @@ async function main() {
       });
     }
 
-    // Origin is the place a unit came FROM. For a counter-drone asset
-    // taken from the response bundle, asset.name IS the station, so it
-    // reads correctly. For a receiver dispatch, asset.name is the
-    // vehicle, which produced "Ambulance dispatched from Ambulance".
-    // Callers that know their base pass originName explicitly.
-    const originName = opts.originName || asset.name;
-    const originLabel = profile.cruiseKmh === 0 ? `activated at ${originName}` : `dispatched from ${originName}`;
-    // The count phrase used to hardcode the word "interceptors" for any
-    // multi-unit send, so three ambulances announced themselves as
-    // "3 interceptors". Read the plural from the profile, which is
-    // where the singular already lives, and fall back to counting the
-    // singular rather than inventing a noun.
-    const what = swarmSize > 1
-      ? `${swarmSize} ${profile.labelPlural || `${profile.label} units`}`
-      : profile.label;
-    toast(`${what} ${originLabel}.`, 'info');
+    const originLabel = profile.cruiseKmh === 0 ? `activated at ${asset.name}` : `dispatched from ${asset.name}`;
+    const countStr = swarmSize > 1 ? `${swarmSize} interceptors ` : '';
+    toast(`${countStr}${profile.label} ${originLabel}.`, 'info');
     // If wreckages already exist (patrols dispatched after the kill),
     // pin the newly-spawned ground vehicles to a cordon slot right
     // away. Defer one tick so the freshly-inserted dispatches are in
@@ -4966,12 +4416,6 @@ async function main() {
       kind: asset.kind,
       profile,
       state: isStatic ? 'engaging' : 'en_route',
-      // Where this unit's POSITION comes from. 'sim' means the tick
-      // loop integrates it from physics; 'live' will mean an agency
-      // tracker feed writes curLat/curLon/curAlt and the movement
-      // phases stand down. Declared at spawn so the tick never has to
-      // guess, and so a mixed scene is legible.
-      telemetrySource: 'sim',
       dispatchedTs: Date.now(),
       lastFrameTs: Date.now(),
       arrivedTs: isStatic ? Date.now() : null,
@@ -5099,7 +4543,7 @@ async function main() {
     // rendered under 500m (same billboard→model swap as Shahed/hostile
     // quad entities). Only these two icons qualify — 'sof' and
     // 'fighter' style interceptors have their own airframe class.
-    const _INT_MODEL_SWAP_M = 250;
+    const _INT_MODEL_SWAP_M = 500;
     const _isQuadInterceptor = d.profile.airborne
       && (d.profile.icon === 'quadcopter' || d.profile.icon === 'counter-drone-interceptor');
     // Position callback captured once so both billboard + model share it.
@@ -5298,7 +4742,6 @@ async function main() {
     if (state.leadSwarmMember) candidates.push(state.leadSwarmMember);
     if (Array.isArray(state.swarmBillboards)) candidates.push(...state.swarmBillboards);
     let jammedCount = 0;
-    let resistantCount = 0;
     for (const sw of candidates) {
       if (!sw || sw.neutralised || sw._jamFall) continue;
       // Must have a live billboard position (i.e. drone actually rendered).
@@ -5311,17 +4754,6 @@ async function main() {
       const swAlt = bc.height || 60;
       const distM = haversineM(d.curLat, d.curLon, swLat, swLon);
       if (distM > RAD_RADIUS_M) continue;
-      // Susceptibility gate (engagement_effects.js): a target with
-      // anti-jam guidance shrugs the jammer off. Rolled once per
-      // (jammer, target) pair so re-entering the ellipse doesn't
-      // re-roll until a different jammer tries.
-      if (sw._jamResistantTo === d.id) { resistantCount++; continue; }
-      const _jam = resolveJammingEffect({ weaponKind: d.kind, targetPlatform: event.platform });
-      if (!_jam.jammed) {
-        sw._jamResistantTo = d.id;
-        resistantCount++;
-        continue;
-      }
       // Terrain height at drone position — target landing altitude.
       const gh = viewer.scene.globe.getHeight(Cesium.Cartographic.fromDegrees(swLon, swLat));
       const groundAlt = (typeof gh === 'number') ? gh : 0;
@@ -5341,9 +4773,6 @@ async function main() {
     if (jammedCount > 0) {
       toast(`${d.assetName} jamming ${jammedCount} hostile drone${jammedCount === 1 ? '' : 's'}.`, 'info');
     }
-    if (resistantCount > 0) {
-      toast(`${resistantCount} target${resistantCount === 1 ? '' : 's'} resistant to ${d.assetName} jamming (anti-jam guidance). No effect.`, 'warn');
-    }
   }
 
   // Notify hook fired when a jam-fall lands. Currently drives the
@@ -5359,261 +4788,12 @@ async function main() {
     }
   }
 
-  // Does this unit's position come from a real feed?
-  //
-  // Set by the first accepted fix for that dispatch and never unset.
-  // A unit whose tracker drops out keeps its last known position and
-  // stops moving, which is the truth, rather than silently reverting to
-  // simulated physics and inventing motion that is not happening.
-  function _telemetryIsLive(d) {
-    return d?.telemetrySource === 'live';
-  }
-
-  // Apply an agency's vehicle position. Position only: arrival,
-  // engagement and stand-down stay derived from geometry so one state
-  // machine serves both environments.
-  onDispatchFix((fix) => {
-    const d = _counterDispatches.get(fix.dispatchId);
-    if (!d) return;   // a fix for a unit we do not know about is not an error
-    if (applyFixToUnit(d, fix)) {
-      console.info('[dispatch_telemetry] %s now tracked from a live feed', fix.dispatchId);
-    }
-    d.telemetryStale = false;
-    d.telemetryProvider = fix.provider || null;
-    _syncDispatchToEvent(d);
-  });
-
-  // ── Signal tier ───────────────────────────────────────────────────
-  // Reads whatever radio-frequency data a detection carries and asks
-  // src/signal_tier.js what it means. C2 does not classify here: the
-  // module maps a frequency to a band, which is arithmetic, and reports
-  // the emission type the network supplied.
-
-  // Build a recorder-shaped sample from whatever a display surface
-  // holds, so the tier consumes the SAME field names as the trajectory
-  // export rather than a parallel set invented for the screen.
-  //
-  // The roster carries rfCarrierMHz, the evidence panel carries a
-  // free-text carrier string. Both normalise to rf_carrier_mhz here,
-  // and nothing downstream has to know which surface it came from.
-  function _sampleFrom(stats, rawText) {
-    if (!stats && !rawText) return {};
-    const raw = String(rawText ?? stats?.rfCarrier ?? '');
-    let mhz = null;
-    if (Number.isFinite(stats?.rf_carrier_mhz)) mhz = stats.rf_carrier_mhz;
-    else if (Number.isFinite(stats?.rfCarrierMHz)) mhz = stats.rfCarrierMHz;
-    else {
-      const ghz = raw.match(/([\d.]+)\s*GHz/i);
-      const m = raw.match(/([\d.]+)\s*MHz/i);
-      if (ghz) mhz = parseFloat(ghz[1]) * 1000;
-      else if (m) mhz = parseFloat(m[1]);
-    }
-    return {
-      rf_carrier_mhz: mhz,
-      rf_bandwidth_mhz: stats?.rf_bandwidth_mhz ?? _mhzFromText(stats?.rfBandwidth),
-      rf_power_dbm: Number.isFinite(stats?.rf_power_dbm) ? stats.rf_power_dbm : null,
-      rf_carrier_type: stats?.rf_carrier_type ?? null,
-      rf_match_signature: stats?.rf_match_signature ?? stats?.rfMatch ?? null,
-      rf_match_confidence: Number.isFinite(stats?.rf_match_confidence) ? stats.rf_match_confidence : null,
-      // A passive track emits nothing. That is a finding, not missing
-      // data, and the library has a category for it.
-      rf_emission: /passive/i.test(raw) ? _EMISSION.SILENT : (stats?.rf_emission ?? null),
-      rf_hopping: stats?.rf_hopping ?? null,
-      // Present only when the network decoded a broadcast. Never
-      // derived here from a band or a frequency.
-      remote_id: stats?.remote_id ?? null,
-      // Provenance, so a synthesised signature is labelled as one
-      // rather than asserted as evidence.
-      source: stats?.source ?? 'sim',
-    };
-  }
-
-  function _mhzFromText(v) {
-    if (Number.isFinite(v)) return v;
-    const m = String(v ?? '').match(/([\d.]+)\s*MHz/i);
-    return m ? parseFloat(m[1]) : null;
-  }
-
-  function _tierFor(stats, rawText) {
-    return _signalTier(_sampleFrom(stats, rawText));
-  }
-
-  function _tierSummary(stats, rawText) {
-    return _tierFor(stats, rawText).summary || 'No radio-frequency data';
-  }
-
-  // The hover detail. Rows are conditional, so a field nobody observed
-  // does not render as "unknown" and train an operator to ignore the panel.
-  function _tierTitle(stats, rawText) {
-    return _tierFor(stats, rawText).rows
-      .map(r => `${r.label}: ${r.value}`)
-      .join(' · ')
-      .replace(/"/g, '&quot;');
-  }
-
-  // ── Track identity ────────────────────────────────────────────────
-  // A track arrives already knowing what it is. All this does is write
-  // that identity onto the member track. It does NOT move anything:
-  // position still comes from the simulation tick, or, when a real feed
-  // replaces it, from the same track's own kinematics through
-  // syncMemberTrack. Keeping identity and movement separate is what
-  // lets the edge take over one before the other.
-  //
-  // _memberByObjectId is the reverse index a live feed needs, because a
-  // track knows its object_id and nothing else. It is built here as
-  // identities are attached rather than derived later, so the lookup is
-  // never a scan over every event.
-  const _memberByObjectId = new Map();
-  const _trackConflictsWarned = new Set();
-
-  onTrack((t) => {
-    const key = _trackMemberKeyFor(t.objectId);
-    if (!key) return;   // a track for an object we do not hold is not an error
-    const res = attachMemberTrackIdentity(key.eventId, key.memberId, t.objectId, {
-      provider: t.provider,
-      nodeId: t.nodeId,
-    });
-    if (res?.status === 'conflict') {
-      // Two edge nodes disagreeing about what is one aircraft is a real
-      // finding, not noise to swallow. The first claim stands.
-      //
-      // Warned once per member. A persistent disagreement would
-      // otherwise repeat at feed rate and make a shared console
-      // unusable, which is how a real finding ends up being scrolled
-      // past.
-      if (!_trackConflictsWarned.has(key.memberId)) {
-        _trackConflictsWarned.add(key.memberId);
-        console.warn('[track_source] %s already identified as %s, refused %s from %s',
-          key.memberId, res.existing, res.offered, t.provider);
-      }
-      return;
-    }
-    if (res?.status === 'attached') _memberByObjectId.set(t.objectId, key);
-  });
-
-  // Publish a track for a simulation member, so the identity path runs
-  // in the browser and not only under Node in the build gate.
-  //
-  // ONCE PER MEMBER, not per tick. Identity does not change, so there
-  // is nothing to republish: the second call would resolve through the
-  // index, return 'unchanged', and do a linear scan of EVENTS for no
-  // effect. Skipping when nnTrackId is already set makes the steady
-  // state free and stops a persistent conflict warning from repeating
-  // at sample rate.
-  //
-  // Position is NOT published here and must not be. The architecture
-  // deliberately separates the two so the edge can take over identity
-  // before it takes over movement, and a position branch growing out
-  // of this function is how that separation gets lost.
-  function _publishSimTrack(event, memberId, pos, relatedMemberKeys) {
-    if (!memberId) return;
-    const m = event?.memberTracks?.find(t => t.memberId === memberId);
-    if (!m || m.nnTrackId) return;
-    try {
-      publishMockTrack(buildMockTrack({
-        memberKey: memberId,
-        siteId: event.siteId,
-        lat: pos.lat,
-        lon: pos.lon,
-        // Left null deliberately. The simulation's altitude is height
-        // above ground, which is neither datum the standard defines,
-        // and the seam refuses to convert rather than guess.
-        alt: null,
-        confidence: event.confidence,
-        relatedMemberKeys,
-        timestamp: new Date().toISOString(),
-      }));
-    } catch (err) {
-      // Never break the tick for a track publish.
-      console.warn('[track_source] sim publish failed:', err?.message || err);
-    }
-  }
-
-  // Every member of this event, so a formation publishes as siblings
-  // rather than as unrelated objects.
-  function _memberKeysFor(event) {
-    return (event?.memberTracks || []).map(t => t.memberId);
-  }
-
-  // Resolve an object id to the member that holds it.
-  //
-  // In the simulation the mock adapter derives its ids from the member
-  // key, so the mapping is recoverable. A real feed has no such
-  // shortcut and resolves through the index above, which is why both
-  // paths are here rather than the sim path only.
-  function _trackMemberKeyFor(objectId) {
-    const known = _memberByObjectId.get(objectId);
-    if (known) return known;
-    for (const ev of EVENTS) {
-      for (const m of ev.memberTracks || []) {
-        if (m.nnTrackId === objectId) return { eventId: ev.id, memberId: m.memberId };
-        if (!m.nnTrackId && _mockObjectIdFor(m.memberId) === objectId) {
-          return { eventId: ev.id, memberId: m.memberId };
-        }
-      }
-    }
-    return null;
-  }
-
-  // Only the mock can answer this. A real edge node's ids are opaque
-  // and resolve purely through the index.
-  function _mockObjectIdFor(memberKey) {
-    try {
-      return _trackMockObjectIdForMember(memberKey);
-    } catch { return null; }
-  }
-
-  // Exposed so the seam is reachable from the running application, the
-  // same reason window.__isr_dispatchFix exists.
-  window.__isr_publishTrack = publishMockTrack;
-  window.__isr_buildTrack = buildMockTrack;
-  window.__isr_trackStats = _trackStats;
-  window.__isr_trackRelated = relatedObjectIds;
-
-  // A registered provider for hand-fed fixes, so the seam is reachable
-  // from the running application. Without it the only consumer is the
-  // build gate under Node and the live path never executes in a
-  // browser, which is how the first version shipped with the live unit
-  // still being flown by simulated physics.
-  //
-  // A real agency adapter registers the same way, from its own module
-  // under src/adapters/, and gets back its own publish function.
-  const _consoleFix = registerTelemetryAdapter('console', {
-    start() { /* no feed of its own. Fixes arrive from the handle below. */ },
-  });
-  window.__isr_dispatchFix = _consoleFix;
-  window.__isr_dispatchTelemetry = _dispatchTelemetryStats;
-
   function _startCounterDispatchLoop() {
     if (_cdRafId) return;
     const tick = () => {
       const now = Date.now();
       for (const [, d] of _counterDispatches) {
         _tickCounterDispatch(d, now);
-        // LIVE POSITION AUTHORITY. Re-assert the last real fix over
-        // whatever the tick computed. Level-triggered on purpose: the
-        // tick writes position from four different states and
-        // interpolates altitude ahead of all of them, so gating each
-        // one would leave the next person to add physics responsible
-        // for remembering this unit is not ours to move.
-        if (reassertLivePosition(d)) {
-          if (d.profile?.trail) {
-            d.trailPositions.push(Cesium.Cartesian3.fromDegrees(
-              d.curLon, d.curLat,
-              d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
-            if (d.trailPositions.length > 500) d.trailPositions.shift();
-          }
-          // A tracker that has gone quiet leaves the unit frozen, which
-          // is the truth. Marking it stale stops that reading as a unit
-          // still driving to the scene, which would wedge the event
-          // open and let the record claim it lost its target.
-          const stale = isTelemetryStale(d, now);
-          if (stale !== d.telemetryStale) {
-            d.telemetryStale = stale;
-            if (stale) toast(`${d.assetName} position feed has gone quiet.`, 'warn');
-            _syncDispatchToEvent(d);
-          }
-        }
         // Persist live dispatch state onto event.counterDispatches so
         // consumers reading from the shared event object (multi-tab
         // cross-tenant echo panel, "Other agencies on case", future
@@ -5678,28 +4858,6 @@ async function main() {
     entry.viaRequestFromRoleId = d.viaRequestFromRoleId || null;
     entry.archetype = d.archetype || entry.archetype || null;
     entry.rtbCompleted = !!d.rtbCompleted;
-    // Provenance rides along. This mirror is a whitelist, so anything
-    // not listed here never reaches the permanent record.
-    entry.telemetrySource = d.telemetrySource || 'sim';
-    entry.telemetryStale = !!d.telemetryStale;
-    entry.telemetryProvider = d.telemetryProvider || null;
-    // Wreck attachment. Mirrored because the auto-close predicate reads
-    // it off the event mirror, not off the live dispatch. It was never
-    // mirrored, so the `|| !!c.assignedWreckageId` clause in that
-    // predicate was dead from the day it was written: a cordon car in
-    // 'en_route' or 'engaging' still held a dead-air event open, and
-    // only the 'holding-cordon' literal ever did the work the clause
-    // was added for.
-    entry.assignedWreckageId = d.assignedWreckageId || null;
-    entry.sceneWreckageId = d.sceneWreckageId || null;
-    // Cordon stand-down. This mirror is a whitelist, and the live
-    // dispatch is deleted five seconds after it reaches base, so
-    // anything not copied here is lost from the permanent record. The
-    // reason matters most: it distinguishes a police account recording
-    // that the scene was released from a simulation timer running out,
-    // and those two must never be confused in a case file.
-    entry.cordonReleasedAt = d.cordonReleasedAt || entry.cordonReleasedAt || null;
-    entry.cordonReleaseReason = d.cordonReleaseReason || entry.cordonReleaseReason || null;
     // Append-only state history for report reconstruction. Only push
     // when the state actually changes so we don't spam the array
     // with identical entries every tick (60 Hz would balloon this).
@@ -5738,11 +4896,7 @@ async function main() {
     // minutes of flight. Skip on holding-cordon (parked ground unit
     // idling, negligible fuel use). Once battery hits low reserve
     // (15%), interceptor auto-RTBs so it can make it home.
-    // Skipped for a live unit. Its endurance is a real quantity that
-    // this platform does not observe, and draining an invented battery
-    // would order a real vehicle home.
-    if (d.enduranceMin && !_telemetryIsLive(d)
-        && d.state !== 'holding-cordon' && d.state !== 'rtb_home') {
+    if (d.enduranceMin && d.state !== 'holding-cordon' && d.state !== 'rtb_home') {
       const _battDtMin = (now - (d._battLastMs || now)) / 60000;
       d._battLastMs = now;
       d.batteryPct = Math.max(0, (d.batteryPct ?? 100) - (100 / d.enduranceMin) * _battDtMin);
@@ -5775,14 +4929,6 @@ async function main() {
     if (event?.status === 'closed' && event.linkedEventIds?.length) {
       for (const linkedId of event.linkedEventIds) {
         const linked = getEvent(linkedId);
-        // NEVER hand an interceptor group to a breakaway child: it is
-        // a single promoted member the group was not assigned to. The
-        // child was the first linked event in a month to satisfy the
-        // lastPosition gate (its mirror writes per tick), which flipped
-        // every interceptor's eventId to it the moment the overwatch
-        // panicked — no assignments, no engagement, mass RTB past four
-        // live drones (field-found 2026-09-18, deep-dive confirmed).
-        if (linked?.provenance?.breakawayOf) continue;
         if (linked && linked.status === 'active' && linked.lastPosition) {
           if (d.eventId !== linkedId) {
             const fromSite = siteName(event.siteId) || event.siteId;
@@ -5881,17 +5027,7 @@ async function main() {
           d.targetAlt = cA.height;
         }
       }
-    // Consequence responders are excluded from chasing the live track.
-    // They go to a fixed scene, not to wherever the drone currently is.
-    // Without this an ambulance re-aims at the flying drone every tick,
-    // which corrupts its ETA readout and, if the road route has not
-    // returned yet, actually sends it chasing an airborne track.
-    //
-    // They are re-aimed by _rebalancePatrolsToWreckages instead, which
-    // gives them d.sceneWreckageId and the ingress standoff once the
-    // airframe is down.
-    } else if (event?.lastPosition && !targetLost && !d.assignedWreckageId
-               && !d.sceneWreckageId && !leavesSceneUnassisted(d.profile)) {
+    } else if (event?.lastPosition && !targetLost && !d.assignedWreckageId) {
       d.targetLat = event.lastPosition.lat;
       d.targetLon = event.lastPosition.lon;
       if (typeof event.lastPosition.alt === 'number') d.targetAlt = event.lastPosition.alt;
@@ -5915,46 +5051,8 @@ async function main() {
       }
     }
 
-    // Is this unit still holding its target on its OWN sensor?
-    //
-    // Interceptors carry a seeker head (onboardSensorRangeM). The
-    // documented behaviour is that a pursuit HOLDS beyond our sensor
-    // mesh while the target is inside onboard range: the map goes dark
-    // because our sensors lost it, and the responder keeps the contact.
-    //
-    // That was never wired into the two abandon-pursuit paths below,
-    // both of which fired the moment the site mesh lost the target. A
-    // drone that broke formation and flew out of coverage therefore
-    // shook off every interceptor chasing it, and they turned for home
-    // with it still airborne. Exactly what Lucas saw.
-    //
-    // Reads the target's true position rather than its rendered one.
-    // The billboard is hidden when no site sensor sees it, which is the
-    // whole point: the seeker still has it.
-    const _onboardHoldsTarget = (() => {
-      const range = d.profile?.onboardSensorRangeM;
-      const sw = d.assignedSwarmMember;
-      if (!range || !sw || sw.neutralised) return false;
-      const cart = sw.billboard?.position?.getValue?.(Cesium.JulianDate.now());
-      if (!cart) return false;
-      const c = Cesium.Cartographic.fromCartesian(cart);
-      const tLat = Cesium.Math.toDegrees(c.latitude);
-      const tLon = Cesium.Math.toDegrees(c.longitude);
-      return haversineM(d.curLat, d.curLon, tLat, tLon) <= range;
-    })();
-
-    // While the seeker holds it, keep steering at the real position.
-    // Without this the interceptor would hold the contact and still fly
-    // at a stale coordinate, which is worse than either behaviour alone.
-    if (_onboardHoldsTarget) {
-      const cart = d.assignedSwarmMember.billboard.position.getValue(Cesium.JulianDate.now());
-      const c = Cesium.Cartographic.fromCartesian(cart);
-      d.targetLat = Cesium.Math.toDegrees(c.latitude);
-      d.targetLon = Cesium.Math.toDegrees(c.longitude);
-    }
-
     // Phase F: RTB behaviour when target lost signal before arrival
-    if (d.state === 'en_route' && targetLost && d.profile.supportsRTB && !_onboardHoldsTarget) {
+    if (d.state === 'en_route' && targetLost && d.profile.supportsRTB) {
       d.state = 'rtb_via_last_known';
       d.rtbTargetLat = d.targetLat;   // last known coord we had
       d.rtbTargetLon = d.targetLon;
@@ -5985,10 +5083,7 @@ async function main() {
         // the icon has been suppressed to keep it from rendering on top
         // of the camera. Interceptor should keep engaging normally, and
         // the operator should get to watch themselves get shot down.
-        && !d.assignedSwarmMember._povActive
-        // The seeker still has it. Our mesh losing the target is not
-        // the interceptor losing the target.
-        && !_onboardHoldsTarget) {
+        && !d.assignedSwarmMember._povActive) {
       d.state = 'rtb_via_last_known';
       // Extend the last-known target 1 km along the target's last
       // heading before signal loss. Interceptor keeps flying past
@@ -6032,13 +5127,7 @@ async function main() {
     // Lucas's rule: "never head home immediately unless kill all
     // targets". Interceptors now stay in the fight through the coast
     // and past soft-cap until they run out of hostiles or fuel.
-    // Skipped for a live unit. These are simulation envelope constants
-    // tuned against simulated flight. Applied to a real vehicle's real
-    // position they would order a helicopter legitimately 30 km out to
-    // turn around, and the coast rule would do the same to any real
-    // unit east of that meridian.
-    if (!_telemetryIsLive(d)
-        && (d.state === 'en_route' || d.state === 'engaging') && d.profile.supportsRTB && d.profile.maxChaseKm) {
+    if ((d.state === 'en_route' || d.state === 'engaging') && d.profile.supportsRTB && d.profile.maxChaseKm) {
       const chaseKm = haversineM(d.curLat, d.curLon, d.originLat, d.originLon) / 1000;
       const hasLiveTarget = d.assignedSwarmMember && !d.assignedSwarmMember.neutralised;
       const maxPursuitKm = d.profile.maxPursuitKm || (d.profile.maxChaseKm * 2);
@@ -6055,13 +5144,8 @@ async function main() {
         toast(`${d.assetName} at fuel limit ${maxPursuitKm} km from base. Returning to base.`, 'warn');
         return;
       }
-      // Soft cap: only RTB when genuinely idle. "Idle" means no live
-      // target AND nothing left hunting on this event or a breakaway
-      // child of it. An interceptor whose own assignment was downed is
-      // not idle while a detached drone is still up; it just has not
-      // been re-tasked yet.
-      if (chaseKm >= d.profile.maxChaseKm && !hasLiveTarget
-          && !_hostilesRemainIncludingChildren(d.eventId)) {
+      // Soft cap: only RTB when idle.
+      if (chaseKm >= d.profile.maxChaseKm && !hasLiveTarget) {
         d.state = 'rtb_via_last_known';
         d.rtbTargetLat = d.curLat;
         d.rtbTargetLon = d.curLon;
@@ -6118,9 +5202,7 @@ async function main() {
       // ceiling, the interceptor levels off at ceiling and the
       // engagement outcome later will fail with 'above ceiling'.
       const physics = _SIM_INTERCEPTOR_PHYSICS[d.kind];
-      // Climb physics is simulated motion. A live unit's altitude comes
-      // from its own feed.
-      if (isSimEvent && !_telemetryIsLive(d) && d.profile.airborne && physics) {
+      if (isSimEvent && d.profile.airborne && physics) {
         const ceiling = physics.serviceCeilingM;
         const climbRate = physics.climbRateMs;
         const desiredAlt = Math.min(d.targetAlt || 60, ceiling);
@@ -6134,34 +5216,7 @@ async function main() {
         }
       }
 
-      if (_telemetryIsLive(d)) {
-        // LIVE. The vehicle's position is written by its agency's
-        // tracker, so nothing here advances it. Arrival is still
-        // derived from that real position against the assigned target,
-        // which keeps one state machine across both environments.
-        //
-        // Deliberately a third branch rather than a refactor of the two
-        // below. Those are the simulation path, they are what every
-        // scenario and demo runs through, and they are left
-        // byte-identical.
-        const distM = haversineM(d.curLat, d.curLon, d.targetLat, d.targetLon);
-        if (distM <= d.profile.arriveAtM) {
-          d.state = 'engaging';
-          d.arrivedTs = now;
-          d.engageStartTs = now;
-          if (d.kind === 'counter-drone-swarm') _assignInterceptorTarget(d);
-          if (d.profile.radiationCone) {
-            _createRadiationEntity(d);
-            _initiateJamFall(d);
-          }
-          if (getActiveRole().kind === 'receiver') renderReceiverView();
-          toast(d.profile?.stagesAtScene
-            ? `${d.assetName} staging at scene perimeter.`
-            : leavesSceneUnassisted(d.profile)
-              ? `${d.assetName} on scene. Response under way.`
-              : `${d.assetName} on station.`, 'info');
-        }
-      } else if (d.routePositions && d.routeSegmentLengths) {
+      if (d.routePositions && d.routeSegmentLengths) {
         // Follow OSRM street network route
         const step = advanceAlongPolyline(
           d.routePositions, d.routeSegmentLengths,
@@ -6181,11 +5236,7 @@ async function main() {
             _initiateJamFall(d);
           }
           if (getActiveRole().kind === 'receiver') renderReceiverView();
-          toast(d.profile?.stagesAtScene
-            ? `${d.assetName} staging at scene perimeter.`
-            : leavesSceneUnassisted(d.profile)
-              ? `${d.assetName} on scene. Response under way.`
-              : `${d.assetName} on station. Engaging.`, 'info');
+          toast(`${d.assetName} on station. Engaging.`, 'info');
         }
       } else {
         // Straight-line fallback (used pre-route-fetch or on OSRM fail)
@@ -6218,11 +5269,7 @@ async function main() {
           }
           if (d.profile.firesTracer) _fireMachineGunBurst(d);
           if (getActiveRole().kind === 'receiver') renderReceiverView();
-          toast(d.profile?.stagesAtScene
-            ? `${d.assetName} staging at scene perimeter.`
-            : leavesSceneUnassisted(d.profile)
-              ? `${d.assetName} on scene. Response under way.`
-              : `${d.assetName} on station. Engaging.`, 'info');
+          toast(`${d.assetName} on station. Engaging.`, 'info');
         }
       }
     } else if (d.state === 'engaging') {
@@ -6323,67 +5370,6 @@ async function main() {
             // outcome flip. For single-target events without a swarm
             // member, mark the event neutralized directly.
             if (!d.assignedSwarmMember && targetEv && targetEv.status === 'active') {
-              // Jamming-class weapons (police / army C-UAS) resolve by
-              // susceptibility, not rounds: a susceptible target is
-              // forced down (physics-fall = forced landing), a
-              // resistant one (anti-jam guidance) is unaffected and
-              // the engagement ENDS — re-engaging a jam-proof target
-              // forever would spam the case file with 0%-damage notes
-              // (verify-agent finding: police-c-uas could never
-              // resolve a single-target engagement).
-              const _wp = WEAPON_PROFILES[d.kind];
-              if (_wp?.class === 'jamming') {
-                const _jamFx = resolveJammingEffect({ weaponKind: d.kind, targetPlatform: targetEv.platform });
-                if (!_jamFx.jammed) {
-                  toast(`${targetEv.droneType || 'Target'} resistant to ${d.assetName} jamming (anti-jam guidance). No effect.`, 'warn');
-                  appendEventArray(targetEv.id, 'notes', {
-                    timestamp: new Date().toISOString(),
-                    author: 'Interceptor telemetry',
-                    text: `${d.assetName} jamming ineffective. Target guidance resisted, no observed effect.`,
-                    type: 'engagement-failed',
-                  });
-                  d.state = 'complete';
-                  _resolveEngagement(d);
-                  return;
-                }
-                d._effectOutcome = 'disable';   // jam success = forced landing
-              } else {
-              // Survivability roll (engagement_effects.js): landing
-              // hits is not a kill. Outcome distribution depends on
-              // weapon class, rounds landed, and target construction;
-              // damage carries across windows so sustained fire
-              // converges on certain neutralisation. hitQuality scales
-              // damage on top of already gating the hit roll upstream:
-              // the quadratic penalty on fast targets is intentional
-              // (machine guns should not grind down jets — fast
-              // targets escape via the miss path instead).
-              const _fxState = droneState.get(d.eventId);
-              const _fx = resolveKineticEffect({
-                weaponKind: d.kind,
-                roundsFired: d._roundsFired || 8,
-                hitQuality: outcome.quality ?? 1,
-                targetPlatform: targetEv.platform,
-                accumulatedDamage: _fxState?._damageAccum || 0,
-              });
-              if (_fxState) _fxState._damageAccum = _fx.damage;
-              if (_fx.outcome === 'survive') {
-                // Operator surface reports only what telemetry can
-                // observe: rounds fired, target still flying. The
-                // damage model is sim-internal and NEVER surfaced —
-                // no sensor measures airframe damage percentages.
-                toast(`${targetEv.droneType || 'Target'} not neutralised. Still flying. ${d.assetName} re-engaging.`, 'warn');
-                appendEventArray(targetEv.id, 'notes', {
-                  timestamp: new Date().toISOString(),
-                  author: 'Interceptor telemetry',
-                  text: `${d.assetName} engaged, rounds fired, target not neutralised. Re-engaging.`,
-                  type: 'engagement-partial',
-                });
-                d.engageStartTs = now;   // new engagement window, keep chasing
-                d._roundsFired = 0;
-                return;
-              }
-              d._effectOutcome = _fx.outcome;   // 'explode' | 'disable' → mode below
-              }
               // Capture the kill location from live target position (or
               // fall back to the interceptor's current position if that
               // lookup fails). This is the "wreckage" coordinate that
@@ -6430,13 +5416,7 @@ async function main() {
                     return killLive?.alt || 400;
                   })()
                 : (killLive?.alt || 400);
-              // Mode from the survivability roll when present (explode
-              // vs disabled airframe); rounds-threshold policy remains
-              // the fallback for kinds without an effect profile.
-              const mode = d._effectOutcome === 'explode' ? 'explosion'
-                         : d._effectOutcome === 'disable' ? 'physics-fall'
-                         : _resolveNeutralisationMode(d);
-              d._effectOutcome = null;
+              const mode = _resolveNeutralisationMode(d);
               const lastPos = targetEv.lastPosition || {};
               const targetSpeedMs = lastPos.speed || targetEv?.subject?.kinematics?.speed_ms || 30;
               const targetHeadingDeg = (typeof lastPos.heading === 'number') ? lastPos.heading : 0;
@@ -6486,7 +5466,6 @@ async function main() {
                   lon: wreckLon,
                   at: new Date().toISOString(),
                   downedBy: d.id,
-                  model: targetEv.droneType || targetEv.platform || null,
                   mode,
                 };
                 appendEventArray(targetEv.id, 'wreckages', wreck);
@@ -6572,7 +5551,7 @@ async function main() {
               appendEventArray(targetEv.id, 'notes', {
                 timestamp: new Date().toISOString(),
                 author: 'Interceptor telemetry',
-                text: `${d.assetName} engagement failed. Reason: ${reasonText}`,
+                text: `${d.assetName} engagement failed. Reason: ${reasonText} Engagement quality score ${(outcome.quality * 100).toFixed(0)} percent.`,
                 type: 'engagement-failed',
               });
             }
@@ -6647,23 +5626,8 @@ async function main() {
       if (distM <= 120) {
         d.state = 'complete';
         d.rtbCompleted = true;
-        // Auto-record outcome as target evaded before arrival.
-        //
-        // Only when nothing has already recorded one. This stamp is
-        // written in interceptor vocabulary, and it used to overwrite
-        // unconditionally, so every unit that drove home ended its day
-        // recorded as "Interceptor lost signal on target before
-        // intercept" regardless of what it actually did. That is wrong
-        // for a released police cordon and absurd for an ambulance
-        // leaving a mass-casualty scene.
-        //
-        // setDispatchOutcome replaces rather than merges, so the guard
-        // has to be here at the call site.
-        // Never for a consequence responder: its outcome belongs to
-        // the agency and is recorded by a human in Step 4, from
-        // _CONSEQUENCE_OUTCOMES. Stamping anything here would remove it
-        // from that list.
-        if (event && !event.dispatchOutcomes?.[d.id] && !leavesSceneUnassisted(d.profile)) {
+        // Auto-record outcome as target evaded before arrival
+        if (event) {
           setDispatchOutcome(event.id, d.id, {
             outcomeId: 'target_evaded_before_arrival',
             outcomeLabel: 'Target evaded before arrival',
@@ -6672,9 +5636,7 @@ async function main() {
             confirmedBy: 'system_auto',
           });
         }
-        if (!leavesSceneUnassisted(d.profile)) {
-          toast(`${d.assetName} back at base. Target signal not reacquired.`, 'info');
-        }
+        toast(`${d.assetName} back at base. Target signal not reacquired.`, 'info');
         _resolveEngagement(d);
       }
     }
@@ -7168,31 +6130,6 @@ async function main() {
       // marked Downed without ever being hit" bug when the enemy
       // fled outside range before the 4s engagement timer expired.
       if (sw && !sw.neutralised && d._firedAtLeastOnce) {
-        // Survivability roll per member (engagement_effects.js). A
-        // member that absorbs the burst keeps flying with accumulated
-        // damage; the interceptor re-engages the same target.
-        const _swFx = resolveKineticEffect({
-          weaponKind: d.kind,
-          roundsFired: d._roundsFired || 8,
-          hitQuality: 1,
-          targetPlatform: event.platform,
-          accumulatedDamage: sw._damageAccum || 0,
-        });
-        sw._damageAccum = _swFx.damage;
-        if (_swFx.outcome === 'survive') {
-          toast(`${sw.model || 'Target'} not neutralised. Still flying. ${d.assetName} re-engaging.`, 'warn');
-          d._firedAtLeastOnce = false;
-          d._roundsFired = 0;
-          d.engageStartTs = null;
-          d.state = 'en_route';
-          // Date.now(), NOT the tick-loop `now` param — that variable
-          // does not exist in _resolveEngagement's scope and reading
-          // it threw a ReferenceError that aborted the rAF callback
-          // before reschedule, freezing every dispatch for the session
-          // (verify-agent finding).
-          d.lastFrameTs = Date.now();
-          return;
-        }
         // Hit animation at THIS drone's live position
         const cart = sw.billboard?.position?.getValue?.(Cesium.JulianDate.now());
         if (cart) {
@@ -7239,7 +6176,7 @@ async function main() {
           // for cars that dispatched before any kill happened).
           const nowIso = new Date().toISOString();
           const wreckId = `wr-${event.id}-${(event.wreckages?.length || 0) + 1}`;
-          const wreck = { id: wreckId, lat: dropLat, lon: dropLon, at: nowIso, downedBy: d.id, model: sw.model || event.droneType || null };
+          const wreck = { id: wreckId, lat: dropLat, lon: dropLon, at: nowIso, downedBy: d.id };
           appendEventArray(event.id, 'wreckages', wreck);
           mutateEvent(event.id, { wreckageLocation: { lat: dropLat, lon: dropLon, at: nowIso } });
           // Build cordon + rebalance patrol assignments. Fire-and-
@@ -7256,15 +6193,6 @@ async function main() {
         // Swarm Phase 1: source-of-truth status transition. The sw
         // flag above stays as the render-cache fast path.
         if (sw.memberId) setMemberStatus(d.eventId, sw.memberId, 'neutralised', { reason: 'interceptor kill' });
-        // Swarm Phase 2: a promoted breakaway's child event ends with
-        // its member. Kill closes the child as neutralised.
-        if (sw._breakawayChildId) {
-          const bwChild = getEvent(sw._breakawayChildId);
-          if (bwChild && bwChild.status === 'active') {
-            markNeutralised(bwChild.id, { outcome: 'neutralized', byDispatchId: d.id, needsPostIncident: false });
-            closeEvent(bwChild.id, null);
-          }
-        }
         // Clear any lingering jamming visuals from other counter-
         // dispatches now that this hostile is down. Ellipses on empty
         // air look wrong.
@@ -7322,14 +6250,10 @@ async function main() {
       const state = droneState.get(d.eventId);
       const groupMembers = (event.counterDispatches || []).filter(cd => cd.groupId === d.groupId);
       const groupCompletedCount = groupMembers.filter(cd => {
-        const s = counterDispatchStateForEntry(d.eventId, cd);
+        const s = counterDispatchStateFor(d.eventId, cd.assetId);
         return s === 'complete' || cd.dispatchId === d.id;   // include this one which just completed
       }).length;
-      // Not finished while a breakaway child is still airborne. Without
-      // this the group completes on the last in-formation kill and every
-      // RTB path downstream unlocks at once.
-      const _stillHunting = _hostilesRemainIncludingChildren(d.eventId);
-      if (groupCompletedCount >= groupMembers.length && !_stillHunting && !event._interceptorGroupsCompleted?.has(d.groupId)) {
+      if (groupCompletedCount >= groupMembers.length && !event._interceptorGroupsCompleted?.has(d.groupId)) {
         addToEventSet(event.id, '_interceptorGroupsCompleted', d.groupId);
         let downedCount = 0;
         let overwatchSurvived = false;
@@ -7347,25 +6271,6 @@ async function main() {
             if (sw2.neutralised) downedCount++;
             else if (sw2.role === 'overwatch') overwatchSurvived = true;
           }
-        }
-        // Truthful-outcome guard: a group that downed NOTHING while
-        // live hostiles remain must never record "neutralised". This
-        // fired via the handover bug (interceptors keyed to an event
-        // with no droneState → downedCount 0 → "neutralised, 0
-        // downed"). Record the honest failure instead.
-        const _liveHostilesRemain = (state?.leadSwarmMember && !state.leadSwarmMember.neutralised)
-          || (state?.swarmBillboards || []).some(sw2 => !sw2.neutralised)
-          || !state;   // no render state resolvable = cannot claim a kill
-        if (downedCount === 0 && _liveHostilesRemain) {
-          setDispatchOutcome(event.id, d.id, {
-            outcomeId: 'engagement_unsuccessful',
-            outcomeLabel: 'Engagement unsuccessful. No hostiles downed.',
-            notes: 'Interceptor group completed its engagement cycle without a confirmed kill. Targets remained airborne.',
-            confirmedAt: new Date().toISOString(),
-            confirmedBy: 'system_auto',
-          });
-          toast('Interceptor group disengaged. No hostiles downed.', 'warn');
-          return;
         }
         // Auto-outcome on the dispatch group
         const outcomeId = overwatchSurvived ? 'partial_neutralisation' : 'neutralised';
@@ -7386,17 +6291,6 @@ async function main() {
           ? `Partial neutralisation. ${downedCount} downed. Overwatch escaped.`
           : `Threat neutralised. ${downedCount} downed.`, 'ok');
       }
-    } else if (event && d.profile.consequenceOnly) {
-      // Consequence responders never neutralise. Arriving at a crash
-      // scene is not a kill, and crediting one to an ambulance would
-      // overwrite the real outcome in the case file and the report.
-      //
-      // No toast here. This branch runs at task end AND again when the
-      // unit reaches base, so it announced "on scene, consequence
-      // response under way" while the ambulance was parked at its own
-      // station, and at task end it fired in the same frame as the
-      // "response complete" message below. The departure branch further
-      // down owns the messaging for these units.
     } else if (event && !d.profile.visualVerifyOnly && !d.rtbCompleted) {
       // Kinetic truth beats machine assumption: a late kill (engagement
       // resolving after the event already auto-closed) supersedes the
@@ -7466,50 +6360,12 @@ async function main() {
         if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
       return;
     }
-    // A consequence responder has finished its on-scene task. It goes
-    // home on its own: nobody released it, because nobody stood it up
-    // as a cordon. This must come BEFORE the cordon promotion below,
-    // which tests only "ground vehicle with a wreckage" and would
-    // otherwise park an ambulance on a police perimeter until a police
-    // account released the scene.
-    //
-    // Guarded on rtbCompleted because the rtb_home arrival path calls
-    // _resolveEngagement again once the unit is back at base. Without
-    // the guard this branch would fire on arrival and send it straight
-    // back out, and the unit would never finish.
-    if (leavesSceneUnassisted(d.profile) && !d.rtbCompleted) {
-      // NO outcome is stamped here, deliberately.
-      //
-      // Step 4 only offers a dispatch for outcome confirmation while
-      // dispatchOutcomes[id] is unset. Auto-stamping one here would
-      // make _CONSEQUENCE_OUTCOMES ("No action required on arrival",
-      // "Stood down before arrival", "Handed over to another service")
-      // unreachable, and would flip outcomeConfirmed true the moment an
-      // ambulance finished, silently unlocking the post-incident
-      // handoff with no human confirmation. The agency records what
-      // happened at its own scene; the platform observes.
-      toast(`${d.assetName} response complete. Returning to base.`, 'ok');
-      _sendDispatchHome(d);
-      return;
-    }
     if (d.profile.useRoadRouting && !d.profile.airborne && d.assignedWreckageId) {
       // Ground patrol at cordon — stay parked. Turn off any remaining
       // radiation/engage visuals. State stays 'engaging' visually so
       // the popup keeps showing "On station" but the tick loop's
       // engage timer no longer trips (rtbCompleted-style guard).
       d.state = 'holding-cordon';
-      // Stamp when the hold began so the cordon can end. Before this,
-      // nothing anywhere moved a unit out of holding-cordon: no timer,
-      // no action, no path. Every scenario with a downed airframe
-      // parked its units permanently and the downed symbol never
-      // cleared. See src/scene_lifecycle.js for the release rules.
-      // Date.now(), NOT the tick-loop `now` param. Same trap as the
-      // comment above: `now` does not exist in this function's scope,
-      // and reading it throws a ReferenceError that aborts the rAF
-      // callback before it reschedules, freezing every dispatch on the
-      // map for the session. Date.now() is also the right timebase:
-      // the sweep compares this against Date.now().
-      if (typeof d.cordonHoldSinceMs !== 'number') d.cordonHoldSinceMs = Date.now();
       if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
         if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
       return;
@@ -7535,41 +6391,6 @@ async function main() {
 
   // Lookup: has this asset been dispatched for this event? Returns
   // the dispatch state string or null.
-  // State of ONE specific dispatch, by its own id.
-  //
-  // counterDispatchStateFor below matches on assetId and returns the
-  // FIRST live dispatch of that asset, which is wrong whenever two
-  // call-outs of the same asset are live on one event. That became
-  // reachable when a responder driving home was allowed to be
-  // re-dispatched: a finished first call-out would read the second
-  // unit's 'en_route' and disappear from outcome confirmation until
-  // the second one also finished.
-  //
-  // Falls back to the mirrored state, which is what remains after the
-  // live dispatch is deleted five seconds past base.
-  function counterDispatchStateForEntry(eventId, cd) {
-    if (cd?.dispatchId) {
-      const live = _counterDispatches.get(cd.dispatchId);
-      if (live) return live.state;
-      // No live dispatch means it finished and was removed five seconds
-      // after reaching base, so 'complete' is the truth.
-      //
-      // Deliberately NOT falling back to the mirrored cd.state. The
-      // mirror is written through the tenant-filtered getEvent(), so if
-      // the active role could not see the event during a unit's final
-      // rtb_home -> complete transition, the mirror froze at rtb_home.
-      // Trusting it would leave that unit stuck in the returning-to-base
-      // bucket forever and stop a multi-unit group ever reporting
-      // complete. Matches the behaviour of counterDispatchStateFor
-      // below, which this replaced at the entry-holding call sites.
-      return 'complete';
-    }
-    return counterDispatchStateFor(eventId, cd?.assetId);
-  }
-
-  // State of ANY live dispatch of this asset on this event. Correct for
-  // "is this asset currently out", which is what the option cards ask.
-  // Use counterDispatchStateForEntry when you hold a specific entry.
   function counterDispatchStateFor(eventId, assetId) {
     for (const [, d] of _counterDispatches) {
       if (d.eventId === eventId && d.assetId === assetId) return d.state;
@@ -8197,6 +7018,7 @@ async function main() {
       });
       records.forEach((r, idx) => {
         setTimeout(() => updateEscalationStatus(event.id, r.id, 'delivered'), 800 + idx * 200);
+        setTimeout(() => updateEscalationStatus(event.id, r.id, 'read'), 2500 + idx * 300);
       });
       toast(`Auto escalated · reacquired at ${site ? site.name : siteId}`, 'ok');
     }
@@ -8894,22 +7716,8 @@ async function main() {
     for (const sid of Object.keys(event._siteAgg)) {
       const agg = event._siteAgg[sid];
       if (!agg) continue;
-      if (!agg.inCovDrones || _liveCount(agg.inCovDrones) > 0) continue;
-      // Site emptied by DEATHS: close the site's linked shadow event.
-      // The per-site exit lifecycle only closes on coverage-exit
-      // transitions, so a site whose airframes were all shot down
-      // inside coverage kept its event LIVE forever with zero
-      // detections (field-found twice at AMK). Downed inside the
-      // site = the local truth is neutralised.
-      try {
-        const siteEv = _findGroupEventForSite(event, sid);
-        if (siteEv && siteEv.id !== event.id && siteEv.status === 'active') {
-          closeEvent(siteEv.id, null, { autoOutcome: 'neutralized' });
-          addNote(siteEv.id, `All tracked airframes at ${SITES[sid]?.name || sid} are down. Event closed.`, 'AUTO-CORRELATOR');
-          renderAlertStrip();
-        }
-      } catch (_) { /* never break the death-purge tick */ }
       if (agg._oorFiredThisCycle) continue;   // already fired for this in→out cycle
+      if (!agg.inCovDrones || _liveCount(agg.inCovDrones) > 0) continue;
       // Empty of live drones AND OOR hasn't fired. Fire now.
       const site = SITES[sid];
       const pos = agg._pendingOorPos || { lat: deathLat, lon: deathLon };
@@ -8924,276 +7732,6 @@ async function main() {
       toast(`OUT OF RANGE · ${event.droneType || 'track'} left ${site?.name || site?.code || sid} sensor coverage.`, 'warn');
     }
   }
-
-  // ── Unobserved-event sweeper ─────────────────────────────────
-  // Level-triggered lifecycle backstop, independent of any per-event
-  // tick ownership. The AMK phantom-LIVE bug survived two fixes
-  // because every close mechanism was edge-triggered from loops the
-  // shadow event did not own. Rule (operator requirement): no event
-  // may stay LIVE when nothing is observed locally. Any active,
-  // detected event with no live render track of its own, no detection
-  // batch for GRACE seconds, and no active pursuit closes with an
-  // honest outcome: 'neutralized' when its group's airframes are all
-  // down, else 'lost contact'.
-  const _SWEEP_GRACE_MS = 15000;
-  function _sweepUnobservedActiveEvents() {
-    const now = Date.now();
-    for (const ev of EVENTS) {
-      if (ev.status !== 'active') continue;
-      if (ev.detected !== true) continue;             // pre-detection transits are not ours to kill
-      if (ev.awaitingNeutralization) continue;
-      if (droneState.has(ev.id)) continue;            // owns a live track; its own tick governs it
-      const lastObs = ev._lastDetectionTs || ev.spawnTs || Date.parse(ev.startTime || 0) || 0;
-      if (now - lastObs < _SWEEP_GRACE_MS) continue;
-      let chased = false;
-      for (const [, cd] of _counterDispatches) {
-        if (cd.eventId === ev.id && (cd.state === 'en_route' || cd.state === 'engaging')) { chased = true; break; }
-      }
-      if (chased) continue;
-      const primary = getEvent(ev.linkedEventId || ev.shadowOfEventId || ev.provenance?.breakawayOf);
-      const st = primary ? droneState.get(primary.id) : null;
-      let anyLive = false;
-      if (st) {
-        if (st.leadSwarmMember && !st.leadSwarmMember.neutralised) anyLive = true;
-        if (!anyLive && (st.swarmBillboards || []).some(sw => !sw.neutralised)) anyLive = true;
-      }
-      const outcome = (st && !anyLive) ? 'neutralized' : 'lost contact';
-      closeEvent(ev.id, null, { autoOutcome: outcome });
-      addNote(ev.id, `No sensor observation for ${Math.round(_SWEEP_GRACE_MS / 1000)} seconds and no active pursuit. Event closed.`, 'AUTO-CORRELATOR');
-      renderAlertStrip();
-    }
-  }
-  setInterval(_sweepUnobservedActiveEvents, 2000);
-
-  // ── Scene lifecycle sweep ──────────────────────────────────────────
-  // Ends a scene: cordons stand down, the downed symbol clears, units
-  // drive home, and a closed track's entities are finally removed.
-  //
-  // Hosted on an interval rather than in the simulation tick, because
-  // the tick is exactly why the teardown never ran: closing a track
-  // stops it emitting positions, so the per-position loop never visited
-  // it again and the removal check was unreachable on every natural
-  // close. That is why a threat leaving coverage kept flying.
-  //
-  // All decisions live in src/scene_lifecycle.js, which is pure and
-  // testable. This function only applies them.
-  // Wreckage ids that have had a unit attached at some point. A cordon
-  // that never formed has not stood down, it never stood up, so its
-  // perimeter must not be swept away. Browser-local like the dispatch
-  // map it is derived from.
-  const _everHeldWreckageIds = new Set();
-  // Events already toasted/warned about scene command. Browser-local
-  // and only guards the NOTIFICATION; correctness of the escalation
-  // itself comes from escalateEvent's own dedup, so losing this set
-  // cannot produce duplicate escalations.
-  const _cordonCommandWarned = new Set();
-
-  // Put a ground unit on the road home.
-  //
-  // The one place that knows how to end a ground deployment. Two
-  // callers: a cordon released by scene command or the simulation hold
-  // timer, and a consequence responder that has finished its own
-  // on-scene task. They must not drift, because a half-applied version
-  // of this leaves the outbound route line painted across the map for
-  // the whole return leg.
-  //
-  // rtb_home moves by bearing and ignores routePositions, so the route
-  // state is dropped rather than left stale.
-  function _sendDispatchHome(d, nowMs = Date.now()) {
-    if (!d) return;
-    d.assignedWreckageId = null;
-    d.sceneWreckageId = null;
-    d.state = 'rtb_home';
-    d.rtbTargetLat = d.originLat;
-    d.rtbTargetLon = d.originLon;
-    d.lastFrameTs = nowMs;
-    if (d.routeEntity) { try { viewer.entities.remove(d.routeEntity); } catch (_) {} d.routeEntity = null; }
-    d.routePositions = null;
-    d.routeSegmentLengths = null;
-    _syncDispatchToEvent(d);
-  }
-
-  function _sweepSceneLifecycle() {
-    const now = Date.now();
-    const dispatches = Array.from(_counterDispatches.values());
-    for (const d of dispatches) {
-      // Both fields. A wreck attended only by ambulances is still a
-      // wreck that was attended, so its perimeter must be allowed to
-      // clear when they leave. Tracking only the cordon pin left the
-      // polygon on the map for the session on a consequence-only
-      // response.
-      if (d.assignedWreckageId) _everHeldWreckageIds.add(d.assignedWreckageId);
-      if (d.sceneWreckageId) _everHeldWreckageIds.add(d.sceneWreckageId);
-    }
-
-    // 0. A forming cordon needs a scene commander.
-    //
-    // Escalates to the site's own Politikreds the moment a unit is
-    // pinned to a wreck. Without this, an operator could dispatch
-    // ground units to a kill on an event that never reached police, and
-    // in a live incident nothing could ever release them: the release
-    // control only appears for a police account that has the event in
-    // its inbox. Only the warhead-impact path escalated to police; the
-    // two kill paths, which are the normal case, did not.
-    //
-    // Level-triggered and safe to run every sweep. escalateEvent dedups
-    // against existing escalations and returns only NEW records, so
-    // after the first success this is a no-op.
-    //
-    // NEVER pass an assessmentPackage here. That flag makes
-    // escalateEvent bypass its own dedup and mint a fresh record on
-    // every call, which from a two-second sweep would be an escalation
-    // every two seconds for the life of the cordon.
-    const _byEventCordon = new Map();
-    for (const d of dispatches) {
-      if (!d.assignedWreckageId) continue;
-      if (!_byEventCordon.has(d.eventId)) _byEventCordon.set(d.eventId, []);
-      _byEventCordon.get(d.eventId).push(d);
-    }
-    for (const [eventId, group] of _byEventCordon) {
-      if (!cordonNeedsSceneCommand(group)) continue;
-      const event = EVENTS.find(e => e.id === eventId);
-      if (!event) continue;
-      const politiIds = localPoliceDestinationIds(event);
-      if (!politiIds.length) {
-        if (!_cordonCommandWarned.has(eventId)) {
-          _cordonCommandWarned.add(eventId);
-          console.warn('[scene command] no tier-2 Politikreds for site', event.siteId,
-            '- a cordon is forming with no account able to release it.');
-        }
-        continue;
-      }
-      // Level-triggered: ask whether they are already on the case
-      // rather than remembering that we told them.
-      const already = new Set((event.escalations || []).map(r => r.destinationId));
-      if (politiIds.every(id => already.has(id))) continue;
-      const records = escalateEvent(eventId, {
-        destinationIds: politiIds,
-        payload: 'summary',
-        message: 'Cordon forming at a downed airframe. Scene command required: this district holds the release.',
-        // Explicit system actor. The default operator is a named human,
-        // and a machine decision must not put one in the chain of
-        // custody.
-        operator: 'AUTO-CASCADE',
-        operatorRoleId: 'system-cordon-command',
-      });
-      if (!records.length) continue;
-      _fireEscalationAdapterSend(event, records);
-      // Toasted once per event, not per sweep. The escalation itself is
-      // deduped, but a toast inside a two-second loop would storm.
-      if (!_cordonCommandWarned.has(eventId)) {
-        _cordonCommandWarned.add(eventId);
-        const name = getDestination?.(politiIds[0])?.name || 'local Politikreds';
-        toast(`Cordon forming. ${name} notified to take scene command.`, 'info');
-      }
-      renderAlertStrip();
-    }
-
-    // 1. Release cordons that are due, grouped by event so the
-    //    simulation gate and the human release are read per event.
-    //
-    //    Deliberately NOT via getEvent() or visibleEvents(): both filter
-    //    by the active actor, and scene lifecycle is a rendering
-    //    concern, not a data-read one. Switching to a receiver role not
-    //    on an event would otherwise freeze that event's cordons for as
-    //    long as the role stayed active.
-    const byEvent = new Map();
-    for (const d of dispatches) {
-      if (d.state !== 'holding-cordon') continue;
-      if (!byEvent.has(d.eventId)) byEvent.set(d.eventId, []);
-      byEvent.get(d.eventId).push(d);
-    }
-    for (const [eventId, group] of byEvent) {
-      const event = EVENTS.find(e => e.id === eventId);
-      if (!event) continue;
-      const decisions = cordonReleaseDecisions(group, {
-        now,
-        // Wreckage sites a human has recorded as released. Written by
-        // the 'record-scene-release' action on any police account, via
-        // recordSceneRelease() in events.js. This is the path that
-        // works in a LIVE event, where the hold timer below is
-        // deliberately inert.
-        //
-        // Per site, not per event: an event gains wreckages one kill at
-        // a time, and a cordon formed on a later crash site must not
-        // inherit an earlier site's release.
-        releasedWreckageIds: releasedWreckageIds(event),
-        simulationOnly: !!event.templateKey,
-        holdSecOverride: window.__isr_cordon?.holdSecOverride,
-      });
-      for (const { id, reason } of decisions) {
-        const d = _counterDispatches.get(id);
-        if (!d) continue;
-        d.cordonReleasedAt = new Date().toISOString();
-        d.cordonReleaseReason = reason;
-        _sendDispatchHome(d, now);
-      }
-      if (decisions.length) {
-        // Reason recorded verbatim. 'hold-elapsed' must never read as
-        // an agency decision: the platform observes, agencies decide.
-        const viaHuman = decisions.some(x => x.reason === 'scene-released');
-        addNote(eventId, viaHuman
-          ? `Scene released. ${decisions.length} unit${decisions.length === 1 ? '' : 's'} standing down and returning to base.`
-          : `Cordon hold elapsed in simulation. ${decisions.length} unit${decisions.length === 1 ? '' : 's'} standing down and returning to base.`,
-          'AUTO-CORRELATOR');
-        renderAlertStrip();
-      }
-    }
-
-    // 2. Remove the cordon perimeter once nobody is attached to that
-    //    wreckage any more. Drives off the perimeter map rather than
-    //    off events, for the same tenant reason as step 1.
-    //
-    //    This clears the PERIMETER only. The downed-airframe marker is
-    //    a separate entity in _perEventMarkers and deliberately stays:
-    //    the wreck is still on the ground after the cordon lifts.
-    const _perimeterIds = Array.from(_wreckagePerimeterEntities.keys()).map(id => ({ id }));
-    for (const wid of clearedWreckageIds(_perimeterIds, dispatches, _everHeldWreckageIds)) {
-      const ents = _wreckagePerimeterEntities.get(wid);
-      if (!ents) continue;
-      try {
-        if (ents.fill) viewer.entities.remove(ents.fill);
-        if (ents.outline) viewer.entities.remove(ents.outline);
-      } catch (err) { console.warn('[scene lifecycle] perimeter clear failed for', wid, err.message); }
-      _wreckagePerimeterEntities.delete(wid);
-    }
-
-    // 3. Remove the entities of tracks closed longer than the ghost
-    //    period. The check the tick loop could never reach.
-    let _removedAny = false;
-    for (const eventId of expiredGhostEventIds(droneState, { now: performance.now(), ghostMs: GHOST_MS })) {
-      const state = droneState.get(eventId);
-      if (!state) continue;
-      // Persist BEFORE teardown. removeDroneEntities deletes the
-      // droneState entry, and state.recording is the only copy for any
-      // close path that does not already persist: left coverage, lost
-      // contact, and the kill path all skip it. Without this, a track
-      // shorter than the 30 second in-flight persist loses its
-      // recording entirely and Replay has nothing to show, which breaks
-      // the rule that replay is available whenever sensors captured
-      // data.
-      try {
-        if (state.recording) {
-          _persistRecording(eventId);
-          const ev = EVENTS.find(e => e.id === eventId);
-          if (ev) _persistCrossCuedRecordings(ev);
-        }
-      } catch (err) { console.warn('[scene lifecycle] persist before teardown failed for', eventId, err.message); }
-      try {
-        removeDroneEntities(eventId);
-        removeLiveTrack(eventId);
-        _removedAny = true;
-      } catch (err) {
-        // Flag set only AFTER success, so a partial failure is retried
-        // next pass rather than latched and left with orphan entities.
-        console.warn('[scene lifecycle] teardown failed for', eventId, err.message);
-        continue;
-      }
-      if (droneState.get(eventId)) droneState.get(eventId)._entitiesRemoved = true;
-    }
-    if (_removedAny) updateSimButton();
-  }
-  setInterval(_sweepSceneLifecycle, 2000);
 
   // Detection envelope for a passive fused-modality sensor is modeled
   // as a cylinder: coverageRadius meters horizontal, detectionCeilingM
@@ -9366,13 +7904,6 @@ async function main() {
   // "sensor N01 saw 0% because the drone exited coverage before the
   // event closed." Peak is monotonic — never decays.
   function _applyDetectionBatchToEvent(batch, targetEvent) {
-    // Observation recency: the sweeper's level-triggered clock.
-    // Stamped whenever any sensor in the batch carries a detection.
-    // Source-agnostic (mock and WebSocket both flow through here),
-    // which is the IF-1 seam the sweeper is allowed to trust.
-    if ((batch.sensors || []).some(se => se.status !== 'offline' && (se.detections || []).length)) {
-      targetEvent._lastDetectionTs = Date.now();
-    }
     for (const sEntry of batch.sensors) {
       if (sEntry.status === 'offline') continue;
       let maxConf = 0;
@@ -9600,22 +8131,6 @@ async function main() {
             ...mt,
             memberId: `${spawnedId}-${mt.memberId.split('-').pop()}`,
             sourceMemberId: mt.memberId,
-            // IDENTITY IS NOT INHERITED. The spread above copies every
-            // field, and nnTrackId is the one field that must not be
-            // copied: it is assigned per object by the edge, and two
-            // member tracks carrying the same object_id is the platform
-            // asserting that one aircraft is two objects.
-            //
-            // Harmless while nnTrackId is null everywhere. The moment
-            // anything publishes a track it is not, and the resolver
-            // matches on nnTrackId and returns the first hit in EVENTS
-            // order, so the other event becomes unreachable by track.
-            //
-            // The breakaway path already does this explicitly. This one
-            // did not.
-            nnTrackId: null,
-            trackProvider: null,
-            trackNodeId: null,
             kinematics: { ...mt.kinematics },
             formationOffset: { ...mt.formationOffset },
             inCoverage: false,
@@ -10210,7 +8725,6 @@ async function main() {
     // already gates on altitude; this keeps the persisted trajectory
     // in sync with what the operator actually saw.
     const sensors = _computeSensorsDetecting(pos.lat, pos.lon, pos.alt);
-    const _sig = signatureFieldsFromEvidence(event.evidence);
     const detState = inCov ? 'detected' : (tipInCov ? 'tip_cued' : (tSec < 5 ? 'pre_ingress' : 'sensor_gap'));
     return {
       droneId,
@@ -10226,26 +8740,12 @@ async function main() {
       classification: event.classification,
       confidence: +(conf || event.confidence).toFixed(3),
       threat_level: event.threat,
-      // RF SIGNATURE, FROM THE SCENARIO'S OWN EVIDENCE.
-      //
-      // These six fields used to be constants: the signature was
-      // always 'DJI OcuSync', the confidence always 0.89, the
-      // bandwidth always 20 MHz, and the carrier type was picked by
-      // whether the frequency was above 5 GHz. A cruise missile with
-      // no emitter at all exported as a DJI consumer datalink.
-      //
-      // The template already describes what its sensors saw, per
-      // scenario and in detail. It is parsed here instead. A field the
-      // template does not describe comes out null, because a constant
-      // standing in for an unobserved value is the thing being
-      // removed, and source: 'sim' below does not make a wrong value
-      // right.
-      //
-      // rfMHz, the position-tick's own carrier, is the fallback when
-      // the template says nothing, so the swarm roster keeps working.
-      ..._sig,
-      rf_carrier_mhz: _sig.rf_carrier_mhz ?? (rfMHz || null),
+      rf_carrier_mhz: rfMHz,
       rf_power_dbm: -68 + (droneIdx * -2),
+      rf_carrier_type: rfMHz > 5000 ? 'OFDM 5.8 GHz' : 'OFDM 2.4 GHz',
+      rf_bandwidth_mhz: 20,
+      rf_match_signature: 'DJI OcuSync',
+      rf_match_confidence: 0.89,
       acoustic_peak_db: +(58 + (droneIdx * 1.2)).toFixed(1),
       acoustic_dominant_hz: 220,
       acoustic_signature: 'quadcopter-brushless',
@@ -10257,22 +8757,6 @@ async function main() {
       event_id: event.id,
       site_id: event.siteId,
       detection_state: detState,
-      // PROVENANCE. Every sample says where it came from.
-      //
-      // 'sim' here is load-bearing, not a label. The RF, acoustic and
-      // visual fields above are SYNTHESISED: the signature is always
-      // "DJI OcuSync", the acoustic fundamental is always 220 Hz, the
-      // visual match is always 0.85, and the RF power is derived from
-      // the drone's index in the formation. That is correct for a
-      // simulation and it flows straight into the debrief, the
-      // preprocessing pipeline and the agentic narrative.
-      //
-      // Without this tag a live sample and a fabricated one are
-      // indistinguishable downstream, and the agentic layer would
-      // narrate an OcuSync match on a real incident that never
-      // happened. Anything reading these fields must check `source`
-      // before asserting them as observed.
-      source: 'sim',
     };
   }
 
@@ -10430,17 +8914,9 @@ async function main() {
       if (droneState.get(linkedId)?.recording) { console.log(`[P5A cross-cued] ${linkedId} already has own recording, skipping`); continue; }
       const startMs = new Date(linked.startTime).getTime();
       const endMs = linked.endTime ? new Date(linked.endTime).getTime() : Date.now();
-      // Time window ALONE let every drone's full-mesh samples bleed
-      // into a site-linked event's own recording, including a fleeing
-      // drone miles outside this site's coverage during the same
-      // window (field-found: AMK replay showed the escaped overwatch's
-      // line extending far past AMK's radius). A sample belongs to
-      // THIS linked event's own recording only if it was also within
-      // THIS site's own sensor footprint, not merely concurrent in time.
       const slice = primaryRec.timeseries.filter(s => {
         const t = new Date(s.timestamp_utc).getTime();
-        if (t < startMs || t > endMs) return false;
-        return _sitesSeeingPoint(s.lat, s.lon, s.altitude_agl_m).has(linked.siteId);
+        return t >= startMs && t <= endMs;
       });
       if (!slice.length) {
         const primaryFirst = primaryRec.timeseries[0]?.timestamp_utc;
@@ -10547,7 +9023,13 @@ async function main() {
     if (!event || !rec?.timeseries) return rec;
     const scope = scopedTrajectoryFor(event, roleId, rec.timeseries);
     if (scope.fullyVisible) return rec;
-    const filteredTs = _confirmedSamplesForScope(scope, rec.timeseries);
+    // Build the set of (droneId, t_sec) keys allowed through.
+    const allow = new Set();
+    for (const seg of scope.segments) {
+      if (seg.visibility !== 'confirmed') continue;
+      for (const p of seg.positions) allow.add(`${p.droneId}:${p.t_sec_from_event}`);
+    }
+    const filteredTs = rec.timeseries.filter(s => allow.has(`${s.droneId}:${s.t_sec_from_event}`));
     return {
       ...rec,
       timeseries: filteredTs,
@@ -10596,19 +9078,10 @@ async function main() {
       'classification', 'confidence', 'threat_level',
       'rf_carrier_mhz', 'rf_power_dbm', 'rf_carrier_type', 'rf_bandwidth_mhz',
       'rf_match_signature', 'rf_match_confidence',
-      // Added alongside the numeric fields rather than replacing them.
-      // A compound carrier ("Ku band SATCOM (12.5 GHz) + PCL from
-      // DVB T reflection") cannot be reduced to one number without
-      // losing what it says, and a passive track has no number at all.
-      'rf_carrier_text', 'rf_passive', 'modality',
       'acoustic_peak_db', 'acoustic_dominant_hz', 'acoustic_signature',
       'visual_match_model', 'visual_match_confidence',
       'drone_model', 'formation_role',
       'event_id', 'site_id', 'detection_state', 'sensors_detecting',
-      // Provenance travels with the evidence. A CSV handed to an agency
-      // that cannot say whether a row was observed or simulated is not
-      // evidence, and this file leaves the platform.
-      'source',
     ];
     const escape = (v) => {
       if (v == null) return '';
@@ -10754,65 +9227,7 @@ async function main() {
     return synth ? [...samples, synth] : samples;
   }
 
-  // Full-access tier: admin + every receiver (government response
-  // agencies) see the complete cross-site trajectory. Only OPERATOR
-  // accounts (the site infrastructure owners — the airport, the
-  // substation owner) are fenced to their own site's own recording.
-  // Single source of truth; scopedTrajectoryFor reuses this.
-  function _isFullAccessRoleId(roleId) {
-    const role = ACCOUNTS?.find?.(r => r.id === roleId) || null;
-    const kind = role?.kind || 'admin';
-    return kind === 'admin' || kind === 'receiver' || !role;
-  }
-
-  // Owned-site scope for an account that is NOT full access. Empty set
-  // for any role that owns no sites. Deliberately does not re-derive
-  // the tier: _isFullAccessRoleId above stays the single source of
-  // truth for "is this viewer fenced at all". This only answers
-  // "fenced to what".
-  function _ownedSiteIdsForRoleId(roleId) {
-    const acct = ACCOUNTS?.find?.(r => r.id === roleId) || null;
-    return new Set(Array.isArray(acct?.siteIds) ? acct.siteIds : []);
-  }
-
-  // Walk up shadowOfEventId (site-linked shadow -> its primary) and
-  // provenance.breakawayOf (a promoted breakaway member -> the event
-  // that was governing its tick loop when it broke off, always the
-  // topmost primary today since shadow events never own a live track)
-  // to the topmost ancestor. That ancestor's OWN recording already
-  // holds the entire physical encounter continuously — approach,
-  // every site's engagement, any breakaway flight — because every
-  // sample for a given drone was pushed into whichever event's tick
-  // loop actually owned it, and that has only ever been the primary.
-  // Returns the ancestor EVENT OBJECT (not just its id) so callers can
-  // also source ITS OWN terminal/exit coordinate correctly.
-  function _resolveChainPrimaryEvent(event) {
-    let cur = event;
-    let hops = 0;
-    while (cur && hops < 6) {
-      const nextId = cur.shadowOfEventId || cur.provenance?.breakawayOf;
-      if (!nextId || nextId === cur.id) break;
-      const next = getEvent(nextId);
-      if (!next) break;
-      cur = next;
-      hops++;
-    }
-    return cur || event;
-  }
-
   function _debriefResolveSamples(event) {
-    // Full-access roles (admin, every receiver/government agency):
-    // the complete chain, not just this event's own local slice. Falls
-    // through to the scoped chain below only if the chain primary's
-    // recording is unavailable for some reason (defensive, not the
-    // expected path once a scenario has run to completion).
-    if (_isFullAccessRoleId(getActiveRole?.()?.id)) {
-      const chainPrimary = _resolveChainPrimaryEvent(event);
-      const chainRec = window.__isr_getRecording?.(chainPrimary.id);
-      if (chainRec?.timeseries?.length) {
-        return { source: 'chain_recording', samples: _appendTerminalIfMissing(chainPrimary, chainRec.timeseries) };
-      }
-    }
     // Prefer this event's own recording; fall back to primary's recording
     // filtered to this event's time window; last resort: template waypoints.
     const own = window.__isr_getRecording?.(event.id);
@@ -11207,21 +9622,25 @@ async function main() {
   // Full spec in IDD IF-6 + IF-8. See safety notes at top of
   // scopedTrajectoryFor for the default-to-admin fallback.
   // ═══════════════════════════════════════════════════════════════════
-  // Site containment for scoping uses _sitesSeeingPoint directly (see
-  // the sensor-coverage section). It returns the SET of every site
-  // whose online sensors cover the point at its recorded altitude,
-  // which is the same predicate the cross-cued recording writer uses.
-  // A first-match, altitude-blind variant lived here until 2026-09-20
-  // and disagreed with the write path in two ways: it resolved the
-  // Copenhagen Airport / Amager overlap by manifest filename order,
-  // and it never applied the sensor ceiling, so a target above every
-  // sensor's ceiling still rendered as confirmed observation.
+  function _findSiteContainingPoint(lat, lon) {
+    // Returns the first site whose online sensor coverage contains
+    // the point. Null if outside all coverage.
+    for (const sid of Object.keys(SITES)) {
+      const site = SITES[sid];
+      if (!site?.sensors?.length) continue;
+      const cov = nearestSensorInCoverage({ lat, lon }, site);
+      if (cov?.inCoverage) return sid;
+    }
+    return null;
+  }
 
   function scopedTrajectoryFor(event, roleId, samples) {
     if (!Array.isArray(samples) || samples.length === 0) {
       return { segments: [], fullyVisible: true, hiddenSegmentCount: 0, scopeNote: null, ownedSiteIds: null };
     }
-    const isFullAccess = _isFullAccessRoleId(roleId);
+    const role = ACCOUNTS?.find?.(r => r.id === roleId) || null;
+    const kind = role?.kind || 'admin';
+    const isFullAccess = kind === 'admin' || kind === 'receiver' || !role;
     if (isFullAccess) {
       // Pass-through: preserve source order, all samples confirmed.
       return {
@@ -11233,8 +9652,8 @@ async function main() {
         _passthrough: true,   // signal to renderer: use legacy per-drone / gap-split path
       };
     }
-    // Operator path. Scope to owned sites.
-    const ownedSiteIds = _ownedSiteIdsForRoleId(roleId);
+    // Operator path — scope to owned sites.
+    const ownedSiteIds = new Set(role.siteIds || []);
     if (ownedSiteIds.size === 0) {
       return {
         segments: [], fullyVisible: false, hiddenSegmentCount: 0,
@@ -11242,44 +9661,23 @@ async function main() {
         ownedSiteIds: [],
       };
     }
-    // Group by drone and label every sample against the FULL set of
-    // sites whose online sensors actually saw it, at its recorded
-    // altitude. Same predicate the cross-cued write path uses, so a
-    // sample sliced INTO a site's own recording is never then hidden
-    // FROM that site's owner.
-    //
-    // Set membership, not first match: Copenhagen Airport and the
-    // Amager substation overlap by roughly 200 metres, and for those
-    // seconds BOTH sets of sensors genuinely observe the target, so
-    // both owners are entitled to see it. A first-match lookup gave
-    // the overlap to whichever site sorted first by filename.
-    //
-    // Sample altitude lives on altitude_agl_m (see _buildDroneSample);
-    // `alt` is the live-tick field name, accepted as a fallback.
+    // Group samples by drone, then per-drone classify each sample as
+    // confirmed (in owned site cov) or hidden.
     const byDrone = new Map();
-    const touchedOwnedSites = new Set();
     for (const s of samples) {
       const id = s.droneId || 'unknown';
-      const altM = typeof s.altitude_agl_m === 'number' ? s.altitude_agl_m
-                 : (typeof s.alt === 'number' ? s.alt : 0);
-      const owned = [];
-      for (const sid of _sitesSeeingPoint(s.lat, s.lon, altM)) {
-        if (!ownedSiteIds.has(sid)) continue;
-        owned.push(sid);
-        touchedOwnedSites.add(sid);
-      }
       if (!byDrone.has(id)) byDrone.set(id, []);
-      byDrone.get(id).push({ ...s, _inOwnedSite: owned.length > 0, _ownedSites: owned });
+      byDrone.get(id).push(s);
     }
     const segments = [];
     let hiddenRunCount = 0;
-    // The contract reads "owns 2+ sites THE THREAT CROSSED", not
-    // "owns 2+ sites". Energinet owns six substations, so counting the
-    // account put dotted cross-site bridges and the multi-site banner
-    // on every single-substation overflight.
-    const ownsMultipleSites = touchedOwnedSites.size > 1;
+    const ownsMultipleSites = ownedSiteIds.size > 1;
 
-    for (const [droneId, labeled] of byDrone) {
+    for (const [droneId, droneSamples] of byDrone) {
+      const labeled = droneSamples.map(s => {
+        const inSite = _findSiteContainingPoint(s.lat, s.lon);
+        return { ...s, _inOwnedSite: inSite && ownedSiteIds.has(inSite) };
+      });
       // Walk labeled samples, group into confirmed vs hidden runs.
       const runs = [];
       let curRun = [labeled[0]];
@@ -11290,25 +9688,9 @@ async function main() {
         else { runs.push({ label: curLabel, samples: curRun }); curRun = [s]; curLabel = s._inOwnedSite; }
       }
       runs.push({ label: curLabel, samples: curRun });
-      // Emit confirmed runs as solid segments. A dotted bridge between
-      // two confirmed runs says "the target travelled BETWEEN two of
-      // your sensors lost it here and reacquired it there, and what
-      // happened in between we did not watch".
-      //
-      // Emitted between ANY two consecutive confirmed runs, including
-      // two runs at the same site. A single-site operator whose target
-      // leaves coverage and comes back has exactly the same unobserved
-      // stretch as a two-site one, and gating this on owning multiple
-      // sites left them with two disconnected solid runs and no
-      // indication that anything happened between them.
-      //
-      // The two renderers treat these differently on purpose. Debrief
-      // draws them dotted: it is a post-incident analysis surface and
-      // the operator needs to see that the track continued somewhere
-      // unobserved. Replay draws nothing at all: it reconstructs what
-      // the sensors actually watched, second by second, and a line
-      // moving through a stretch no sensor saw would be fabricated
-      // motion. Same data, two honest readings of it.
+      // Emit confirmed runs as solid segments. Between two confirmed
+      // runs (separated by a hidden run), inject an inferred bridge
+      // only if the operator owns multiple sites.
       const confirmedRuns = runs.filter(r => r.label);
       hiddenRunCount += runs.filter(r => !r.label).length;
       for (let i = 0; i < confirmedRuns.length; i++) {
@@ -11316,7 +9698,7 @@ async function main() {
         if (run.samples.length >= 2) {
           segments.push({ positions: run.samples, visibility: 'confirmed', droneId });
         }
-        if (i + 1 < confirmedRuns.length) {
+        if (ownsMultipleSites && i + 1 < confirmedRuns.length) {
           const lastOfThis = run.samples[run.samples.length - 1];
           const firstOfNext = confirmedRuns[i + 1].samples[0];
           segments.push({
@@ -11330,8 +9712,8 @@ async function main() {
     const scopeNote = segments.length === 0
       ? 'This event took place outside your site scope. No trajectory available.'
       : (ownsMultipleSites
-        ? 'Trajectory scoped to your sites. Dotted stretches are unobserved: your sensors did not watch them directly.'
-        : 'Trajectory scoped to your site perimeter. Dotted stretches are unobserved. State agencies see the full path.');
+        ? 'Segments between your sites are inferred (dotted) — your sensors did not observe them directly.'
+        : 'Trajectory scoped to your site perimeter. State agencies see the full path.');
     return {
       segments,
       fullyVisible: false,
@@ -11339,26 +9721,6 @@ async function main() {
       scopeNote,
       ownedSiteIds: Array.from(ownedSiteIds),
     };
-  }
-
-  // Reduce a full sample array to only those samples a scoped viewer is
-  // entitled to, keyed by (droneId, t_sec_from_event). Returns the input
-  // untouched for full-access viewers, so admin and receiver paths are a
-  // no-op through here.
-  //
-  // This exists because trajectory scoping is not only about polylines.
-  // The moments extractor, the deterministic narrative and the Agent B
-  // prompt all consume a sample array, and if they are handed the raw
-  // one an operator's written summary describes legs their own sensors
-  // never observed, while the map beside it correctly hides them.
-  function _confirmedSamplesForScope(scope, samples) {
-    if (!scope || scope._passthrough || scope.fullyVisible) return samples;
-    const allow = new Set();
-    for (const seg of scope.segments) {
-      if (seg.visibility !== 'confirmed') continue;
-      for (const p of seg.positions) allow.add(`${p.droneId}:${p.t_sec_from_event}`);
-    }
-    return samples.filter(s => allow.has(`${s.droneId}:${s.t_sec_from_event}`));
   }
 
   function _debriefRenderTrajectory(samples, event = null) {
@@ -11512,8 +9874,6 @@ async function main() {
   // HTML gives us full CSS control, guaranteed rendering, non-overlap
   // stacking, and a proper Palantir-esque look.
   let _debriefCalloutState = null;
-  // True while debrief owns the collapsed state of the detail pillar.
-  let _debriefCollapsedDetail = false;
   function _debriefRenderMoments(moments) {
     const entities = [];
     const capped = moments.slice(0, 10);
@@ -11538,9 +9898,7 @@ async function main() {
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
-        // debriefIdx maps a clicked dot back to its callout. Without it
-        // a pick knows it hit a debrief dot but not which one.
-        properties: { debrief: true, debriefIdx: dotAnchors.length },
+        properties: { debrief: true },
       });
       entities.push(dot);
       dotAnchors.push(m);
@@ -11571,10 +9929,6 @@ async function main() {
 
     // 3) Per-frame position update: project 3D dot → 2D screen, place
     //    callout above with vertical stagger, draw leader line.
-    // Callouts the operator has dismissed by clicking their dot.
-    // Indices, not elements, because the update loop works by index.
-    const hidden = new Set();
-
     const scratch = new Cesium.Cartesian2();
     function _updatePositions() {
       const w = window.innerWidth;
@@ -11606,15 +9960,6 @@ async function main() {
           line.setAttribute('opacity', '0');
           continue;
         }
-        // Dismissed by the operator. The dot stays, because it is the
-        // thing they click to bring the callout back.
-        if (hidden.has(p.idx)) {
-          cb.style.opacity = '0';
-          cb.style.pointerEvents = 'none';
-          line.setAttribute('opacity', '0');
-          continue;
-        }
-        cb.style.pointerEvents = '';
         const cbH = cb.offsetHeight || 70;
         let calloutY = p.win.y - BASE_OFFSET - (p.idx * STAGGER);
         // If stacking upward pushes above top bar, flip below the dot
@@ -11640,16 +9985,7 @@ async function main() {
     viewer.scene.postRender.addEventListener(_updatePositions);
     _updatePositions();
 
-    _debriefCalloutState = {
-      layer, svg, updateFn: _updatePositions, calloutEls, lineEls, hidden,
-      // Called from the map click handler. Returns the new state so the
-      // caller can give the dot itself some visual feedback.
-      toggle(idx) {
-        if (hidden.has(idx)) hidden.delete(idx); else hidden.add(idx);
-        _updatePositions();
-        return !hidden.has(idx);
-      },
-    };
+    _debriefCalloutState = { layer, svg, updateFn: _updatePositions, calloutEls, lineEls };
     return entities;
   }
 
@@ -11664,25 +10000,6 @@ async function main() {
     if (svg) while (svg.firstChild) svg.removeChild(svg.firstChild);
     _debriefCalloutState = null;
   }
-
-  // Debrief panel pose. Module-level so it survives a re-render: the
-  // narrative streams in and rebuilds the panel, and a panel that
-  // jumped back to centre screen every time would be unusable.
-  let _debriefPanelPos = null;
-  let _debriefPanelCollapsed = false;
-  let _debriefPanelHidden = false;
-
-  // D shows a hidden debrief again. Ignored while typing.
-  window.addEventListener('keydown', (ev) => {
-    if (ev.key !== 'd' && ev.key !== 'D') return;
-    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
-    const t = ev.target;
-    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
-    const panel = document.getElementById('debrief-narrative');
-    if (!panel || !_debriefPanelHidden) return;
-    _debriefPanelHidden = false;
-    panel.hidden = false;
-  });
 
   function _debriefBuildNarrativePanel(event, narrativeHtml, moments) {
     const wrap = document.createElement('div');
@@ -11714,11 +10031,9 @@ async function main() {
       </div>` : '';
 
     wrap.innerHTML = `
-      <div class="dbn-header" data-debrief-drag>
+      <div class="dbn-header">
         <span class="dbn-badge">DEBRIEF</span>
         <span class="dbn-eid pl-mono">${event.id}</span>
-        <button class="dbn-ctl" id="debrief-collapse-btn" title="Collapse or expand the panel">–</button>
-        <button class="dbn-ctl" id="debrief-hide-btn" title="Hide the panel. Press D to bring it back.">✕</button>
         <button class="dbn-close" id="debrief-close-btn">Exit debrief</button>
       </div>
       ${scopeBanner}
@@ -11726,80 +10041,12 @@ async function main() {
       <div class="dbn-body" data-debrief-body="${event.id}" data-debrief-reco="${event.id}">${narrativeHtml}</div>
       ${momentsList}
       <div class="dbn-footer" data-debrief-foot="${event.id}">${modelSubtitle}</div>
-      <div class="dbn-regen-row">
-        <button class="dbn-regen-btn" data-debrief-regen="${event.id}">Regenerate narrative</button>
-        <span class="dbn-regen-hint">Re-runs Agent B against the same event data. Use if the current read is off.</span>
+      <div class="dbn-regen-row" style="display:flex;gap:8px;padding:0 var(--space-3) var(--space-3);align-items:center;">
+        <button class="dbn-regen-btn" data-debrief-regen="${event.id}" style="padding:6px 12px;background:transparent;border:1px solid var(--border);color:var(--text-dim);font-family:var(--font-mono);font-size:var(--fs-2xs);letter-spacing:0.10em;text-transform:uppercase;cursor:pointer;border-radius:2px;">Regenerate narrative</button>
+        <span class="dbn-regen-hint" style="font-family:var(--font-mono);font-size:9px;color:var(--text-dim);letter-spacing:0.08em;">Re-runs Agent B against the same event data. Use if the current read is off.</span>
       </div>
     `;
     document.body.appendChild(wrap);
-
-    // ── Panel controls ────────────────────────────────────────────
-    // The debrief sits over the map, and the map is the thing being
-    // debriefed. Drag it by the header, collapse it to the header
-    // alone, or hide it entirely and bring it back with D.
-    //
-    // Deliberately self-contained: listeners on this element only, no
-    // shared state, nothing that outlives the panel. Position and
-    // collapse are remembered in module-level vars so a re-render or a
-    // narrative stream does not throw the panel back to centre screen.
-    const _applyDebriefPose = () => {
-      if (_debriefPanelPos) {
-        wrap.style.left = `${_debriefPanelPos.left}px`;
-        wrap.style.top = `${_debriefPanelPos.top}px`;
-        wrap.style.bottom = 'auto';
-        wrap.style.transform = 'none';
-      }
-      wrap.classList.toggle('is-collapsed', _debriefPanelCollapsed);
-      wrap.hidden = _debriefPanelHidden;
-    };
-    _applyDebriefPose();
-
-    const _collapseBtn = wrap.querySelector('#debrief-collapse-btn');
-    _collapseBtn?.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      _debriefPanelCollapsed = !_debriefPanelCollapsed;
-      _collapseBtn.textContent = _debriefPanelCollapsed ? '+' : '–';
-      _applyDebriefPose();
-    });
-    wrap.querySelector('#debrief-hide-btn')?.addEventListener('click', (ev) => {
-      ev.stopPropagation();
-      _debriefPanelHidden = true;
-      _applyDebriefPose();
-      toast('Debrief panel hidden. Press D to show it again.', 'info');
-    });
-
-    // Drag by the header. Pointer events so it works with a trackpad,
-    // a mouse or a touch screen, and setPointerCapture so a fast drag
-    // that leaves the header does not drop the panel mid-move.
-    const _hdr = wrap.querySelector('[data-debrief-drag]');
-    let _dragFrom = null;
-    _hdr?.addEventListener('pointerdown', (ev) => {
-      if (ev.target.closest('button')) return;   // controls are not a drag handle
-      const r = wrap.getBoundingClientRect();
-      _dragFrom = { dx: ev.clientX - r.left, dy: ev.clientY - r.top };
-      _debriefPanelPos = { left: r.left, top: r.top };
-      _applyDebriefPose();
-      _hdr.setPointerCapture(ev.pointerId);
-      ev.preventDefault();
-    });
-    _hdr?.addEventListener('pointermove', (ev) => {
-      if (!_dragFrom) return;
-      // Clamped so the panel can never be dragged fully off screen and
-      // become unreachable.
-      const w = wrap.offsetWidth, h = wrap.offsetHeight;
-      _debriefPanelPos = {
-        left: Math.min(Math.max(ev.clientX - _dragFrom.dx, -w + 120), window.innerWidth - 120),
-        top: Math.min(Math.max(ev.clientY - _dragFrom.dy, 0), window.innerHeight - 40),
-      };
-      _applyDebriefPose();
-    });
-    const _endDrag = (ev) => {
-      if (!_dragFrom) return;
-      _dragFrom = null;
-      try { _hdr.releasePointerCapture(ev.pointerId); } catch (_) {}
-    };
-    _hdr?.addEventListener('pointerup', _endDrag);
-    _hdr?.addEventListener('pointercancel', _endDrag);
     document.getElementById('debrief-close-btn').addEventListener('click', stopDebrief);
     // Regenerate: clear ALL downstream caches and re-fire the full
     // pipeline (highlights → digest → preprocessing → Agent B).
@@ -11826,12 +10073,7 @@ async function main() {
       invalidatePreprocessed(event);     // preprocessing.js: clear persisted preprocessed
       clearNarrativeCache(event.id);     // events.js: null the in-memory field
       clearPreprocessedCache(event.id);  // events.js: null the in-memory field
-      // Same scoping as the initial debrief render. Without it a
-      // regenerate would quietly widen an operator's narrative back to
-      // the full cross-site flight that the first pass had scoped out.
-      const _regenRaw = window.__isr_getRecording?.(event.id)?.timeseries || [];
-      const _regenScope = scopedTrajectoryFor(event, getActiveRole?.()?.id, _regenRaw);
-      const samples = _confirmedSamplesForScope(_regenScope, _regenRaw);
+      const samples = window.__isr_getRecording?.(event.id)?.timeseries || [];
       const analysis = _debriefAnalyzeAssets(event, samples);
       mutateEvent(event.id, {
         _regenInFlight: _fireMistralDebrief(event, samples, analysis).finally(() => {
@@ -11856,9 +10098,9 @@ async function main() {
     // runs. For cross-cued events, also ensure the primary is loaded
     // (the resolver's fallback path needs it).
     await window.__isr_ensureRecording(eventId);
-    const _chainPrimaryEv = _resolveChainPrimaryEvent(event);
-    if (_chainPrimaryEv.id !== eventId) {
-      await window.__isr_ensureRecording(_chainPrimaryEv.id);
+    const _primaryId = event.linkedEventId || event.shadowOfEventId;
+    if (_primaryId && _primaryId !== eventId) {
+      await window.__isr_ensureRecording(_primaryId);
     }
     // Rehydrate any persisted narrative from localStorage before we
     // render the debrief panel — a reload otherwise re-triggers Agent B
@@ -11869,37 +10111,12 @@ async function main() {
     // CSS class on <body> is picked up by style.css rules that reduce
     // imagery brightness for the Cesium wrapper.
     document.body.classList.add('mode-analysis');
-    // The debrief panel is centred at the bottom of the viewport and the
-    // detail pillar is a fixed column on the right, so on anything but a
-    // very wide screen they overlap. Collapsing the pillar gives the
-    // debrief the width it was designed for, and the pillar's own expand
-    // arrow stays exactly where it was if the operator wants it back.
-    //
-    // Only auto-collapse a pillar that was open, and remember that we
-    // did, so exiting debrief restores what the operator had rather than
-    // leaving them to reopen something they never closed.
-    if (!document.body.classList.contains('details-collapsed')) {
-      _debriefCollapsedDetail = true;
-      window.__isr_setDetailPanelCollapsed?.(true);
-    }
     const resolved = _debriefResolveSamples(event);
     if (!resolved || !resolved.samples.length) {
-      toast('No trajectory data for this event. Debrief unavailable.', 'info');
+      toast('No trajectory data for this event — debrief unavailable.', 'info');
       return;
     }
-    // Trajectory scoping applies to the ANALYSIS layer too, not just to
-    // the polyline. Scope before the asset correlator, the moments
-    // extractor, the deterministic narrative and Agent B see anything,
-    // otherwise a site operator's written summary and its map callouts
-    // describe legs their own sensors never observed while the drawn
-    // track correctly hides them. No-op for admin and receivers.
-    const _dbScope = scopedTrajectoryFor(event, getActiveRole?.()?.id, resolved.samples);
-    const samples = _confirmedSamplesForScope(_dbScope, resolved.samples);
-    if (!samples.length) {
-      toast(_dbScope?.scopeNote || 'Event outside your site scope.', 'info');
-      document.body.classList.remove('mode-analysis');
-      return;
-    }
+    const samples = resolved.samples;
     const analysis = _debriefAnalyzeAssets(event, samples);
     const moments = _debriefExtractMoments(samples, analysis);
     const narrativeHtml = _debriefBuildNarrative(event, samples, analysis);
@@ -11915,19 +10132,10 @@ async function main() {
       }, 2500);
     }
     // Render map annotations (event passed so trajectory scoping can
-    // resolve per-role visibility, see scopedTrajectoryFor).
-    //
-    // NOTE the deliberate asymmetry: the trajectory renderer gets the
-    // FULL sample array, the analysis layer above gets the scoped one.
-    // _debriefRenderTrajectory scopes internally, and it needs to see
-    // the out-of-scope samples in order to know WHERE the gaps are.
-    // Handing it a pre-filtered array makes the remaining samples look
-    // contiguous, and it draws one solid line straight across ground
-    // the site never observed. The analysis layer has the opposite
-    // need: it must never read a sample this site did not see.
+    // resolve per-role visibility — see scopedTrajectoryFor).
     const entities = [
       ..._debriefRenderAssetHighlights(analysis.touched),
-      ..._debriefRenderTrajectory(resolved.samples, event),
+      ..._debriefRenderTrajectory(samples, event),
       ..._debriefRenderMoments(moments),
     ];
     const narrativeEl = _debriefBuildNarrativePanel(event, narrativeHtml, moments);
@@ -12215,13 +10423,6 @@ async function main() {
     _clearDebriefCallouts();
     _debriefState = null;
     document.body.classList.remove('mode-analysis');
-    // Restore the pillar only if debrief is what closed it and the
-    // operator has not touched it since. A manual toggle clears the flag,
-    // so we never reopen a panel someone deliberately closed.
-    if (_debriefCollapsedDetail) {
-      _debriefCollapsedDetail = false;
-      window.__isr_setDetailPanelCollapsed?.(false);
-    }
   }
   window.__isr_startDebrief = startDebrief;
   window.__isr_stopDebrief = stopDebrief;
@@ -12265,58 +10466,21 @@ async function main() {
   // Passthrough helper kept so callers don't need to change.
   function _safeTrailAlt(alt) { return alt || 0; }
 
-  function _replayBuildTrailSegments(samples, intervalMs = 500) {
+  function _replayBuildTrailSegments(samples) {
     // Group into contiguous same-band, same-confirmed-status segments so
     // each polyline is a uniform style and colour.
     const bandOf = (c) => c < 0.5 ? 0 : c < 0.7 ? 1 : c < 0.85 ? 2 : 3;
-    // Hysteresis pre-pass. The coverage gate is a hard cylinder with
-    // zero margin, so a drone skimming a scallop edge flips state for
-    // 1-3 samples repeatedly — every flip minted a fake gap with two
-    // seam markers ("lost 10:24:48Z / reacquired 10:24:49Z" clutter,
-    // field-found). Bounded sensor_gap runs shorter than GAP_MIN_S
-    // reclassify as detected: real seam crossings are tens of seconds,
-    // boundary notches are fractions of one — two orders apart.
-    const GAP_MIN_S = Math.max(2.0, (4 * intervalMs) / 1000);
-    const states = samples.map(x => x.detection_state);
-    let i = 0;
-    while (i < states.length) {
-      if (states[i] === 'sensor_gap') {
-        let j = i;
-        while (j < states.length && states[j] === 'sensor_gap') j++;
-        const endTs = samples[Math.min(j, samples.length - 1)]?.timestamp_utc;
-        const durS = (Date.parse(endTs || 0) - Date.parse(samples[i].timestamp_utc || 0)) / 1000;
-        const bounded = i > 0 && j < states.length && states[i - 1] === 'detected' && states[j] === 'detected';
-        if (bounded && durS < GAP_MIN_S) { for (let k = i; k < j; k++) states[k] = 'detected'; }
-        i = j;
-      } else i++;
-    }
     const segments = [];
     let current = null;
-    let prevDetected = null;
-    for (let idx = 0; idx < samples.length; idx++) {
-      const s = samples[idx];
-      const st = states[idx];
+    for (const s of samples) {
       const b = bandOf(s.confidence || 0);
-      const confirmed = st === 'detected';
-      const isGap = st === 'sensor_gap';
-      if (!current || current.band !== b || current.confirmed !== confirmed || current.isGap !== isGap) {
-        const gapBoundary = current && current.isGap !== isGap;
-        // Seam-close push ONLY for style transitions within the same
-        // observability. Pushing across a gap boundary extended the
-        // solid observed trail one sample into unobserved space.
-        if (current && !gapBoundary) current.positions.push([s.lon, s.lat, s.altitude_agl_m]);
-        const nc = { band: b, confirmed, isGap, avgConf: s.confidence || 0, positions: [], tStart: s.timestamp_utc, tEnd: s.timestamp_utc };
-        // Honest seam anchors: last DETECTED sample before the gap,
-        // first REDETECTED sample after it. Marker positions and
-        // timestamps come only from observed samples.
-        if (isGap) nc.anchorA = prevDetected ? { lon: prevDetected.lon, lat: prevDetected.lat, alt: prevDetected.altitude_agl_m, ts: prevDetected.timestamp_utc } : null;
-        if (current && current.isGap && confirmed) current.anchorZ = { lon: s.lon, lat: s.lat, alt: s.altitude_agl_m, ts: s.timestamp_utc };
-        current = nc;
+      const confirmed = _sampleIsConfirmed(s);
+      if (!current || current.band !== b || current.confirmed !== confirmed) {
+        if (current) current.positions.push([s.lon, s.lat, s.altitude_agl_m]);
+        current = { band: b, confirmed, avgConf: s.confidence || 0, positions: [] };
         segments.push(current);
       }
       current.positions.push([s.lon, s.lat, s.altitude_agl_m]);
-      current.tEnd = s.timestamp_utc;
-      if (confirmed) prevDetected = s;
     }
     return segments;
   }
@@ -12327,38 +10491,6 @@ async function main() {
       const segments = _replayBuildTrailSegments(samples);
       for (const seg of segments) {
         if (seg.positions.length < 2) continue;
-        if (seg.isGap) {
-          // NO line across a gap. The drone's real path there is sim
-          // ground truth no sensor observed, and a straight chord is
-          // fabricated geometry. The void IS the information; the two
-          // seam markers are the two truths we hold. Markers render
-          // only when BOTH anchors exist (a trailing gap with no
-          // reacquisition draws nothing).
-          if (!seg.anchorA || !seg.anchorZ) continue;
-          const seam = (a, text) => {
-            const m = viewer.entities.add({
-              position: Cesium.Cartesian3.fromDegrees(a.lon, a.lat, a.alt),
-              point: { pixelSize: 5, color: Cesium.Color.fromCssColorString('#9ca3af'), outlineColor: Cesium.Color.BLACK, outlineWidth: 1, disableDepthTestDistance: Number.POSITIVE_INFINITY },
-              label: {
-                text,
-                font: '9px system-ui',
-                fillColor: Cesium.Color.fromCssColorString('#9ca3af'),
-                outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
-                style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-                pixelOffset: new Cesium.Cartesian2(0, -12),
-                showBackground: true,
-                backgroundColor: Cesium.Color.fromCssColorString('rgba(8, 11, 16, 0.85)'),
-                backgroundPadding: new Cesium.Cartesian2(4, 2),
-                disableDepthTestDistance: Number.POSITIVE_INFINITY,
-              },
-            });
-            m._replayDroneId = droneId;
-            trailEntities.push(m);
-          };
-          seam(seg.anchorA, `signal lost ${String(seg.anchorA.ts || '').slice(11, 19)}Z`);
-          seam(seg.anchorZ, `reacquired ${String(seg.anchorZ.ts || '').slice(11, 19)}Z`);
-          continue;
-        }
         const flat = seg.positions.flat();
         const color = _confidenceColor(seg.avgConf);
         // Confirmed = solid, full width, full alpha.
@@ -12555,24 +10687,9 @@ async function main() {
   }
 
   async function startReplay(eventId) {
-    // One marker language at a time: the live run's persistent markers
-    // (OUT OF RANGE, DETECTED, ENTRY/EXIT) tell the same story the
-    // replay seam markers tell, at nearly the same coordinates. Hide
-    // them for the replay's duration; stopReplay restores.
-    try { _setEventMarkersVisibility(eventId, false); } catch (_) {}
     // Ensure recording is loaded from IDB into memory before consuming.
-    // Full-access roles (admin, every receiver) replay the WHOLE chain:
-    // load the topmost ancestor's own recording, which already holds
-    // the entire encounter continuously (see _resolveChainPrimaryEvent).
-    // Site-scoped operator roles keep loading just this one event's own
-    // (now spatially-honest, per the cross-cued slice fix) recording.
-    const _replayEvent = getEvent(eventId);
-    const _activeRoleId = getActiveRole?.()?.id;
-    const _replayFullAccess = _isFullAccessRoleId(_activeRoleId);
-    const _replayChainPrimary = (_replayFullAccess && _replayEvent) ? _resolveChainPrimaryEvent(_replayEvent) : null;
-    const _replayLoadId = _replayChainPrimary ? _replayChainPrimary.id : eventId;
-    await window.__isr_ensureRecording(_replayLoadId);
-    const rec = window.__isr_getRecording(_replayLoadId);
+    await window.__isr_ensureRecording(eventId);
+    const rec = window.__isr_getRecording(eventId);
     if (!rec || !rec.timeseries?.length) {
       toast('No trajectory recording available for this event.', 'info');
       return;
@@ -12583,6 +10700,8 @@ async function main() {
     // owned-site segments; admin + state agencies see full trajectory.
     // For operators, filter timeseries to in-scope samples + build
     // inferred bridges between owned sites.
+    const _replayEvent = getEvent(eventId);
+    const _activeRoleId = getActiveRole?.()?.id;
     const _scope = _replayEvent
       ? scopedTrajectoryFor(_replayEvent, _activeRoleId, rec.timeseries)
       : null;
@@ -12590,7 +10709,12 @@ async function main() {
     if (_scope && !_scope.fullyVisible) {
       // Keep only confirmed samples for droneEntries (bridges rendered
       // separately below as inferred polylines).
-      _filteredSamples = _confirmedSamplesForScope(_scope, rec.timeseries);
+      const _confirmedPositionSet = new Set();
+      for (const seg of _scope.segments) {
+        if (seg.visibility !== 'confirmed') continue;
+        for (const p of seg.positions) _confirmedPositionSet.add(`${p.droneId}:${p.t_sec_from_event}`);
+      }
+      _filteredSamples = rec.timeseries.filter(s => _confirmedPositionSet.has(`${s.droneId}:${s.t_sec_from_event}`));
       if (_filteredSamples.length === 0) {
         toast(_scope.scopeNote || 'Event outside your site scope.', 'info');
         document.body.classList.remove('mode-analysis');
@@ -12606,22 +10730,26 @@ async function main() {
     for (const [, arr] of droneEntries) arr.sort((a, b) => a.t_sec_from_event - b.t_sec_from_event);
     // Confidence-coloured trails (all drones, static)
     const trailEntities = _replayRenderTrails(droneEntries);
-    // Unobserved stretches render NOTHING in replay. Deliberate, and
-    // deliberately different from the debrief, which dots them.
-    //
-    // Replay reconstructs what the sensors watched as it happened. A
-    // line crossing ground no sensor observed is fabricated motion at
-    // a fabricated speed, and the operator is watching a clock while
-    // it draws. The void between the last confirmed position and the
-    // reacquisition IS the information, and it matches the coverage-gap
-    // treatment already used for every other account. The debrief is a
-    // static post-incident surface where a dotted stretch reads as
-    // "continued, unobserved" rather than as live motion, so it keeps
-    // the bridge. The scope banner names the hidden stretches either
-    // way, so nothing is silently dropped.
-    //
-    // _scope.segments still carries the inferred bridges; replay simply
-    // does not draw them.
+    // Inferred bridges between owned sites (dotted) — operator scope only.
+    if (_scope && !_scope.fullyVisible) {
+      for (const seg of _scope.segments) {
+        if (seg.visibility !== 'inferred' || seg.positions.length < 2) continue;
+        const flat = [];
+        for (const p of seg.positions) flat.push(p.lon, p.lat, _safeTrailAlt(p.altitude_agl_m || 100));
+        trailEntities.push(viewer.entities.add({
+          polyline: {
+            positions: Cesium.Cartesian3.fromDegreesArrayHeights(flat),
+            width: 2.5,
+            material: new Cesium.PolylineDashMaterialProperty({
+              color: Cesium.Color.fromCssColorString('#ffb84d').withAlpha(0.55),
+              dashLength: 14,
+            }),
+            clampToGround: false,
+          },
+          properties: { replay: true, confirmed: false, scoped: true, droneId: seg.droneId },
+        }));
+      }
+    }
     // Ghost billboards — one per drone, translucent variant of platformIcon
     const event = getEvent(eventId);
     const platform = event?.platform || rec.meta?.event_type || 'quadcopter';
@@ -12676,7 +10804,6 @@ async function main() {
 
   function stopReplay() {
     if (!_replayState) return;
-    try { if (_replayState.eventId) _setEventMarkersVisibility(_replayState.eventId, true); } catch (_) {}
     cancelAnimationFrame(_replayState._rafId);
     for (const ent of _replayState.droneEntities.values()) viewer.entities.remove(ent);
     for (const ent of _replayState.trailEntities) viewer.entities.remove(ent);
@@ -12791,7 +10918,7 @@ async function main() {
     // get the assault-drone GLB with a forward-pitch orientation rig
     // (they nose down when accelerating forward, unlike delta-wings).
     const isQuadcopter = platform === 'quadcopter' || platform === 'quad';
-    const MODEL_SWAP_M = 250;
+    const MODEL_SWAP_M = 500;
     const _modelUri = isLoiterMun
       ? '/aircraft/shahed_238_drone.glb'
       : (isQuadcopter ? '/aircraft/assault_drone_concept.glb' : null);
@@ -12824,11 +10951,6 @@ async function main() {
       const T = window.__isr_shahed_tuning || {};
       const headingOffset  = ((T.headingOffsetDeg || 0) * Math.PI) / 180;
       const pitchOffset    = ((T.pitchOffsetDeg   || 0) * Math.PI) / 180;
-      // Asset-space axis flips. 1 for a model whose nose sits on body
-      // +X, -1 for one authored nose-reversed. Applied at the HPR
-      // boundary below so everything above stays world-semantic.
-      const pitchSign      = T.pitchSign          ?? 1;
-      const rollSign       = T.rollSign           ?? 1;
       const headingSmooth  = T.headingSmoothing   ?? 0.18;
       const pitchSmooth    = T.pitchSmoothing     ?? 0.10;
       const rollSmooth     = T.rollSmoothing      ?? 0.08;
@@ -12891,8 +11013,8 @@ async function main() {
 
       const hpr = new Cesium.HeadingPitchRoll(
         _smoothedHeading + headingOffset,
-        (_smoothedPitch + pitchOffset) * pitchSign,
-        _smoothedRoll * rollSign,
+        _smoothedPitch + pitchOffset,
+        _smoothedRoll,
       );
       return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
     };
@@ -12915,11 +11037,6 @@ async function main() {
       const T = window.__isr_quad_tuning || {};
       const headingOffset  = ((T.headingOffsetDeg || 0) * Math.PI) / 180;
       const pitchOffset    = ((T.pitchOffsetDeg   || 0) * Math.PI) / 180;
-      // Asset-space axis flips. 1 for a model whose nose sits on body
-      // +X, -1 for one authored nose-reversed. Applied at the HPR
-      // boundary below so everything above stays world-semantic.
-      const pitchSign      = T.pitchSign          ?? 1;
-      const rollSign       = T.rollSign           ?? 1;
       const headingSmooth  = T.headingSmoothing   ?? 0.20;
       const pitchSmooth    = T.pitchSmoothing     ?? 0.15;
       const rollSmooth     = T.rollSmoothing      ?? 0.12;
@@ -12984,8 +11101,8 @@ async function main() {
 
       const hpr = new Cesium.HeadingPitchRoll(
         _qSmoothedHeading + headingOffset,
-        (_qSmoothedPitch + pitchOffset) * pitchSign,
-        _qSmoothedRoll * rollSign,
+        _qSmoothedPitch + pitchOffset,
+        _qSmoothedRoll,
       );
       return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
     };
@@ -13092,9 +11209,6 @@ async function main() {
           const T = window.__isr_shahed_tuning || {};
           const headingOffset  = ((T.headingOffsetDeg || 0) * Math.PI) / 180;
           const pitchOffset    = ((T.pitchOffsetDeg   || 0) * Math.PI) / 180;
-          // Asset-space axis flips. See the lead rig for the rationale.
-          const pitchSign      = T.pitchSign          ?? 1;
-          const rollSign       = T.rollSign           ?? 1;
           const headingSmooth  = T.headingSmoothing   ?? 0.18;
           const pitchSmooth    = T.pitchSmoothing     ?? 0.10;
           const rollSmooth     = T.rollSmoothing      ?? 0.08;
@@ -13150,8 +11264,8 @@ async function main() {
 
           const hpr = new Cesium.HeadingPitchRoll(
             _swSmoothedHeading + headingOffset,
-            (_swSmoothedPitch + pitchOffset) * pitchSign,
-            _swSmoothedRoll * rollSign,
+            _swSmoothedPitch + pitchOffset,
+            _swSmoothedRoll,
           );
           return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
         };
@@ -13171,9 +11285,6 @@ async function main() {
           const T = window.__isr_quad_tuning || {};
           const headingOffset  = ((T.headingOffsetDeg || 0) * Math.PI) / 180;
           const pitchOffset    = ((T.pitchOffsetDeg   || 0) * Math.PI) / 180;
-          // Asset-space axis flips. See the lead rig for the rationale.
-          const pitchSign      = T.pitchSign          ?? 1;
-          const rollSign       = T.rollSign           ?? 1;
           const headingSmooth  = T.headingSmoothing   ?? 0.20;
           const pitchSmooth    = T.pitchSmoothing     ?? 0.15;
           const rollSmooth     = T.rollSmoothing      ?? 0.12;
@@ -13233,8 +11344,8 @@ async function main() {
 
           const hpr = new Cesium.HeadingPitchRoll(
             _swQSmoothedHeading + headingOffset,
-            (_swQSmoothedPitch + pitchOffset) * pitchSign,
-            _swQSmoothedRoll * rollSign,
+            _swQSmoothedPitch + pitchOffset,
+            _swQSmoothedRoll,
           );
           return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
         };
@@ -13385,29 +11496,6 @@ async function main() {
   // overwatch-panic logic in the swarm tick). Narrative outcome
   // ("overwatch escaped") stays realistic — pursuit ends at
   // maxPursuitKm or coverage loss, not by hard-coded exclusion.
-  // Live hostiles on this event OR on any active event it spawned.
-  //
-  // A member that breaks formation is promoted to its own child event,
-  // and the parent's own hostile list stops being the whole picture.
-  // Interceptors are dispatched against the PARENT, so once the last
-  // in-formation drone was downed the group read as finished and the
-  // interceptors flew home while the detached drone was still being
-  // pursued. Exactly what Lucas saw on screen.
-  function _hostilesRemainIncludingChildren(eventId) {
-    if (_allDownableHostiles(eventId).length) return true;
-    const ev = EVENTS.find(e => e.id === eventId);
-    for (const lid of (ev?.linkedEventIds || [])) {
-      const child = EVENTS.find(e => e.id === lid);
-      if (!child || child.status !== 'active') continue;
-      // Only children that broke away from THIS event. A cross-linked
-      // sighting at another site is not this group's problem.
-      if (child.provenance?.breakawayOf !== eventId) continue;
-      const cs = droneState.get(lid);
-      if (cs && !cs.closedAt) return true;
-    }
-    return false;
-  }
-
   function _allDownableHostiles(eventId) {
     const st = droneState.get(eventId);
     if (!st) return [];
@@ -13621,35 +11709,8 @@ async function main() {
             && !event.awaitingNeutralization
             && !f35Chasing
             && !missileChasing) {
-          // "No chase" means no unit still pursuing the AIR track.
-          // Ground units pinned to wreckage (holding-cordon, or any
-          // dispatch with an assigned wreckage) are guarding debris,
-          // not chasing: they must never hold a dead-air event open.
-          // Field-found: AMK stayed LIVE forever with zero detections
-          // because cordon cars never reach 'complete'.
-          // Consequence responders are never chasing either. They are
-          // treating casualties or fighting a fire at a fixed scene, so
-          // they must not hold a dead-air event open. Without this an
-          // event stayed LIVE with zero detections for the whole
-          // on-scene task: 5 minutes for an ambulance, 15 for a
-          // Beredskabsstyrelsen rescue team. Same failure the cordon
-          // clause above was added for.
-          //
-          // Read off the mirrored kind, because event.counterDispatches
-          // entries carry no profile.
           const noChase = !Array.isArray(event.counterDispatches)
-            || event.counterDispatches.every(c =>
-                 c.state === 'complete'
-                 || c.state === 'holding-cordon'
-                 || c.state === 'rtb_home'
-                 || c.state === 'rtb_via_last_known'
-                 || !!c.assignedWreckageId
-                 || !!c.sceneWreckageId
-                 // A live unit whose tracker has gone quiet is frozen
-                 // by design. Without this it reads as permanently
-                 // en route and the event can never auto-close.
-                 || c.telemetryStale === true
-                 || leavesSceneUnassisted(CD_PROFILE[c.kind]));
+            || event.counterDispatches.every(c => c.state === 'complete');
           const linkedActive = Array.isArray(event.linkedEventIds)
             && event.linkedEventIds.some(lid => {
               const le = getEvent(lid);
@@ -13787,9 +11848,7 @@ async function main() {
         // Applies to primary AND linked/shadow events at other sites
         // (fixes: AMK shadow event had zero sensor data because template's
         // contributingSensors were CPH's — no dynamic update ever ran).
-        if (!state.leadSwarmMember?.neutralised) {
-          _updateContributingSensorsForPosition(event, p.lat, p.lon, p.alt);
-        }
+        _updateContributingSensorsForPosition(event, p.lat, p.lon, p.alt);
 
         // ── P55: single-drone recording capture (fixed-wing / jet / missile)
         // Additive path. If the event has NO swarm formation and no recording
@@ -13841,22 +11900,9 @@ async function main() {
         // the AMRAAM's homing arc, instead of an instant snap.
         if (state.prevLat !== undefined) {
           const dLat = p.lat - state.prevLat;
-          // cos(lat) correction: a longitude degree at Copenhagen is
-          // only ~56% of a latitude degree in metres. Without this the
-          // bearing rotates toward north on every diagonal leg, which
-          // read as the icon nose permanently bending LEFT on the
-          // northwest-running attack routes (straight on pure east-west
-          // legs, up to ~10 degrees off on diagonals).
-          const dLon = (p.lon - state.prevLon) * Math.cos(p.lat * Math.PI / 180);
+          const dLon = p.lon - state.prevLon;
           if (Math.abs(dLat) > 1e-9 || Math.abs(dLon) > 1e-9) {
-            // bearingTrimDeg: final sub-degree alignment between the
-            // icon art's apex and the computed course (canvas pixel
-            // grid + axis projection leave a hair of skew the math
-            // cannot see). Negative rotates the nose counter-clockwise.
-            // Dial LIVE while watching a straight leg:
-            //   window.__isr_icon_tuning.bearingTrimDeg = -4 / -2 / 0 / 2
-            const _trim = ((window.__isr_icon_tuning?.bearingTrimDeg ?? -2) * Math.PI) / 180;
-            const target = -Math.atan2(dLon, dLat) + _trim;
+            const target = -Math.atan2(dLon, dLat);
             if (state.stateHolder.headingInit) {
               let delta = target - state.stateHolder.headingRad;
               while (delta > Math.PI) delta -= 2 * Math.PI;
@@ -13963,7 +12009,7 @@ async function main() {
           }
         }
 
-        // OUT OF RANGE (marker) — fires the instant no sensor at this
+        // OUT OF RANGE (terminal) — fires the instant no sensor at this
         // site can detect the missile. cov.inCoverage aggregates every
         // sensor's individual coverageRadius from metadata; if any sensor
         // still covers the position we stay in range. No hardcoded buffer.
@@ -13973,25 +12019,15 @@ async function main() {
             const oorTime = new Date().toISOString().slice(11, 19);
             state.outOfRangeMarker = _dropMarker(p.lat, p.lon, '#ff5a5a', `OUT OF RANGE ${oorTime}Z · signal lost`, event.id);
             mutateEvent(event.id, { outOfRange: { lat: p.lat, lon: p.lon, alt: Math.round(p.alt), timestamp: new Date().toISOString() } });
+            if (!state.closedAt && !event.awaitingNeutralization && !event.multiSiteTrack) {
+              state.closedAt = performance.now();
+              markTrackClosed(p.eventId);
+              closeEvent(p.eventId, event.exit || null, { autoOutcome: 'lost contact' });
+              updateContributingRings();
+              renderAlertStrip();
+              if (getSelectedEventId() === p.eventId) renderDetailPanel();
+            }
           }
-        }
-        // Terminal close — separated from the marker drop and
-        // re-evaluated every tick while dark: a responder whose
-        // ONBOARD sensor still holds the target (per-model
-        // onboardSensorRangeM in CD_PROFILE) keeps the pursuit alive.
-        // The map stays dark either way — the responder's seeker is
-        // not our sensor mesh, so the only visible tell is the
-        // responder changing course. The event closes only when both
-        // our mesh AND every responder's onboard sensor have lost it.
-        if (state.outOfRangeDropped && !state.closedAt && !event.awaitingNeutralization
-            && !event.multiSiteTrack && event.status === 'active'
-            && !cov?.inCoverage && !_onboardTrackMaintained(event, p)) {
-          state.closedAt = performance.now();
-          markTrackClosed(p.eventId);
-          closeEvent(p.eventId, event.exit || null, { autoOutcome: 'lost contact' });
-          updateContributingRings();
-          renderAlertStrip();
-          if (getSelectedEventId() === p.eventId) renderDetailPanel();
         }
       } else {
         // Off-map: hide LEAD drone (swarm handled by its own loop below).
@@ -14048,12 +12084,6 @@ async function main() {
                 heading: leadHdgDeg, speedMs: p.speed || 25,
                 inCoverage: _leadCovNow,
               });
-              // Identity rides the same throttle and the same
-              // neutralised guard as the kinematics sync above. Swarm
-              // events only: a non-swarm event has no memberTracks, so
-              // a publish would be accepted, counted, and attach to
-              // nothing.
-              _publishSimTrack(event, state.leadSwarmMember.memberId, p, _memberKeysFor(event));
               state._leadTrackSyncMs = nowMs;
               state._leadTrackSyncInCov = _leadCovNow;
             }
@@ -14263,15 +12293,6 @@ async function main() {
               sw._neutralisedAt = new Date().toISOString();
               // Swarm Phase 1: source-of-truth status transition.
               if (sw.memberId) setMemberStatus(event.id, sw.memberId, 'neutralised', { reason: 'jamming forced landing' });
-              // Swarm Phase 2: close a promoted breakaway's child event
-              // with its member.
-              if (sw._breakawayChildId) {
-                const bwChild = getEvent(sw._breakawayChildId);
-                if (bwChild && bwChild.status === 'active') {
-                  markNeutralised(bwChild.id, { outcome: 'neutralized', needsPostIncident: false });
-                  closeEvent(bwChild.id, null);
-                }
-              }
               // Drop a small downed-drone marker at the landing spot so
               // it's visible in top-down after the billboard hides.
               viewer.entities.add({
@@ -14422,82 +12443,8 @@ async function main() {
               heading: hdgDeg, speedMs,
               inCoverage: swShouldShow,
             });
-            _publishSimTrack(event, sw.memberId, pos, _memberKeysFor(event));
             sw._lastTrackSyncMs = nowMs;
             sw._trackSyncInCov = swShouldShow;
-          }
-          // Swarm Phase 2: breakaway detection. Deviation anchor is the
-          // formation lead (the group's reference point); a member is a
-          // breakaway candidate when its distance from the lead exceeds
-          // its own slot offset magnitude plus the tuned threshold.
-          // The grace clock accumulates OBSERVED deviation only: ticks
-          // where our sensors actually see the member (sensors-observe-
-          // only — a formation break no sensor witnessed must never be
-          // announced from sim ground truth). Promotion fires once.
-          if (!sw._breakawayChildId && !sw.neutralised && leadPos) {
-            const _bw = window.__isr_breakaway || { distM: 500, graceSec: 10 };
-            const slotMagM = Math.hypot(sw.offset?.forward || 0, sw.offset?.right || 0);
-            const devM = haversineM(pos.lat, pos.lon, leadPos.lat, leadPos.lon);
-            const dtBwMs = Math.min(500, nowMs - (sw._lastBwTickMs || nowMs));
-            sw._lastBwTickMs = nowMs;
-            if (devM > slotMagM + _bw.distM) {
-              if (swShouldShow) sw._breakawayObsMs = (sw._breakawayObsMs || 0) + dtBwMs;
-              if ((sw._breakawayObsMs || 0) / 1000 >= _bw.graceSec) {
-                _promoteBreakawayMember(event, sw, pos, hdgDeg, speedMs);
-              }
-            } else {
-              sw._breakawayObsMs = 0;
-            }
-          } else if (sw._breakawayChildId && !sw.neutralised) {
-            const childEv = getEvent(sw._breakawayChildId);
-            if (childEv && childEv.status === 'active') {
-              if (swShouldShow) childEv._lastDetectionTs = Date.now();
-              mutateEvent(childEv.id, {
-                lastPosition: { lat: pos.lat, lon: pos.lon, alt: pos.alt, heading: hdgDeg, speed: speedMs, timestamp: new Date().toISOString() },
-                // Sticky-once-true, matching every other detected write
-                // in the codebase. Coverage loss must not vanish an
-                // active event from the strip; the child's own OOR
-                // close below handles a sustained loss truthfully.
-                ...(swShouldShow ? { detected: true } : {}),
-              });
-              if (childEv.memberTracks?.[0]) {
-                syncMemberTrack(childEv.id, childEv.memberTracks[0].memberId, {
-                  lat: pos.lat, lon: pos.lon, alt: pos.alt,
-                  heading: hdgDeg, speedMs,
-                  inCoverage: swShouldShow,
-                });
-              }
-              // Child owns its coverage-loss close: sustained loss of
-              // the member (outside our mesh AND outside every
-              // responder's onboard range) closes the child 'lost
-              // contact' — which also unblocks the parent's own
-              // coverage-loss close (linkedActive gate).
-              if (!swShouldShow && !_onboardTrackMaintained(childEv, pos)) {
-                if (!sw._bwChildOorSince) sw._bwChildOorSince = nowMs;
-                if ((nowMs - sw._bwChildOorSince) / 1000 >= 30) {
-                  closeEvent(childEv.id, null, { autoOutcome: 'lost contact' });
-                  // The dashed breadcrumb goes with the track.
-                  //
-                  // While a drone is outside coverage the dashed line
-                  // grows behind it, showing where an unobserved object
-                  // went. That is a simulation aid and it is honest
-                  // while the track is still open. Once the track is
-                  // closed as lost, the object is not being tracked at
-                  // all, and a line left frozen mid-ocean reads as a
-                  // position we still hold. We do not.
-                  sw._trackLost = true;
-                  if (sw.projPositions) sw.projPositions.length = 0;
-                  if (sw.projLine) sw.projLine.show = false;
-                  appendEventArray(event.id, 'notes', {
-                    timestamp: new Date().toISOString(),
-                    author: 'AUTO-CORRELATOR',
-                    text: `Breakaway track ${childEv.id} lost. No sensor or responder holds it.`,
-                  });
-                }
-              } else {
-                sw._bwChildOorSince = null;
-              }
-            }
           }
           // P5A: adaptive sample capture (interval decided ONCE per event by platform)
           if (state.recording && (!sw._lastSampleMs || (nowMs - sw._lastSampleMs) >= _sampleIntervalForEvent(event))) {
@@ -14534,20 +12481,11 @@ async function main() {
             sw.trailPositions.push(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, _safeTrailAlt(pos.alt)));
             if (sw.trailPositions.length > 400) sw.trailPositions.shift();
             sw.projLine.show = false;
-            // Re-acquired. A track that comes back is tracked again, so
-            // the lost flag is cleared and the next coverage gap draws
-            // its breadcrumb as normal.
-            sw._trackLost = false;
             // Wipe projPositions on re-entry so the NEXT out-of-cov
             // cycle starts fresh. Otherwise the dashed projection line
             // draws a straight segment from the previous cycle's last
             // out-of-cov point across the map to the new re-exit point.
             if (sw.projPositions && sw.projPositions.length) sw.projPositions.length = 0;
-          } else if (sw._trackLost) {
-            // Closed as lost contact. The member may still be moving in
-            // the simulation, but nothing is observing it and nothing
-            // should be drawn for it.
-            sw.projLine.show = false;
           } else {
             sw.projPositions.push(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, pos.alt));
             if (sw.projPositions.length > 300) sw.projPositions.shift();
@@ -14570,13 +12508,8 @@ async function main() {
         // sites currently see any of them, and diff vs last tick to
         // trigger spawn-on-entry / close-on-exit per site.
         const groupPositions = [];
-        // Dead drones and the dead lead's ghost waypoints are NOT
-        // observations (sensors-observe-only): counting them kept a
-        // death-emptied site inside currentGroupSites forever, so its
-        // exit-close never fired (verified AMK root-cause chain).
-        if (p?.lat != null && !state.leadSwarmMember?.neutralised) groupPositions.push({ lat: p.lat, lon: p.lon });
+        if (p?.lat != null) groupPositions.push({ lat: p.lat, lon: p.lon });
         for (const sw of state.swarmBillboards || []) {
-          if (sw.neutralised) continue;
           if (sw.stats?.lat != null) groupPositions.push({ lat: sw.stats.lat, lon: sw.stats.lon });
         }
         const currentGroupSites = _aggregateGroupSites(groupPositions);
@@ -14621,7 +12554,7 @@ async function main() {
         evaluateClassificationPipeline(event, pipelineCtx);
         evaluateAttackProfileDetector(event, pipelineCtx, {
           onAdvisory: (ev, rules) => {
-            toast(`Attack profile advisory. ${ev.droneType || 'track'} · ${rules[0]}. Operator confirmation required to promote to red.`, 'warn');
+            toast(`Attack profile advisory — ${ev.droneType || 'track'} · ${rules[0]}. Operator confirmation required to promote to red.`, 'warn');
             renderAlertStrip();
           },
         });
@@ -14635,22 +12568,7 @@ async function main() {
       // ended. `awaitingNeutralization` still exempts events under
       // active F-35 pursuit so they close on interception, not on
       // waypoint end.
-      //
-      // Airborne interceptor engagements ALSO defer this close: the
-      // engagement window is seconds long and its resolution decides
-      // the true ending. A hit closes the event as neutralised (kill
-      // path) and the warhead never detonates; a miss lets this branch
-      // fire next tick and the terminal impact proceeds. Without the
-      // exemption, a last-second kill resolved silently against an
-      // already-closed event — the interceptor caught the weapon and
-      // nothing happened (found live on the Geran-3 scenario).
-      const _resolvingEngagement = (() => {
-        for (const [, cd] of _counterDispatches) {
-          if (cd.eventId === p.eventId && cd.state === 'engaging' && cd.profile?.airborne) return true;
-        }
-        return false;
-      })();
-      if (p.completed && !state.closedAt && event.status === 'active' && !event.awaitingNeutralization && !_resolvingEngagement) {
+      if (p.completed && !state.closedAt && !event.awaitingNeutralization) {
         state.closedAt = performance.now();
         markTrackClosed(p.eventId);
         // Terminal impact: attack-profile templates (Shahed, Geran-3)
@@ -14673,7 +12591,7 @@ async function main() {
           // must treat it at least as urgently as a shot-down drone.
           const _impIso = new Date().toISOString();
           const _impWreckId = `wr-${event.id}-impact`;
-          const _impWreck = { id: _impWreckId, lat: p.lat, lon: p.lon, at: _impIso, downedBy: 'terminal-impact', isImpact: true, model: event.droneType || event.platform || null };
+          const _impWreck = { id: _impWreckId, lat: p.lat, lon: p.lon, at: _impIso, downedBy: 'terminal-impact', isImpact: true };
           appendEventArray(event.id, 'wreckages', _impWreck);
           mutateEvent(event.id, { wreckageLocation: { lat: p.lat, lon: p.lon, at: _impIso } });
           _rebalancePatrolsToWreckages(event);
@@ -14681,76 +12599,6 @@ async function main() {
             _renderWreckagePerimeter(_impWreck, cordon);
             _rebalancePatrolsToWreckages(event);
           }).catch(err => console.warn('[impact cordon] build failed:', err.message));
-          // Consequence auto-cascade: our sensors observed a warhead
-          // detonation, so the system alerts the consequence chain
-          // immediately (detection + alerting, never action). Medical
-          // coordination, nearest akutmodtagelser, fire and rescue,
-          // heavy rescue, and the responsible police district receive
-          // the case in their inbox; dispatch decisions stay with the
-          // humans in each profile.
-          //
-          // POLICE ARE NOT OPTIONAL HERE. This cascade tells medical
-          // and fire that the scene is not yet declared safe, and
-          // police are the only agency that can declare it safe, take
-          // scene command, and later release the scene. Until
-          // 2026-09-22 this list held consequence agencies only, so an
-          // impact produced responders with no scene commander. The
-          // comment above it claimed police were included; they were
-          // not, and the build gate did not check.
-          //
-          // Resolved from the site's own tier-2 Politikreds rather than
-          // hardcoded, so it is correct at every site including ones
-          // added later. escalateEvent dedups against existing
-          // escalations, so if the rules engine or the operator already
-          // escalated to that district this is a silent no-op.
-          const _casPoliceIds = localPoliceDestinationIds(event);
-          if (!_casPoliceIds.length) {
-            console.warn('[impact cascade] no tier-2 Politikreds destination for site', event.siteId,
-              '— consequence agencies will be alerted with no scene commander.');
-          }
-          try {
-            // Resolved from the site: its regional medical
-            // coordination centre, the receiving acute hospital, the
-            // municipal fire service covering its kommune, and the
-            // state rescue centre. Table and reasoning in
-            // src/consequence_routing.js.
-            //
-            // This was a fixed Copenhagen list until 2026-09-22, so a
-            // detonation at Billund Airport summoned Rigshospitalet,
-            // Hovedstadens Beredskab and Beredskabsstyrelsen Hedehusene
-            // while the services that actually cover Billund were never
-            // told. It was correct only because every site that could
-            // detonate happened to be in the capital region.
-            //
-            // Empty for a site with no routing entry, never a default
-            // set: falling back to Copenhagen is the bug being removed,
-            // and the build gate blocks a detonating site that has no
-            // entry.
-            const _casConsequenceIds = consequenceAgenciesForSite(event.siteId);
-            if (!_casConsequenceIds.length) {
-              console.warn('[impact cascade] no consequence routing for site', event.siteId,
-                '- no medical, fire or rescue agency will be alerted.');
-            }
-            const _casRecords = escalateEvent(event.id, {
-              destinationIds: [..._casConsequenceIds, ..._casPoliceIds],
-              payload: 'full',
-              message: `Warhead detonation observed at ${p.lat.toFixed(4)}N ${p.lon.toFixed(4)}E. Casualties possible. Immediate consequence response requested. Scene not yet declared safe: police scene command required.`,
-              operator: 'AUTO-CASCADE',
-              operatorRoleId: 'system-impact-cascade',
-            });
-            _casRecords.forEach((r, idx) => {
-              setTimeout(() => updateEscalationStatus(event.id, r.id, 'delivered'), 1200 + idx * 250);
-            });
-            // Every other escalation path fires the adapter seam; this
-            // one did not, so impact cascades never reached the
-            // per-role escalation adapter that real customer inbox
-            // systems will register against. Fire-and-forget, guarded
-            // internally against an empty array.
-            _fireEscalationAdapterSend(event, _casRecords);
-            toast(_casRecords.length
-              ? `Consequence cascade sent: ${_casRecords.length} agencies alerted, local to this site.`
-              : 'Consequence cascade: every agency was already on the case.', 'warn');
-          } catch (err) { console.warn('[impact cascade] failed:', err.message); }
           // Persistent IMPACT marker at the detonation point — same
           // pattern as the DOWNED marker so the coordinate survives on
           // the map after the smoke clears and routes through the
@@ -14791,11 +12639,7 @@ async function main() {
         const linkedIds = event.linkedEventIds || [];
         for (const lid of linkedIds) {
           const le = getEvent(lid);
-          // Outcome per what the sensors last knew: a linked track that
-          // was still detected when the scenario tore down ends as
-          // 'lost contact' (the track ended, not the drone's transit);
-          // an undetected one genuinely left coverage.
-          if (le && le.status === 'active') closeEvent(lid, le.exit || null, { autoOutcome: le.detected ? 'lost contact' : 'left coverage' });
+          if (le && le.status === 'active') closeEvent(lid, le.exit || null, { autoOutcome: 'left coverage' });
         }
         updateContributingRings();
         renderAlertStrip();
@@ -14821,12 +12665,12 @@ async function main() {
         state._lastPersistMs = performance.now();
       }
 
-      // Ghost-period teardown used to live here and was unreachable.
-      // markTrackClosed stops a closed track emitting positions, so this
-      // per-position loop never visited it again and the check never ran
-      // on any natural close. _sweepSceneLifecycle now owns it, asking
-      // the same question on an interval that does not depend on a tick
-      // that has already stopped. Single owner, so no double removal.
+      // Ghost period: keep markers + trail visible for GHOST_MS, then remove
+      if (state.closedAt && performance.now() - state.closedAt > GHOST_MS) {
+        removeDroneEntities(p.eventId);
+        removeLiveTrack(p.eventId);
+        updateSimButton();
+      }
     });
 
     // Detail Panel refresh for live selected event — routes through the
@@ -14851,19 +12695,14 @@ async function main() {
   function updateContributingRings() {
     contributingRingEntities.forEach(e => viewer.entities.remove(e));
     contributingRingEntities = [];
-    // Iterate every online sensor across every site the ACTIVE ACCOUNT
-    // can see. Any such sensor that currently has a live-event drone
-    // inside its coverage radius gets the pulsing ring. Degraded
-    // (orange) and offline (red) sensors never pulse. Previously scoped
-    // to event.contributingSensors which was a subset: sensors on the
-    // same site whose radius the drone fell into but which weren't yet
-    // added to contributingSensors got no pulse. This iterates the
-    // ground truth, narrowed to the viewer's own sites.
-    //
-    // The account filter matters most here. This runs on every tick, so
-    // without it a threat over one operator's substation pulses that
-    // operator's sensors live inside a different operator's session.
-    for (const sid of _visibleSiteIds()) {
+    // Iterate EVERY online sensor across every site. Any sensor that
+    // currently has a live-event drone inside its coverage radius gets
+    // the pulsing ring. Degraded (orange) and offline (red) sensors
+    // never pulse. Previously scoped to event.contributingSensors which
+    // was a subset — sensors on the same site whose radius the drone
+    // fell into but which weren't yet added to contributingSensors got
+    // no pulse. This iterates the ground truth.
+    for (const sid of Object.keys(SITES)) {
       const site = SITES[sid];
       if (!site?.sensors?.length) continue;
       for (const sensor of site.sensors) {
@@ -15046,23 +12885,6 @@ async function main() {
   handler.setInputAction((movement) => {
     const picked = viewer.scene.pick(movement.position);
     if (picked && picked.id && picked.id.properties) {
-      // A debrief callout dot. Clicking it dismisses its callout;
-      // clicking again brings it back. The dot never disappears,
-      // because it is the affordance for getting the callout back.
-      const _dbgIdx = picked.id.properties.debriefIdx?.getValue?.();
-      if (_dbgIdx != null && _debriefCalloutState?.toggle) {
-        const shown = _debriefCalloutState.toggle(_dbgIdx);
-        // Feedback on the dot itself, so a dismissed moment still reads
-        // as a moment rather than as a stray point on the map.
-        if (picked.id.point) {
-          picked.id.point.outlineWidth = shown ? 2.5 : 1;
-          picked.id.point.outlineColor = shown
-            ? Cesium.Color.WHITE
-            : Cesium.Color.WHITE.withAlpha(0.45);
-          picked.id.point.pixelSize = shown ? 14 : 11;
-        }
-        return;
-      }
       const type = picked.id.properties.type?.getValue?.();
       if (type === 'sensor') {
         const siteId = picked.id.properties.siteId.getValue();
@@ -15273,13 +13095,11 @@ async function main() {
   }
 
   function _renderDispatchPopupContent(d) {
-    const stateLabel = (d.state === 'engaging' && d.profile?.stagesAtScene)
-      ? 'STAGING'
-      : { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE', rtb_via_last_known: 'RTB · LAST KNOWN', rtb_home: 'RTB · HOME', 'holding-cordon': 'HOLDING CORDON' }[d.state] || (d.state || '').toUpperCase();
+    const stateLabel = { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE', rtb_via_last_known: 'RTB · LAST KNOWN', rtb_home: 'RTB · HOME', 'holding-cordon': 'HOLDING CORDON' }[d.state] || (d.state || '').toUpperCase();
     const stateClass = d.state === 'complete' ? 'offline' : d.state === 'engaging' ? 'degraded' : 'online';
     const elapsedSec = Math.max(0, Math.floor((Date.now() - d.dispatchedTs) / 1000));
     const elapsedStr = elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
-    const kindLabel = _kindDisplayName(d.kind);
+    const kindLabel = RESPONSE_OPTION_DETAILS?.[d.kind]?.displayName || d.kind;
     const unitStr = (d.memberCount || 1) > 1 ? `Unit ${(d.memberIndex || 0) + 1} of ${d.memberCount}` : 'Single unit';
     const distToTarget = (d.targetLat != null && d.targetLon != null)
       ? Math.round(haversineM(d.curLat, d.curLon, d.targetLat, d.targetLon))
@@ -15287,7 +13107,7 @@ async function main() {
     const speedKmh = d.profile?.cruiseKmh || 0;
     const etaLine = (d.state === 'en_route' && distToTarget != null && speedKmh > 0)
       ? `${Math.max(1, Math.round((distToTarget / 1000) / speedKmh * 60))} min ETA · ${distToTarget} m out`
-      : d.state === 'engaging' ? (d.profile?.stagesAtScene ? 'Staging at scene perimeter' : 'On station, engaging target')
+      : d.state === 'engaging' ? 'On station, engaging target'
       : d.state === 'complete' ? 'Engagement complete'
       : d.state === 'rtb_via_last_known' ? 'Signal lost, RTB via last-known coord'
       : d.state === 'rtb_home' ? 'Returning to base'
@@ -15891,10 +13711,7 @@ async function main() {
       const t = ent.properties?.type?.getValue?.();
       if (t === 'sensor-coverage') {
         const ringSite = ent.properties.siteId.getValue();
-        // Belt and braces against the scope sweep: a site the active
-        // account does not own can never have its coverage revealed,
-        // whatever selection path got here.
-        ent.show = (siteId != null && ringSite === siteId && _roleCanSeeSite(ringSite));
+        ent.show = (siteId != null && ringSite === siteId);
       }
     }
     if (!siteId) {
@@ -15939,10 +13756,7 @@ async function main() {
       });
       scopeLabel = site.name;
     } else {
-      // "All sites" means all sites THIS account owns. An operator's
-      // status bar must not total another owner's hardware.
-      _visibleSiteIds().forEach(sid => {
-        const site = SITES[sid];
+      Object.values(SITES).forEach(site => {
         site.sensors.forEach(s => {
           total++;
           if (s.status === 'online') online++;
@@ -16028,10 +13842,6 @@ async function main() {
   function flyTo(key) {
     const t = FLY_TARGETS[key];
     if (!t) return;
-    // Entry-point guard. The buttons for unowned sites are hidden by
-    // applyFlyToScope, but flyTo is also reached from the debrief
-    // camera move and from console handles, so refuse here too.
-    if (t.siteId && !_roleCanSeeSite(t.siteId)) return;
     hideSensorPopup();
     setActiveSite(t.siteId);
 
@@ -16109,33 +13919,9 @@ async function main() {
       applyOverlayVisibility();
     });
   });
-  // Hide fly-to buttons, the Energinet group and simulation site
-  // options for sites the active account does not own, so an operator
-  // is never offered a destination they cannot see. Re-run on every
-  // role switch. No-op for admin and receivers.
-  function applyFlyToScope() {
-    document.querySelectorAll('#control-panel .cp-btn[data-fly]').forEach((btn) => {
-      const sid = FLY_TARGETS[btn.dataset.fly]?.siteId;
-      btn.hidden = !!sid && !_roleCanSeeSite(sid);
-    });
-    const grp = document.getElementById('fly-group-energinet');
-    if (grp) grp.hidden = !_visibleSiteIds().some(sid => sid.startsWith('energinet_'));
-    const sel = document.getElementById('sim-site-select');
-    if (sel) {
-      let firstVisible = null;
-      for (const opt of sel.options) {
-        opt.hidden = !_roleCanSeeSite(opt.value);
-        if (!opt.hidden && !firstVisible) firstVisible = opt.value;
-      }
-      // If the current selection just became invisible, move it to the
-      // first site this account can actually simulate against.
-      if (sel.selectedOptions[0]?.hidden && firstVisible) sel.value = firstVisible;
-    }
-  }
   document.querySelectorAll('#control-panel .cp-btn[data-fly]').forEach((btn) => {
     btn.addEventListener('click', () => flyTo(btn.dataset.fly));
   });
-  applyFlyToScope();
   // Fly-to expandable group toggle (e.g. Energinet → 5 substations)
   document.querySelectorAll('[data-fly-expand]').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -16164,7 +13950,6 @@ async function main() {
       { key: 'cph_unknown_contact', label: 'Non-identifiable contact (N perimeter)', cls: 'recon' },
       { key: 'cph_shahed_amalienborg', label: 'Shahed-136 attack (Øresund → CPH → Amalienborg)', cls: 'critical' },
       { key: 'cph_geran3_amalienborg', label: 'Geran-3 jet attack, same route at 2x speed', cls: 'critical' },
-      { key: 'cph_shahed238_amalienborg', label: 'Shahed-238 jet attack, fastest of the family', cls: 'critical' },
       { key: 'cph_quad_recon_apron', label: 'Quadcopter recon over cargo apron (unknown → yellow)' },
       { key: 'cph_dji_hobbyist', label: 'Unauthorized DJI hobbyist (unknown → yellow → resolved)' },
     ],
@@ -16214,77 +13999,19 @@ async function main() {
       simPanel.innerHTML = `<div class="cp-empty" style="padding:12px;font-family:var(--font-mono);font-size:var(--fs-2xs);color:var(--text-dim);letter-spacing:0.08em;">No threat scenarios authored for this site yet. Site config, sensor grid, and receiver routing are live — drone-path templates land next.</div>`;
       return;
     }
-    // ── Sim composer: threat and path DROPDOWNS ────────────────
-    // Two collapsed selects in the same grammar as the site picker
-    // above. Options stay hidden until the dropdown opens. Path
-    // enables after a threat is chosen (auto-selected when the
-    // threat has exactly one route). Launch resolves the authored
-    // template for the chosen pair.
-    const meta = k => _SIM_COMPOSER_META[k] || null;
-    const entries = menu.map(t => ({
-      key: t.key, cls: t.cls || '',
-      threat: meta(t.key)?.threat || t.label,
-      pathLabel: meta(t.key)?.pathLabel || 'Authored route',
-    }));
-    const threats = [...new Set(entries.map(e => e.threat))];
-    if (!threats.includes(_simSelThreat)) { _simSelThreat = null; _simSelPath = null; }
-    const pathsForSel = _simSelThreat ? entries.filter(e => e.threat === _simSelThreat) : [];
-    if (_simSelThreat && pathsForSel.length === 1) _simSelPath = pathsForSel[0].pathLabel;
-    const selEntry = pathsForSel.find(e => e.pathLabel === _simSelPath) || null;
-    const esc = v => v.replace(/"/g, '&quot;');
-    simPanel.innerHTML = `
-      <div class="sim-composer-field">
-        <div class="sim-composer-hdr">Threat</div>
-        <select class="sim-select" id="sim-comp-threat">
-          <option value="" ${_simSelThreat ? '' : 'selected'} disabled>Select threat…</option>
-          ${threats.map(th => `<option value="${esc(th)}" ${th === _simSelThreat ? 'selected' : ''}>${th}</option>`).join('')}
-        </select>
-      </div>
-      <div class="sim-composer-field">
-        <div class="sim-composer-hdr">Path</div>
-        <select class="sim-select" id="sim-comp-path" ${_simSelThreat ? '' : 'disabled'}>
-          <option value="" ${_simSelPath ? '' : 'selected'} disabled>${_simSelThreat ? 'Select path…' : 'Select threat first'}</option>
-          ${pathsForSel.map(e => `<option value="${esc(e.pathLabel)}" ${e.pathLabel === _simSelPath ? 'selected' : ''}>${e.pathLabel}</option>`).join('')}
-        </select>
-      </div>
-      <button class="cp-btn wide sim-btn sim-launch" data-comp-launch ${selEntry ? '' : 'disabled'}>Launch simulation</button>`;
-    const thSel = simPanel.querySelector('#sim-comp-threat');
-    if (thSel) thSel.addEventListener('change', () => {
-      _simSelThreat = thSel.value || null;
-      _simSelPath = null;
-      renderSimPanel();
-    });
-    const paSel = simPanel.querySelector('#sim-comp-path');
-    if (paSel) paSel.addEventListener('change', () => {
-      _simSelPath = paSel.value || null;
-      renderSimPanel();
-    });
-    const launchBtn = simPanel.querySelector('[data-comp-launch]');
-    if (launchBtn && selEntry) launchBtn.addEventListener('click', () => {
-      if (anyTrackLive()) return;
-      flyTo(site);
-      setTimeout(() => window.__spawnDrone(selEntry.key), 1500);
+    simPanel.innerHTML = menu.map(t =>
+      `<button class="cp-btn wide sim-btn ${t.cls || ''}" data-threat="${t.key}" data-site="${site}">${t.label}</button>`
+    ).join('');
+    simPanel.querySelectorAll('.sim-btn[data-threat]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (anyTrackLive()) return;
+        const key = btn.dataset.threat;
+        const s = btn.dataset.site || 'cph';
+        flyTo(s);
+        setTimeout(() => window.__spawnDrone(key), 1500);
+      });
     });
   }
-  let _simSelThreat = null;
-  let _simSelPath = null;
-  // Threat/path annotation for the composer. Keys not listed fall
-  // back automatically. pathLabel doubles as the path identity.
-  const _SIM_COMPOSER_META = {
-    cph_shahed_amalienborg:    { threat: 'Shahed-136 / Geran-2',   pathLabel: 'Øresund → CPH → Amalienborg' },
-    cph_geran3_amalienborg:    { threat: 'Geran-3 (jet)',          pathLabel: 'Øresund → CPH → Amalienborg' },
-    cph_shahed238_amalienborg: { threat: 'Shahed-238 (jet)',       pathLabel: 'Øresund → CPH → Amalienborg' },
-    cph_quad_hostile:          { threat: 'Quadcopter, hostile',    pathLabel: 'Perimeter ingress' },
-    cph_fixedwing_hostile:     { threat: 'Fixed-wing UAS',         pathLabel: 'Recon transit' },
-    cph_recon_hostile:         { threat: 'HALE reconnaissance',    pathLabel: 'High-altitude loiter' },
-    cph_jet_friendly:          { threat: 'Jet (SAS 743), friendly',pathLabel: 'Filed airliner route' },
-    cph_missile_hostile:       { threat: 'Cruise missile',         pathLabel: 'Baltic sea ingress' },
-    cph_missile_inbound_sw:    { threat: 'Cruise missile',         pathLabel: 'SW continuation ingress' },
-    swarm_recon_cph_amk:       { threat: '5-drone recon swarm',    pathLabel: 'CPH → Amager transit' },
-    cph_unknown_contact:       { threat: 'Non-identifiable contact', pathLabel: 'N perimeter approach' },
-    cph_quad_recon_apron:      { threat: 'Quadcopter recon',       pathLabel: 'Cargo apron loiter' },
-    cph_dji_hobbyist:          { threat: 'DJI hobbyist',           pathLabel: 'Perimeter stray' },
-  };
   if (simSelect) {
     simSelect.addEventListener('change', renderSimPanel);
     renderSimPanel();
@@ -16707,7 +14434,7 @@ async function main() {
     );
     const _agencyPickerHtml = (agencyOptions && agencyOptions.length) ? `
       <div style="padding: 0 var(--space-4) var(--space-3);">
-        <div class="c-section-eyebrow" style="margin-top: 14px; margin-bottom: 8px;">Cascade to</div>
+        <div class="c-section-eyebrow" style="margin-bottom: 8px;">Cascade to</div>
         <div id="cascade-agency-picker" style="display: flex; flex-wrap: wrap; gap: 6px;">
           ${agencyOptions.map(a => `
             <button class="cascade-agency-chip"
@@ -16717,17 +14444,17 @@ async function main() {
                     title="${a.alreadyOnCase ? 'Already on the case via a prior escalation' : 'Toggle to include in this cascade'}"
                     style="
                       display: inline-flex; align-items: center; gap: 6px;
-                      padding: 6px 12px; border-radius: 4px;
-                      background: ${a.preselected ? 'rgba(127,168,201,0.08)' : 'rgba(255,255,255,0.02)'};
-                      border: 1px solid ${a.preselected ? 'rgba(127,168,201,0.45)' : 'var(--border)'};
-                      color: ${a.preselected ? '#a9c4d8' : 'var(--text)'};
+                      padding: 6px 12px; border-radius: 999px;
+                      background: ${a.preselected ? 'rgba(77,210,255,0.10)' : 'rgba(255,255,255,0.02)'};
+                      border: 1px solid ${a.preselected ? 'var(--accent)' : 'var(--border)'};
+                      color: ${a.preselected ? 'var(--accent)' : 'var(--text)'};
                       cursor: pointer; font-family: var(--font-body);
                       font-size: var(--fs-xs); font-weight: 500;
                       transition: border-color 120ms, background 120ms, color 120ms;
                     ">
-              <span class="cascade-agency-check" aria-hidden="true" style="width:6px; height:6px; border-radius:50%; background: ${a.preselected ? '#7fa8c9' : 'transparent'}; border: 1px solid ${a.preselected ? '#7fa8c9' : 'var(--border)'};"></span>
+              <span class="cascade-agency-check" aria-hidden="true" style="width:10px; height:10px; border-radius:50%; background: ${a.preselected ? 'var(--accent)' : 'transparent'}; border: 1px solid ${a.preselected ? 'var(--accent)' : 'var(--text-dim)'};"></span>
               <span>${a.label}</span>
-              ${a.alreadyOnCase ? `<span style="font-size:9px; padding:1px 6px; border-radius:3px; border:1px solid var(--border); color:var(--text-dim); font-family:var(--font-mono); letter-spacing:0.08em;">on case</span>` : ''}
+              ${a.alreadyOnCase ? `<span style="font-size:9px; padding:1px 6px; border-radius:8px; background:rgba(255,184,77,0.14); color:#ffb84d; font-family:var(--font-mono); letter-spacing:0.06em;">ON CASE</span>` : ''}
             </button>
           `).join('')}
         </div>
@@ -16996,15 +14723,8 @@ async function main() {
     const _spec = buildPickerGroups(event, RECEIVERS, {
       alreadyOnCaseRoleIds: _alreadyOnCaseRoleIds,
       activeRoleId,
-      // Same site receivers the recommended row below uses. Without
-      // this the modal resolved its stars nationally while the row
-      // resolved site-locally, so one modal showed two answers.
-      siteReceivers: SITES[event.siteId]?.receivers,
     });
-    // Pass the site's own receivers so an archetype slot resolves to
-    // the LOCAL agency. Without it the broadcast slot falls back to a
-    // national default rather than the kommune containing the site.
-    const _recommendations = recommendationsForEvent(event, RECEIVERS, { siteReceivers: SITES[event.siteId]?.receivers }).filter(
+    const _recommendations = recommendationsForEvent(event, RECEIVERS).filter(
       r => !_alreadyOnCaseRoleIds.has(r.id) && r.id !== activeRoleId
     );
     const _selectedRoleIds = new Set();
@@ -17629,7 +15349,7 @@ async function main() {
     const editingDest = _editingId && _editingId !== 'new' ? getDestination(_editingId) : null;
     const formOpen = _editingId !== null;
 
-    const tabHtml = _visibleSiteIds().map(sid => `
+    const tabHtml = Object.keys(SITES).map(sid => `
       <button class="cfg-tab ${sid === _configSiteId ? 'on' : ''}" data-site="${sid}">
         ${siteName(sid)}
       </button>`).join('');
@@ -17994,7 +15714,7 @@ async function main() {
       const respCount = (e.escalations || []).filter(esc => esc.response && esc.response.text).length;
       const respBadge = respCount > 0 ? `<span class="alert-resp" title="${respCount} response${respCount === 1 ? '' : 's'} received">↩ ${respCount}</span>` : '';
       const timeStr = isActive ? 'now' : relativeTime(e.startTime);
-      const rangeLine = isActive && e.lastPosition && e.lastPosition.rangeToPerim != null
+      const rangeLine = isActive && e.lastPosition
         ? `<div class="alert-line"><span>Range</span><b>${e.lastPosition.rangeToPerim} m</b></div>`
         : `<div class="alert-line"><span>Duration</span><b>${formatDuration(e.duration)}</b></div>`;
       // Operator alert card actions. Acknowledge is a RECEIVER action
@@ -18350,19 +16070,15 @@ async function main() {
     `;
 
     const intelligenceBody = `
-      ${e.evidence?.rfCarrier ? (() => {
-        // Rows come from the signal-tier reference library and are
-        // conditional by construction: a field nobody observed is
-        // absent rather than rendered as "unknown".
-        const _t = _tierFor(e.evidence, e.evidence.rfCarrier);
-        return `<div class="pl-kv">
-        <div class="pl-k">Radio frequency</div>
+      ${e.evidence?.rfCarrier ? `<div class="pl-kv">
+        <div class="pl-k">RF fingerprint</div>
         <div class="pl-v">
-          ${_t.rows.map(r => `<div class="pl-inline-row" ${r.note ? `title="${String(r.note).replace(/"/g, '&quot;')}"` : ''}><span>${r.label}</span><span class="pl-mono">${r.value}</span></div>`).join('')}
+          <div class="pl-inline-row"><span>Carrier</span><span class="pl-mono">${e.evidence.rfCarrier}</span></div>
+          ${e.evidence.rfBandwidth ? `<div class="pl-inline-row"><span>Bandwidth</span><span class="pl-mono">${e.evidence.rfBandwidth}</span></div>` : ''}
           ${e.evidence.rfMatch ? `<div class="pl-inline-row"><span>Match</span><span class="pl-mono">${e.evidence.rfMatch}</span></div>` : ''}
           ${e.evidence.modality ? `<div class="pl-inline-row"><span>Modality</span><span class="pl-mono">${e.evidence.modality}</span></div>` : ''}
         </div>
-      </div>`; })() : ''}
+      </div>` : ''}
       ${topSensors.length ? `<div class="pl-kv">
         <div class="pl-k">Contributing sensors</div>
         <div class="pl-v">
@@ -19049,18 +16765,13 @@ async function main() {
           <span class="dp-swarm-id">${d.id}</span>
           <span class="dp-swarm-model">${d.model}</span>
           <span class="dp-swarm-role">${d.role}</span>
-          <span class="dp-swarm-status">${
-            d.status === 'neutralised' ? `<span class="dp-swarm-status-downed">× DOWNED</span>`
-            : d.status === 'broken-away' ? `<span class="dp-swarm-status-breakaway">↗ DETACHED</span>`
-            : ''
-          }</span>
           ${d.status === 'neutralised'
-            ? ``
+            ? `<span class="dp-swarm-status-downed">× DOWNED</span>`
             : `<span class="dp-swarm-pos mono">${d.stats.lat.toFixed(4)}°N ${d.stats.lon.toFixed(4)}°E</span>
           <span class="dp-swarm-alt mono">${Math.round(d.stats.alt)} m</span>
           <span class="dp-swarm-hdg mono">${Math.round(d.stats.heading)}°</span>
           <span class="dp-swarm-spd mono">${(d.stats.speed || 0).toFixed(1)} m/s</span>
-          <span class="dp-swarm-rf mono" title="${_tierTitle(d.stats)}">${_tierSummary(d.stats)}</span>
+          <span class="dp-swarm-rf mono">${d.stats.rfCarrierMHz || 2412} MHz</span>
           <span class="dp-swarm-conf mono">${Math.round((d.conf || 0) * 100)}%</span>`}
         </div>`;
       swarmRoster = `
@@ -19088,11 +16799,15 @@ async function main() {
           'non-identifiable': 'Non-identified platform',
         })[e.platform]
         || 'Airborne platform';
-      // Band and emission from the reference library, rather than a
-      // frequency printed on its own. "2.4 GHz · Video downlink" tells an
-      // operator something; "2412 MHz" does not.
+      // Parse RF carrier MHz from evidence string (e.g. "2.412 GHz" → 2412).
+      // Passive tracks (missile) show "Passive" instead of an MHz number.
       const _rfRaw = e.evidence?.rfCarrier || '';
-      const _rfLabel = _tierSummary(e.evidence, _rfRaw);
+      let _rfLabel = 'N/A';
+      const _ghz = _rfRaw.match(/([\d.]+)\s*GHz/i);
+      const _mhz = _rfRaw.match(/(\d+)\s*MHz/i);
+      if (_ghz) _rfLabel = `${Math.round(parseFloat(_ghz[1]) * 1000)} MHz`;
+      else if (_mhz) _rfLabel = `${_mhz[1]} MHz`;
+      else if (/passive/i.test(_rfRaw)) _rfLabel = 'Passive';
       const soloRow = `
         <div class="dp-swarm-row is-focused" data-swarm-idx="0" title="${_platformId} (${_platformModel})">
           <span class="dp-swarm-id">${_platformId}</span>
@@ -19102,7 +16817,7 @@ async function main() {
           <span class="dp-swarm-alt mono">${e.lastPosition.alt} m</span>
           <span class="dp-swarm-hdg mono">${e.lastPosition.heading}°</span>
           <span class="dp-swarm-spd mono">${(e.lastPosition.speed || 0).toFixed(1)} m/s</span>
-          <span class="dp-swarm-rf mono" title="${_tierTitle(e.evidence, _rfRaw)}">${_rfLabel}</span>
+          <span class="dp-swarm-rf mono">${_rfLabel}</span>
           <span class="dp-swarm-conf mono">${Math.round((e.confidence || 0) * 100)}%</span>
         </div>`;
       swarmRoster = `
@@ -19265,7 +16980,7 @@ async function main() {
         </button>
         <div class="dp-pir-cta-hdr">Civil Response</div>
         <button class="dp-pir-cta ${cordonDispatched ? 'done' : ''}" data-pir="cordon" data-id="${e.id}" ${cordonDispatched ? 'disabled' : ''}>
-          ${cordonDispatched ? 'Cordon deployed · Københavns Politi' : 'Afspær området · Politi cordon (mass dispatch)'}
+          ${cordonDispatched ? 'Cordon deployed · Politi København' : 'Afspær området · Politi cordon (mass dispatch)'}
         </button>
         <button class="dp-pir-cta ${beredskabDispatched ? 'done' : ''}" data-pir="beredskab-mass" data-id="${e.id}" ${beredskabDispatched ? 'disabled' : ''}>
           ${beredskabDispatched ? 'Beredskabsstyrelsen inbound · full deployment' : 'Alert Beredskabsstyrelsen · full civil deployment'}
@@ -19847,7 +17562,7 @@ async function main() {
         if (nowAll && !_rbCompletionNoted(e.id)) {
           _rbMarkCompletionNoted(e.id);
           addNote(e.id, `Response playbook complete. All ${rb.steps.length} steps executed for "${rb.title}".`, 'PLAYBOOK');
-          toast('Playbook complete. Logged to event timeline.', 'ok');
+          toast('Playbook complete — logged to event timeline', 'ok');
         }
       });
     });
@@ -20189,11 +17904,10 @@ async function main() {
         closeEscalateModal();
         records.forEach((r, idx) => {
           setTimeout(() => updateEscalationStatus(eventId, r.id, 'delivered'), 1500 + idx * 300);
-          // NO auto-acknowledge. Delivered/read are transport receipts
-          // the system legitimately generates; acknowledgment is a
-          // HUMAN decision that only happens when someone acks from
-          // that agency's receiver profile. A random timer pretending
-          // to be PET was fake data on an operator surface.
+          setTimeout(() => updateEscalationStatus(eventId, r.id, 'read'), 4500 + idx * 500);
+          if (Math.random() < 0.6 || getDestination(r.destinationId)?.type === 'internal') {
+            setTimeout(() => updateEscalationStatus(eventId, r.id, 'acknowledged'), 8000 + idx * 800);
+          }
         });
       }));
       modalCard.querySelector('[data-modal="send"]').addEventListener('click', () => {
@@ -20205,11 +17919,10 @@ async function main() {
         closeEscalateModal();
         records.forEach((r, idx) => {
           setTimeout(() => updateEscalationStatus(eventId, r.id, 'delivered'), 1500 + idx * 300);
-          // NO auto-acknowledge. Delivered/read are transport receipts
-          // the system legitimately generates; acknowledgment is a
-          // HUMAN decision that only happens when someone acks from
-          // that agency's receiver profile. A random timer pretending
-          // to be PET was fake data on an operator surface.
+          setTimeout(() => updateEscalationStatus(eventId, r.id, 'read'), 4500 + idx * 500);
+          if (Math.random() < 0.6 || getDestination(r.destinationId)?.type === 'internal') {
+            setTimeout(() => updateEscalationStatus(eventId, r.id, 'acknowledged'), 8000 + idx * 800);
+          }
         });
       });
     };
@@ -20526,13 +18239,8 @@ async function main() {
     alertToggle.textContent = collapsed ? '›' : '‹';
     document.body.classList.toggle('alerts-collapsed', collapsed);
   });
-  // Extracted from the click handler so debrief can drive it too.
-  // Idempotent: setting it to the state it is already in does nothing,
-  // so callers do not have to check first.
-  function _setDetailPanelCollapsed(collapsed) {
-    const isCollapsed = detailPanel.classList.contains('collapsed');
-    if (isCollapsed === collapsed) return;
-    detailPanel.classList.toggle('collapsed', collapsed);
+  detailToggle.addEventListener('click', () => {
+    const collapsed = detailPanel.classList.toggle('collapsed');
     detailToggle.classList.toggle('collapsed', collapsed);
     detailToggle.textContent = collapsed ? '‹' : '›';
     document.body.classList.toggle('details-collapsed', collapsed);
@@ -20548,15 +18256,6 @@ async function main() {
       if (cp) cp.style.right = `${w + 12}px`;
       detailToggle.style.right = `${w}px`;
     }
-  }
-  window.__isr_setDetailPanelCollapsed = _setDetailPanelCollapsed;
-
-  detailToggle.addEventListener('click', () => {
-    // A manual toggle takes ownership of the panel. Debrief will not
-    // restore it on exit after this, because the operator has said what
-    // they want it to be.
-    _debriefCollapsedDetail = false;
-    _setDetailPanelCollapsed(!detailPanel.classList.contains('collapsed'));
   });
   // Resize handle on the left edge — drag to widen/shrink the detail
   // panel. Width persisted to localStorage so it survives reloads.
@@ -20690,10 +18389,7 @@ async function main() {
   // ── History view ──
   function renderHistory() {
     if (_activeView !== 'history') return;
-    // visibleEvents() applies the ambient tenant filter in events.js.
-    // Reading the raw EVENTS array here put every other tenant's
-    // incident history in an operator's History view.
-    const allEvents = visibleEvents().sort((a, b) => b.startTime.localeCompare(a.startTime));
+    const allEvents = [...EVENTS].sort((a, b) => b.startTime.localeCompare(a.startTime));
     const filtered = allEvents.filter(e => {
       if (_historyFilters.site !== 'all' && e.siteId !== _historyFilters.site) return false;
       if (_historyFilters.class !== 'all' && e.classification !== _historyFilters.class) return false;
@@ -20767,8 +18463,9 @@ async function main() {
           </div>
           <div class="hst-filter-row">
             <select class="cfg-input" id="hst-site">
-              <option value="all" ${_historyFilters.site==='all'?'selected':''}>All sites</option>
-              ${_visibleSiteIds().map(sid => `<option value="${sid}" ${_historyFilters.site===sid?'selected':''}>${SITES[sid].name}</option>`).join('')}
+              <option value="all"      ${_historyFilters.site==='all'?'selected':''}>All sites</option>
+              <option value="cph"      ${_historyFilters.site==='cph'?'selected':''}>CPH Airport</option>
+              <option value="esbjerg"  ${_historyFilters.site==='esbjerg'?'selected':''}>Esbjerg Harbour</option>
             </select>
             <select class="cfg-input" id="hst-class">
               <option value="all"       ${_historyFilters.class==='all'?'selected':''}>All classes</option>
@@ -20795,9 +18492,7 @@ async function main() {
   // ── Fleet view (sensor health across all sites) ──
   function renderFleet() {
     if (_activeView !== 'fleet') return;
-    // Fleet lists hardware. An operator sees only their own sites'
-    // sensors, not another owner's model numbers and coverage radii.
-    const sites = _visibleSiteIds().map(sid => SITES[sid]);
+    const sites = Object.values(SITES);
     fleetView.innerHTML = `
       <div class="flt-hdr">
         <div class="flt-hdr-title">Sensor Fleet</div>
@@ -20854,7 +18549,7 @@ async function main() {
     const rules = getRules();
     const activeRulesCount = rules.filter(r => r.enabled).length;
     const destBySite = dests.reduce((m, d) => { m[d.siteId] = (m[d.siteId] || 0) + 1; return m; }, {});
-    const siteRows = _visibleSiteIds().map(sid => {
+    const siteRows = Object.keys(SITES).map(sid => {
       const s = SITES[sid];
       return `<div class="cfg-site-row"><span>${s.name}</span><span class="mono dim">${destBySite[sid] || 0} destinations</span></div>`;
     }).join('');
@@ -20930,10 +18625,6 @@ async function main() {
   // between 'report' (case-file layout) and 'map' (full Cesium focus).
   let _workspaceEventId = null;
   let _workspaceMode = 'report';   // 'report' | 'map'
-  // Workspace navigation history: pushed when opening another event's
-  // workspace from inside one (linked-event jumps), popped by the
-  // back arrow. Cleared on full workspace close.
-  const _workspaceHistory = [];
 
   function renderRoleMenu() {
     const active = getActiveRole();
@@ -21204,8 +18895,8 @@ async function main() {
   // are demo/scenario-only visualisations that don't reflect real
   // operator capability (we don't tap enemy drone cameras). SIM badge
   // renders on the operator chip so the mode is visible at a glance.
-  // _simulationMode / _isSimMode() now declared near the top of main()
-  // (search "Declared here" for why) — only _setSimMode stays here.
+  let _simulationMode = false;
+  function _isSimMode() { return _simulationMode === true; }
   function _setSimMode(on) {
     _simulationMode = !!on;
     document.body.classList.toggle('mode-simulation', _simulationMode);
@@ -21213,10 +18904,6 @@ async function main() {
     if (!_simulationMode && typeof _dronePov !== 'undefined' && _dronePov.active) {
       _exitDronePOV();
     }
-    // Re-apply the current imagery mode so Sim-gated night rendering
-    // (real building textures) picks up immediately, even if Night was
-    // already selected before this toggle flipped.
-    applyImageryMode();
   }
 
   function updateOperatorChip() {
@@ -21289,7 +18976,7 @@ async function main() {
       'fe':             new Set(['army-isr-drone']),
       'rigspoliti':     new Set(['police-c-uas', 'counter-drone-swarm']),
       'politi-kbh':     new Set(['police-c-uas']),
-      'politi-sydsonderjyl': new Set(['police-c-uas']),
+      'politi-sydvest': new Set(['police-c-uas']),
       'op-cph-airports':new Set(['wildlife-response']),
       'op-esbjerg-port':new Set(['wildlife-response']),
       // Energinet is a grid TSO. They have NO kinetic-response capability
@@ -21319,40 +19006,6 @@ async function main() {
     const mineList = tactical.filter(a => DISPATCHABLE_KINDS_MC.has(a.kind) && canDispatchMc(a.kind));
     const otherList = tactical.filter(a => DISPATCHABLE_KINDS_MC.has(a.kind) && !canDispatchMc(a.kind));
 
-    // Units this role owns outright, for roles the counter-drone table
-    // does not cover.
-    //
-    // The lists above are drawn from the tactical response bundle,
-    // which holds counter-drone options only: no ambulance, physician
-    // car, fire engine or rescue team appears in it. So a hospital fell
-    // to the empty state and was told "no assets under your
-    // jurisdiction match this threat class", which is false. It has
-    // eight ambulances. They are simply not counter-drone equipment.
-    //
-    // Deliberately NOT fixed by adding these kinds to the counter-drone
-    // table. That table is scoped by threat class, and a hospital's
-    // vehicles do not answer a threat. They answer its consequences.
-    // Reuse the receiver asset registry instead, which already keys
-    // units by owning role and already drives a working dispatch path
-    // in the case file.
-    //
-    // Gated on the role having NO counter-drone scope rather than on
-    // mineList being empty. If it keyed on the empty list, a police
-    // role facing a threat class it cannot answer would suddenly grow a
-    // panel it does not have today. Every role in the table renders
-    // exactly what it renders now, on every subject. Energinet keeps
-    // its deliberately empty Set, which is truthy, so it keeps the
-    // escalate-and-coordinate treatment that is correct for a grid
-    // operator.
-    //
-    // Same event gate as the case-file rail: a live event, or a closed
-    // one with wreckage still on the ground.
-    const _mcWreckagePhase = Array.isArray(event.wreckages) && event.wreckages.length > 0;
-    const _mcOwnSpec = (!roleScopeMc && (event.status === 'active' || _mcWreckagePhase))
-      ? assetsForReceiverRole(activeRole?.id)
-      : null;
-    const _mcOwnUnits = _mcOwnSpec?.dispatchable || [];
-
     // Rich response option card. Shows what the option INCLUDES, what
     // it's typically DEPLOYED FOR, and its TRADEOFFS — before the duty
     // officer commits. Metadata sourced from RESPONSE_OPTION_DETAILS in
@@ -21362,9 +19015,7 @@ async function main() {
     // graduated-response system's top pick at a glance.
     const dispatchRow = (a, idx) => {
       const cdState = counterDispatchStateFor(event.id, a.id);
-      const stateLabel = (cdState === 'engaging' && CD_PROFILE[a.kind]?.stagesAtScene)
-        ? 'STAGING'
-        : { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE' }[cdState];
+      const stateLabel = { en_route: 'EN ROUTE', engaging: 'ENGAGING', complete: 'COMPLETE' }[cdState];
       const stateColor = cdState === 'complete' ? '#6b7280' : cdState === 'engaging' ? '#ffb84d' : '#4dd2ff';
       // Asset-level overrides > kind-level defaults. Prevents two
       // Politi teams (Rigspolitiet + Copenhagen) showing identical
@@ -21480,7 +19131,8 @@ async function main() {
       });
     }
     const _otherKindLabel = (kind) => {
-      return _kindDisplayName(kind);
+      const details = RESPONSE_OPTION_DETAILS[kind];
+      return details?.displayName || kind.replace(/-/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
     };
     const otherKindRow = (kind) => {
       const list = otherByKind[kind];
@@ -21557,65 +19209,6 @@ async function main() {
 
     const ackedBadge = isAcked ? `<span style="font-size: var(--fs-2xs); color: var(--ok); letter-spacing: 0.10em; text-transform: uppercase; font-family: var(--font-mono);">✓ Acked ${ackTs ? ackTs.slice(11,19) + 'Z' : ''}</span>` : '';
 
-    // Step 2 built here rather than as a nested ternary inside the
-    // template below. Three outcomes now share that slot, and the
-    // bracket arithmetic of a three-way ternary inside a template
-    // literal is how this edit was first written and why it did not
-    // parse.
-    const _step2Html = (() => {
-      if (!(isAcked || !rec)) return '';
-
-      // Counter-drone options, unchanged.
-      if (mineList.length) {
-        return `
-        <div class="c-panel c-panel-collapsible">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">${isAcked ? 'Step 2 · Select response option' : 'Your Response Options'}</div>
-          <div class="c-panel-body">
-          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${mineList.length} option${mineList.length === 1 ? '' : 's'} available. Multiple can be dispatched concurrently. Recommended pick is the closest by ETA.</div>
-          <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-3);">
-            ${mineList.map((a) => `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); border-radius: 2px; font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-dim);">○ ${_kindDisplayName(a.kind).split(' ').slice(0, 3).join(' ')}</span>`).join('')}
-          </div>
-          ${mineList.map((a, i) => dispatchRow(a, i)).join('')}
-          </div>
-        </div>`;
-      }
-
-      // Units this role owns. Wording is deliberately neutral: this
-      // panel serves a hospital, a fire service and the police tactical
-      // unit alike, so it must not reach for medical phrasing any more
-      // than for counter-drone phrasing.
-      if (_mcOwnUnits.length) {
-        const rows = _mcOwnUnits.map((a) => {
-          const name = a.name || a.label || 'Response unit';
-          const countStr = a.count && a.count > 1 ? `${a.count} available` : 'Single unit';
-          const deployStr = a.deployTime ? ` · ${a.deployTime}` : '';
-          return `
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--border);">
-              <div style="min-width: 0;">
-                <div style="font-size: var(--fs-sm); color: var(--text); font-weight: 500;">${name}</div>
-                <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-2xs); color: var(--text-dim);">${countStr}${deployStr}</div>
-              </div>
-              <button class="pl-dispatch-btn" style="flex: none; padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.06); color: #4dff9c; border: 1px solid rgba(77, 255, 156, 0.35); border-left: 2px solid #4dff9c; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.20em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="receiver-dispatch" data-id="${event.id}" data-asset-key="${a.assetKey}">Dispatch</button>
-            </div>`;
-        }).join('');
-        return `
-        <div class="c-panel c-panel-collapsible">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">${isAcked ? 'Step 2 · Dispatch your units' : 'Your units'}</div>
-          <div class="c-panel-body">
-            <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-2);">Units under your own command, dispatched from your base. Other agencies below can be asked for anything you do not hold.</div>
-            ${rows}
-          </div>
-        </div>`;
-      }
-
-      // Genuinely nothing to offer.
-      return `
-        <div class="c-panel c-panel-collapsible">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Response Options</div>
-          <div class="c-panel-body"><div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">You hold no units for this incident. Other agencies below can act.</div></div>
-        </div>`;
-    })();
-
     return `
       <div class="c-panel">
         <div class="c-section-eyebrow">Mission Console</div>
@@ -21629,7 +19222,21 @@ async function main() {
 
       ${ackGateHtml}
 
-      ${_step2Html}
+      ${isAcked || !rec ? (mineList.length ? `
+        <div class="c-panel c-panel-collapsible">
+          <div class="c-panel-title" style="margin-bottom: var(--space-2);">${isAcked ? 'Step 2 · Select response option' : 'Your Response Options'}</div>
+          <div class="c-panel-body">
+          <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${mineList.length} option${mineList.length === 1 ? '' : 's'} available. Multiple can be dispatched concurrently. Recommended pick is the closest by ETA.</div>
+          <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-3);">
+            ${mineList.map((a) => `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border); border-radius: 2px; font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.10em; text-transform: uppercase; color: var(--text-dim);">○ ${(RESPONSE_OPTION_DETAILS[a.kind]?.displayName || a.kind).split(' ').slice(0, 3).join(' ')}</span>`).join('')}
+          </div>
+          ${mineList.map((a, i) => dispatchRow(a, i)).join('')}
+          </div>
+        </div>` : `
+        <div class="c-panel c-panel-collapsible">
+          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Response Options</div>
+          <div class="c-panel-body"><div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">No assets under your jurisdiction match this threat class. Other agencies below can act.</div></div>
+        </div>`) : ''}
 
       ${_renderStep3ActiveEngagement(event, activeRole)}
       ${_renderStepOrPlaceholder(4, 'CONFIRM OUTCOME',        _renderStep4OutcomeConfirm(event, activeRole),    event)}
@@ -21638,14 +19245,6 @@ async function main() {
       ${_renderPostIncidentReportPanel(event, activeRole)}
 
       ${renderHistoricalPatternPanel(event, activeRole, { hasReportFor: (id) => !!getEvent(id)?.postIncidentReport })}
-      ${(() => {
-        // Attribution sits directly under the historical pattern
-        // because it consumes the same priors. The family and the
-        // prior list are resolved ONCE here and passed in, so the two
-        // panels can never disagree about what platform this is.
-        const _hp = getHistoricalPattern(event);
-        return renderAttributionPanel(event, activeRole, { priors: _hp.priors, family: _hp.family });
-      })()}
 
       ${_renderAnnulHistoryBlock(event, activeRole)}
 
@@ -21876,15 +19475,12 @@ async function main() {
   // Monitor Engagement bucket ordering. Most-active first so the operator
   // sees urgent state at the top of the panel. RTB variants and holding-
   // cordon come after primary active states, complete last.
-  // Matte, desaturated state palette. Saturated cyan/green on black
-  // read as a DOS console; these hold the same semantic (blue moving,
-  // gold engaging, violet returning, grey done) at premium volume.
   const _MON_ENG_BUCKETS = [
-    { key: 'engaging',          label: 'ENGAGING',              color: '#c8a35f' },
-    { key: 'en_route',          label: 'EN ROUTE',              color: '#7fa8c9' },
-    { key: 'holding-cordon',    label: 'HOLDING CORDON',        color: '#7fa8c9' },
-    { key: 'rtb_via_last_known',label: 'RTB · LAST KNOWN',      color: '#9a8fc0' },
-    { key: 'rtb_home',          label: 'RTB · HOME',            color: '#9a8fc0' },
+    { key: 'engaging',          label: 'ENGAGING',              color: '#ffb84d' },
+    { key: 'en_route',          label: 'EN ROUTE',              color: '#4dd2ff' },
+    { key: 'holding-cordon',    label: 'HOLDING CORDON',        color: '#4dd2ff' },
+    { key: 'rtb_via_last_known',label: 'RTB · LAST KNOWN',      color: '#c084fc' },
+    { key: 'rtb_home',          label: 'RTB · HOME',            color: '#c084fc' },
     { key: 'complete',          label: 'COMPLETE',              color: '#6b7280' },
   ];
 
@@ -21905,16 +19501,13 @@ async function main() {
   // dispatch object from _counterDispatches when available (same tab);
   // falls back to the event-trail mirror for cross-tab renders where
   // only position + state are synced.
-  function _monEngUnitRow(cd, bucketKey, live, { inGroup = false } = {}) {
+  function _monEngUnitRow(cd, bucketKey, live) {
     const elapsedSec = Math.max(0, Math.floor((Date.now() - cd.dispatchedTs) / 1000));
     const elapsedStr = elapsedSec < 60 ? `${elapsedSec}s` : `${Math.floor(elapsedSec / 60)}m ${elapsedSec % 60}s`;
-    const kindLabel = _kindDisplayName(cd.kind);
+    const kindLabel = RESPONSE_OPTION_DETAILS[cd.kind]?.displayName || cd.kind;
 
-    // Inside an expanded formation the kind is on the group header;
-    // repeating it per unit is what made the panel read as one block.
-    const metaParts = inGroup ? [] : [kindLabel];
+    const metaParts = [kindLabel];
     let progressHtml = '';
-    const bucketColor = (_MON_ENG_BUCKETS.find(b => b.key === bucketKey) || {}).color || '#7fa8c9';
 
     if (bucketKey === 'en_route' && live && live.targetLat != null && live.curLat != null) {
       const distM = haversineM(live.curLat, live.curLon, live.targetLat, live.targetLon);
@@ -21928,9 +19521,9 @@ async function main() {
       // never renders negative progress.
       const initialM = haversineM(live.originLat, live.originLon, live.targetLat, live.targetLon);
       const frac = Math.min(1, Math.max(0, 1 - distM / Math.max(initialM, distM, 1)));
-      progressHtml = `<div class="mon-eng-progress"><div class="mon-eng-progress-bar" style="width: ${Math.round(frac * 100)}%; background: ${bucketColor};"></div></div>`;
+      progressHtml = `<div class="mon-eng-progress"><div class="mon-eng-progress-bar" style="width: ${Math.round(frac * 100)}%;"></div></div>`;
     } else if (bucketKey === 'engaging') {
-      metaParts.push(CD_PROFILE[cd.kind]?.stagesAtScene ? 'Staging at perimeter' : 'On station');
+      metaParts.push('On station');
       metaParts.push(`Elapsed ${elapsedStr}`);
     } else if (bucketKey === 'holding-cordon') {
       metaParts.push('On cordon');
@@ -21956,17 +19549,10 @@ async function main() {
       }
     }
 
-    // Inside a group the parent name is on the header; the row only
-    // needs its unit slot. "Rigspolitiet · Slotsholmen Interceptor
-    // Team · Unit 1/3" three times over was the wall of text.
-    const rowName = inGroup && cd.memberCount > 1 && cd.memberIndex != null
-      ? `Unit ${cd.memberIndex + 1} / ${cd.memberCount}`
-      : cd.assetName;
-    const bucketLabel = (_MON_ENG_BUCKETS.find(b => b.key === bucketKey) || {}).label || '';
     return `
       <div class="mon-eng-unit">
         <div class="mon-eng-unit-main">
-          <div class="mon-eng-unit-name">${rowName}${!inGroup ? ` <span class="mon-eng-chip" style="color: ${bucketColor}; border-color: ${bucketColor}55;">${bucketLabel}</span>` : ''}</div>
+          <div class="mon-eng-unit-name">${cd.assetName}</div>
           <div class="mon-eng-unit-meta">${metaParts.join(' · ')}</div>
           ${enduranceHtml}
         </div>
@@ -21980,14 +19566,18 @@ async function main() {
   // would destroy the collapse listener and is-collapsed state bound
   // by _bindReceiverActions.
   function _monEngBodyHtml(event, activeRole) {
-    const dispatches = (event.counterDispatches || []).filter(cd => _roleCanSeeDispatch(cd, activeRole));
+    const dispatches = (event.counterDispatches || []).filter(cd => {
+      // Only show dispatches this role owns (issued from their scope)
+      const scope = _ROLE_DISPATCH_SCOPE_LOOKUP[activeRole?.id];
+      return activeRole?.kind === 'admin' || (scope && scope.has(cd.kind));
+    });
     if (!dispatches.length) return null;
 
     // Bucket dispatches by live state. counterDispatchStateFor returns
     // the current state or 'complete' if the entity has already retired.
     const bucketed = new Map(_MON_ENG_BUCKETS.map(b => [b.key, []]));
     for (const cd of dispatches) {
-      const state = counterDispatchStateForEntry(event.id, cd) || 'complete';
+      const state = counterDispatchStateFor(event.id, cd.assetId) || 'complete';
       const bucketKey = bucketed.has(state) ? state : 'complete';
       bucketed.get(bucketKey).push(cd);
     }
@@ -22011,37 +19601,34 @@ async function main() {
       // render flat.
       const groups = new Map();
       for (const cd of items) {
-        // Formation groups share a groupId. Repeated SINGLE dispatches
-        // of the same asset (Dispatch more clicked twice) carry unique
-        // group ids, which rendered two identical standalone cards
-        // instead of one expandable group (field-found): those key on
-        // asset + kind so same-type units always fold together.
-        const key = (cd.groupId && cd.memberCount > 1) ? cd.groupId : `${cd.assetId}::${cd.kind}`;
+        const key = cd.groupId || cd.dispatchId;
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key).push(cd);
       }
       const rows = Array.from(groups.entries()).map(([groupKey, members]) => {
         if (members.length === 1) {
-          return `<div class="mon-eng-card">${_monEngUnitRow(members[0], bucket.key, _counterDispatches.get(members[0].dispatchId), { inGroup: false })}</div>`;
+          return _monEngUnitRow(members[0], bucket.key, _counterDispatches.get(members[0].dispatchId));
         }
         const expanded = _monEngExpandedGroups.has(groupKey);
-        const kindLabel = _kindDisplayName(members[0].kind);
+        const kindLabel = RESPONSE_OPTION_DETAILS[members[0].kind]?.displayName || members[0].kind;
         const memberRows = expanded
-          ? members.map(cd => _monEngUnitRow(cd, bucket.key, _counterDispatches.get(cd.dispatchId), { inGroup: true })).join('')
+          ? members.map(cd => _monEngUnitRow(cd, bucket.key, _counterDispatches.get(cd.dispatchId))).join('')
           : '';
         return `
-          <div class="mon-eng-card">
-            <div class="mon-eng-group-hdr" data-mon-group-toggle="${groupKey}">
-              <span class="mon-eng-caret">${expanded ? '▾' : '▸'}</span>
-              <span class="mon-eng-group-name">${members[0].groupName || members[0].assetName}</span>
-              <span class="mon-eng-group-sub">${kindLabel} · ${members.length} units</span>
-              <span class="mon-eng-chip" style="color: ${bucket.color}; border-color: ${bucket.color}55;">${bucket.label}</span>
+          <div class="mon-eng-unit" data-mon-group-toggle="${groupKey}" style="cursor: pointer;">
+            <div class="mon-eng-unit-main">
+              <div class="mon-eng-unit-name">${expanded ? '▾' : '▸'} ${members[0].groupName || members[0].assetName}</div>
+              <div class="mon-eng-unit-meta">${kindLabel} · ${members.length} units</div>
             </div>
-            ${expanded ? `<div class="mon-eng-group-members">${memberRows}</div>` : ''}
-          </div>`;
+          </div>
+          ${expanded ? `<div style="padding-left: var(--space-3); border-left: 1px solid var(--border);">${memberRows}</div>` : ''}`;
       }).join('');
       return `
-        <div class="mon-eng-bucket">
+        <div class="mon-eng-bucket" style="margin-top: var(--space-3);">
+          <div class="mon-eng-bucket-hdr" style="display: flex; align-items: center; gap: var(--space-2); padding: 4px 10px; background: rgba(255,255,255,0.02); border: 1px solid ${bucket.color}66; border-left: 2px solid ${bucket.color}; border-radius: 2px; font-size: var(--fs-2xs); color: ${bucket.color}; font-family: var(--font-mono); letter-spacing: 0.16em; font-weight: 600; text-transform: uppercase;">
+            <span>${bucket.label}</span>
+            <span style="opacity: 0.7;">${items.length} unit${items.length === 1 ? '' : 's'}</span>
+          </div>
           ${rows}
         </div>`;
     }).join('');
@@ -22051,81 +19638,6 @@ async function main() {
       ${bucketSections}`;
     return { html, wrapped };
   }
-
-  // ── Prior-activity incident popup ────────────────────────────
-  // Click a history row: overlay with the archived one-pager and a
-  // DETERMINISTIC correlation checklist against the active event.
-  // Every correlation line traces to computed sensor-derived features
-  // (precedent vectors); no agent, no latency, no hallucination risk.
-  function _openHistPopup(priorId, activeId) {
-    const rec = getPrecedentRecord(priorId);
-    if (!rec) return;
-    const ev = getEvent(priorId);           // in-session only
-    const active = getEvent(activeId);
-    const esc = v => String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-    const f = rec.featureFields || {};
-    // One-pager block: full event when held, compact record otherwise
-    const onePager = ev ? `
-      <div class="hp-pop-grid">
-        <div><span>Platform</span><b>${esc(ev.droneType || ev.platform)}</b></div>
-        <div><span>Entered</span><b>${esc(ev.entry?.timestamp?.slice(11,19) || ev.startTime?.slice(11,19) || '?')}Z</b></div>
-        <div><span>Ended</span><b>${esc(ev.endTime?.slice(11,19) || '?')}Z</b></div>
-        <div><span>Site dwell</span><b>${esc(formatDuration(ev.duration))}</b></div>
-        <div><span>Classification</span><b>${esc(ev.classification)}</b></div>
-        <div><span>Confidence</span><b>${ev.confidence != null ? Math.round(ev.confidence * 100) + '%' : '?'}</b></div>
-        <div><span>Dispatches</span><b>${(ev.counterDispatches || []).length}</b></div>
-        <div><span>Outcome</span><b>${esc(ev.outcome || 'unrecorded')}</b></div>
-      </div>` : `
-      <div class="hp-pop-grid">
-        <div><span>Closed</span><b>${esc(rec.closedAt?.slice(0,10))} ${esc(rec.closedAt?.slice(11,19))}Z</b></div>
-        <div><span>Classification</span><b>${esc(rec.classification || 'unclassified')}</b></div>
-        <div><span>Outcome</span><b>${esc(rec.outcome || 'unrecorded')}</b></div>
-        <div><span>Family</span><b>${esc(f.platform_family)}</b></div>
-      </div>
-      <div class="hp-pop-note">Compact archive record. The full report was generated at close; the server-side report archive arrives with the Azure backend.</div>`;
-    // Deterministic correlation vs active event
-    let corrHtml = '';
-    if (active) {
-      const a = computeEventFeatures(active);
-      const rv = rec.featureVector || [];
-      let dot = 0, ma = 0, mb = 0;
-      for (let i = 0; i < Math.min(a.vec.length, rv.length); i++) { dot += a.vec[i]*rv[i]; ma += a.vec[i]*a.vec[i]; mb += rv[i]*rv[i]; }
-      const sim = (ma && mb) ? dot / (Math.sqrt(ma) * Math.sqrt(mb)) : 0;
-      const band = sim >= 0.75 ? 'high' : sim >= 0.5 ? 'medium' : 'low';
-      const af = a.fields;
-      const hpA = new Set(af.hotspot_ids || []);
-      const dwellShared = (f.hotspot_ids || []).filter(h => hpA.has(h));
-      const line = (match, text) => `<div class="hp-corr-line ${match ? 'is-match' : ''}">${match ? '✓' : '·'} ${text}</div>`;
-      corrHtml = `
-        <div class="hp-pop-sec">Correlation with active event <span class="hp-corr-score">similarity ${sim.toFixed(2)} · ${band}</span></div>
-        ${line(af.platform_family === f.platform_family, af.platform_family === f.platform_family ? `same platform family (${esc(f.platform_family)})` : `different platform family (${esc(f.platform_family)} vs ${esc(af.platform_family)})`)}
-        ${line(af.approach_bucket && af.approach_bucket === f.approach_bucket, af.approach_bucket === f.approach_bucket && af.approach_bucket ? `same approach corridor (${esc(f.approach_bucket)} ingress)` : `different approach corridor (${esc(f.approach_bucket || '?')} vs ${esc(af.approach_bucket || '?')})`)}
-        ${line(af.cardinality_bucket === f.cardinality_bucket, af.cardinality_bucket === f.cardinality_bucket ? `same formation size (${esc(f.cardinality_bucket)})` : `different formation size (${esc(f.cardinality_bucket)} vs ${esc(af.cardinality_bucket)})`)}
-        ${line(dwellShared.length > 0, dwellShared.length ? `dwell over same asset${dwellShared.length === 1 ? '' : 's'} (${dwellShared.map(esc).join(', ')})` : 'no shared dwell hotspots')}
-        <div class="hp-pop-note">Every line derives from computed track features. Context for your judgment, not a conclusion.</div>`;
-    }
-    const overlay = document.createElement('div');
-    overlay.className = 'hp-pop-overlay';
-    overlay.innerHTML = `
-      <div class="hp-pop-card">
-        <div class="hp-pop-hdr">
-          <span class="hp-pop-title">${esc(rec.closedAt?.slice(0,10))} · ${esc(ev?.droneType || f.platform_family)}</span>
-          <span class="hist-pattern-class hist-pattern-class-${esc(rec.classification || 'unclassified')}">${esc(rec.classification === 'resolved' ? 'dismissed' : (rec.classification || 'unclassified'))}</span>
-          <button class="hp-pop-x" title="Close">×</button>
-        </div>
-        ${rec.summary ? `<div class="hp-pop-summary">${esc(rec.summary)}</div>` : ''}
-        ${onePager}
-        ${corrHtml}
-      </div>`;
-    overlay.addEventListener('click', (e) => { if (e.target === overlay || e.target.classList.contains('hp-pop-x')) overlay.remove(); });
-    document.body.appendChild(overlay);
-  }
-  document.addEventListener('click', (ev) => {
-    const row = ev.target.closest('[data-hist-view]');
-    if (!row) return;
-    if (ev.target.closest('[data-rcv]')) return;   // View report button keeps its own action
-    _openHistPopup(row.dataset.histView, _workspaceEventId);
-  });
 
   // Expanded formation groups in the Step 3 panel. Keyed by groupId.
   // Default collapsed (header row only). Document-level delegated
@@ -22206,18 +19718,21 @@ async function main() {
     const outcomes = event.dispatchOutcomes || {};
     const dispatches = (event.counterDispatches || []).filter(cd => {
       if (outcomes[cd.dispatchId]) return false;   // already confirmed
-      const state = counterDispatchStateForEntry(event.id, cd);
+      const state = counterDispatchStateFor(event.id, cd.assetId);
       // Include completed dispatches OR dispatches whose entities have
       // already been retired (state lookup returns 'complete' from the
       // event's counterDispatches trail even after entities are gone).
       if (state && state !== 'complete') return false;
-      return _roleCanSeeDispatch(cd, activeRole);
+      const scope = _ROLE_DISPATCH_SCOPE_LOOKUP[activeRole?.id];
+      return activeRole?.kind === 'admin' || (scope && scope.has(cd.kind));
     });
     if (!dispatches.length) return '';
     const blocks = dispatches.map(cd => {
-      const optionsHtml = _outcomeOptionsForKind(cd.kind)
-        .map(o => `<option value="${o.id}">${o.label}</option>`).join('');
-      const kindLabel = _kindDisplayName(cd.kind);
+      const outcomeOptions = outcomesForKind(cd.kind);
+      const optionsHtml = outcomeOptions.length
+        ? outcomeOptions.map(o => `<option value="${o.id}">${o.label}</option>`).join('')
+        : '<option value="complete">Engagement complete</option>';
+      const kindLabel = RESPONSE_OPTION_DETAILS[cd.kind]?.displayName || cd.kind;
       return `
         <article style="padding: var(--space-3); border: 1px solid var(--border); border-left: 2px solid #ffb84d; border-radius: var(--radius); background: var(--surface-panel); margin-bottom: var(--space-3);">
           <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.12em; color: #ffb84d; font-size: var(--fs-2xs); margin-bottom: 4px;">${kindLabel}</div>
@@ -22407,38 +19922,6 @@ async function main() {
     const chainCount = report.handoff_chain?.length || 0;
     const timelineCount = report.timeline?.length || 0;
 
-    const downed = report.downed_airframes || [];
-    const downedRows = downed.length ? `
-      <div class="c-panel-title" style="margin: var(--space-3) 0 var(--space-2); color: #ff8a8a;">Downed airframes · ${downed.length}</div>
-      ${downed.map(w => `
-        <details class="pir-downed">
-          <summary style="display:flex;gap:var(--space-3);align-items:center;padding:5px 0;border-top:1px solid var(--border);font-size:var(--fs-2xs);cursor:pointer;list-style:none;">
-            <span style="color:var(--text-dim);font-size:10px;">▸</span>
-            <span style="color:var(--text-dim);font-family:var(--font-mono);flex:0 0 74px;">${(w.at || '').slice(11,19)}Z</span>
-            <span style="color:${w.is_impact_site ? '#ff8f2a' : '#ff8a8a'};font-family:var(--font-mono);flex:0 0 84px;">${w.is_impact_site ? 'IMPACT' : 'DOWNED'}</span>
-            <span style="color:var(--text);flex:1 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${w.model || 'Unknown platform'}</span>
-            <span style="color:var(--text-dim);flex:0 0 auto;">${w.downed_by === 'terminal-impact' ? 'warhead detonation' : (w.downed_by ? 'by ' + w.downed_by : '')}</span>
-          </summary>
-          <div style="padding:6px 0 8px 24px;font-size:var(--fs-2xs);display:grid;grid-template-columns:110px 1fr;gap:3px 12px;">
-            <span style="color:var(--text-dim);">Threat type</span><span style="color:var(--text);">${w.model || 'Unknown platform'}${report.event_snapshot?.platform ? ' · ' + report.event_snapshot.platform : ''}</span>
-            <span style="color:var(--text-dim);">Downed at</span><span style="color:var(--text);font-family:var(--font-mono);">${w.lat.toFixed(5)}N ${w.lon.toFixed(5)}E</span>
-            <span style="color:var(--text-dim);">Time</span><span style="color:var(--text);font-family:var(--font-mono);">${w.at || '?'}</span>
-          </div>
-        </details>`).join('')}` : '';
-    // Scene command decisions. Sits beside the downed airframes because
-    // it answers the question that follows them: who released the site.
-    // Rendered from the report rather than from live dispatch state, so
-    // a report opened months later still shows the decision.
-    const sceneReleases = report.scene_releases || [];
-    const sceneReleaseRows = sceneReleases.length ? `
-      <div class="c-panel-title" style="margin: var(--space-3) 0 var(--space-2); color: #8fc9a8;">Scene released · ${sceneReleases.length}</div>
-      ${sceneReleases.map(r => `
-        <div style="display:flex;gap:var(--space-3);align-items:baseline;padding:5px 0;border-top:1px solid var(--border);font-size:var(--fs-2xs);">
-          <span style="color:var(--text-dim);font-family:var(--font-mono);flex:0 0 74px;">${(r.at || '').slice(11,19)}Z</span>
-          <span style="color:#8fc9a8;font-family:var(--font-mono);flex:0 0 84px;">RELEASED</span>
-          <span style="color:var(--text);flex:1 1 auto;">${r.wreckageIds.length > 1 ? `${r.wreckageIds.length} crash sites` : 'Crash site'}</span>
-          <span style="color:var(--text-dim);flex:0 0 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:45%;">${r.by || 'scene command'}</span>
-        </div>`).join('')}` : '';
     const timelineRows = (report.timeline || []).map(t => `
       <div style="display:flex;gap:var(--space-3);padding:6px 0;border-top:1px solid var(--border);font-size:var(--fs-2xs);">
         <span style="color:var(--text-dim);font-family:var(--font-mono);flex:0 0 90px;">${(t.ts || '').slice(11,19)}Z</span>
@@ -22497,8 +19980,7 @@ async function main() {
             <div style="padding:var(--space-2);background:rgba(255,255,255,0.02);border-radius:2px;"><div class="c-label" style="color:var(--text-dim);">Outcome</div><div style="color:var(--text);font-family:var(--font-mono);">${(snap.outcome || 'closed').toUpperCase()}</div></div>
           </div>
 
-          ${timelineCount ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Timeline · ${timelineCount}</div>${downedRows}${sceneReleaseRows}
-      ${timelineRows}</div>` : ''}
+          ${timelineCount ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Timeline · ${timelineCount}</div>${timelineRows}</div>` : ''}
           ${(report.escalations?.length || 0) ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Dispatched to · ${report.escalations.length}</div>${escalationRows}</div>` : ''}
           ${dispatchCount ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Counter-dispatches · ${dispatchCount}</div>${dispatchRows}</div>` : ''}
           ${chainCount ? `<div style="margin-bottom:var(--space-3);"><div class="c-section-eyebrow">Ground handoff chain · ${chainCount}</div>${chainRows}</div>` : ''}
@@ -22680,14 +20162,9 @@ async function main() {
       </div>`;
   }
 
-  // Capability table: which dispatch KINDS each role is able to send.
-  //
-  // The comment here used to say this filtered dispatches by "did this
-  // role own it". It does not, and that mismatch was the bug: the table
-  // answers what a role CAN dispatch, which is a different question
-  // from what it DID dispatch. Steps 3 and 4 asked the wrong one, so a
-  // role with no entry saw none of its own units. Use
-  // _roleCanSeeDispatch below for the ownership question.
+  // Shared lookup for the ROLE_DISPATCH_SCOPE map, used by Steps 3+4
+  // to filter dispatches by "did this role own it". Kept as module
+  // scope so all step renderers reference the same source of truth.
   const _ROLE_DISPATCH_SCOPE_LOOKUP = {
     'flv-skrydstrup': new Set(['helicopter-intercept']),
     'flv-karup':      new Set(['helicopter-intercept']),
@@ -22701,7 +20178,7 @@ async function main() {
     'fe':             new Set(['army-isr-drone']),
     'rigspoliti':     new Set(['police-c-uas', 'counter-drone-swarm']),
     'politi-kbh':     new Set(['police-c-uas']),
-    'politi-sydsonderjyl': new Set(['police-c-uas']),
+    'politi-sydvest': new Set(['police-c-uas']),
     'op-cph-airports':new Set(['wildlife-response']),
     'op-esbjerg-port':new Set(['wildlife-response']),
     // Energinet has NO kinetic-response scope by design (grid TSO).
@@ -22709,31 +20186,6 @@ async function main() {
     'op-energinet':   new Set([]),
     'flv-qra':        new Set(['helicopter-intercept']),
   };
-
-  // Can this role see this dispatch in the engagement steps?
-  //
-  // Ownership first. A role always sees what it dispatched itself, and
-  // that is definitional rather than a capability judgement. The
-  // capability table is only a fallback, for seeing a dispatch of a
-  // kind you could have sent but did not, which is how the counter-
-  // drone roles have always worked and which is preserved exactly.
-  //
-  // Previously both steps consulted only the capability table. Any role
-  // absent from it got `undefined` and the guard short-circuited false,
-  // so it saw none of its own units. That hid every ambulance, physician
-  // car, fire engine and rescue team from the agency that sent them,
-  // and it hid Copenhagen police patrol cars and the Aktionsstyrken
-  // vans too, which has been true for as long as those assets existed.
-  //
-  // Fixed by asking the right question rather than by adding more rows
-  // to the table, which would have to be extended again for every new
-  // agency and is already duplicated in two places.
-  function _roleCanSeeDispatch(cd, activeRole) {
-    if (activeRole?.kind === 'admin') return true;
-    if (cd?.ownerRoleId && cd.ownerRoleId === activeRole?.id) return true;
-    const scope = _ROLE_DISPATCH_SCOPE_LOOKUP[activeRole?.id];
-    return !!(scope && scope.has(cd?.kind));
-  }
 
   // ── renderResponseOverlay — RETIRED 2026-09-05 ──
   // Legacy slide-in response panel from the pre-workspace receiver
@@ -22761,7 +20213,7 @@ async function main() {
     return `
       <div class="rcv-workspace ${isMap ? 'is-map-mode' : ''}">
         <header class="rws-topbar">
-          ${_workspaceHistory.length ? `<button class="c-btn-icon" data-rcv="workspace-back-hist" aria-label="Back to previous report" title="Back to ${_workspaceHistory[_workspaceHistory.length - 1].eventId}">←</button>` : `<button class="c-btn-icon" data-rcv="workspace-back" aria-label="Back to inbox" title="Back to inbox">←</button>`}
+          <button class="c-btn-icon" data-rcv="workspace-back" aria-label="Back to inbox" title="Back to inbox">←</button>
           <div class="rws-ident">
             <span class="rws-ident-id">${event.id}</span>
             <span class="rws-ident-sep">·</span>
@@ -24003,18 +21455,7 @@ async function main() {
     // Request-only assets fire receiver-request which routes the
     // request to another profile's inbox. See receiver_assets.js and
     // dispatchReceiverAsset in this file for the full flow.
-    // Wreckage on the ground is a live physical scene even though the
-    // detection event has closed. The consequence cascade reaches
-    // medical, fire and heavy rescue only AFTER the close, so gating
-    // their vehicles on the event being active left five agencies
-    // holding full asset kits they could never reach.
-    //
-    // Deliberately the only one of the fourteen isActive reads in this
-    // render that is relaxed. The others gate airspace notices, army
-    // and air force tasking and intelligence requests, none of which
-    // make sense against an airframe already on the ground.
-    const _wreckagePhase = Array.isArray(event.wreckages) && event.wreckages.length > 0;
-    const _receiverAssetSpec = (isActive || _wreckagePhase) ? assetsForReceiverRole(roleId) : null;
+    const _receiverAssetSpec = isActive ? assetsForReceiverRole(roleId) : null;
     if (_receiverAssetSpec) {
       // Dispatchable assets: fire from profile's own home base.
       // Descriptive metadata (useCases, deployTime, limitations)
@@ -24049,7 +21490,7 @@ async function main() {
         ctas.push({
           label: `Request ${r.name.toLowerCase()}`,
           sub: `Routes to ${r.from}. Priority ${r.priority || 'standard'}`,
-          icon: '↗',
+          icon: '⚡',
           tone: 'neutral',
           action: 'receiver-request',
           requestId: r.requestKey,
@@ -24059,52 +21500,13 @@ async function main() {
       });
     }
 
-    // Scene command — release the scene.
-    //
-    // Deliberately OUTSIDE the !_receiverAssetSpec guard below. This is
-    // not an asset dispatch, it is the incident commander recording
-    // that the scene is released, so it applies to every police
-    // district whether or not it has an asset library yet.
-    //
-    // Not gated on isActive either. A cordon outlives the detection
-    // event: the drone is down and the track is closed long before the
-    // perimeter lifts, which is exactly the window in which this
-    // control is needed.
-    //
-    // Whether to offer it is decided in src/scene_lifecycle.js so the
-    // predicate lives next to the sweep that consumes it.
-    if (isPolitiBranch) {
-      const _sceneRelease = sceneReleaseState({
-        hasSceneCommand: true,
-        releasedWreckageIds: releasedWreckageIds(event),
-        dispatches: Array.from(_counterDispatches.values()).filter(d => d.eventId === event.id),
-      });
-      if (_sceneRelease.offered) {
-        const _enRoute = _sceneRelease.attachedCount - _sceneRelease.holdingCount;
-        // Named by site count when a swarm has put more than one
-        // airframe down, because releasing one crash site does not
-        // release the others.
-        const _sites = _sceneRelease.wreckageIds.length;
-        ctas.push({
-          label: _sites > 1 ? `Record ${_sites} scenes released` : 'Record scene released',
-          sub: _enRoute > 0
-            ? `${_sceneRelease.holdingCount} on cordon, ${_enRoute} still en route`
-            : `${_sceneRelease.holdingCount} unit${_sceneRelease.holdingCount === 1 ? '' : 's'} on cordon`,
-          icon: '⏻', tone: 'neutral',
-          action: 'record-scene-release',
-          category: 'case',
-          tooltip: 'Records that police scene command has released the crash site or sites currently being held. Every unit on those cordons stands down and returns to base, and units still en route stand down on arrival. A crash site that appears later is a separate scene and is released separately. Recorded in the audit trail against this account.',
-        });
-      }
-    }
-
     // Politi actors — legacy stub buttons. Only rendered when the
     // role does NOT have a defined asset library yet (older Politi
     // districts pending real asset spec). Once assetsForReceiverRole
     // returns a spec for the role, these stubs are skipped.
     if (isActive && isPolitiBranch && !_receiverAssetSpec) {
       if (_siteAllowsAction(event, 'deploy-patrol')) ctas.push({
-        label: 'Deploy patrol', sub: 'Local district cars', icon: '▸', tone: 'accent',
+        label: 'Deploy patrol', sub: 'Local district cars', icon: '🚔', tone: 'accent',
         action: 'deploy-patrol',
         category: 'dispatch',
         tooltip: 'Dispatches district patrol cars to the incident site. Confirms via radio when on scene.',
@@ -24118,7 +21520,7 @@ async function main() {
       // Only regional Politi (not HQ, not specialty) requests AKS backup — AND site must declare aks capability
       if (role.parentId === 'politi' && !roleId.startsWith('politi-special') && _siteAllowsAction(event, 'request-aks')) {
         ctas.push({
-          label: 'Request tactical intervention', sub: 'Aktionsstyrken, national police tactical unit', icon: '↗', tone: 'neutral',
+          label: 'Request tactical intervention', sub: 'Aktionsstyrken, national police tactical unit', icon: '⚡', tone: 'neutral',
           action: 'request-aks',
           category: 'request',
           tooltip: 'Requests Aktionsstyrken, the Danish national police tactical unit, for armed or hostage-taking incidents.',
@@ -24129,13 +21531,13 @@ async function main() {
     // Beredskabsstyrelsen (Danish Emergency Management Agency) actors
     if (isActive && isBrsBranch) {
       if (_siteAllowsAction(event, 'brs-standby')) ctas.push({
-        label: 'Standby response', sub: 'Beredskabsstyrelsen teams on alert', icon: '◷', tone: 'accent',
+        label: 'Standby response', sub: 'Beredskabsstyrelsen teams on alert', icon: '⏳', tone: 'accent',
         action: 'brs-standby',
         category: 'dispatch',
         tooltip: 'Places Beredskabsstyrelsen, the Danish Emergency Management Agency, response teams on active standby without deploying yet.',
       });
       if (_siteAllowsAction(event, 'brs-deploy')) ctas.push({
-        label: 'Full deployment', sub: 'Beredskabsstyrelsen: hazmat, rescue, medical', icon: '≡', tone: 'accent',
+        label: 'Full deployment', sub: 'Beredskabsstyrelsen: hazmat, rescue, medical', icon: '🚨', tone: 'accent',
         action: 'brs-deploy',
         category: 'dispatch',
         tooltip: 'Full Beredskabsstyrelsen deployment. Chemical, biological, radiological, nuclear, rescue, and medical teams en route.',
@@ -24146,7 +21548,7 @@ async function main() {
     const isFlyv = roleId.startsWith('flv-') || role.parentId === 'flyvevaabnet';
     if (isActive && isForsvaretBranch && isFlyv && (event.platform === 'missile' || (event.classification === 'hostile' && ['fixed-wing', 'jet', 'quadcopter'].includes(event.platform)))) {
       ctas.push({
-        label: 'Scramble Air Force fighter', sub: 'On-call squadron', icon: '↗', tone: 'accent',
+        label: 'Scramble Air Force fighter', sub: 'On-call squadron', icon: '✈', tone: 'accent',
         action: 'qra-dispatch',
         category: 'dispatch',
         tooltip: 'Requests fighter intercept from the on-call squadron. Only available while the event is active.',
@@ -24157,13 +21559,13 @@ async function main() {
     const isHaer = roleId.startsWith('haer-') || role.parentId === 'haeren';
     if (isActive && isForsvaretBranch && isHaer) {
       if (_siteAllowsAction(event, 'army-c-uas')) ctas.push({
-        label: 'Deploy army counter drone unit', sub: 'Radio frequency and electronic warfare', icon: '↗', tone: 'neutral',
+        label: 'Deploy army counter drone unit', sub: 'Radio frequency and electronic warfare', icon: '⚡', tone: 'neutral',
         action: 'army-c-uas',
         category: 'dispatch',
         tooltip: 'Requests army counter drone unit deployment. Radio frequency jamming and electronic warfare capability.',
       });
       if (_siteAllowsAction(event, 'army-ground')) ctas.push({
-        label: 'Deploy ground force', sub: 'Rapid reinforcement', icon: '▲', tone: 'neutral',
+        label: 'Deploy ground force', sub: 'Rapid reinforcement', icon: '🪖', tone: 'neutral',
         action: 'army-ground',
         category: 'dispatch',
         tooltip: 'Requests army ground reinforcement to hold cordon or protect infrastructure.',
@@ -24174,7 +21576,7 @@ async function main() {
     const isIntel = roleId === 'fe' || roleId.startsWith('agency-cfcs') || roleId === 'forsvar-intel';
     if (isActive && isForsvaretBranch && isIntel) {
       ctas.push({
-        label: 'Log to intel picture', sub: 'Pattern-of-life analysis', icon: '≣', tone: 'neutral',
+        label: 'Log to intel picture', sub: 'Pattern-of-life analysis', icon: '📊', tone: 'neutral',
         action: 'intel-log',
         category: 'dispatch',
         tooltip: 'Adds this event to the intelligence picture for pattern-of-life analysis. No active response.',
@@ -24184,13 +21586,13 @@ async function main() {
     // Agency (Trafikstyrelsen — aviation regulator)
     if (isActive && isAgencyBranch && roleId === 'agency-traf' && ['quadcopter', 'fixed-wing', 'jet', 'missile'].includes(event.platform)) {
       if (_siteAllowsAction(event, 'issue-notam')) ctas.push({
-        label: 'Issue airspace advisory', sub: 'NOTAM push', icon: '⇡', tone: 'accent',
+        label: 'Issue airspace advisory', sub: 'NOTAM push', icon: '📡', tone: 'accent',
         action: 'issue-notam',
         category: 'dispatch',
         tooltip: 'Issues NOTAM airspace advisory for the affected zone. Distributed to Eurocontrol.',
       });
       if (_siteAllowsAction(event, 'restrict-airspace')) ctas.push({
-        label: 'Restrict airspace', sub: 'Full closure order', icon: '⊘', tone: 'danger',
+        label: 'Restrict airspace', sub: 'Full closure order', icon: '⛔', tone: 'danger',
         action: 'restrict-airspace',
         category: 'dispatch',
         tooltip: 'Full airspace closure order for the affected zone. Requires ministerial sign-off in production.',
@@ -24200,7 +21602,7 @@ async function main() {
     // Agency (Søfartsstyrelsen — maritime regulator)
     if (isActive && isAgencyBranch && roleId === 'agency-sof' && (roleScope === 'maritime' || event.siteId === 'esbjerg')) {
       if (_siteAllowsAction(event, 'issue-maritime-advisory')) ctas.push({
-        label: 'Issue maritime advisory', sub: 'Coast guard notice', icon: '⇡', tone: 'accent',
+        label: 'Issue maritime advisory', sub: 'Coast guard notice', icon: '📡', tone: 'accent',
         action: 'issue-maritime-advisory',
         category: 'dispatch',
         tooltip: 'Issues advisory to coast guard and maritime traffic in affected zone.',
@@ -24210,14 +21612,14 @@ async function main() {
     // Kommune (municipal crisis staff)
     if (isActive && isKommune) {
       if (_siteAllowsAction(event, 'kom-crisis')) ctas.push({
-        label: 'Alert kommune crisis staff', sub: 'Municipal war-room', icon: '◆', tone: 'accent',
+        label: 'Alert kommune crisis staff', sub: 'Municipal war-room', icon: '🏛', tone: 'accent',
         action: 'kom-crisis',
         category: 'dispatch',
         tooltip: 'Alerts the municipal crisis staff. Activates local emergency plan.',
       });
       if (event.classification === 'hostile' && event.threat === 'high' && _siteAllowsAction(event, 'kom-shelter')) {
         ctas.push({
-          label: 'Shelter-in-place notification', sub: 'Public alert', icon: '⌂', tone: 'danger',
+          label: 'Shelter-in-place notification', sub: 'Public alert', icon: '🏘', tone: 'danger',
           action: 'kom-shelter',
           category: 'dispatch',
           tooltip: 'Broadcasts shelter-in-place notification to residents in affected zone via SMS + siren.',
@@ -24228,7 +21630,7 @@ async function main() {
     // Hjemmeværnet (Danish Home Guard) actors
     if (isActive && isHjvBranch) {
       if (_siteAllowsAction(event, 'hjv-reinforce')) ctas.push({
-        label: 'Reinforce guard', sub: 'Hjemmeværnet volunteer callout', icon: '◈', tone: 'neutral',
+        label: 'Reinforce guard', sub: 'Hjemmeværnet volunteer callout', icon: '🛡', tone: 'neutral',
         action: 'hjv-reinforce',
         category: 'dispatch',
         tooltip: 'Calls out Hjemmeværnet, the Danish Home Guard, volunteer patrols to reinforce perimeter or hold cordon.',
@@ -24238,14 +21640,14 @@ async function main() {
     // Region (ambulance + hospital coordination)
     if (isActive && isRegionBranch) {
       if (_siteAllowsAction(event, 'region-ambulance-standby')) ctas.push({
-        label: 'Ambulance standby', sub: 'Regional 112 alerted', icon: '✚', tone: 'accent',
+        label: 'Ambulance standby', sub: 'Regional 112 alerted', icon: '🚑', tone: 'accent',
         action: 'region-ambulance-standby',
         category: 'dispatch',
         tooltip: 'Puts regional ambulance service on active standby for casualty response.',
       });
       if (event.classification === 'hostile' && event.threat === 'high' && _siteAllowsAction(event, 'region-triage-prep')) {
         ctas.push({
-          label: 'Casualty triage prep', sub: 'Regional hospitals', icon: '✚', tone: 'danger',
+          label: 'Casualty triage prep', sub: 'Regional hospitals', icon: '🏥', tone: 'danger',
           action: 'region-triage-prep',
           category: 'dispatch',
           tooltip: 'Alerts regional hospitals to prepare mass-casualty triage.',
@@ -24272,14 +21674,14 @@ async function main() {
     }
     if (isActive) {
       ctas.push({
-        label: 'Cascade to any agency', sub: 'Full picker across all archetypes', icon: '⌖', tone: 'neutral',
+        label: 'Cascade to any agency', sub: 'Full picker across all archetypes', icon: '🎯', tone: 'neutral',
         action: 'cascade-any',
         category: 'request',
         tooltip: 'Opens the full archetype-grouped picker. Type-ahead search across every registered receiver plus recommended defaults tailored to this event.',
       });
     }
     ctas.push({
-      label: 'Loop in observer', sub: 'Add role to case', icon: '⊕', tone: 'neutral',
+      label: 'Loop in observer', sub: 'Add role to case', icon: '👥', tone: 'neutral',
       action: 'observer-add',
       category: 'audit',
       tooltip: 'Adds another role to this event as an observer. They receive notifications but no CTAs unless promoted.',
@@ -24990,11 +22392,7 @@ async function main() {
   // Persists across re-renders so a panel Lucas collapsed stays
   // collapsed after Mistral streams, ack lands, dispatch state
   // transitions, etc. Key is the panel title text (stable per step).
-  // Attribution starts collapsed. It is reference material consulted
-  // when a reader questions the classification, not something to read
-  // on every case, and expanded by default it competed with the numbered
-  // response steps for attention.
-  const _collapsedPanels = new Set(['Attribution assessment']);
+  const _collapsedPanels = new Set();
   function _applyCollapsedPanelState() {
     receiverView.querySelectorAll('.c-panel-collapsible').forEach(panel => {
       const titleEl = panel.querySelector(':scope > .c-panel-title');
@@ -25232,11 +22630,7 @@ async function main() {
         const ev = getEvent(eventId);
         if (!ev) { toast('Event not found', 'err'); return; }
         const dests = destinationsForEvent(ev);
-        // Same resolver the impact cascade uses. Exported once from
-        // destinations.js rather than copied, because a police-district
-        // predicate that exists in two places is exactly the drift this
-        // codebase keeps shipping bugs from.
-        const politiIds = localPoliceDestinationIds(ev);
+        const politiIds = dests.filter(d => d.tier === 2 && destinationParent(d) === 'Politi').map(d => d.id);
         if (!politiIds.length) { toast('No local Politi destination configured', 'err'); return; }
         const role = getActiveRole();
         const targetPolitiName = dests.find(d => d.id === politiIds[0])?.name || 'local Politikreds';
@@ -25725,7 +23119,7 @@ async function main() {
           a.click();
           document.body.removeChild(a);
           setTimeout(() => URL.revokeObjectURL(url), 1000);
-          toast(`Chain report downloaded. ${bundle.event_count} events, ${bundle.contributors.length} contributors.`, 'ok');
+          toast(`Chain report downloaded — ${bundle.event_count} events, ${bundle.contributors.length} contributors.`, 'ok');
         } catch (err) {
           toast(`Chain export failed: ${err.message || 'unknown'}`, 'err');
         }
@@ -25931,75 +23325,6 @@ async function main() {
         _lastReceiverViewSig = null;
         renderReceiverView({ immediate: true });
       }
-      // ── Scene command: release the scene ────────────────────
-      //
-      // The human release path for a cordon. Appends to
-      // event.sceneReleases[] via recordSceneRelease(), which
-      // _sweepSceneLifecycle reads on its next pass (every 2s) to
-      // stand units down through the exact same code path the
-      // simulation timer uses. Nothing about the stand-down is
-      // duplicated here.
-      //
-      // The sweep releases units in 'holding-cordon' only. A unit still
-      // driving to a released site stands down when it arrives, because
-      // the sweep is level-triggered rather than a one-shot at click
-      // time.
-      //
-      // Scoped to the crash sites being held right now. A site that
-      // appears later is a separate scene and is released separately.
-      //
-      // NOT routed through the dispatch adapter, and not in
-      // STUB_DISPATCH_ACTIONS. Dispatching sends an instruction to an
-      // agency; this records a decision that agency already made on
-      // the ground. Sending it outward would have ISR instructing
-      // police to release a scene, which inverts the whole stance.
-      else if (action === 'record-scene-release') {
-        const evtId = id || _selectedReceiverEventId || _workspaceEventId;
-        const ev = getEvent(evtId);
-        const role = getActiveRole();
-        if (!ev) { toast('Event not found.', 'err'); return; }
-        // Re-checked at click time, not trusted from the rendered
-        // button. A stale panel could offer this after another
-        // account already released the scene.
-        const state = sceneReleaseState({
-          hasSceneCommand: agencyBranchOf?.(role?.id) === 'politi',
-          releasedWreckageIds: releasedWreckageIds(ev),
-          dispatches: Array.from(_counterDispatches.values()).filter(d => d.eventId === ev.id),
-        });
-        if (!state.offered) {
-          toast(state.reason === 'already-released'
-            ? 'Every crash site being held has already been released.'
-            : 'No cordon is being held on this scene.', 'info');
-          _lastReceiverViewSig = null;
-          renderReceiverView({ immediate: true });
-          return;
-        }
-        const who = `${role?.person || role?.label || 'Scene command'} (${role?.org || role?.label || role?.id})`;
-        // Releases exactly the sites the control was offered for. A
-        // crash site that appears after this click is a separate scene
-        // and keeps its own cordon until it is released in turn.
-        recordSceneRelease(ev.id, { by: who, roleId: role?.id || null, wreckageIds: state.wreckageIds });
-        const _siteStr = state.wreckageIds.length > 1 ? `${state.wreckageIds.length} crash sites` : 'Crash site';
-        // Attributed to the account, never to AUTO-CORRELATOR. The
-        // sweep's own note says 'Scene released' without naming an
-        // agency; this is the line that records who decided it.
-        addNote(ev.id, `${_siteStr} released by police scene command. ${state.attachedCount} unit${state.attachedCount === 1 ? '' : 's'} standing down.`, who);
-        logOperatorDecision({
-          event: ev,
-          action: 'record-scene-release',
-          actionDetail: {
-            unitsAttached: state.attachedCount,
-            unitsOnCordon: state.holdingCount,
-            wreckageIds: state.wreckageIds,
-          },
-          actorRole: role?.id || 'unknown',
-        });
-        toast(`${_siteStr} released. ${state.attachedCount} unit${state.attachedCount === 1 ? '' : 's'} standing down.`, 'ok');
-        renderAlertStrip();
-        _lastConsoleSig = null;
-        _lastReceiverViewSig = null;
-        renderReceiverView({ immediate: true });
-      }
       // ── Admin history annulment ─────────────────────────────
       else if (action === 'annul-history') {
         const ev = getEvent(id);
@@ -26019,46 +23344,14 @@ async function main() {
         renderReceiverView({ immediate: true });
       }
       // ── Event Workspace routing ─────────────────────────────
-      else if (action === 'open-report') {
-        // Navigation history: arriving at a linked event's workspace
-        // from another report gets a real back arrow home.
-        if (_workspaceEventId && _workspaceEventId !== id) {
-          _workspaceHistory.push({ eventId: _workspaceEventId, mode: _workspaceMode });
-          if (_workspaceHistory.length > 20) _workspaceHistory.shift();
-        }
-        _workspaceEventId = id; _workspaceMode = 'report'; _exitMapMode();
-        // Honest read receipts: 'read' fires when THIS profile opens
-        // the case, never from a timer. Flips only this role's own
-        // delivered/sent escalations.
-        const _openEv = getEvent(id);
-        const _openRole = getActiveRole();
-        if (_openEv && _openRole?.kind === 'receiver') {
-          const _myDests = new Set([...(getRoleDestinationIdsRolledUp(_openRole.id) || []), _openRole.id]);
-          for (const esc of (_openEv.escalations || [])) {
-            if (_myDests.has(esc.destinationId) && (esc.status === 'delivered' || esc.status === 'sent')) {
-              updateEscalationStatus(_openEv.id, esc.id, 'read');
-            }
-          }
-        }
-        renderReceiverView();
-      }
+      else if (action === 'open-report') { _workspaceEventId = id; _workspaceMode = 'report'; _exitMapMode(); renderReceiverView(); }
       else if (action === 'open-map')    {
         _workspaceEventId = id; _workspaceMode = 'map';
         const ev = _lookupWorkspaceEvent(id);
         if (ev) _enterMapMode(ev);
         renderReceiverView();
       }
-      else if (action === 'workspace-back-hist') {
-        const prev = _workspaceHistory.pop();
-        if (prev) {
-          _workspaceEventId = prev.eventId;
-          _workspaceMode = prev.mode || 'report';
-          _exitMapMode();
-          renderReceiverView({ immediate: true });
-        }
-      }
       else if (action === 'workspace-back' || action === 'workspace-close') {
-        _workspaceHistory.length = 0;
         _workspaceEventId = null;
         _mistralFiredForEvent = null;
         _lastReceiverWorkspaceId = null;
@@ -26145,17 +23438,6 @@ async function main() {
       setCurrentActor(null);
     }
     updateOperatorChip();
-    // Site geometry is drawn once at boot and never re-rendered, so the
-    // globe and the site-picker surfaces have to be re-scoped here.
-    // Without these two the account switch changed the event ledger but
-    // left every other owner's boundaries, sensors and coverage rings
-    // on screen. Both are no-ops for admin and receiver accounts.
-    try {
-      applySiteScopeVisibility();
-      applyFlyToScope();
-    } catch (err) {
-      console.error('[roleChange] site scope re-apply failed:', err);
-    }
     _selectedReceiverEventId = null;
     _respondingEscId = null;
     _workspaceEventId = null;

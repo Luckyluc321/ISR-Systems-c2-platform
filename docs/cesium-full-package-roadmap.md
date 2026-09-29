@@ -21,9 +21,8 @@ This document maps every Cesium feature we intend to add to either surface, orde
 
 Every feature listed here obeys these. Any proposal that violates them is out of scope.
 
-- **No Cesium ion.** Sovereign procurement rules eliminate ion for the customers we target.
-- **No Google Photorealistic 3D Tiles.** Same procurement reason.
-- **No mutation of `viewer.globe`, `viewer.scene.atmosphere`, or `viewer.clock` properties.** Additive entities only. Day-mode Cesium settings are off-limits.
+- **No Cesium ion, no Google Photorealistic 3D Tiles, for the Real/operational platform.** Sovereign procurement rules eliminate both for the customers we target. **Exception:** the Sim (cinematic/demo) platform mode does load Google Photorealistic 3D Tiles for night-mode building detail — gated behind `_isSimMode()`, never shown in Real mode, see `docs/night-mode-sim-rendering.md`. This is the one deliberate, scoped exception to this constraint.
+- **No mutation of `viewer.globe`, `viewer.scene.atmosphere`, or `viewer.clock` properties outside the sanctioned day/night/auto mode-switching in `applyImageryMode()`.** Additive entities only elsewhere. Day-mode Cesium settings are off-limits.
 - **Detection-only invariant preserved.** No auto-response visualization, no kinetic overlay, no offensive-action rendering.
 - **Coverage-visibility gating preserved.** Tracked objects hide when outside every sensor coverage radius. Universal rule across all views.
 - **Additive-only rendering.** Layer additions and entity additions are the only permitted extension pattern.
