@@ -127,11 +127,15 @@ A snake_case identifier cannot appear in good operator writing, so those fixture
 
 The fifth was a prompt gap rather than a model gap. The precedent block told the model to "highlight pattern similarity" and never asked it to cite the event ID, so it wrote "the behaviour mirrors prior hostile events at this site" — following its instruction exactly. The prompt now asks for the ID, because a case file an agency reads should be traceable to the event it references rather than gesturing at one.
 
-**A second finding, still open.** The eval fixture carries a hand-copied duplicate of the precedent block's instruction text, so changing the production prompt in `src/precedent_retrieval.js` does not reach the eval. They were re-synced by hand on 2026-09-28 and will drift again. The fixture should build its block through the real formatter, or a check should assert the two match.
+**The second finding is closed.** The fixture's hand-copied duplicate of the precedent instruction is now guarded by `scripts/check-eval-fixtures.mjs`, wired into the build and its own CI step. The fixed strings have one definition, exported from the module that owns them, and the gate fails the build when a fixture stops carrying them.
 
-**The residual variance is real and is not to be fixed by loosening checks.** Over five consecutive runs of 65 assertions, two sporadic failures appeared, both on `agent-b-precedent-cph`: once the precedent event ID was omitted, once "Terminal 2" was. Roughly one failure every two or three runs. That is genuine model nondeterminism against checks that are now correct, and it is the honest quality signal this entry was supposed to carry all along.
+The data in a canned block stays canned deliberately. A fixture should be a fixed input, and the precedent formatter computes "22 days ago" from the current clock, so generating it live would make fixtures non-reproducible. It is the instruction that must not drift, because that is what the model is graded against.
 
-Do not chase it by widening the assertions. Widening them is what produced four years of false green in the first place.
+**The residual variance is real and is not to be fixed by loosening checks.** Across roughly ten runs of 65 assertions, a single assertion fails on maybe one run in three. The most frequent is `subject_fidelity` on `agent-b-cooperative-match-billund`, where the model sometimes writes "cooperative match to RYR2A confirms friendly commercial traffic" and sometimes "a single fixed-wing track". Both are correct; only the second contains a family word. `agent-b-precedent-cph` occasionally omits the precedent event id or an asset name.
+
+That is genuine model nondeterminism against checks that are now correct, and it is the honest quality signal this entry was supposed to carry all along. **A single red assertion is not automatically a regression. Run it again before investigating.**
+
+Do not chase it by widening the assertions. Widening them is what produced the false green in the first place.
 
 ## Housekeeping
 

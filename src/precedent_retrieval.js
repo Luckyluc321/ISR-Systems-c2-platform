@@ -143,11 +143,34 @@ export function retrievePrecedents(newEvent, opts = {}) {
 // ── Prompt-block formatter ───────────────────────────────────────
 // Detection-only stance is enforced in the trailing sentences. Agent
 // B must NOT extrapolate action from precedent outcomes.
+// ── Prompt text, exported so it has ONE definition ─────────────────
+// The eval fixtures carry a canned copy of a formatted block as test
+// input. That is fine for the DATA, which should be fixed, and bad for
+// the INSTRUCTION, which is the thing the model is graded against.
+//
+// On 2026-09-28 the production instruction changed here and the eval
+// kept grading against its own stale copy, so the change appeared to
+// have no effect. Exporting these lets scripts/check-eval-fixtures.mjs
+// fail the build when a fixture drifts, instead of the drift being
+// discovered by a confusing eval result.
+export const PRECEDENT_BLOCK_HEADER = 'PRIOR SIMILAR EVENTS AT THIS SITE';
+
+// The citation requirement is about traceability, not style. A case file
+// that says "this mirrors prior events at this site" cannot be checked
+// by the person reading it; one that names DET-20260814-0417 can. The
+// restriction is unchanged: a precedent may be cited as context and
+// never used as the basis for a recommendation.
+export const PRECEDENT_INSTRUCTION =
+  'Use these as contextual reference only. Do NOT extrapolate or recommend action based on '
+  + 'prior outcomes. Highlight pattern similarity only if it clearly exists in the current '
+  + "event's signals. If you do reference a prior event, cite its event ID exactly as written "
+  + 'above so an operator can retrieve it.';
+
 export function formatPrecedentBlock(result) {
   if (!result || !Array.isArray(result.precedents) || result.precedents.length === 0) {
     return null;
   }
-  const lines = ['PRIOR SIMILAR EVENTS AT THIS SITE', '─────────────────────────────────'];
+  const lines = [PRECEDENT_BLOCK_HEADER, '─────────────────────────────────'];
   result.precedents.forEach((p, i) => {
     const daysAgo = Math.round((Date.now() - new Date(p.record.closedAt).getTime()) / (1000 * 60 * 60 * 24));
     const tierNote = p.tier === 1 ? ' [same site + same asset targeted]'
@@ -158,12 +181,7 @@ export function formatPrecedentBlock(result) {
     lines.push(`   ${p.record.summary}`);
   });
   lines.push('');
-  // The citation instruction is about traceability, not style. A case
-  // file that says "this mirrors prior events at this site" cannot be
-  // checked by the person reading it; one that names DET-20260814-0417
-  // can. The restriction above is unchanged: a precedent may be cited
-  // as context and never used as the basis for a recommendation.
-  lines.push('Use these as contextual reference only. Do NOT extrapolate or recommend action based on prior outcomes. Highlight pattern similarity only if it clearly exists in the current event\'s signals. If you do reference a prior event, cite its event ID exactly as written above so an operator can retrieve it.');
+  lines.push(PRECEDENT_INSTRUCTION);
   return lines.join('\n');
 }
 

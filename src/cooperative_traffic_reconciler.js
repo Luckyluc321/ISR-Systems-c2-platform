@@ -197,8 +197,14 @@ function _eventPos(event) {
 //   2. status=ok, matches=0, expected=true  → strong non-cooperative signal
 //   3. status=ok, matches=0, expected=false → weak signal, note only
 //   4. status=error/missing        → tell the model the check couldn't run
+
+// Exported for the same reason as PRECEDENT_BLOCK_HEADER: an eval
+// fixture carries a canned copy of this block, and nothing else links
+// the two. See scripts/check-eval-fixtures.mjs.
+export const COOPERATIVE_BLOCK_HEADER = 'COOPERATIVE TRAFFIC CROSS-CHECK';
+
 function _formatBlock(state) {
-  const lines = ['COOPERATIVE TRAFFIC CROSS-CHECK', '─────────────────────────────────'];
+  const lines = [COOPERATIVE_BLOCK_HEADER, '─────────────────────────────────'];
   if (state.status === 'adapter_missing') {
     lines.push(`Configured source "${state.cfg?.source}" not registered. Cross-check unavailable.`);
     return lines.join('\n');

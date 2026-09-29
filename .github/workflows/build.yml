@@ -68,6 +68,9 @@ jobs:
       - name: Signal tier (reference library, not a classifier)
         run: npm run check:signal-tier
 
+      - name: Eval fixtures (no stale prompt copies)
+        run: npm run check:eval-fixtures
+
       - name: Production build
         run: npx vite build
 
