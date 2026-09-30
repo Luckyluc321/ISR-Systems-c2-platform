@@ -91,17 +91,43 @@ def search(bbox, collection: str, token: str, limit: int = 500) -> list:
     return items
 
 
-def focal_mm_from_id(item_id: str):
-    """Focal length is encoded in the image id, e.g. `..._100mm`.
+# The trailing "100mm" in an image id is a CDN PRODUCT TIER, not a
+# focal length. Every image over Billund ends in `_100mm` while the real
+# focal lengths are 79.6 mm (nadir) and 123.38 mm (oblique).
+#
+# An earlier version of this file parsed that suffix as focal length and
+# was wrong on 100% of images, by -19% on obliques and +26% on nadir.
+# Kept only as a cross-check that shouts if anyone reintroduces it.
+_TIER_RE = re.compile(r"_(\d+)mm$")
 
-    Interior orientation is the one genuinely open question in this
-    pipeline, and this recovers only part of it. Principal point and
-    lens distortion still need confirming against SDFI's own SAUL
-    library before dense stereo can be trusted. Recorded per image so
-    that work has something to check against.
+
+def interior_of(item: dict) -> dict:
+    """Interior orientation, published per image by SDFI.
+
+    This is the real camera model and it is on every item: focal length,
+    principal point offset, pixel spacing, sensor dimensions, and the
+    calibration date. SDFI's own SAUL library reads exactly these six
+    fields and applies plain collinearity with no distortion terms, so
+    that is the sanctioned model rather than a simplification.
+
+    There are SIX distinct cameras over Billund, not one. Nadir is a
+    different head from the obliques, and the left/right cones carry a
+    6.68 mm principal point offset that the forward/backward cones do
+    not. Binding every image to one shared intrinsic would corrupt the
+    nadir images against the obliques, so this is emitted per image.
     """
-    m = re.search(r"_(\d+)mm$", item_id)
-    return int(m.group(1)) if m else None
+    p = item.get("properties", {})
+    io = p.get("pers:interior_orientation") or {}
+    if not io:
+        return {}
+    return {
+        "camera_id": io.get("camera_id"),
+        "focal_length_mm": io.get("focal_length"),
+        "principal_point_offset_mm": io.get("principal_point_offset"),
+        "pixel_spacing_mm": io.get("pixel_spacing"),
+        "sensor_array_dimensions_px": io.get("sensor_array_dimensions"),
+        "calibration_date": io.get("calibration_date"),
+    }
 
 
 def pose_of(item: dict) -> dict:
@@ -113,7 +139,7 @@ def pose_of(item: dict) -> dict:
         "direction": p.get("direction"),
         "datetime": p.get("datetime"),
         "gsd": p.get("gsd"),
-        "focal_mm": focal_mm_from_id(item.get("id", "")),
+        "interior": interior_of(item),
         "omega": p.get("pers:omega"),
         "phi": p.get("pers:phi"),
         "kappa": p.get("pers:kappa"),
@@ -175,9 +201,31 @@ def main() -> None:
     no_pose = [p["id"] for p in poses if not p["perspective_center"]]
     if no_pose:
         print(f"WARNING: {len(no_pose)} image(s) carry no exterior orientation and are unusable.")
-    no_focal = [p["id"] for p in poses if not p["focal_mm"]]
-    if no_focal:
-        print(f"WARNING: {len(no_focal)} image(s) have no focal length in their id.")
+    no_io = [p["id"] for p in poses if not p.get("interior", {}).get("focal_length_mm")]
+    if no_io:
+        print(f"WARNING: {len(no_io)} image(s) carry no interior orientation and are unusable.")
+
+    # One camera per distinct calibration. The stereo stage needs this
+    # grouping, and seeing it here catches a collection that silently
+    # mixes two survey systems.
+    cams = {}
+    for pz in poses:
+        io = pz.get("interior") or {}
+        key = (io.get("camera_id"), io.get("focal_length_mm"),
+               tuple(io.get("principal_point_offset_mm") or []))
+        cams.setdefault(key, 0)
+        cams[key] += 1
+    print(f"{len(cams)} distinct camera(s):")
+    for (cid, fl, pp), n in sorted(cams.items(), key=lambda kv: -kv[1]):
+        print(f"  n={n:3d}  focal={fl}mm  principal_point_offset={list(pp)}  {cid}")
+
+    # Loud cross-check. If this ever fires, someone has gone back to
+    # reading focal length off the filename.
+    tiers = {int(m.group(1)) for pz in poses if (m := _TIER_RE.search(pz["id"]))}
+    focals = {io.get("focal_length_mm") for pz in poses if (io := pz.get("interior"))}
+    if tiers and focals and not (tiers & {f for f in focals if f}):
+        print(f"note: filename tier {sorted(tiers)} is NOT the focal length "
+              f"{sorted(f for f in focals if f)}. It is a CDN product tier. Do not parse it.")
 
     if a.dry_run:
         print("dry run, nothing downloaded")

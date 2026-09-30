@@ -79,41 +79,88 @@ wants a GPU.
 
 | Stage | State |
 | --- | --- |
-| API access and data availability | **Proven.** Token works, 121 images located over Billund, orientation confirmed present |
-| `fetch.py` | Written. Downloads imagery and writes a pose sidecar |
-| Camera interior orientation | **Open question.** Focal length is in the image id (`100mm`), but principal point and lens distortion need confirming. See below |
+| API access and data availability | **Proven.** Token works |
+| `fetch.py` | **Works.** 68 images and verified poses on disk for the terminal box |
+| Interior orientation | **Resolved. It was never a blocker.** Published on every image |
 | Dense stereo | **Not attempted.** This is the step that decides whether the whole thing works |
-| Mesh to 3D Tiles | Not attempted. Well-trodden, low risk |
+| Mesh to 3D Tiles | Not attempted. Well-trodden, but see the vertical datum trap below |
 | App integration | Not started. The tileset-loading block in `main.js` needs a per-site gate, not one global URL |
 
 **Nobody should claim this works until the dense-stereo stage has run
-once and been looked at.** Everything above it is confirmed; everything
-below it is expected-to-work rather than known-to-work.
+once and been looked at.** Everything above that line is confirmed;
+everything below it is expected-to-work rather than known-to-work.
 
-## The one real unknown
+## The camera model, resolved
 
-Interior orientation. Exterior orientation says where the camera was and
-which way it pointed. Interior orientation says how the lens projects:
-focal length, principal point offset, distortion coefficients. Dense
-stereo needs both.
+Interior orientation was written up here as the one real unknown. It
+was not an unknown at all: SDFI publishes it on every image under
+`pers:interior_orientation`, alongside the exterior orientation.
 
-The image id encodes `100mm` so focal length is recoverable, and SDFI
-publishes **SAUL** (github.com/SDFIdk/saul), their own open-source
-photogrammetry helper library for this exact API, which does the
-image-to-ground maths. If interior orientation is not directly on the
-STAC item, SAUL is where to look for it.
+Verified against all 68 images of the terminal box:
 
-This is the first thing to resolve, because it gates everything after.
+| | |
+| --- | --- |
+| Distinct cameras | **6**, not one |
+| Nadir | focal **79.6 mm**, sensor 20544 x 14016, principal point centred |
+| Oblique forward/backward | focal **123.38 mm**, sensor 14144 x 10560, centred |
+| Oblique left/right | focal **123.38 mm**, sensor 10560 x 14144 (portrait), principal point offset **6.68 mm** |
+| Pixel pitch | 0.00376 mm |
+| Distortion | **none to apply** |
+
+Three things follow, and each one is a way to get this wrong:
+
+**The `100mm` in an image id is a CDN product tier, not a focal length.**
+Every image over Billund ends in `_100mm` while the true focal lengths
+are 79.6 and 123.38. An earlier version of `fetch.py` parsed that suffix
+and was wrong on 100% of images, by -19% on obliques and +26% on nadir.
+`fetch.py` now prints a loud note if the tier ever disagrees with the
+published focal length, which it always will.
+
+**Bind interior orientation per image, never globally.** Nadir is a
+different camera head from the obliques. One shared intrinsic block
+would corrupt the nadir images against the oblique ones.
+
+**Apply the principal point offset.** It is 6.68 mm on the left/right
+cones, which is 1777 pixels. Zeroing it moves the ground intercept by
+roughly 200 m, and it does not fail loudly: it produces a plausible
+tilt, so a wrong reconstruction looks superficially fine.
+
+Distortion can be treated as zero. This is a Vexcel UltraCam Osprey
+Level 2 product whose residual distortion is specified under 0.002 mm,
+which is about 5 cm on the ground, half the 0.1 m GSD. SDFI's own
+open-source SAUL library, which their national viewer depends on,
+implements plain pinhole collinearity with no distortion terms at all.
+That is the sanctioned model, not a shortcut.
+
+## The vertical datum trap
+
+Poses carry `crs: 25832` (ETRS89 / UTM 32N) and `vertical_crs: 5799`,
+which is **DVR90**, an orthometric height system.
+
+Cesium works in ellipsoidal height. The geoid separation over Denmark is
+roughly 36-40 m. Converting horizontally and forgetting the vertical
+puts the finished mesh about 40 metres underground.
+
+This is worth writing down because the failure is late and expensive:
+everything up to the final tileset looks correct, and the problem only
+appears when the mesh is loaded in the app.
 
 ## Order of work
 
-1. Resolve interior orientation, via the STAC item or SAUL. Half a day.
-2. Run `fetch.py` for a **small** area first, a few hundred metres around
-   the terminal, not the whole aerodrome. Dense stereo scales badly and
-   a failed six-hour run teaches less than a failed twenty-minute one.
-3. Dense stereo on that patch. Look at it. This is the go/no-go.
-4. If it looks right, scale to the full aerodrome and convert to 3D Tiles.
-5. Host, and add a per-site tileset gate in the app.
+1. ~~Resolve interior orientation~~ **Done.** It is published per image.
+2. ~~Fetch a small area first~~ **Done.** 68 images, 7.4 GB, on disk at
+   `work/billund-terminal/` with a verified `poses.json`.
+3. **Dense stereo on that patch. This is the go/no-go and the next
+   thing to do.** Poses and intrinsics are known, so no Structure from
+   Motion: the route is a COLMAP model written directly from
+   `poses.json`, one camera per `camera_id`, then dense stereo, then
+   OpenMVS for the mesh and texture.
+4. Subtract a local origin before anything consumes the coordinates.
+   UTM northings here are around 6,177,000 and will lose precision in
+   single-precision maths.
+5. If the patch looks right, scale to the full aerodrome and convert to
+   3D Tiles, handling DVR90 to ellipsoidal height as above.
+6. Host, and add a per-site tileset gate in the app.
 
 ## Licence
 
