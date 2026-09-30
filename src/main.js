@@ -1067,6 +1067,34 @@ async function main() {
     viewer.scene.primitives.add(osmBuildings);
   } catch (err) { console.warn('OSM Buildings failed:', err); }
 
+  // ── EXPERIMENT: facades on by URL flag ────────────────────────────
+  // Open the app with ?facades=1 to load straight into the procedural
+  // daylight facade look, so it can be compared against main without
+  // touching a console.
+  //
+  // applyImageryMode() owns the tilesets' style and is off limits, so it
+  // clears customShader whenever the imagery mode changes. Rather than
+  // edit that function, a watchdog re-applies the shader when it finds
+  // it has been cleared. That is the correct trade for an experiment:
+  // the known-good day path stays byte-identical and the experiment
+  // pays the cost of living beside it.
+  const _facadesFlag = (() => {
+    try { return new URLSearchParams(location.search).get('facades') === '1'; } catch (_) { return false; }
+  })();
+  if (_facadesFlag) {
+    setTimeout(() => {
+      try {
+        window.__isr_buildings?.facades(true);
+        console.log('[facades] EXPERIMENT active. Remove ?facades=1 for the shipped look.');
+      } catch (_) {}
+    }, 1200);
+    setInterval(() => {
+      try {
+        if (osmBuildings && !osmBuildings.customShader) window.__isr_buildings?.facades(true);
+      } catch (_) {}
+    }, 2000);
+  }
+
   // ── Live dial for the extruded-building look ──────────────────────
   // A console handle, nothing more. Added because the right value here
   // is a visual judgement that cannot be made by reading the code: at
@@ -1100,9 +1128,25 @@ async function main() {
       osmBuildings.debugWireframe = !!on;
       return `wireframe ${on ? 'on' : 'off'}`;
     },
+    // EXPERIMENT. Procedural daylight facades: roofs distinct from
+    // walls, window lattice, per-building colour. Applied to the
+    // tileset's own customShader, which is the same property the night
+    // city-lights path uses, so nothing in applyImageryMode() is
+    // touched. Switching imagery mode clears it.
+    facades(on = true) {
+      if (!osmBuildings) return 'no tileset';
+      osmBuildings.customShader = on ? _makeDayFacadeShader() : undefined;
+      // The flat near-white style multiplies over the shader output and
+      // washes it out, so the fill goes neutral while facades are on.
+      osmBuildings.style = on
+        ? new Cesium.Cesium3DTileStyle({ color: 'color("#ffffff", 1.0)' })
+        : new Cesium.Cesium3DTileStyle({ color: 'color("#d8e4ec", 0.95)' });
+      return `facades ${on ? 'on' : 'off'}`;
+    },
     reset() {
       if (!osmBuildings) return 'no tileset';
       osmBuildings.show = true;
+      osmBuildings.customShader = undefined;
       osmBuildings.style = new Cesium.Cesium3DTileStyle({ color: 'color("#d8e4ec", 0.95)' });
       return 'reset to shipped look';
     },
@@ -2066,6 +2110,123 @@ async function main() {
       `,
     });
   }
+  // ── Daylight facade shader (EXPERIMENT) ───────────────────────────
+  // The problem this exists for: outside the six Danish cities Google
+  // flew, there is no photoreal mesh, so a site like Billund renders as
+  // OSM extrusions painted a flat near-white. Against a sharp
+  // orthophoto that reads as a broken render rather than as buildings.
+  //
+  // No photography is needed to fix that, and a game engine would not
+  // use any. Real footprints and real heights plus a procedural facade
+  // is how an environment is built where nobody flew a camera. We
+  // already do exactly this at night: _makeCityLightShader below
+  // detects walls from the surface normal, quantises world position
+  // into a window lattice, and hashes each cell. This is the daylight
+  // half that was never written.
+  //
+  // Everything is derived from WORLD POSITION, never from tile-local
+  // data, so it is stable across frames, tile reloads and camera moves.
+  // A facade must not shimmer when you fly past it.
+  const FACADE_WINDOW_W = 3.4;      // metres, horizontal window pitch
+  const FACADE_FLOOR_H  = 3.2;      // metres, storey height
+  function _makeDayFacadeShader() {
+    return new Cesium.CustomShader({
+      uniforms: {
+        u_winW:   { type: Cesium.UniformType.FLOAT, value: FACADE_WINDOW_W },
+        u_floorH: { type: Cesium.UniformType.FLOAT, value: FACADE_FLOOR_H },
+      },
+      fragmentShaderText: `
+        // Cheap stable hash. Same cell in, same value out, forever.
+        float _h(vec3 c) {
+          return fract(sin(dot(c, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+        }
+
+        void fragmentMain(FragmentInput fsInput, inout czm_modelMaterial material) {
+          vec3 p  = fsInput.attributes.positionWC;
+          vec3 up = normalize(p);
+          vec3 n  = normalize(czm_inverseViewRotation * fsInput.attributes.normalEC);
+          float verticality = 1.0 - abs(dot(n, up));
+
+          // Per-building identity. Quantised coarsely so one building
+          // gets one identity, and neighbours get different ones. This
+          // is what stops a town reading as a single extruded mass.
+          vec3 bCell = floor(p / 18.0);
+          float bId  = _h(bCell);
+
+          // ── ROOFS ──────────────────────────────────────────────────
+          // The single biggest improvement available. Today roofs are
+          // the same near-white as the walls, which is most of what
+          // makes the render look like poured plaster. Real roofs are
+          // darker than their walls and vary between buildings.
+          if (verticality < 0.5) {
+            vec3 roofDark  = vec3(0.24, 0.25, 0.27);   // slate
+            vec3 roofWarm  = vec3(0.42, 0.29, 0.24);   // tile
+            vec3 roofLight = vec3(0.50, 0.51, 0.52);   // metal / felt
+            vec3 roof = bId < 0.45 ? roofDark
+                      : (bId < 0.80 ? roofWarm : roofLight);
+            // Fine granular noise so a large roof is not a flat fill.
+            float grain = _h(floor(p / 1.4)) * 0.06 - 0.03;
+            roof += grain;
+            material.diffuse = roof;
+            return;
+          }
+
+          // ── WALLS ──────────────────────────────────────────────────
+          // Wall tone varies per building around a muted range. The
+          // shipped colour is near-white at 0.95 alpha, which is what
+          // dominates the orthophoto.
+          vec3 wallCool = vec3(0.74, 0.75, 0.76);
+          vec3 wallWarm = vec3(0.80, 0.75, 0.69);
+          vec3 wallRed  = vec3(0.62, 0.47, 0.42);      // Danish brick
+          vec3 wall = bId < 0.35 ? wallRed
+                    : (bId < 0.70 ? wallWarm : wallCool);
+
+          // Window lattice. Horizontal pitch from the wall's own
+          // tangent direction so windows run along the facade rather
+          // than across an arbitrary world axis.
+          vec3 tangent = normalize(cross(up, n));
+          float along  = dot(p, tangent);
+          float height = dot(p, up);
+
+          float wx = fract(along  / u_winW);
+          float wy = fract(height / u_floorH);
+
+          // Window occupies the middle of each cell, leaving mullion
+          // and spandrel. Slight asymmetry vertically so it reads as a
+          // storey rather than a grid.
+          float inWinX = step(0.22, wx) * step(wx, 0.78);
+          float inWinY = step(0.30, wy) * step(wy, 0.86);
+          float isWin  = inWinX * inWinY;
+
+          // Not every opening is glass. Some panels are solid, which
+          // breaks up the stamped-grid look that gives procedural
+          // facades away.
+          float panel = _h(vec3(floor(along / u_winW), floor(height / u_floorH), floor(bId * 64.0)));
+          if (panel < 0.14) isWin = 0.0;
+
+          // Ground floor reads differently on almost every real
+          // building: taller openings, shopfronts, doors.
+          float aboveGround = height - dot(floor(p / 500.0) * 500.0, up);
+
+          vec3 glass = vec3(0.16, 0.21, 0.27);
+          // A weak sky term so glass is not uniformly flat. Windows
+          // facing up-sun pick up more.
+          float skyish = clamp(dot(n, up) * 0.5 + 0.55, 0.0, 1.0);
+          glass = mix(glass, vec3(0.34, 0.44, 0.54), skyish * 0.5);
+
+          vec3 col = mix(wall, glass, isWin);
+
+          // Faint horizontal floor line. Real buildings have slab
+          // edges and this is most of what sells scale from a distance.
+          float slab = smoothstep(0.02, 0.0, abs(wy - 0.02));
+          col *= (1.0 - slab * 0.18);
+
+          material.diffuse = col;
+        }
+      `,
+    });
+  }
+
   function _applyCityLights(on) {
     // Separate instances per tileset — Cesium regenerates shaders per model,
     // so the two tilesets must not share one CustomShader object.
