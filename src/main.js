@@ -1067,6 +1067,47 @@ async function main() {
     viewer.scene.primitives.add(osmBuildings);
   } catch (err) { console.warn('OSM Buildings failed:', err); }
 
+  // ── Live dial for the extruded-building look ──────────────────────
+  // A console handle, nothing more. Added because the right value here
+  // is a visual judgement that cannot be made by reading the code: at
+  // Billund the orthophoto is sharp enough to show parked aircraft and
+  // individual trees, and the near-opaque white fill above sits on top
+  // of it and reads as broken rather than as geometry.
+  //
+  // Deliberately NOT wired into applyImageryMode(). That function owns
+  // the known-good day configuration and the night styling, and both
+  // are off limits. This only writes the tileset's own style and show,
+  // so switching imagery mode will overwrite whatever is set here.
+  // That is correct: this is a dial for finding a value, not a feature.
+  //
+  //   __isr_buildings.hide()             see the orthophoto alone
+  //   __isr_buildings.show()
+  //   __isr_buildings.tint('#d8e4ec', 0.35)   try an alpha
+  //   __isr_buildings.reset()            back to the shipped look
+  window.__isr_buildings = {
+    hide() { if (osmBuildings) osmBuildings.show = false; return 'hidden'; },
+    show() { if (osmBuildings) osmBuildings.show = true; return 'shown'; },
+    tint(css = '#d8e4ec', alpha = 0.95) {
+      if (!osmBuildings) return 'no tileset';
+      osmBuildings.style = new Cesium.Cesium3DTileStyle({ color: `color("${css}", ${alpha})` });
+      return `color("${css}", ${alpha})`;
+    },
+    outline(on = true) {
+      // Reads as a drawn plan rather than a solid mass. Worth trying
+      // alongside a low alpha.
+      if (!osmBuildings) return 'no tileset';
+      viewer.scene.globe.depthTestAgainstTerrain = true;
+      osmBuildings.debugWireframe = !!on;
+      return `wireframe ${on ? 'on' : 'off'}`;
+    },
+    reset() {
+      if (!osmBuildings) return 'no tileset';
+      osmBuildings.show = true;
+      osmBuildings.style = new Cesium.Cesium3DTileStyle({ color: 'color("#d8e4ec", 0.95)' });
+      return 'reset to shipped look';
+    },
+  };
+
   // ── SDFI GeoDanmark Ortofoto (Denmark, sovereign, CC BY 4.0) ──
   // Danish state imagery, activated when VITE_SDFI_TOKEN is set in
   // .env.local. Used in the receiver workspace map mode (photoreal
