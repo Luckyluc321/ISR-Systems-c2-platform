@@ -114,6 +114,47 @@ def inside(x, y, ring):
     return hit
 
 
+def near_edge(x, y, ring, pad):
+    """True if the point is within pad metres of the outline.
+
+    This is what grows a footprint, and it has to be done here rather
+    than by moving the polygon's corners. An OSM footprint is the roof
+    outline seen from above, while a reconstructed wall leans outward
+    from it: render slightly bulged, eaves overhang, and the wall's
+    lower triangles sit a metre or two beyond the line. Testing only
+    inside() shaves those off and leaves roofs hanging with no walls
+    under them, which is the facade geometry this whole pipeline exists
+    to produce.
+
+    Distance to the nearest edge is exact dilation of the polygon by a
+    disc, and unlike pushing corners outward it behaves correctly on the
+    concave outlines and inner courtyards real buildings have.
+
+    An earlier version grew only the bounding box. The bbox is just the
+    grid pre-filter, so that had no effect on the result at all: --pad 0
+    and --pad 50 kept an identical face count. Found by changing the
+    value and watching nothing happen.
+    """
+    p2 = pad * pad
+    n = len(ring)
+    j = n - 1
+    for i in range(n):
+        xi, yi = ring[i]
+        xj, yj = ring[j]
+        dx, dy = xj - xi, yj - yi
+        d2 = dx * dx + dy * dy
+        if d2 < 1e-12:
+            t = 0.0
+        else:
+            t = ((x - xi) * dx + (y - yi) * dy) / d2
+            t = 0.0 if t < 0.0 else (1.0 if t > 1.0 else t)
+        ex, ey = x - (xi + t * dx), y - (yi + t * dy)
+        if ex * ex + ey * ey <= p2:
+            return True
+        j = i
+    return False
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--obj", required=True)
@@ -263,7 +304,8 @@ def main():
                 if not any(
                     polys[i]["bbox"][0] <= cx <= polys[i]["bbox"][2]
                     and polys[i]["bbox"][1] <= cy <= polys[i]["bbox"][3]
-                    and inside(cx, cy, polys[i]["ring"])
+                    and (inside(cx, cy, polys[i]["ring"])
+                         or (a.pad and near_edge(cx, cy, polys[i]["ring"], a.pad)))
                     for i in hits
                 ):
                     dropped_out += 1
@@ -280,8 +322,38 @@ def main():
 
     total = len(kept) + dropped_out + dropped_low
     if not kept:
-        sys.exit("Nothing kept. Footprints and mesh are probably in different "
-                 "coordinate systems, or cover different ground.")
+        # Footprints were confirmed standing on this mesh further up, so
+        # this is not the empty-box case and definitely not a coordinate
+        # one. Both remaining causes are tuning, and the two tallies say
+        # which.
+        sys.exit(
+            f"\nNothing kept out of {total:,} triangles.\n"
+            f"  {dropped_out:,} fell outside every footprint\n"
+            f"  {dropped_low:,} were inside one but under {a.min_height} m\n\n"
+            # Deliberately NOT guessing which filter is at fault.
+            #
+            # The counts cannot tell them apart. "Outside" outnumbers
+            # "too low" in every mesh, because most of any reconstruction
+            # is open ground, so comparing the two always blames
+            # position. And a non-zero "too low" does not prove height
+            # is the problem either: ground inside a footprint lands
+            # there legitimately while the actual roof was rejected on
+            # position a step earlier.
+            #
+            # Every heuristic tried here was wrong on one of the two
+            # real cases. A confident wrong diagnosis is what made the
+            # original failure expensive, so this prints both remedies
+            # and leaves the choice to whoever can look at the mesh.
+            + ("Both filters are candidates and the counts cannot separate "
+               "them:\n\n"
+               f"  If the roofs reconstructed but sit low, raise nothing and "
+               f"loosen height:\n      --min-height 1.0   (now {a.min_height})\n"
+               "      Check VERTICAL_DATUM.txt first; DVR90 against ellipsoidal "
+               "is ~37 m.\n\n"
+               f"  If the geometry is slightly offset from the footprints, "
+               f"widen the pad:\n      --pad 5   (now {a.pad})\n\n"
+               "  Open the mesh in preview.html and look. That settles it in "
+               "seconds\n  and neither number will.\n"))
 
     # Vertices and UVs are written unchanged and faces keep their original
     # indices, so the existing texture atlas still applies with no
