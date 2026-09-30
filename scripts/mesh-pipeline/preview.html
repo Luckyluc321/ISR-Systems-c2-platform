@@ -125,7 +125,24 @@ function loadGLB(url) {
     undefined, () => tryNext());
 }
 function loadOBJ(url) {
-  new THREE.OBJLoader().load(url, o => frame(o), undefined, () => tryNext());
+  // Load the .mtl alongside, or the model arrives untextured and the
+  // whole question this preview exists to answer goes unanswered.
+  const dir = url.slice(0, url.lastIndexOf('/') + 1);
+  const mtl = url.replace(/\.obj$/i, '.mtl');
+  say('loading materials…');
+  new THREE.MTLLoader().setPath(dir).load(mtl.slice(dir.length), materials => {
+    materials.preload();
+    say('loading geometry (this model is large)…');
+    new THREE.OBJLoader().setMaterials(materials).setPath(dir)
+      .load(url.slice(dir.length), o => frame(o),
+        xhr => { if (xhr.lengthComputable) say(`geometry ${Math.round(100 * xhr.loaded / xhr.total)}%`); },
+        () => tryNext());
+  }, undefined, () => {
+    // No .mtl is not fatal. Untextured geometry still shows whether the
+    // shapes came out, and the HUD reports the missing texture.
+    say('no .mtl, loading geometry only…', 'warn');
+    new THREE.OBJLoader().load(url, o => frame(o), undefined, () => tryNext());
+  });
 }
 
 // Where ODM leaves things, most-useful first.
