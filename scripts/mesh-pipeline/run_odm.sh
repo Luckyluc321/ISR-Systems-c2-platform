@@ -18,6 +18,11 @@ PROJECT="${1:-}"
 PROJECT="$(cd "$PROJECT" && pwd)"
 [ -d "$PROJECT/images" ] || { echo "no images/ in $PROJECT — run prep_odm.py first"; exit 1; }
 
+# ODM resumes from a named stage, so a failure late in a long run does
+# not mean repeating the expensive early stages. Matching and the dense
+# point cloud are by far the slowest parts.
+RERUN="${RERUN_FROM:-}"
+
 N=$(find "$PROJECT/images" -name '*.jpg' | wc -l | tr -d ' ')
 echo "project : $PROJECT"
 echo "images  : $N"
@@ -33,7 +38,11 @@ NAME="$(basename "$PROJECT")"
 # feature-quality/pc-quality drive cost more than anything else.
 # FAST trades detail for a result you can look at today.
 if [ "${FAST:-0}" = "1" ]; then
-  QUALITY=(--feature-quality medium --pc-quality medium)
+  # Feature quality stays high even in FAST mode. The imagery is already
+  # downscaled by roughly 20x before ODM sees it, and degrading feature
+  # detection on top of that is how matching starts producing the false
+  # correspondences described below.
+  QUALITY=(--feature-quality high --pc-quality medium)
   echo "mode    : FAST"
 else
   QUALITY=(--feature-quality high --pc-quality high)
@@ -43,10 +52,40 @@ fi
 OPTS=(
   --project-path /datasets "$NAME"
   "${QUALITY[@]}"
-  # Oblique imagery: matching only nearby frames misses the cross-views
-  # between cones, and the cross-views are the entire reason facades
-  # reconstruct rather than just roofs.
-  --matcher-neighbors 0
+  # A 3D mesh, not ODM's default 2.5D one.
+  #
+  # 2.5D is a height field: one elevation per ground position. It is the
+  # right model for nadir survey work and it is what ODM assumes, but it
+  # cannot represent a wall, an overhang or anything under a roof. Using
+  # it here would discard the exact thing five-direction oblique imagery
+  # was flown to capture, which is the facades.
+  #
+  # It also removes the renderdem stage, which is where the first run
+  # ran out of memory.
+  --use-3dmesh
+  # Mesh complexity. The default targets a survey-grade model and is
+  # more than a first look needs, and vertex count drives the memory
+  # that killed the first attempt.
+  --mesh-size 300000
+  --mesh-octree-depth 11
+  # Matcher neighbours: let ODM choose, do NOT force all-pairs.
+  #
+  # The first run set this to 0, meaning match every image against every
+  # other. The reasoning was that oblique cones need cross-views, which
+  # is true. The effect was the opposite of the intent: with 68 images
+  # spread over several kilometres, most pairs share no ground at all,
+  # and matching them produces false correspondences that triangulate to
+  # arbitrary points in space.
+  #
+  # The result was a dense cloud spanning 21,000 km with only 9.6 per
+  # cent of its points within a kilometre of the median. Poisson then
+  # produced a mesh with 10,379 vertices and ZERO faces, and texturing
+  # aborted on "Building BVH from 0 faces".
+  #
+  # ODM's default neighbour selection is driven by camera position, and
+  # our positions come from the national mapping agency and are exact.
+  # So it can pick genuinely overlapping images, including the
+  # cross-cone pairs, far better than forcing all-pairs can.
   # We want the mesh, not the survey products. Skipping these saves a
   # large share of the runtime.
   --skip-orthophoto
@@ -59,6 +98,7 @@ OPTS=(
   --texturing-single-material
   --verbose
 )
+[ -n "$RERUN" ] && OPTS+=(--rerun-from "$RERUN")
 
 echo "opts    : ${OPTS[*]}"
 echo
@@ -67,7 +107,7 @@ echo
 
 time docker run --rm \
   -v "$PARENT":/datasets \
-  --memory=12g \
+  --memory="${DOCKER_MEM:-7g}" \
   opendronemap/odm:latest \
   "${OPTS[@]}"
 
