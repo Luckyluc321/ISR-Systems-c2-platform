@@ -35,3 +35,7 @@ dist-ssr
 scripts/mesh-pipeline/work/
 
 scripts/mesh-pipeline/work/
+
+# Python bytecode from the mesh pipeline scripts
+__pycache__/
+*.pyc

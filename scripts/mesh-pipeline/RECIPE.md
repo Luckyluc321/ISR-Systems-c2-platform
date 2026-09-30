@@ -3,6 +3,39 @@
 Verified twice on Billund Airport terminal. Do not change any of it
 without a copy of the output saved somewhere else first.
 
+## Step 0: get the box from the footprints
+
+**Never type a bounding box by hand.** This is step zero because
+skipping it wasted more time than every settings problem below put
+together.
+
+```bash
+# one named building, which is the airport case
+python3 pick_bbox.py --osm /tmp/osm_buildings.json --name "Billund Lufthavn"
+
+# the densest boxes in the set, which is how a city gets tiled
+python3 pick_bbox.py --osm /tmp/osm_buildings.json --rank 20
+
+# check a box before spending an hour on it
+python3 pick_bbox.py --osm /tmp/osm_buildings.json --check 9.15,55.739,9.16,55.744
+```
+
+Footprints come from Overpass, the same source the C2 map draws its
+white boxes from, so a clipped mesh and the box it replaces line up:
+
+```
+[out:json][timeout:60];
+way["building"](55.7196,9.0989,55.7596,9.2004);
+out geom;
+```
+
+A box holding no buildings is worth nothing. The mesh is only ever
+wanted for buildings; every other square metre is ground the map
+already draws, and it costs the same to reconstruct.
+
+`--check` exits 1 on an empty box. `clip_to_buildings.py` now refuses
+one too, before it spends any time filtering.
+
 ## Inputs
 
 | | |
@@ -86,3 +119,37 @@ When something that worked stops working, **diff the inputs before the
 settings.** The command was replayed exactly and still failed, because
 the data underneath it had changed. Checking the images would have
 taken thirty seconds at any point.
+
+## The box was wrong the whole time
+
+Separate from all of the above, and worse.
+
+`billund-terminal` was typed from memory as
+`9.150,55.739,9.160,55.744`. That is Billund's **runway and apron**. It
+contains **zero buildings**. The real terminal is 500 m northwest.
+
+So every successful run reconstructed half a square kilometre of tarmac
+and grass at full density, and `clip_to_buildings.py` then correctly
+kept nothing, because there was nothing there. Its error message said
+the footprints and the mesh were "probably in different coordinate
+systems", which was wrong, and the search went into the projection code.
+
+The projection was never broken. Checked against the camera poses, the
+site centre projects to 509731 E / 6177321 N and the mesh centre sits at
+509730 / 6177317. Four metres apart. It was right all along.
+
+Two things made this survive so long:
+
+- **An extent test said the coordinates overlapped.** They did. The
+  mesh box sat well inside the overall extent of 3,696 footprints
+  spread over Billund, while not one individual building was within
+  500 m. Overlapping extents is not overlapping ground. The check has
+  to count footprints on the mesh, which is what it does now.
+- **The name said terminal.** Nothing else was ever asked.
+
+Fixed by `pick_bbox.py`, which derives the box from the footprints, and
+by `clip_to_buildings.py` failing fast with the nearest building's
+distance instead of blaming the coordinate system.
+
+**Check what is in a box before reconstructing it.** One command, and
+the box is either worth an hour of compute or it is not.

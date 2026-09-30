@@ -36,11 +36,26 @@ DEFAULT_COLLECTION = "skraafotos2025"
 # coordinates. Deliberately tight: dense stereo scales badly, and a
 # small area that reconstructs is worth more than a large one that runs
 # for six hours and fails.
+#
+# EVERY BOX MUST BE DERIVED FROM BUILDING FOOTPRINTS, NOT TYPED BY HAND.
+# `python3 pick_bbox.py --osm <file> --name <substring>` prints one.
+#
+# The first "billund-terminal" box was typed from memory as
+# 9.150,55.739,9.160,55.744. It is the runway and apron: it contains
+# ZERO buildings. Half a square kilometre of tarmac and grass was
+# reconstructed at full density, and the clip to footprints then kept
+# nothing, which read as a coordinate-system bug and was chased as one
+# for hours. The terminal is 500 m northwest of that box.
+#
+# The mesh is only ever wanted for buildings, so the area worth
+# reconstructing is defined by where the buildings are. Anything else
+# spends the whole triangle budget on ground the map already draws.
 SITE_BBOX = {
     # Billund Airport, aerodrome and terminal.
     "billund": (9.145, 55.735, 9.172, 55.746),
-    # Just the terminal and apron. Start here.
-    "billund-terminal": (9.150, 55.739, 9.160, 55.744),
+    # The terminal itself, plus the P2 and P4 decks.
+    # 14 footprints, 43k m2 of roof, terminal alone 21k m2.
+    "billund-terminal": (9.14189, 55.74272, 9.15307, 55.74900),
 }
 
 
