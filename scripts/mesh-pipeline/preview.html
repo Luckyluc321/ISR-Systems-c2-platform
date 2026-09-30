@@ -40,24 +40,56 @@
 <div id="hud">
   <h1>Skråfoto mesh preview</h1>
   <div id="stat">looking for a model…</div>
-  <input type="file" id="pick" accept=".glb,.gltf,.obj" hidden>
+  <input type="file" id="pick" accept=".glb,.gltf,.obj,.ply" hidden>
   <button id="btn">open a file…</button>
   <button id="wire">wireframe</button>
+  <button id="mode">mode: map</button>
 </div>
-<div id="tips">drag orbit · scroll zoom · right-drag pan</div>
+<div id="tips">
+<b>map</b>: drag moves · right-drag tilts and turns · scroll zooms to cursor<br>
+<b>fly</b> (press V): drag looks around · WASD moves · Q/E down/up · shift faster<br>
+<b>F</b> resets to the whole site</div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/examples/js/controls/OrbitControls.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/examples/js/loaders/GLTFLoader.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/examples/js/loaders/OBJLoader.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/examples/js/loaders/MTLLoader.js"></script>
+<!--
+  three r128 from jsDelivr, pinned deliberately.
+
+  The first version of this file loaded 0.160 from cdnjs. Every loader
+  404'd: three removed examples/js in favour of ES modules around r150,
+  and cdnjs carries only the core build, never the examples. The page
+  rendered its own chrome and then sat on "looking for a model" forever,
+  because THREE.OrbitControls was undefined and the script died before
+  it ever tried to load anything.
+
+  r128 is the last comfortable release that still ships the classic
+  non-module loaders, and jsDelivr serves the whole npm package rather
+  than just the build. Verified 200 on all five.
+-->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/MTLLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/PLYLoader.js"></script>
 <script>
 const statEl = document.getElementById('stat');
 const say = (msg, cls) => { statEl.innerHTML = cls ? `<span class="${cls}">${msg}</span>` : msg; };
 
+// Say so when a library is missing. The previous failure mode was this
+// page sitting on "looking for a model" indefinitely while the real
+// problem was a 404 two lines above, visible only in the console.
+const MISSING = ['OrbitControls', 'OBJLoader', 'MTLLoader', 'PLYLoader', 'GLTFLoader']
+  .filter(n => !window.THREE || !THREE[n]);
+if (!window.THREE || MISSING.length) {
+  say(`Three.js did not load properly.\nmissing: ${window.THREE ? MISSING.join(', ') : 'THREE itself'}\nCheck the network tab for 404s.`, 'bad');
+  throw new Error('three.js unavailable');
+}
+
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.setSize(innerWidth, innerHeight);
+// Without this an sRGB texture is drawn as if it were linear and comes
+// out pale and flat, which compounds the over-lighting problem above.
+renderer.outputEncoding = THREE.sRGBEncoding;
 document.getElementById('c').appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -65,19 +97,80 @@ scene.background = new THREE.Color(0x0b0f14);
 const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 1e6);
 const controls = new THREE.OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
+// MAP NAVIGATION, matching the C2 platform's Cesium controls.
+//
+// The default here, and the first two attempts at this viewer, rotated
+// around a pivot. That is right for turning an object over in your
+// hand and wrong for a map: however far you travel the view keeps
+// swinging around one point, and the site is 600 m across.
+//
+//   left drag   move across the ground
+//   right drag  tilt and turn
+//   scroll      zoom toward the cursor
+//
+// Which is what everyone already knows from every map they have used.
+controls.mouseButtons = {
+  LEFT: THREE.MOUSE.PAN,
+  MIDDLE: THREE.MOUSE.DOLLY,
+  RIGHT: THREE.MOUSE.ROTATE,
+};
+// Pan along the ground plane, not the screen plane, so dragging moves
+// you over the map rather than sliding the model sideways in view.
+controls.screenSpacePanning = false;
+controls.panSpeed = 1.4;
+controls.zoomSpeed = 1.6;
+controls.rotateSpeed = 0.7;
+// Zoom toward the cursor is implemented by hand further down.
+// OrbitControls only gained a zoomToCursor option around r154, and this
+// file is pinned to r128 because that is the last release shipping the
+// classic non-module loaders. Setting the property here would silently
+// do nothing.
+controls.enableZoom = false;
+// Allow going right down to ground level and looking along a facade.
+// Stopping just short of exactly horizontal avoids the gimbal snap at
+// the pole.
+controls.maxPolarAngle = Math.PI * 0.499;
 
-// Flat, even lighting. A first reconstruction is being judged on
-// geometry and texture, and dramatic lighting hides both.
-scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 2.0));
-const sun = new THREE.DirectionalLight(0xffffff, 1.4);
-sun.position.set(1, 2, 1);
-scene.add(sun);
+// NO LIGHTING, deliberately.
+//
+// A photogrammetry texture already contains the light that was falling
+// on the scene when the aircraft flew over: the sun, the shadows, the
+// shading on every roof. Lighting it again multiplies that on top of
+// itself and blows the whole surface to white, which is exactly what
+// the first version of this viewer did. The result looked like a blank
+// slab and was read, reasonably, as a failed reconstruction.
+//
+// So materials are switched to unlit and the scene has no lights at
+// all. What you see is the photograph, shown as captured.
+const AMBIENT_ONLY = true;
 
 let current = null, wireframe = false;
+
+// Swap every lit material for an unlit one carrying the same texture.
+// MeshBasicMaterial ignores lights entirely and draws the map exactly
+// as photographed.
+function unlit(obj) {
+  obj.traverse(n => {
+    if (!n.isMesh) return;
+    const mats = Array.isArray(n.material) ? n.material : [n.material];
+    const swapped = mats.map(m => {
+      if (!m) return m;
+      const b = new THREE.MeshBasicMaterial({
+        map: m.map || null,
+        color: m.map ? 0xffffff : (m.color || new THREE.Color(0x999999)),
+        side: THREE.DoubleSide,
+      });
+      if (b.map) { b.map.encoding = THREE.sRGBEncoding; b.map.needsUpdate = true; }
+      return b;
+    });
+    n.material = Array.isArray(n.material) ? swapped : swapped[0];
+  });
+}
 
 function frame(obj) {
   if (current) scene.remove(current);
   current = obj;
+  if (AMBIENT_ONLY && !obj.isPoints) unlit(obj);
   scene.add(obj);
 
   // ODM emits georeferenced coordinates, so vertices can sit at UTM
@@ -96,6 +189,15 @@ function frame(obj) {
   controls.target.set(0, 0, 0);
   controls.update();
 
+  // Remembered so F can always get back to the whole site after flying
+  // off somewhere.
+  fitAll = () => {
+    camera.position.set(extent * 0.8, extent * 0.6, extent * 0.8);
+    controls.target.set(0, 0, 0);
+    controls.update();
+  };
+
+  const isPoints = obj.isPoints;
   let tris = 0, textured = 0, meshes = 0;
   obj.traverse(n => {
     if (!n.isMesh) return;
@@ -116,8 +218,34 @@ function frame(obj) {
   // The two failure modes worth calling out rather than leaving the
   // viewer to squint at.
   if (!textured) lines.push(`<span class="warn">no texture — geometry only</span>`);
-  if (tris < 5000) lines.push(`<span class="bad">very few triangles — reconstruction likely failed</span>`);
+  if (isPoints) {
+    const n = current.geometry.attributes.position.count;
+    lines.length = 1;
+    lines.push(`point cloud`, `points    ${n.toLocaleString()}`,
+      `coloured  ${current.geometry.attributes.color ? 'yes' : 'no'}`,
+      `extent    ${size.x.toFixed(1)} x ${size.y.toFixed(1)} x ${size.z.toFixed(1)}`);
+  } else if (tris < 5000) {
+    lines.push(`<span class="bad">very few triangles — reconstruction likely failed</span>`);
+  }
   statEl.innerHTML = lines.join('\n');
+}
+
+function loadPLY(url) {
+  // The dense point cloud, viewable before any meshing happens. Useful
+  // on its own: if the cloud looks like the site, the reconstruction
+  // succeeded and anything wrong afterwards is a meshing problem.
+  say('loading point cloud…');
+  new THREE.PLYLoader().load(url, geom => {
+    geom.computeBoundingBox();
+    const mat = new THREE.PointsMaterial({
+      size: 0.35,
+      vertexColors: !!geom.attributes.color,
+      color: geom.attributes.color ? 0xffffff : 0x8fd4ff,
+    });
+    frame(new THREE.Points(geom, mat));
+  }, xhr => {
+    if (xhr.lengthComputable) say(`point cloud ${Math.round(100 * xhr.loaded / xhr.total)}%`);
+  }, () => tryNext());
 }
 
 function loadGLB(url) {
@@ -150,7 +278,8 @@ const CANDIDATES = [
   ['work/billund-terminal/odm/odm_texturing/odm_textured_model_geo.glb', loadGLB],
   ['work/billund-terminal/odm/odm_texturing/odm_textured_model_geo.obj', loadOBJ],
   ['work/billund-terminal/odm/odm_texturing/odm_textured_model.obj', loadOBJ],
-  ['work/billund-terminal/odm/odm_meshing/odm_mesh.ply', null],
+  ['work/billund-terminal/odm/odm_meshing/odm_mesh.ply', loadPLY],
+  ['work/billund-terminal/odm/odm_filterpoints/point_cloud.ply', loadPLY],
 ];
 let idx = 0;
 function tryNext() {
@@ -171,8 +300,179 @@ document.getElementById('pick').onchange = e => {
   if (!f) return;
   const url = URL.createObjectURL(f);
   say(`loading ${f.name}…`);
-  (/\.obj$/i.test(f.name) ? loadOBJ : loadGLB)(url);
+  (/\.ply$/i.test(f.name) ? loadPLY : /\.obj$/i.test(f.name) ? loadOBJ : loadGLB)(url);
 };
+// ── Zoom toward the cursor ────────────────────────────────────────
+// Every map zooms toward the pointer, and zooming toward the screen
+// centre instead means constantly re-panning to whatever you were
+// actually looking at.
+//
+// Raycast under the cursor, then move the camera a fraction of the way
+// to that point, dragging the orbit pivot with it so the next drag
+// turns around what is now in front of you.
+const zoomRay = new THREE.Raycaster();
+const _ndc = new THREE.Vector2();
+
+renderer.domElement.addEventListener('wheel', e => {
+  e.preventDefault();
+  if (flyMode) {
+    // No pivot in fly mode: wheel just moves along the view direction.
+    const dir = new THREE.Vector3();
+    camera.getWorldDirection(dir);
+    const span = current
+      ? new THREE.Box3().setFromObject(current).getSize(new THREE.Vector3()).length()
+      : 500;
+    camera.position.addScaledVector(dir, -Math.sign(e.deltaY) * span * 0.04);
+    return;
+  }
+
+  const r = renderer.domElement.getBoundingClientRect();
+  _ndc.set(((e.clientX - r.left) / r.width) * 2 - 1,
+           -((e.clientY - r.top) / r.height) * 2 + 1);
+
+  let anchor = null;
+  if (current) {
+    zoomRay.setFromCamera(_ndc, camera);
+    anchor = zoomRay.intersectObject(current, true)[0]?.point || null;
+  }
+  // Nothing under the cursor, over empty sky: fall back to the pivot so
+  // the wheel still does something sensible.
+  if (!anchor) anchor = controls.target.clone();
+
+  // Fraction of the remaining distance per notch. Geometric, so zooming
+  // never overshoots through the surface however fast the wheel spins.
+  const k = Math.sign(e.deltaY) > 0 ? 1 / 0.82 : 0.82;
+  const camOffset = camera.position.clone().sub(anchor).multiplyScalar(k);
+  const tgtOffset = controls.target.clone().sub(anchor).multiplyScalar(k);
+
+  // Do not let the camera cross the surface it is approaching.
+  if (camOffset.length() > 1.2) {
+    camera.position.copy(anchor).add(camOffset);
+    controls.target.copy(anchor).add(tgtOffset);
+    controls.update();
+  }
+}, { passive: false });
+
+// ── Fly mode ──────────────────────────────────────────────────────
+// OrbitControls always rotates around a pivot. That is right for
+// inspecting an object from outside and wrong for moving through a
+// site: however far you fly, the view keeps swinging around one point.
+//
+// Fly mode turns the mouse into a head rather than a hand. Dragging
+// looks around from where the camera is, and WASD moves it. No pivot
+// exists at all.
+let flyMode = false;
+const look = { yaw: 0, pitch: 0 };
+let dragging = false, lastX = 0, lastY = 0;
+
+function enterFly() {
+  // Seed the angles from wherever the orbit camera was pointing, so the
+  // switch does not snap the view somewhere else.
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  look.yaw = Math.atan2(-dir.x, -dir.z);
+  look.pitch = Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
+  controls.enabled = false;
+  flyMode = true;
+}
+function enterOrbit() {
+  // Put the pivot a sensible distance in front of the camera, so the
+  // first orbit drag turns around what is being looked at rather than
+  // around wherever the pivot was left.
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  const dist = current
+    ? Math.max(20, new THREE.Box3().setFromObject(current).getSize(new THREE.Vector3()).length() * 0.15)
+    : 100;
+  controls.target.copy(camera.position).add(dir.multiplyScalar(dist));
+  controls.enabled = true;
+  flyMode = false;
+  controls.update();
+}
+
+const modeBtn = document.getElementById('mode');
+modeBtn.onclick = () => {
+  flyMode ? enterOrbit() : enterFly();
+  modeBtn.textContent = `mode: ${flyMode ? 'fly' : 'map'}`;
+};
+
+renderer.domElement.addEventListener('mousedown', e => {
+  if (!flyMode || e.button !== 0) return;
+  dragging = true; lastX = e.clientX; lastY = e.clientY;
+});
+addEventListener('mouseup', () => { dragging = false; });
+addEventListener('mousemove', e => {
+  if (!flyMode || !dragging) return;
+  look.yaw   -= (e.clientX - lastX) * 0.0028;
+  look.pitch -= (e.clientY - lastY) * 0.0028;
+  look.pitch = THREE.MathUtils.clamp(look.pitch, -1.53, 1.53);
+  lastX = e.clientX; lastY = e.clientY;
+  camera.quaternion.setFromEuler(new THREE.Euler(look.pitch, look.yaw, 0, 'YXZ'));
+});
+
+// ── Navigation ────────────────────────────────────────────────────
+// Double-click sets the orbit centre to whatever was clicked, so a
+// building can be circled rather than the whole model. This is the one
+// that makes inspection possible: without it the camera is always
+// swinging around the middle of a 600 m site.
+const ray = new THREE.Raycaster();
+renderer.domElement.addEventListener('dblclick', e => {
+  if (!current) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  ray.setFromCamera(new THREE.Vector2(
+    ((e.clientX - r.left) / r.width) * 2 - 1,
+    -((e.clientY - r.top) / r.height) * 2 + 1,
+  ), camera);
+  const hit = ray.intersectObject(current, true)[0];
+  if (!hit) return;
+  // Keep the camera where it is and swing the pivot to the clicked
+  // point, so the view does not jump.
+  if (flyMode) { enterOrbit(); modeBtn.textContent = 'mode: map'; }
+  const offset = camera.position.clone().sub(controls.target);
+  controls.target.copy(hit.point);
+  camera.position.copy(hit.point).add(offset.setLength(Math.min(offset.length(), 400)));
+  controls.update();
+});
+
+// Keyboard fly. Speed scales with how far the camera is from its pivot,
+// so the same keys work when looking at the whole site and when a metre
+// from a wall.
+const keys = new Set();
+addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT') return;
+  keys.add(e.key.toLowerCase());
+  if (e.key.toLowerCase() === 'f') fitAll();
+  if (e.key.toLowerCase() === 'v') modeBtn.click();
+});
+addEventListener('keyup', e => keys.delete(e.key.toLowerCase()));
+
+function fly(dt) {
+  if (!keys.size) return;
+  // In fly mode there is no pivot to measure against, so speed comes
+  // from the model's own size instead.
+  const dist = flyMode
+    ? (current ? new THREE.Box3().setFromObject(current).getSize(new THREE.Vector3()).length() * 0.12 : 60)
+    : camera.position.distanceTo(controls.target);
+  const step = Math.max(0.5, dist * 0.9) * dt * (keys.has('shift') ? 3 : 1);
+  const fwd = new THREE.Vector3();
+  camera.getWorldDirection(fwd);
+  const right = new THREE.Vector3().crossVectors(fwd, camera.up).normalize();
+  const move = new THREE.Vector3();
+  if (keys.has('w')) move.add(fwd);
+  if (keys.has('s')) move.sub(fwd);
+  if (keys.has('d')) move.add(right);
+  if (keys.has('a')) move.sub(right);
+  if (keys.has('e') || keys.has(' ')) move.y += 1;
+  if (keys.has('q')) move.y -= 1;
+  if (!move.lengthSq()) return;
+  move.normalize().multiplyScalar(step);
+  camera.position.add(move);
+  // Only drag the pivot along in orbit mode. In fly mode there is none.
+  if (!flyMode) controls.target.add(move);
+}
+
+let fitAll = () => {};
+
 document.getElementById('wire').onclick = () => {
   wireframe = !wireframe;
   current?.traverse(n => {
@@ -187,9 +487,13 @@ addEventListener('resize', () => {
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
 });
-(function loop() {
+let _last = performance.now();
+(function loop(now) {
   requestAnimationFrame(loop);
-  controls.update();
+  const dt = Math.min(0.1, ((now || performance.now()) - _last) / 1000);
+  _last = now || performance.now();
+  fly(dt);
+  if (!flyMode) controls.update();
   renderer.render(scene, camera);
 })();
 </script>

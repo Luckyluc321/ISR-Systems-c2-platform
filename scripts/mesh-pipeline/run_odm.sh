@@ -66,8 +66,13 @@ OPTS=(
   # Mesh complexity. The default targets a survey-grade model and is
   # more than a first look needs, and vertex count drives the memory
   # that killed the first attempt.
-  --mesh-size 300000
-  --mesh-octree-depth 11
+  # Mesh density, sized for the cropped area rather than for everything
+  # the cameras saw. Over 0.35 km2 this is roughly 6 triangles per square
+  # metre, enough for a wall to be a wall. The earlier 300,000 was chosen
+  # to survive a memory crash while covering 14.6 km2, which worked out
+  # at one triangle per 26 m2 and could not represent a building at all.
+  --mesh-size 2000000
+  --mesh-octree-depth 12
   # Matcher neighbours: let ODM choose, do NOT force all-pairs.
   #
   # The first run set this to 0, meaning match every image against every
@@ -98,6 +103,10 @@ OPTS=(
   --texturing-single-material
   --verbose
 )
+# Crop to the area of interest. Without this ODM reconstructs every
+# square metre the cameras could see, and the triangle budget is spread
+# across ground nobody asked for.
+[ -f "$PROJECT/boundary.geojson" ] && OPTS+=(--boundary "/datasets/$NAME/boundary.geojson")
 [ -n "$RERUN" ] && OPTS+=(--rerun-from "$RERUN")
 
 echo "opts    : ${OPTS[*]}"

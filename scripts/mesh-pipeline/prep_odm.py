@@ -97,7 +97,11 @@ def main() -> None:
     poses_path = work / "poses.json"
     if not poses_path.exists():
         sys.exit(f"No poses.json in {work}. Run fetch.py first.")
-    poses = {p["id"]: p for p in json.loads(poses_path.read_text())["images"]}
+    _poses_doc = json.loads(poses_path.read_text())
+    poses = {p["id"]: p for p in _poses_doc["images"]}
+    # The bounding box fetch.py searched with. Recorded there precisely
+    # so downstream steps do not have to be told it again.
+    bbox = _poses_doc.get("bbox")
 
     src_dir = work / "images"
     out = work / "odm"
@@ -163,6 +167,53 @@ def main() -> None:
             "Convert before tiling, or the mesh sits about 40 m underground.\n"
         )
         print(f"wrote {out/'VERTICAL_DATUM.txt'}  (vertical CRS {'/'.join(sorted(vcrs))})")
+
+    # ── Boundary ────────────────────────────────────────────────────
+    # Crop the reconstruction to the area actually wanted.
+    #
+    # This matters more than any quality setting. Each oblique frame sees
+    # kilometres, so without a boundary ODM reconstructs everything the
+    # cameras could see: fields, forest, the whole town. The first run
+    # covered 14.6 km2 when the target was 0.35 km2, spreading the
+    # triangle budget over forty times too much ground. At 567,401
+    # triangles across that area each one covered about 26 m2, so a
+    # thirty-metre building got one or two triangles and came out as a
+    # bump in the terrain rather than a building.
+    #
+    # Same compute, concentrated on the area of interest, is the whole
+    # difference between a draped map and actual geometry.
+    if not bbox:
+        print("NOTE: poses.json records no bbox, so no boundary is written. "
+              "The reconstruction will cover everything the cameras saw.")
+        print(f"\nODM project ready: {out}")
+        print("next:  see run_odm.sh")
+        return
+    try:
+        from pyproj import Transformer
+        tr = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg}", always_xy=True)
+        lo_x, lo_y = tr.transform(bbox[0], bbox[1])
+        hi_x, hi_y = tr.transform(bbox[2], bbox[3])
+        # A small margin so buildings on the edge are still seen from all
+        # sides rather than sliced through.
+        m = 60.0
+        ring = [
+            [lo_x - m, lo_y - m], [hi_x + m, lo_y - m],
+            [hi_x + m, hi_y + m], [lo_x - m, hi_y + m], [lo_x - m, lo_y - m],
+        ]
+        (out / "boundary.geojson").write_text(json.dumps({
+            "type": "FeatureCollection",
+            "features": [{
+                "type": "Feature", "properties": {},
+                "geometry": {"type": "Polygon", "coordinates": [ring]},
+            }],
+        }, indent=2))
+        area = ((hi_x - lo_x) + 2 * m) * ((hi_y - lo_y) + 2 * m)
+        print(f"wrote {out/'boundary.geojson'}  "
+              f"({(hi_x-lo_x)+2*m:.0f} x {(hi_y-lo_y)+2*m:.0f} m, {area/1e6:.2f} km2)")
+    except ImportError:
+        print("NOTE: pyproj not installed, no boundary written. "
+              "The reconstruction will cover everything the cameras saw, "
+              "which is far more ground than you want.")
 
     print(f"\nODM project ready: {out}")
     print("next:  see run_odm.sh")
