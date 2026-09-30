@@ -33,3 +33,5 @@ dist-ssr
 
 # Mesh pipeline working files — imagery and intermediate meshes are large
 scripts/mesh-pipeline/work/
+
+scripts/mesh-pipeline/work/
