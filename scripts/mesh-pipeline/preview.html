@@ -44,11 +44,12 @@
   <button id="btn">open a file…</button>
   <button id="wire">wireframe</button>
   <button id="mode">mode: map</button>
+  <button id="shade">shading: normals</button>
 </div>
 <div id="tips">
-<b>map</b>: drag moves · right-drag tilts and turns · scroll zooms to cursor<br>
-<b>fly</b> (press V): drag looks around · WASD moves · Q/E down/up · shift faster<br>
-<b>F</b> resets to the whole site</div>
+<b>drag</b> moves across the map · <b>right-drag</b> tilts and turns · <b>scroll</b> zooms<br>
+<b>W A S D</b> or arrows move · <b>E / Q</b> up and down · <b>shift</b> faster<br>
+<b>V</b> free-look · <b>F</b> reset view</div>
 
 <!--
   three r128 from jsDelivr, pinned deliberately.
@@ -130,6 +131,10 @@ controls.enableZoom = false;
 // Stopping just short of exactly horizontal avoids the gimbal snap at
 // the pole.
 controls.maxPolarAngle = Math.PI * 0.499;
+// Keep the camera above the surface. Dropping through the ground and
+// looking at the underside of the model is how this ended up looking
+// like a white wall earlier.
+controls.minDistance = 8;
 
 // NO LIGHTING, deliberately.
 //
@@ -170,7 +175,36 @@ function unlit(obj) {
 function frame(obj) {
   if (current) scene.remove(current);
   current = obj;
-  if (AMBIENT_ONLY && !obj.isPoints) unlit(obj);
+
+  // Z-UP TO Y-UP.
+  //
+  // Geospatial data puts Z upward: ODM, and every coordinate system it
+  // writes, treat Z as height. Three.js puts Y upward. Loading one into
+  // the other without saying so stands the ground plane on its edge, so
+  // a 762 x 703 m site 139 m thick renders as a wall, and a terrain
+  // slab is very convincing as a wall because that is exactly what it
+  // is shaped like.
+  //
+  // Wrapping rather than rotating the object itself keeps the
+  // raycasting used by double-click and zoom-to-cursor working against
+  // world coordinates without any further correction.
+  const upright = new THREE.Group();
+  upright.rotation.x = -Math.PI / 2;
+  upright.add(obj);
+  obj = upright;
+  current = obj;
+  // Only strip lighting from models that carry a photographic texture.
+  // An untextured mesh has no baked light of its own and would render
+  // as a flat silhouette with no readable shape.
+  const hasTexture = (() => {
+    let t = false;
+    obj.traverse(n => {
+      if (!n.isMesh) return;
+      (Array.isArray(n.material) ? n.material : [n.material]).forEach(m => { if (m && m.map) t = true; });
+    });
+    return t;
+  })();
+  if (AMBIENT_ONLY && !obj.isPoints && hasTexture) unlit(obj);
   scene.add(obj);
 
   // ODM emits georeferenced coordinates, so vertices can sit at UTM
@@ -181,8 +215,14 @@ function frame(obj) {
   const mid = box.getCenter(new THREE.Vector3());
   obj.position.sub(mid);
 
-  const extent = Math.max(size.x, size.y, size.z) || 1;
-  camera.position.set(extent * 0.8, extent * 0.6, extent * 0.8);
+  // Ground extent drives the framing, not overall extent. Including
+  // height would pull the camera back for a tall thin object and leave
+  // a wide flat site tiny on screen.
+  const extent = Math.max(size.x, size.z) || 1;
+  // Looking down at about 40 degrees, the angle an aerial site reads
+  // best from. Straight down loses all the relief that the whole
+  // exercise is about.
+  camera.position.set(extent * 0.55, extent * 0.62, extent * 0.55);
   camera.near = extent / 1000;
   camera.far = extent * 50;
   camera.updateProjectionMatrix();
@@ -192,7 +232,7 @@ function frame(obj) {
   // Remembered so F can always get back to the whole site after flying
   // off somewhere.
   fitAll = () => {
-    camera.position.set(extent * 0.8, extent * 0.6, extent * 0.8);
+    camera.position.set(extent * 0.55, extent * 0.62, extent * 0.55);
     controls.target.set(0, 0, 0);
     controls.update();
   };
@@ -237,6 +277,34 @@ function loadPLY(url) {
   say('loading point cloud…');
   new THREE.PLYLoader().load(url, geom => {
     geom.computeBoundingBox();
+    // A .ply may be a point cloud or a mesh. ODM writes both, and the
+    // untextured mesh is worth looking at on its own: it answers whether
+    // the geometry came out, which is a different question from whether
+    // the texturing stage survived.
+    if (geom.index && geom.index.count > 0) {
+      geom.computeVertexNormals();
+      // Lit, unlike the textured model. With no photograph to carry the
+      // shading, shape is only readable if something casts light across
+      // it.
+      // SURFACE ORIENTATION, not lighting.
+      //
+      // Lighting an untextured mesh has now washed out twice: intensity
+      // plus sRGB output saturates a pale surface to flat white, and
+      // flat white on a mostly flat site is indistinguishable from a
+      // blank slab. Which is the exact thing being checked for, so the
+      // display cannot be allowed to fake it.
+      //
+      // MeshNormalMaterial colours every face by the direction it
+      // faces. It has no lights and no exposure, so it cannot blow out.
+      // A roof and a wall point in different directions and therefore
+      // come out in different colours, which is precisely the question:
+      // are there walls.
+      frame(new THREE.Mesh(geom, new THREE.MeshNormalMaterial({
+        side: THREE.DoubleSide,
+        flatShading: true,
+      })));
+      return;
+    }
     const mat = new THREE.PointsMaterial({
       size: 0.35,
       vertexColors: !!geom.attributes.color,
@@ -273,24 +341,40 @@ function loadOBJ(url) {
   });
 }
 
-// Where ODM leaves things, most-useful first.
+// Where ODM leaves things, best first. The loader walks this list and
+// takes whatever exists, so the page always opens on the most complete
+// output currently on disk with nothing to choose.
+const BASE = 'work/billund-terminal/odm/';
 const CANDIDATES = [
-  ['work/billund-terminal/odm/odm_texturing/odm_textured_model_geo.glb', loadGLB],
-  ['work/billund-terminal/odm/odm_texturing/odm_textured_model_geo.obj', loadOBJ],
-  ['work/billund-terminal/odm/odm_texturing/odm_textured_model.obj', loadOBJ],
-  ['work/billund-terminal/odm/odm_meshing/odm_mesh.ply', loadPLY],
-  ['work/billund-terminal/odm/odm_filterpoints/point_cloud.ply', loadPLY],
+  [BASE + 'odm_texturing/odm_textured_model_geo.glb', loadGLB],
+  [BASE + 'odm_texturing/odm_textured_model_geo.obj', loadOBJ],
+  [BASE + 'odm_texturing/odm_textured_model.obj', loadOBJ],
+  // Untextured geometry. Present whenever meshing has finished, whether
+  // or not texturing has, and on its own it answers the only question
+  // that matters early on: did buildings come out as buildings.
+  [BASE + 'odm_meshing/odm_mesh.ply', loadPLY],
+  // Raw points, if even meshing has not run.
+  [BASE + 'odm_filterpoints/point_cloud.ply', loadPLY],
 ];
 let idx = 0;
-function tryNext() {
-  if (idx >= CANDIDATES.length) {
-    say('No model found yet.\nRun the pipeline, or open a file manually.', 'warn');
-    return;
+async function tryNext() {
+  while (idx < CANDIDATES.length) {
+    const [url, fn] = CANDIDATES[idx++];
+    if (!fn) continue;
+    // Ask whether the file is actually there before handing it to a
+    // loader. Without this a missing output makes the loader fail on
+    // whatever the server returned instead, which is slow and reports
+    // a confusing parse error rather than "not built yet".
+    let ok = false;
+    try {
+      const head = await fetch(url, { method: 'HEAD' });
+      ok = head.ok;
+    } catch (_) { ok = false; }
+    if (!ok) continue;
+    say(`loading ${url.split('/').pop()}…`);
+    return fn(url);
   }
-  const [url, fn] = CANDIDATES[idx++];
-  if (!fn) return tryNext();
-  say(`trying ${url.split('/').pop()}…`);
-  fn(url);
+  say('Nothing to show yet.\nThe pipeline has not produced a model.\nUse "open a file…" if you have one elsewhere.', 'warn');
 }
 tryNext();
 
@@ -440,6 +524,9 @@ renderer.domElement.addEventListener('dblclick', e => {
 const keys = new Set();
 addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
+  if (['arrowup','arrowdown','arrowleft','arrowright',' ','pageup','pagedown'].includes(e.key.toLowerCase())) {
+    e.preventDefault();
+  }
   keys.add(e.key.toLowerCase());
   if (e.key.toLowerCase() === 'f') fitAll();
   if (e.key.toLowerCase() === 'v') modeBtn.click();
@@ -453,7 +540,10 @@ function fly(dt) {
   const dist = flyMode
     ? (current ? new THREE.Box3().setFromObject(current).getSize(new THREE.Vector3()).length() * 0.12 : 60)
     : camera.position.distanceTo(controls.target);
-  const step = Math.max(0.5, dist * 0.9) * dt * (keys.has('shift') ? 3 : 1);
+  // Scale with distance so the same keys work at altitude and up close,
+  // with a floor so movement never becomes imperceptible, and a ceiling
+  // so a single tap does not fling the camera off the site.
+  const step = Math.min(400, Math.max(2, dist * 0.9)) * dt * (keys.has('shift') ? 4 : 1);
   const fwd = new THREE.Vector3();
   camera.getWorldDirection(fwd);
   const right = new THREE.Vector3().crossVectors(fwd, camera.up).normalize();
@@ -462,8 +552,15 @@ function fly(dt) {
   if (keys.has('s')) move.sub(fwd);
   if (keys.has('d')) move.add(right);
   if (keys.has('a')) move.sub(right);
-  if (keys.has('e') || keys.has(' ')) move.y += 1;
-  if (keys.has('q')) move.y -= 1;
+  // Vertical. Works in both modes: in map mode the pivot rises with the
+  // camera so the view keeps looking at the same spot from higher up,
+  // which is how every map application behaves.
+  if (keys.has('e') || keys.has(' ') || keys.has('pageup')) move.y += 1;
+  if (keys.has('q') || keys.has('pagedown')) move.y -= 1;
+  if (keys.has('arrowup')) move.add(fwd);
+  if (keys.has('arrowdown')) move.sub(fwd);
+  if (keys.has('arrowleft')) move.sub(right);
+  if (keys.has('arrowright')) move.add(right);
   if (!move.lengthSq()) return;
   move.normalize().multiplyScalar(step);
   camera.position.add(move);
@@ -472,6 +569,60 @@ function fly(dt) {
 }
 
 let fitAll = () => {};
+
+// Three ways to read an untextured mesh. Normals cannot wash out and
+// answer "are there walls". Lit reads relief more naturally once you
+// know the shape is there. Height bands make a flat site legible by
+// colouring elevation, so a building stands out from the ground it
+// sits on even from directly overhead.
+const SHADERS = ['normals', 'lit', 'height'];
+let shadeIdx = 0;
+const shadeBtn = document.getElementById('shade');
+shadeBtn.onclick = () => {
+  if (!current) return;
+  shadeIdx = (shadeIdx + 1) % SHADERS.length;
+  const mode = SHADERS[shadeIdx];
+  shadeBtn.textContent = `shading: ${mode}`;
+
+  if (mode === 'lit' && !scene.getObjectByName('geomKey')) {
+    // Deliberately dim. Bright lights plus sRGB output is what turned
+    // this white in the first place.
+    const hemi = new THREE.HemisphereLight(0xdfe8f0, 0x101820, 0.35);
+    hemi.name = 'geomHemi'; scene.add(hemi);
+    const key = new THREE.DirectionalLight(0xffffff, 0.45);
+    key.position.set(0.6, 1, 0.4); key.name = 'geomKey'; scene.add(key);
+  }
+  const hemi = scene.getObjectByName('geomHemi');
+  const key = scene.getObjectByName('geomKey');
+  if (hemi) hemi.visible = mode === 'lit';
+  if (key) key.visible = mode === 'lit';
+
+  current.traverse(n => {
+    if (!n.isMesh || !n.geometry.attributes.position) return;
+    if (mode === 'normals') {
+      n.material = new THREE.MeshNormalMaterial({ side: THREE.DoubleSide, flatShading: true });
+    } else if (mode === 'lit') {
+      n.material = new THREE.MeshLambertMaterial({ color: 0x9fb0bd, side: THREE.DoubleSide });
+    } else {
+      // Colour by height. Computed once and cached on the geometry.
+      if (!n.geometry.attributes.color) {
+        const pos = n.geometry.attributes.position;
+        const col = new Float32Array(pos.count * 3);
+        let lo = Infinity, hi = -Infinity;
+        for (let i = 0; i < pos.count; i++) { const z = pos.getZ(i); if (z < lo) lo = z; if (z > hi) hi = z; }
+        const c = new THREE.Color();
+        for (let i = 0; i < pos.count; i++) {
+          const t = (pos.getZ(i) - lo) / Math.max(1e-6, hi - lo);
+          c.setHSL(0.62 - 0.62 * t, 0.75, 0.25 + 0.45 * t);
+          col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
+        }
+        n.geometry.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      }
+      n.material = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.DoubleSide });
+    }
+    n.material.wireframe = wireframe;
+  });
+};
 
 document.getElementById('wire').onclick = () => {
   wireframe = !wireframe;

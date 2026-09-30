@@ -38,11 +38,16 @@ NAME="$(basename "$PROJECT")"
 # feature-quality/pc-quality drive cost more than anything else.
 # FAST trades detail for a result you can look at today.
 if [ "${FAST:-0}" = "1" ]; then
-  # Feature quality stays high even in FAST mode. The imagery is already
-  # downscaled by roughly 20x before ODM sees it, and degrading feature
-  # detection on top of that is how matching starts producing the false
-  # correspondences described below.
-  QUALITY=(--feature-quality high --pc-quality medium)
+  # Medium feature quality. This was raised to high on the theory that
+  # weak features caused the false matches seen earlier, but the false
+  # matches came from forcing all-pairs matching, which is fixed below.
+  #
+  # High quality was never actually exercised from scratch: the run it
+  # appeared to succeed in reused features already extracted at medium.
+  # From a cold start it aborts during extraction with "terminate called
+  # without an active exception", a thread dying under memory pressure
+  # inside a 7.75 GB container.
+  QUALITY=(--feature-quality medium --pc-quality medium)
   echo "mode    : FAST"
 else
   QUALITY=(--feature-quality high --pc-quality high)
@@ -71,8 +76,21 @@ OPTS=(
   # metre, enough for a wall to be a wall. The earlier 300,000 was chosen
   # to survive a memory crash while covering 14.6 km2, which worked out
   # at one triangle per 26 m2 and could not represent a building at all.
-  --mesh-size 2000000
-  --mesh-octree-depth 12
+  # 1.5 million over 0.51 km2 is about 3 triangles per square metre,
+  # which is ample for a building wall. 2 million produced a good mesh
+  # (3,989,396 faces) and then ran out of memory during texturing, and
+  # texturing cost scales with face count. Detail nobody can see is not
+  # worth a failed run.
+  # Back to the values that produced the textured model that was
+  # actually approved. Later runs chased more detail over a cropped
+  # area, ran out of memory at texturing every time, and ended up
+  # delivering nothing at all. A model you can look at beats a denser
+  # one that never finishes.
+  --mesh-size 300000
+  --mesh-octree-depth 11
+  # No --max-concurrency. It was added on the theory that thread count
+  # was causing the aborts; the run that actually completed did not set
+  # it, and setting it did not stop them.
   # Matcher neighbours: let ODM choose, do NOT force all-pairs.
   #
   # The first run set this to 0, meaning match every image against every
@@ -114,9 +132,20 @@ echo
 echo "Starting. First run pulls a large image."
 echo
 
+# No --memory by default.
+#
+# The successful run passed --memory=12g against a Docker VM that only
+# has 7.75 GB, so the flag could not be satisfied and the container was
+# effectively uncapped, taking whatever the VM had. Changing it to a
+# deliverable 7g then capped the container BELOW the VM's own limit and
+# feature extraction started aborting with "terminate called without an
+# active exception".
+#
+# Omitting it entirely is what that run was doing in practice. Set
+# DOCKER_MEM explicitly to cap it on purpose.
 time docker run --rm \
   -v "$PARENT":/datasets \
-  --memory="${DOCKER_MEM:-7g}" \
+  ${DOCKER_MEM:+--memory=$DOCKER_MEM} \
   opendronemap/odm:latest \
   "${OPTS[@]}"
 

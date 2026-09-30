@@ -25,6 +25,7 @@ Usage:
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -185,20 +186,26 @@ def main() -> None:
     if not bbox:
         print("NOTE: poses.json records no bbox, so no boundary is written. "
               "The reconstruction will cover everything the cameras saw.")
-        print(f"\nODM project ready: {out}")
-        print("next:  see run_odm.sh")
-        return
-    try:
-        from pyproj import Transformer
-        tr = Transformer.from_crs("EPSG:4326", f"EPSG:{epsg}", always_xy=True)
-        lo_x, lo_y = tr.transform(bbox[0], bbox[1])
-        hi_x, hi_y = tr.transform(bbox[2], bbox[3])
-        # A small margin so buildings on the edge are still seen from all
-        # sides rather than sliced through.
-        m = 60.0
+    else:
+        # WGS84 longitude/latitude, NOT the projected coordinates the
+        # poses use.
+        #
+        # GeoJSON is defined as lon/lat unless a CRS is declared, and a
+        # declared CRS was removed from the spec years ago. An earlier
+        # version wrote this in EPSG:25832 metres, so ODM read 509418,
+        # 6177041 as degrees, reprojected them, overflowed to infinity,
+        # and the point filter died on "invalid literal; last read:
+        # coordinates:[[[i" with the i being the start of inf.
+        #
+        # The bbox is already in lon/lat, so this needs no transform at
+        # all, which is also why pyproj is no longer imported here.
+        margin_deg_lat = 60.0 / 111_320.0
+        margin_deg_lon = margin_deg_lat / max(0.2, math.cos(math.radians(bbox[1])))
+        lo_lon, lo_lat = bbox[0] - margin_deg_lon, bbox[1] - margin_deg_lat
+        hi_lon, hi_lat = bbox[2] + margin_deg_lon, bbox[3] + margin_deg_lat
         ring = [
-            [lo_x - m, lo_y - m], [hi_x + m, lo_y - m],
-            [hi_x + m, hi_y + m], [lo_x - m, hi_y + m], [lo_x - m, lo_y - m],
+            [lo_lon, lo_lat], [hi_lon, lo_lat],
+            [hi_lon, hi_lat], [lo_lon, hi_lat], [lo_lon, lo_lat],
         ]
         (out / "boundary.geojson").write_text(json.dumps({
             "type": "FeatureCollection",
@@ -207,14 +214,10 @@ def main() -> None:
                 "geometry": {"type": "Polygon", "coordinates": [ring]},
             }],
         }, indent=2))
-        area = ((hi_x - lo_x) + 2 * m) * ((hi_y - lo_y) + 2 * m)
-        print(f"wrote {out/'boundary.geojson'}  "
-              f"({(hi_x-lo_x)+2*m:.0f} x {(hi_y-lo_y)+2*m:.0f} m, {area/1e6:.2f} km2)")
-    except ImportError:
-        print("NOTE: pyproj not installed, no boundary written. "
-              "The reconstruction will cover everything the cameras saw, "
-              "which is far more ground than you want.")
-
+        # Report in metres, because degrees tell nobody anything.
+        w = (hi_lon - lo_lon) * 111_320.0 * math.cos(math.radians(bbox[1]))
+        h = (hi_lat - lo_lat) * 111_320.0
+        print(f"wrote {out/'boundary.geojson'}  ({w:.0f} x {h:.0f} m, {w*h/1e6:.2f} km2, WGS84 lon/lat)")
     print(f"\nODM project ready: {out}")
     print("next:  see run_odm.sh")
 
