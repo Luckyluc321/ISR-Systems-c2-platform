@@ -151,14 +151,50 @@ def pose_of(item: dict) -> dict:
 
 
 def download(url: str, dest: Path, token: str) -> bool:
-    if dest.exists() and dest.stat().st_size > 0:
-        return False  # resumable: a part-finished run continues
+    """Fetch one image, and refuse to accept a short one.
+
+    The length check is the whole point. An interrupted read finishes
+    without raising: the server simply stops sending, `read()` returns
+    empty, and the file is renamed into place looking complete. The
+    header survives that, so the file still identifies as a valid TIFF
+    of the right dimensions, and the failure only appears much later
+    when a decoder reaches the missing pixels and reports "Not a JPEG
+    file". Six of the first sixty-eight images arrived this way.
+
+    So the size is compared against Content-Length, and a resumed run
+    re-checks files already on disk rather than trusting that a
+    non-empty file is a whole one.
+    """
     if "token=" not in url:
         url += ("&" if "?" in url else "?") + f"token={token}"
+
+    expected = None
+    try:
+        with urllib.request.urlopen(
+            urllib.request.Request(url, method="HEAD"), timeout=60
+        ) as h:
+            expected = int(h.headers.get("content-length") or 0) or None
+    except Exception:
+        pass  # no HEAD is not fatal; the post-download check still applies
+
+    if dest.exists() and dest.stat().st_size > 0:
+        if expected is None or dest.stat().st_size == expected:
+            return False
+        print(f"  re-fetching {dest.name}: {dest.stat().st_size} bytes on disk, {expected} expected")
+        dest.unlink()
+
     tmp = dest.with_suffix(dest.suffix + ".part")
-    with urllib.request.urlopen(url, timeout=300) as r, open(tmp, "wb") as f:
+    written = 0
+    with urllib.request.urlopen(url, timeout=600) as r, open(tmp, "wb") as f:
+        declared = int(r.headers.get("content-length") or 0) or expected
         while chunk := r.read(1 << 20):
             f.write(chunk)
+            written += len(chunk)
+
+    if declared and written != declared:
+        tmp.unlink(missing_ok=True)
+        raise IOError(f"truncated: got {written} of {declared} bytes")
+
     tmp.rename(dest)
     return True
 
