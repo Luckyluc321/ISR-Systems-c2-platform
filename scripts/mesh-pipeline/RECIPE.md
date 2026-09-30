@@ -41,44 +41,88 @@ one too, before it spends any time filtering.
 | | |
 | --- | --- |
 | Images | **3000 px longest edge**, from `prep_odm.py --max-px 3000` |
-| Count | 67-68 frames over the terminal box |
-| Boundary | **none** |
+| Count | 60-68 frames over the box |
+| Boundary | **keep it** (see below) |
 | Docker memory | **12g** on the run command |
 
 ## Command
 
 ```bash
-python3 fetch.py    --site billund-terminal --out ./work/billund-terminal
-python3 prep_odm.py --work ./work/billund-terminal --max-px 3000
-rm -f ./work/billund-terminal/odm/boundary.geojson
+python3 fetch.py    --site billund-terminal --out ./work/bt-dense
+python3 prep_odm.py --work ./work/bt-dense --max-px 3000
+# prep writes boundary.geojson from the site bbox. KEEP IT.
 
-PARENT=$(cd work/billund-terminal && pwd)
+PARENT=$(cd work/bt-dense && pwd)
 docker run --rm -v "$PARENT":/datasets --memory=12g opendronemap/odm:latest \
   --project-path /datasets odm \
   --feature-quality high \
   --pc-quality medium \
   --use-3dmesh \
-  --mesh-size 300000 \
+  --mesh-size 800000 \
   --mesh-octree-depth 11 \
+  --boundary /datasets/odm/boundary.geojson \
   --skip-orthophoto \
   --skip-report \
   --3d-tiles \
   --texturing-single-material
 ```
 
-Takes about 11 minutes.
+About 11 minutes without the boundary, longer with it and a bigger mesh.
+
+## The boundary is the whole game, and it used to say "none" here
+
+**Triangle density decides whether you get a building or a bump.** The
+budget is spread over whatever ground gets reconstructed, so the
+boundary is not a tidiness setting, it is the only thing pointing the
+compute at the buildings.
+
+Measured, same imagery, same everything else:
+
+| | No boundary | Boundary, mesh-size 800000 |
+| --- | --- | --- |
+| Ground covered | 11.4 km2 | 0.67 km2 |
+| Mesh faces | 594,444 | ~1.6M |
+| Per square metre | 0.05 | ~2.4 |
+| **Triangles on the terminal** | **738** | **~50,000** |
+| Per building, 654 of them | ~8 | hundreds |
+
+738 triangles over a 21,000 m2 roof is one per 29 m2, a five-metre
+grid. That is a lumpy slab wearing a photograph, and eight triangles a
+building is a box with a photo on it, which is the thing this pipeline
+exists to replace.
+
+This file said `Boundary: **none**` for a day. It was not wrong about
+what completed, it was wrong about what the output was for: the box it
+was tuned against was the **runway**, which has no buildings in it, so
+nothing about starving the buildings of triangles could show up. A
+setting validated against ground that had none of the thing you care
+about tells you nothing about that thing.
+
+Ceiling: `--mesh-size 2000000` produced a good mesh (3,989,396 faces)
+and then ran out of memory during texturing, which costs roughly with
+face count. 800000 survives and is ample.
 
 ## What a good result looks like
 
-| | |
-| --- | --- |
-| `odm_textured_model_geo.obj` | ~64 MB |
-| texture PNG | ~120 MB |
-| mesh faces | ~598,000 |
+| | Boundary run | No-boundary run |
+| --- | --- | --- |
+| `odm_textured_model_geo.obj` | ~180 MB | ~64 MB |
+| mesh faces | ~1.6M | ~594,000 |
+| triangles per m2 | ~2.4 | 0.05 |
 
 If the OBJ is under a megabyte, or the mesh reports **0 faces**, it has
 failed. Do not try to interpret the output; the numbers above are the
 check.
+
+And check density, not just completion:
+
+```bash
+python3 clip_to_buildings.py --obj <model> --osm /tmp/osm_buildings.json --out /tmp/b.obj
+```
+
+Kept triangles divided by buildings on the mesh should be in the
+hundreds. Single digits means the boundary is missing or too big, and
+the run completed perfectly while producing nothing worth loading.
 
 ## Known-good copy
 

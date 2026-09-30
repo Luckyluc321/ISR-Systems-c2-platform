@@ -750,6 +750,7 @@ import {
   fetchGeoDanmarkFeatures,
   GeoDanmarkFeatureRenderer,
 } from './sovereign_geodanmark_features.js';
+import { applyBuildingSwap, clearBuildingSwap, footprintsFor, sitesWithFootprints } from './building_footprints.js';
 import { primeDagiCache, receiverIdsForPoint, dagiCacheStats } from './sovereign_geo_routing.js';
 import { runbookFor } from './runbooks.js';
 import { TARGETS as TARGETS_CORE } from './targets.js';
@@ -1066,6 +1067,180 @@ async function main() {
     });
     viewer.scene.primitives.add(osmBuildings);
   } catch (err) { console.warn('OSM Buildings failed:', err); }
+
+  // ── Photorealistic mesh, reconstructed from Danish state imagery ──
+  //
+  // Google Photorealistic 3D covers six Danish cities and Billund is not
+  // one of them, so outside those six the map falls back to extruded OSM
+  // footprints: correct heights, blank white surfaces. This is the real
+  // thing for the sites Google never flew, built from Denmark's own
+  // oblique aerial photography through scripts/mesh-pipeline.
+  //
+  // HORIZONTAL POSITION IS EXACT and needs nothing. The skraafoto API
+  // publishes each image's camera position and orientation, so the
+  // reconstruction is georeferenced by the national mapping agency
+  // rather than by us guessing.
+  //
+  // VERTICAL NEEDS ONE CONSTANT. Danish heights are DVR90, measured
+  // from mean sea level. Cesium works in ellipsoidal height. Over
+  // Denmark those differ by roughly 37 m, and the tileset carries no
+  // correction, so without this the mesh loads about 37 m underground.
+  // The same number applies to every Danish site, so solving it once
+  // solves it for the whole country.
+  //
+  // Tunable at runtime because 37 m is the published approximation and
+  // the right value is whatever puts the runway on the runway.
+  const DK_GEOID_SEPARATION_M = 36.8;
+
+  // Per-site meshes. A site with no entry is unaffected, which is what
+  // keeps this from touching the eight sites that already look right.
+  //
+  // Served from a separate origin rather than the app's public folder:
+  // a tileset is hundreds of megabytes, Vite copies public/ into every
+  // build, and in production these sit on object storage behind a CDN
+  // anyway. scripts/mesh-pipeline/serve_tiles.py serves them locally
+  // with the CORS headers Cesium needs.
+  const _meshHost = (() => {
+    try { return import.meta.env?.VITE_SITE_MESH_URL || 'http://localhost:8778'; }
+    catch (_) { return 'http://localhost:8778'; }
+  })();
+  const SITE_MESHES = { billund: `${_meshHost}/tileset.json` };
+
+  let _siteMesh = null;
+  let _siteMeshId = null;
+
+  async function _loadSiteMesh(siteId, heightOffsetM = DK_GEOID_SEPARATION_M) {
+    if (_siteMeshId === siteId && _siteMesh) return _siteMesh;
+    _unloadSiteMesh();
+    const url = SITE_MESHES[siteId];
+    if (!url) return null;
+    try {
+      const ts = await Cesium.Cesium3DTileset.fromUrl(url, {
+        // The reconstruction is the most accurate thing on screen for
+        // this footprint, so it should not be dropped for a lower level
+        // of detail while the camera is anywhere near it.
+        maximumScreenSpaceError: 8,
+      });
+      _applyMeshHeight(ts, heightOffsetM);
+      _matchPhotorealLighting(ts);
+      viewer.scene.primitives.add(ts);
+      _siteMesh = ts;
+      _siteMeshId = siteId;
+
+      // Cut the reconstruction down to the buildings, and take the
+      // white boxes away in exactly those outlines. One set of
+      // footprints drives both, in opposite directions, so the two
+      // layers cannot disagree at the edges. See building_footprints.js.
+      const swap = applyBuildingSwap({ siteId, meshTileset: ts, boxTileset: osmBuildings });
+      console.log(
+        `[site_mesh] ${siteId} loaded, height offset ${heightOffsetM} m, ` +
+        `${swap.polygons} building outlines clipped ` +
+        `(mesh ${swap.mesh ? 'yes' : 'no'}, boxes ${swap.boxes ? 'yes' : 'no'})`,
+      );
+      return ts;
+    } catch (err) {
+      // A missing mesh must never stop a site loading. Most sites have
+      // none and that is the normal case.
+      console.warn(`[site_mesh] ${siteId} failed to load:`, err?.message || err);
+      return null;
+    }
+  }
+
+  // Light it exactly as Google's photorealistic tileset is lit.
+  //
+  // A photogrammetry texture already contains the sunlight and shadows
+  // of the morning the aircraft flew. Lighting it again multiplies that
+  // on itself, and roofs facing the sun blow out to white while the
+  // rest of the map keeps its own lighting. The two then read as
+  // different scenes stitched together.
+  //
+  // Google's tileset is the same kind of data and the day branch of
+  // applyImageryMode already settled how to treat it: no light colour,
+  // no style tint, image-based lighting at unity. Those exact three
+  // values are mirrored here rather than chosen afresh, so the mesh and
+  // the photoreal that surrounds it are handled identically.
+  //
+  // Deliberately NOT wired into applyImageryMode, which owns the
+  // known-good day configuration and is off limits. Switching imagery
+  // mode therefore does not restyle this tileset, which is a gap worth
+  // knowing about rather than a reason to edit that function.
+  function _matchPhotorealLighting(ts) {
+    ts.lightColor = undefined;
+    ts.style = undefined;
+    if (ts.imageBasedLighting) {
+      ts.imageBasedLighting.imageBasedLightingFactor = new Cesium.Cartesian2(1.0, 1.0);
+    }
+  }
+
+  // Shift the whole tileset vertically, along the ellipsoid normal at
+  // its own centre rather than along world Z, which would tilt it away
+  // from vertical everywhere except the equator.
+  function _applyMeshHeight(ts, metres) {
+    const c = Cesium.Cartographic.fromCartesian(ts.boundingSphere.center);
+    const ground = Cesium.Cartesian3.fromRadians(c.longitude, c.latitude, 0.0);
+    const raised = Cesium.Cartesian3.fromRadians(c.longitude, c.latitude, metres);
+    const delta = Cesium.Cartesian3.subtract(raised, ground, new Cesium.Cartesian3());
+    ts.modelMatrix = Cesium.Matrix4.fromTranslation(delta);
+  }
+
+  function _unloadSiteMesh() {
+    if (_siteMesh) {
+      try { viewer.scene.primitives.remove(_siteMesh); } catch (_) {}
+      _siteMesh = null;
+      _siteMeshId = null;
+    }
+    // Always, even when no mesh was loaded. The clipping lives on the
+    // OSM tileset, which outlives any one site, so leaving it set cuts
+    // holes in the boxes somewhere the mesh no longer draws and reads
+    // as buildings gone missing for no reason.
+    clearBuildingSwap({ boxTileset: osmBuildings });
+  }
+
+  // Console handle for tuning the height against the real terrain, and
+  // for turning the mesh off to compare against the extruded boxes.
+  window.__isr_siteMesh = {
+    load: (siteId = 'billund', h) => _loadSiteMesh(siteId, h ?? DK_GEOID_SEPARATION_M),
+    unload: _unloadSiteMesh,
+    height: (m) => {
+      if (!_siteMesh) return 'no mesh loaded';
+      _applyMeshHeight(_siteMesh, m);
+      return `height offset ${m} m`;
+    },
+    show: (on = true) => { if (_siteMesh) _siteMesh.show = on; return `mesh ${on ? 'shown' : 'hidden'}`; },
+    sites: () => Object.keys(SITE_MESHES),
+
+    // Turn the footprint clipping off to see the raw reconstruction,
+    // which is how you tell "the mesh is wrong" from "the mesh is
+    // right and the outlines are cutting it in the wrong place".
+    clip: (on = true) => {
+      if (!_siteMesh) return 'no mesh loaded';
+      if (on) {
+        const r = applyBuildingSwap({
+          siteId: _siteMeshId, meshTileset: _siteMesh, boxTileset: osmBuildings,
+        });
+        return `clipped to ${r.polygons} outlines`;
+      }
+      clearBuildingSwap({ meshTileset: _siteMesh, boxTileset: osmBuildings });
+      return 'clipping off, raw reconstruction and white boxes both drawing';
+    },
+    footprints: (siteId = _siteMeshId || 'billund') => {
+      const f = footprintsFor(siteId);
+      return { siteId, count: f.length, named: f.filter((b) => b.name).map((b) => b.name) };
+    },
+    footprintSites: () => sitesWithFootprints(),
+  };
+
+  // NOT loaded on startup.
+  //
+  // A photogrammetry mesh is a reconstruction of the whole SURFACE:
+  // fields, runway, taxiways, car parks, trees, everything the cameras
+  // saw. Laying that over the map replaces terrain and imagery that are
+  // already correct, and the only thing it was wanted for is the
+  // buildings.
+  //
+  // So it stays off until the mesh is cut to building footprints. Load
+  // it by hand with __isr_siteMesh.load() to inspect the raw
+  // reconstruction; nothing calls it automatically.
 
   // ── Live dial for the extruded-building look ──────────────────────
   // A console handle, nothing more. Added because the right value here

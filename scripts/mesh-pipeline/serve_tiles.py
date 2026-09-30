@@ -13,14 +13,37 @@ another. Python's stock http.server sends no CORS headers and Cesium
 fails with an opaque network error rather than anything that points
 here.
 
-    python3 serve_tiles.py            # port 8778
+    python3 serve_tiles.py                         # newest tileset, port 8778
     python3 serve_tiles.py 9000
+    python3 serve_tiles.py 8778 work/bt-dense      # a specific project
 """
 import http.server, socketserver, sys
 from pathlib import Path
 
-ROOT = Path(__file__).parent / "work" / "billund-terminal" / "odm" / "3d_tiles" / "model"
+HERE = Path(__file__).parent
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8778
+
+# Which tileset, resolved rather than hardcoded.
+#
+# This used to name one project directory. Every new reconstruction goes
+# to a new directory, on purpose, because the rule that cost a working
+# day is never to overwrite the only good output with an attempt at a
+# better one. A fixed path means the server quietly keeps serving the
+# previous run while the C2 is being judged on the new one.
+if len(sys.argv) > 2:
+    base = Path(sys.argv[2])
+    ROOT = base if (base / "tileset.json").exists() else base / "odm" / "3d_tiles" / "model"
+else:
+    found = sorted(HERE.glob("work/*/odm/3d_tiles/model/tileset.json"),
+                   key=lambda p: p.stat().st_mtime, reverse=True)
+    if not found:
+        sys.exit("No tileset under work/. Run the pipeline first (see RECIPE.md).")
+    ROOT = found[0].parent
+    if len(found) > 1:
+        print(f"{len(found)} tilesets found, serving the newest:")
+        for p in found:
+            mark = "->" if p.parent == ROOT else "  "
+            print(f"  {mark} {p.relative_to(HERE)}")
 
 
 class Handler(http.server.SimpleHTTPRequestHandler):
