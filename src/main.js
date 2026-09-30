@@ -1078,14 +1078,20 @@ async function main() {
   // it has been cleared. That is the correct trade for an experiment:
   // the known-good day path stays byte-identical and the experiment
   // pays the cost of living beside it.
+  // ON BY DEFAULT ON THIS BRANCH. The first attempt gated it behind
+  // ?facades=1 and the flag was simply not on the URL, so the branch
+  // looked identical to main and the experiment proved nothing. An
+  // experiment branch should show the experiment. Use ?facades=0 to
+  // compare against the shipped look in the same build.
   const _facadesFlag = (() => {
-    try { return new URLSearchParams(location.search).get('facades') === '1'; } catch (_) { return false; }
+    try { return new URLSearchParams(location.search).get('facades') !== '0'; } catch (_) { return true; }
   })();
   if (_facadesFlag) {
     setTimeout(() => {
       try {
-        window.__isr_buildings?.facades(true);
-        console.log('[facades] EXPERIMENT active. Remove ?facades=1 for the shipped look.');
+        const r = window.__isr_buildings?.facades(true);
+        console.log('%c[facades] EXPERIMENT ACTIVE', 'background:#0a3;color:#fff;padding:2px 6px', r,
+          '— add ?facades=0 to the URL for the shipped look');
       } catch (_) {}
     }, 1200);
     setInterval(() => {
