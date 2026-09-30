@@ -39,6 +39,52 @@ except ImportError:
 Image.MAX_IMAGE_PIXELS = None
 
 
+def _write_jpeg(tif: Path, dst: Path, max_px: int, quality: int) -> None:
+    """Downscale one source image, reading from an overview level.
+
+    These are Cloud Optimized GeoTIFFs carrying a pyramid: full
+    resolution plus successively halved copies. Two reasons to read a
+    pyramid level rather than the base image.
+
+    It is much faster. The base image is up to 20544 x 14016, about 288
+    megapixels, and the target here is a few thousand pixels. Decoding
+    the full frame to throw away 98 per cent of it is wasted work.
+
+    And on this dataset the base image frequently does not decode at
+    all. Both Pillow and ImageMagick fail on it with "Not a JPEG file:
+    starts with 0x00 0x00" on files that are complete and the right
+    size, while every pyramid level in the same file decodes cleanly. So
+    the overview is not a fallback here, it is the reliable path.
+
+    Picks the smallest level still at or above the target, so quality is
+    preserved without decoding more than necessary.
+    """
+    with Image.open(tif) as im:
+        levels = []
+        for page in range(getattr(im, "n_frames", 1)):
+            try:
+                im.seek(page)
+                levels.append((page, max(im.size)))
+            except Exception:
+                break
+
+        usable = [(pg, w) for pg, w in levels if w >= max_px] or levels
+        page = min(usable, key=lambda t: t[1])[0] if usable else 0
+
+        last_err = None
+        # Walk downward if the chosen level is one of the broken ones.
+        for pg in [page] + [p for p, _ in sorted(levels, key=lambda t: -t[1]) if p != page]:
+            try:
+                im.seek(pg)
+                out = im.convert("RGB")
+                out.thumbnail((max_px, max_px), Image.LANCZOS)
+                out.save(dst, "JPEG", quality=quality)
+                return
+            except Exception as e:
+                last_err = e
+        raise OSError(f"no decodable pyramid level ({last_err})")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--work", required=True, help="directory holding images/ and poses.json")
@@ -80,11 +126,12 @@ def main() -> None:
 
         dst = img_out / f"{stem}.jpg"
         if not dst.exists():
-            with Image.open(tif) as im:
-                im.draft("RGB", (a.max_px, a.max_px))   # fast JPEG-native downscale
-                im = im.convert("RGB")
-                im.thumbnail((a.max_px, a.max_px), Image.LANCZOS)
-                im.save(dst, "JPEG", quality=a.quality)
+            try:
+                _write_jpeg(tif, dst, a.max_px, a.quality)
+            except Exception as e:
+                print(f"  skip {stem}: {e}")
+                skipped += 1
+                continue
         x, y, z = pose["perspective_center"]
         geo_lines.append(
             f"{dst.name} {x:.3f} {y:.3f} {z:.3f} "

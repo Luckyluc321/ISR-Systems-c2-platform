@@ -1,0 +1,178 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Skråfoto mesh preview</title>
+<!--
+  Standalone viewer for whatever the pipeline produces.
+
+  Deliberately not part of the C2 app. A first reconstruction needs to
+  be judged on its own before anything is wired into a map that has a
+  customer demonstration against it, and a broken mesh should not be
+  able to take that app down.
+
+  Serve this directory and open the page:
+      python3 -m http.server 8777
+      http://localhost:8777/preview.html
+
+  It looks for the usual ODM outputs by itself, so there is nothing to
+  configure, and falls back to a file picker if none are found.
+-->
+<style>
+  :root { color-scheme: dark; }
+  body { margin: 0; background: #0b0f14; color: #c9d4de;
+         font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  #c { position: fixed; inset: 0; }
+  #hud { position: fixed; left: 12px; top: 12px; z-index: 2;
+         background: rgba(10,14,20,.88); border: 1px solid rgba(120,180,220,.25);
+         border-radius: 4px; padding: 10px 12px; max-width: 380px; }
+  #hud h1 { font-size: 12px; letter-spacing: .14em; text-transform: uppercase;
+            margin: 0 0 6px; color: #7fd4ff; font-weight: 600; }
+  #stat { white-space: pre-wrap; }
+  .warn { color: #ffb86b; }
+  .bad  { color: #ff7a7a; }
+  .ok   { color: #8fe38f; }
+  button, input[type=file] { font: inherit; color: inherit; background: rgba(255,255,255,.06);
+           border: 1px solid rgba(255,255,255,.18); border-radius: 3px;
+           padding: 4px 8px; cursor: pointer; margin-top: 8px; }
+  #tips { position: fixed; right: 12px; bottom: 12px; z-index: 2; opacity: .55;
+          text-align: right; }
+</style>
+<div id="c"></div>
+<div id="hud">
+  <h1>Skråfoto mesh preview</h1>
+  <div id="stat">looking for a model…</div>
+  <input type="file" id="pick" accept=".glb,.gltf,.obj" hidden>
+  <button id="btn">open a file…</button>
+  <button id="wire">wireframe</button>
+</div>
+<div id="tips">drag orbit · scroll zoom · right-drag pan</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/examples/js/loaders/OBJLoader.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/examples/js/loaders/MTLLoader.js"></script>
+<script>
+const statEl = document.getElementById('stat');
+const say = (msg, cls) => { statEl.innerHTML = cls ? `<span class="${cls}">${msg}</span>` : msg; };
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.getElementById('c').appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0f14);
+const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 1e6);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+
+// Flat, even lighting. A first reconstruction is being judged on
+// geometry and texture, and dramatic lighting hides both.
+scene.add(new THREE.HemisphereLight(0xffffff, 0x404050, 2.0));
+const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+sun.position.set(1, 2, 1);
+scene.add(sun);
+
+let current = null, wireframe = false;
+
+function frame(obj) {
+  if (current) scene.remove(current);
+  current = obj;
+  scene.add(obj);
+
+  // ODM emits georeferenced coordinates, so vertices can sit at UTM
+  // values in the millions. Recentre or nothing is visible and depth
+  // precision collapses.
+  const box = new THREE.Box3().setFromObject(obj);
+  const size = box.getSize(new THREE.Vector3());
+  const mid = box.getCenter(new THREE.Vector3());
+  obj.position.sub(mid);
+
+  const extent = Math.max(size.x, size.y, size.z) || 1;
+  camera.position.set(extent * 0.8, extent * 0.6, extent * 0.8);
+  camera.near = extent / 1000;
+  camera.far = extent * 50;
+  camera.updateProjectionMatrix();
+  controls.target.set(0, 0, 0);
+  controls.update();
+
+  let tris = 0, textured = 0, meshes = 0;
+  obj.traverse(n => {
+    if (!n.isMesh) return;
+    meshes++;
+    const g = n.geometry;
+    tris += (g.index ? g.index.count : g.attributes.position.count) / 3;
+    const m = Array.isArray(n.material) ? n.material : [n.material];
+    if (m.some(x => x && x.map)) textured++;
+  });
+
+  const lines = [
+    `<span class="ok">loaded</span>`,
+    `meshes    ${meshes}`,
+    `triangles ${Math.round(tris).toLocaleString()}`,
+    `textured  ${textured}/${meshes}`,
+    `extent    ${size.x.toFixed(1)} x ${size.y.toFixed(1)} x ${size.z.toFixed(1)}`,
+  ];
+  // The two failure modes worth calling out rather than leaving the
+  // viewer to squint at.
+  if (!textured) lines.push(`<span class="warn">no texture — geometry only</span>`);
+  if (tris < 5000) lines.push(`<span class="bad">very few triangles — reconstruction likely failed</span>`);
+  statEl.innerHTML = lines.join('\n');
+}
+
+function loadGLB(url) {
+  new THREE.GLTFLoader().load(url, g => frame(g.scene),
+    undefined, () => tryNext());
+}
+function loadOBJ(url) {
+  new THREE.OBJLoader().load(url, o => frame(o), undefined, () => tryNext());
+}
+
+// Where ODM leaves things, most-useful first.
+const CANDIDATES = [
+  ['work/billund-terminal/odm/odm_texturing/odm_textured_model_geo.glb', loadGLB],
+  ['work/billund-terminal/odm/odm_texturing/odm_textured_model_geo.obj', loadOBJ],
+  ['work/billund-terminal/odm/odm_texturing/odm_textured_model.obj', loadOBJ],
+  ['work/billund-terminal/odm/odm_meshing/odm_mesh.ply', null],
+];
+let idx = 0;
+function tryNext() {
+  if (idx >= CANDIDATES.length) {
+    say('No model found yet.\nRun the pipeline, or open a file manually.', 'warn');
+    return;
+  }
+  const [url, fn] = CANDIDATES[idx++];
+  if (!fn) return tryNext();
+  say(`trying ${url.split('/').pop()}…`);
+  fn(url);
+}
+tryNext();
+
+document.getElementById('btn').onclick = () => document.getElementById('pick').click();
+document.getElementById('pick').onchange = e => {
+  const f = e.target.files[0];
+  if (!f) return;
+  const url = URL.createObjectURL(f);
+  say(`loading ${f.name}…`);
+  (/\.obj$/i.test(f.name) ? loadOBJ : loadGLB)(url);
+};
+document.getElementById('wire').onclick = () => {
+  wireframe = !wireframe;
+  current?.traverse(n => {
+    if (!n.isMesh) return;
+    (Array.isArray(n.material) ? n.material : [n.material])
+      .forEach(m => { if (m) m.wireframe = wireframe; });
+  });
+};
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+(function loop() {
+  requestAnimationFrame(loop);
+  controls.update();
+  renderer.render(scene, camera);
+})();
+</script>
