@@ -164,6 +164,9 @@ def main():
                     help="metres above local ground a triangle must sit to be kept")
     ap.add_argument("--pad", type=float, default=1.5,
                     help="metres to grow each footprint, to keep eaves and wall thickness")
+    ap.add_argument("--min-faces", type=int, default=40,
+                    help="drop connected pieces smaller than this; they are "
+                         "reconstruction specks, not buildings")
     ap.add_argument("--offset", help="path to odm_georeferencing_model_geo.txt")
     a = ap.parse_args()
 
@@ -272,6 +275,7 @@ def main():
 
     # Pass 2: keep faces whose centroid is in a footprint and high enough.
     kept, dropped_out, dropped_low = [], 0, 0
+    kept_ids = []          # vertex indices per kept face, for the island pass
     other = []
     with open(a.obj) as f:
         for line in f:
@@ -317,6 +321,7 @@ def main():
                     continue
 
                 kept.append(line)
+                kept_ids.append(ids)
             elif not line.startswith(("v ", "vt ", "f ")):
                 other.append(line)
 
@@ -354,6 +359,81 @@ def main():
                f"widen the pad:\n      --pad 5   (now {a.pad})\n\n"
                "  Open the mesh in preview.html and look. That settles it in "
                "seconds\n  and neither number will.\n"))
+
+    # ── Pass 3: throw away islands ──────────────────────────────────
+    #
+    # Everything above decides one triangle at a time, and a triangle
+    # has no way of knowing it is part of a building rather than a
+    # fragment of noise sitting over a car park. Two things get through:
+    #
+    #   Specks. Photogrammetry leaves small blobs of geometry in open
+    #   air. 44 of them survived at Billund, averaging four triangles
+    #   each. On screen they are stones scattered over nothing.
+    #
+    #   Whole islands living in the --pad ring. Padding exists so that a
+    #   wall leaning out past the roof outline is kept, and that is right
+    #   when the wall belongs to the building. It is wrong when a patch
+    #   of ground just outside a footprint is kept purely because it fell
+    #   within the pad. One such patch at Billund was 17 x 65 m of tarmac
+    #   at ground level, outside every outline.
+    #
+    # Both are answered by looking at a connected surface rather than a
+    # triangle. A building is one connected thing whose body is inside
+    # its outline; a speck is too small to be a building, and an island
+    # whose own centre is outside every footprint is not a wall of
+    # anything.
+    #
+    # Deliberately NOT a height test. The obvious rule, drop whatever
+    # does not reach down near the ground, is wrong here: the height
+    # filter already removed the bottom two metres of every building, so
+    # the terminal's own kept geometry starts about nine metres up and a
+    # base-height rule would delete the building it is meant to protect.
+    parent = list(range(len(verts)))
+
+    def _find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    for ids in kept_ids:
+        r0 = _find(ids[0])
+        for i in ids[1:]:
+            ri = _find(i)
+            if ri != r0:
+                parent[ri] = r0
+
+    members = {}
+    for n, ids in enumerate(kept_ids):
+        members.setdefault(_find(ids[0]), []).append(n)
+
+    drop = set()
+    dropped_small = dropped_island = 0
+    for face_ns in members.values():
+        if len(face_ns) < a.min_faces:
+            drop.update(face_ns)
+            dropped_small += len(face_ns)
+            continue
+        # The island's own centre, tested strictly: no pad. A real
+        # building's centre is well inside its outline, so this only
+        # bites on something that exists because of the pad.
+        pts = [verts[i] for n in face_ns for i in kept_ids[n]]
+        cx = sum(p[0] for p in pts) / len(pts) + off_x
+        cy = sum(p[1] for p in pts) / len(pts) + off_y
+        hits = idx.get((int(cx // cell), int(cy // cell)), ())
+        if not any(inside(cx, cy, polys[i]["ring"]) for i in hits):
+            drop.update(face_ns)
+            dropped_island += len(face_ns)
+
+    if drop:
+        kept = [l for n, l in enumerate(kept) if n not in drop]
+        kept_ids = [ids for n, ids in enumerate(kept_ids) if n not in drop]
+    print(f"  islands: dropped {dropped_small:,} faces in specks under "
+          f"{a.min_faces} faces, {dropped_island:,} faces in patches whose "
+          f"centre is outside every footprint")
+    if not kept:
+        sys.exit("Island filtering removed everything. --min-faces is probably "
+                 "too high for this mesh's density.")
 
     # Keep only the vertices and texture coordinates the surviving faces
     # actually reference, and renumber them.
