@@ -28,23 +28,23 @@ flowchart TD
   end
 
   subgraph cut["3. Keep only buildings"]
-    C["clip_to_buildings.py<br/>cuts the geometry"]
-    E["export_footprints.py<br/>outlines the C2 clips with"]
+    C["clip_to_buildings.py<br/>cuts the geometry,<br/>ground never leaves here"]
+    T["Obj2Tiles<br/>buildings-only 3D Tiles<br/>7.6 MB, not 96 MB"]
+    E["export_footprints.py<br/>outlines for hiding boxes"]
   end
 
   subgraph c2["4. Swap them in the map"]
-    M["Cesium3DTileset<br/>the reconstruction"]
+    M["Cesium3DTileset<br/>buildings only, drawn as-is"]
     B["Cesium OSM Buildings<br/>the white boxes"]
     S["building_footprints.js<br/>applyBuildingSwap"]
   end
 
   OSM --> PB --> F --> P --> O
-  O --> C
+  O --> C --> T --> M
   O --> E
   OSM --> E
   OSM --> C
   E --> S
-  S -->|"inverse: true<br/>keep inside"| M
   S -->|"inverse: false<br/>remove inside"| B
 ```
 
@@ -85,13 +85,17 @@ standing on it. Both exist because a box was once typed from memory,
 landed on Billund's runway, and reconstructed half a square kilometre
 of tarmac that contained nothing to clip to.
 
-## Two ways to cut, and both are used
+## The mesh is cut in the geometry, not on the screen
 
-**Geometry**, in `clip_to_buildings.py`. Keeps triangles whose centroid
-sits inside a padded footprint and at least 2 m above local ground. The
-height test matters because a footprint alone also captures the tarmac
-inside a building outline wherever the roof failed to reconstruct,
-which would hoist a patch of ground to roof level.
+`clip_to_buildings.py` keeps triangles whose centroid sits inside a
+padded footprint and at least 2 m above local ground, then
+`export_footprints.py` exports the outlines and ODM's `Obj2Tiles` turns
+the result into 3D Tiles. **What reaches the browser contains buildings
+and nothing else.** No runway, no tarmac, no field, no tree.
+
+The height test matters because a footprint alone also captures the
+tarmac inside a building outline wherever the roof failed to
+reconstruct, which would hoist a patch of ground to roof level.
 
 Padding is a true dilation by distance to the nearest edge, not a grown
 bounding box. An OSM footprint is the roof outline seen from above
@@ -99,22 +103,35 @@ while a reconstructed wall leans outward from it, so without real
 padding the wall triangles are shaved off and roofs float with nothing
 under them.
 
-**Render time**, in `building_footprints.js`, via Cesium's
-`ClippingPolygonCollection`. One outline set, used twice in opposite
-directions:
+Render-time clipping of the full reconstruction was tried first, using
+`ClippingPolygonCollection` with `inverse: true` to keep only what
+stood inside a footprint. It was appealing because both layers would be
+cut against the same outline and it needed no extra tooling. It was the
+wrong call:
 
-| Layer | `inverse` | Effect |
-| --- | --- | --- |
-| Reconstruction | `true` | keep only what is inside a footprint |
-| OSM white boxes | `false` | remove what is inside a footprint |
+- It ships a mesh **full of ground** and relies on a shader to hide it,
+  so when the clipping misbehaves the fallback is the worst possible
+  output. It did misbehave, and put a lit square of tarmac and car park
+  across the map.
+- Clipping hides geometry, it does not stop it downloading. 96 MB over
+  the wire to display 7.6 MB of buildings.
 
-That symmetry is why clipping, rather than some other rule for hiding
-boxes. Both layers are cut against the same polygon, so they cannot
-disagree at the edges.
+Cutting the geometry removes that failure mode instead of guarding
+against it. A file with no ground in it cannot draw ground.
 
-Render-time clipping hides geometry, it does not stop it downloading.
-Fine for one site, wrong for a country, so cutting the geometry stays
-the answer when tiling a city.
+`SITE_MESHES[site].buildingsOnly` records that a mesh is already cut,
+and the loader then skips clipping it.
+
+## Clipping still hides the boxes
+
+The one remaining use of `ClippingPolygonCollection` is the white
+boxes, with `inverse: false`, so they are removed exactly where the
+reconstruction replaces them.
+
+That direction is safe in a way the other was not: clipping can only
+**remove** box geometry, never reveal something that should not be
+there. The worst failure is a white box that stays visible, which is
+the map as it was.
 
 ## Vertical datum
 
@@ -144,15 +161,25 @@ model, registers a `live` source and nothing else changes.
 ## Console
 
 ```js
-__isr_siteMesh.load('billund')   // load the reconstruction
-__isr_siteMesh.height(36.8)      // tune the geoid offset live
-__isr_siteMesh.clip(false)       // raw reconstruction, boxes back
-__isr_siteMesh.footprints()      // what is being clipped against
-__isr_buildings.hide()           // white boxes off entirely
+await __isr_siteMesh.load('billund')   // load the reconstruction
+await __isr_siteMesh.goto()            // put the camera on it
+await __isr_siteMesh.debug()           // position, tiles drawn, clip state
+await __isr_siteMesh.height(36.8)      // tune the geoid offset live
+await __isr_siteMesh.clip(false)       // white boxes back, to compare
+__isr_buildings.hide()                 // white boxes off entirely
 ```
 
-`clip(false)` is the diagnostic that separates "the mesh is wrong" from
-"the mesh is right and the outlines are cutting it in the wrong place".
+Every handle awaits a load in flight. They did not, and three commands
+pasted together all answered "no mesh loaded" about a mesh that was a
+second from existing, which reads exactly like a mesh that failed.
+
+`debug()` reports `metresAboveTerrain` and `tiles.selected`, which
+separate the ways this looks identical on screen: the mesh never
+rendered, it rendered somewhere else, or it rendered and something cut
+it away.
+
+On a `buildingsOnly` mesh, `clip(false)` only brings the white boxes
+back. It cannot reveal ground, because there is none in the file.
 
 ## Not loaded on startup
 

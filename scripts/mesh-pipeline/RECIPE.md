@@ -124,6 +124,51 @@ Kept triangles divided by buildings on the mesh should be in the
 hundreds. Single digits means the boundary is missing or too big, and
 the run completed perfectly while producing nothing worth loading.
 
+## Step 4: tile the BUILDINGS, not the reconstruction
+
+ODM's own `3d_tiles/` output is the whole reconstruction, ground
+included. The C2 must never be given that. Tile the clipped mesh
+instead, with the same tool ODM uses, which ships inside the image it
+already runs:
+
+```bash
+# the lat/lon come from ODM's own Obj2Tiles line in its log
+grep Obj2Tiles work/bt-dense/odm-dense-terminal.log | head -1
+
+PARENT=$(cd work/bt-dense && pwd)
+docker run --rm --entrypoint /code/SuperBuild/install/bin/Obj2Tiles \
+  -v "$PARENT":/datasets opendronemap/odm:latest \
+  /datasets/odm/odm_texturing/buildings_only.obj \
+  /datasets/odm/3d_tiles_buildings \
+  --divisions 4 --lat <lat> --lon <lon> --alt 0.0
+
+python3 export_footprints.py --osm /tmp/osm_buildings.json --site <site> \
+  --obj work/bt-dense/odm/odm_texturing/odm_textured_model_geo.obj \
+  --out ../../src/data/building_footprints.json
+
+python3 serve_tiles.py 8778 work/bt-dense/odm/3d_tiles_buildings
+```
+
+Takes about six seconds.
+
+**Why not clip at render time.** Cesium can clip a tileset to polygons,
+and doing that to the full reconstruction looked attractive: no extra
+tooling, and both layers cut against the same outline. It was wrong
+twice over. It ships a mesh full of ground and trusts a shader to hide
+it, so the failure mode is a lit square of tarmac and car park laid
+across the map, which is exactly what happened. And clipping hides
+geometry without stopping the download: 96 MB over the wire to show
+7.6 MB of buildings.
+
+A file with no ground in it cannot draw ground. Mark the site
+`buildingsOnly: true` in `SITE_MESHES` so the loader skips clipping it.
+
+| | Full reconstruction | Buildings only |
+| --- | --- | --- |
+| Tileset | 96 MB | 7.6 MB |
+| Vertical extent | ±59 m | ±12.5 m |
+| Contains ground | yes | no |
+
 ## Known-good copy
 
 `work/_KNOWN_GOOD/` holds a working textured model, mesh and 3D Tiles,

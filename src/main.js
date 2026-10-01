@@ -1104,16 +1104,51 @@ async function main() {
     try { return import.meta.env?.VITE_SITE_MESH_URL || 'http://localhost:8778'; }
     catch (_) { return 'http://localhost:8778'; }
   })();
-  const SITE_MESHES = { billund: `${_meshHost}/tileset.json` };
+  // `buildingsOnly` means the geometry was already cut to building
+  // footprints by scripts/mesh-pipeline/clip_to_buildings.py, so there
+  // is no runway, tarmac, field or tree in the file to hide.
+  //
+  // That is the difference between a mesh that MIGHT show terrain if
+  // the clipping misbehaves and one that CANNOT. Render-time clipping
+  // of a full reconstruction was tried first and, when it went wrong,
+  // laid a lit square of tarmac and car park over the map. Cutting the
+  // geometry removes the failure mode rather than guarding against it,
+  // and takes the tileset from 96 MB to 7.6 MB on the way.
+  const SITE_MESHES = {
+    billund: { url: `${_meshHost}/tileset.json`, buildingsOnly: true },
+  };
 
   let _siteMesh = null;
   let _siteMeshId = null;
 
-  async function _loadSiteMesh(siteId, heightOffsetM = DK_GEOID_SEPARATION_M) {
+  // The load in flight, if any.
+  //
+  // Tracked because every console handle below reports on _siteMesh,
+  // and a tileset takes a moment to arrive. Three commands pasted
+  // together run in the same tick, so goto/clip/debug all answered
+  // "no mesh loaded" about a mesh that was seconds away from existing,
+  // which reads exactly like a mesh that failed. Awaiting this makes
+  // them answer about the mesh rather than about the timing.
+  let _siteMeshLoading = null;
+
+  function _loadSiteMesh(siteId, heightOffsetM = DK_GEOID_SEPARATION_M) {
+    _siteMeshLoading = _loadSiteMeshNow(siteId, heightOffsetM)
+      .finally(() => { _siteMeshLoading = null; });
+    return _siteMeshLoading;
+  }
+
+  /** Whatever load is in flight, so a caller can report on the result. */
+  async function _settledSiteMesh() {
+    if (_siteMeshLoading) { try { await _siteMeshLoading; } catch (_) {} }
+    return _siteMesh;
+  }
+
+  async function _loadSiteMeshNow(siteId, heightOffsetM = DK_GEOID_SEPARATION_M) {
     if (_siteMeshId === siteId && _siteMesh) return _siteMesh;
     _unloadSiteMesh();
-    const url = SITE_MESHES[siteId];
-    if (!url) return null;
+    const entry = SITE_MESHES[siteId];
+    if (!entry) return null;
+    const { url, buildingsOnly } = entry;
     try {
       const ts = await Cesium.Cesium3DTileset.fromUrl(url, {
         // The reconstruction is the most accurate thing on screen for
@@ -1127,15 +1162,19 @@ async function main() {
       _siteMesh = ts;
       _siteMeshId = siteId;
 
-      // Cut the reconstruction down to the buildings, and take the
-      // white boxes away in exactly those outlines. One set of
-      // footprints drives both, in opposite directions, so the two
-      // layers cannot disagree at the edges. See building_footprints.js.
-      const swap = applyBuildingSwap({ siteId, meshTileset: ts, boxTileset: osmBuildings });
+      // Take the white boxes away where the reconstruction replaces
+      // them. The mesh itself is only clipped when it still contains
+      // ground; a buildings-only mesh has nothing to cut away, and
+      // clipping it is the step that once removed all of it.
+      const swap = applyBuildingSwap({
+        siteId,
+        meshTileset: buildingsOnly ? null : ts,
+        boxTileset: osmBuildings,
+      });
       console.log(
         `[site_mesh] ${siteId} loaded, height offset ${heightOffsetM} m, ` +
-        `${swap.polygons} building outlines clipped ` +
-        `(mesh ${swap.mesh ? 'yes' : 'no'}, boxes ${swap.boxes ? 'yes' : 'no'})`,
+        `${swap.polygons} outlines: boxes hidden ${swap.boxes ? 'yes' : 'no'}, ` +
+        `mesh ${buildingsOnly ? 'pre-cut to buildings' : (swap.mesh ? 'clipped' : 'not clipped')}`,
       );
       return ts;
     } catch (err) {
@@ -1201,33 +1240,107 @@ async function main() {
   window.__isr_siteMesh = {
     load: (siteId = 'billund', h) => _loadSiteMesh(siteId, h ?? DK_GEOID_SEPARATION_M),
     unload: _unloadSiteMesh,
-    height: (m) => {
-      if (!_siteMesh) return 'no mesh loaded';
-      _applyMeshHeight(_siteMesh, m);
+    // Every one of these waits for a load in flight, so pasting several
+    // commands at once reports on the mesh instead of on the clock.
+    async height(m) {
+      const ts = await _settledSiteMesh();
+      if (!ts) return 'no mesh loaded';
+      _applyMeshHeight(ts, m);
       return `height offset ${m} m`;
     },
-    show: (on = true) => { if (_siteMesh) _siteMesh.show = on; return `mesh ${on ? 'shown' : 'hidden'}`; },
+    async show(on = true) {
+      const ts = await _settledSiteMesh();
+      if (!ts) return 'no mesh loaded';
+      ts.show = on;
+      return `mesh ${on ? 'shown' : 'hidden'}`;
+    },
     sites: () => Object.keys(SITE_MESHES),
 
     // Turn the footprint clipping off to see the raw reconstruction,
     // which is how you tell "the mesh is wrong" from "the mesh is
     // right and the outlines are cutting it in the wrong place".
-    clip: (on = true) => {
-      if (!_siteMesh) return 'no mesh loaded';
+    async clip(on = true) {
+      const ts = await _settledSiteMesh();
+      if (!ts) return 'no mesh loaded';
+      const pre = SITE_MESHES[_siteMeshId]?.buildingsOnly;
       if (on) {
         const r = applyBuildingSwap({
-          siteId: _siteMeshId, meshTileset: _siteMesh, boxTileset: osmBuildings,
+          siteId: _siteMeshId,
+          meshTileset: pre ? null : ts,
+          boxTileset: osmBuildings,
         });
-        return `clipped to ${r.polygons} outlines`;
+        return `${r.polygons} outlines: boxes hidden` + (pre ? ', mesh already buildings-only' : ', mesh clipped');
       }
-      clearBuildingSwap({ meshTileset: _siteMesh, boxTileset: osmBuildings });
-      return 'clipping off, raw reconstruction and white boxes both drawing';
+      clearBuildingSwap({ meshTileset: ts, boxTileset: osmBuildings });
+      // Says what to expect, because on a buildings-only mesh turning
+      // this off brings the white boxes back and changes nothing else.
+      return pre
+        ? 'white boxes back on, mesh unchanged (it holds no ground to clip)'
+        : 'clipping off, raw reconstruction and white boxes both drawing';
     },
     footprints: (siteId = _siteMeshId || 'billund') => {
       const f = footprintsFor(siteId);
       return { siteId, count: f.length, named: f.filter((b) => b.name).map((b) => b.name) };
     },
     footprintSites: () => sitesWithFootprints(),
+
+    // Everything needed to tell apart the ways this can look like
+    // nothing happened: the mesh never rendered, the mesh rendered
+    // somewhere else, or the mesh rendered and the outlines cut all of
+    // it away. Those have different fixes and look identical on screen.
+    async debug() {
+      const ts = await _settledSiteMesh();
+      if (!ts) return 'no mesh loaded';
+      const out = { site: _siteMeshId, show: ts.show, ready: !!ts.ready };
+      try {
+        const c = Cesium.Cartographic.fromCartesian(ts.boundingSphere.center);
+        out.meshCentre = {
+          lon: +Cesium.Math.toDegrees(c.longitude).toFixed(5),
+          lat: +Cesium.Math.toDegrees(c.latitude).toFixed(5),
+          height: +c.height.toFixed(1),
+        };
+        out.radius = +ts.boundingSphere.radius.toFixed(0);
+        const terrain = viewer.scene.globe.getHeight(c);
+        out.terrainHeightHere = terrain == null ? null : +terrain.toFixed(1);
+        // The number that matters: a mesh sitting far below the ground
+        // it belongs on is invisible for a reason that has nothing to
+        // do with clipping.
+        out.metresAboveTerrain = terrain == null ? null : +(c.height - terrain).toFixed(1);
+      } catch (err) { out.boundingSphereError = err?.message || String(err); }
+      const s = ts.statistics || {};
+      out.tiles = {
+        total: s.numberOfTilesTotal,
+        loaded: s.numberOfTilesWithContentReady,
+        selected: s.numberOfTilesSelected,
+        visited: s.visited,
+      };
+      out.meshClip = ts.clippingPolygons
+        ? { polygons: ts.clippingPolygons.length, inverse: ts.clippingPolygons.inverse,
+            enabled: ts.clippingPolygons.enabled }
+        : 'none';
+      out.boxClip = osmBuildings?.clippingPolygons
+        ? { polygons: osmBuildings.clippingPolygons.length,
+            inverse: osmBuildings.clippingPolygons.inverse,
+            enabled: osmBuildings.clippingPolygons.enabled }
+        : 'none';
+      out.boxesShown = osmBuildings ? osmBuildings.show : 'no tileset';
+      const cam = Cesium.Cartographic.fromCartesian(viewer.camera.positionWC);
+      out.camera = {
+        lon: +Cesium.Math.toDegrees(cam.longitude).toFixed(5),
+        lat: +Cesium.Math.toDegrees(cam.latitude).toFixed(5),
+        height: +cam.height.toFixed(0),
+      };
+      return out;
+    },
+
+    // Put the camera on the mesh, so "I cannot see it" stops being a
+    // question about where the camera is pointing.
+    async goto() {
+      const ts = await _settledSiteMesh();
+      if (!ts) return 'no mesh loaded';
+      viewer.camera.flyToBoundingSphere(ts.boundingSphere, { duration: 2 });
+      return 'flying to the mesh';
+    },
   };
 
   // NOT loaded on startup.

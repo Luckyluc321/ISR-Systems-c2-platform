@@ -355,19 +355,50 @@ def main():
                "  Open the mesh in preview.html and look. That settles it in "
                "seconds\n  and neither number will.\n"))
 
-    # Vertices and UVs are written unchanged and faces keep their original
-    # indices, so the existing texture atlas still applies with no
-    # retexturing and no resampling.
+    # Keep only the vertices and texture coordinates the surviving faces
+    # actually reference, and renumber them.
+    #
+    # Writing all of them was simpler and kept every face index valid,
+    # but it means a file of 42,450 triangles carrying 798,779 vertices,
+    # 95 per cent of which nothing points at. That is 72 MB where 4 MB
+    # would do, and the tiler then walks all of it.
+    #
+    # UV VALUES ARE UNTOUCHED, only renumbered, so the existing texture
+    # atlas still applies with no retexturing and no resampling.
+    #
+    # ODM writes faces as v/vt/vn while emitting no vn lines at all, so
+    # the third index refers to nothing. It is dropped rather than
+    # carried forward.
+    v_new, vt_new, faces_out = {}, {}, []
+    for line in kept:
+        toks = []
+        for part in line.split()[1:]:
+            bits = part.split("/")
+            vi = int(bits[0]) - 1
+            if vi not in v_new:
+                v_new[vi] = len(v_new) + 1
+            if len(bits) > 1 and bits[1]:
+                ti = int(bits[1]) - 1
+                if ti not in vt_new:
+                    vt_new[ti] = len(vt_new) + 1
+                toks.append(f"{v_new[vi]}/{vt_new[ti]}")
+            else:
+                toks.append(str(v_new[vi]))
+        faces_out.append("f " + " ".join(toks) + "\n")
+
     out = Path(a.out)
     with open(out, "w") as f:
         for line in other:
             if line.startswith(("mtllib", "usemtl", "o ", "g ", "s ")):
                 f.write(line)
-        for x, y, z in verts:
+        # Insertion order is the new numbering, so these two loops must
+        # stay in the order the faces first referenced them.
+        for old in v_new:
+            x, y, z = verts[old]
             f.write(f"v {x} {y} {z}\n")
-        for line in vts:
-            f.write(line)
-        f.writelines(kept)
+        for old in vt_new:
+            f.write(vts[old])
+        f.writelines(faces_out)
 
     print(f"\n{total:,} triangles in")
     print(f"  kept            {len(kept):,} ({100*len(kept)/total:.1f}%)")
