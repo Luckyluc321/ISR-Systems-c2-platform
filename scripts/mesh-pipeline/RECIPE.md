@@ -133,23 +133,64 @@ already runs:
 
 ```bash
 # the lat/lon come from ODM's own Obj2Tiles line in its log
-grep Obj2Tiles work/bt-dense/odm-dense-terminal.log | head -1
+grep Obj2Tiles work/odm-dense-terminal.log | head -1
 
+# ROTATE TO Y-UP FIRST. Skipping this is not a cosmetic mistake: the
+# tileset lands as an 800 m vertical slab, 96 m off, up to 170 m in the
+# air, and NOTHING reports an error because Obj2Tiles writes the
+# bounding boxes already rotated to match. See to_yup.py.
+python3 to_yup.py \
+  --in  work/bt-dense/odm/odm_texturing/buildings_only.obj \
+  --out work/bt-dense/odm/odm_texturing/buildings_only_yup.obj
+
+rm -rf work/bt-dense/odm/3d_tiles_buildings      # Obj2Tiles leaves debris
 PARENT=$(cd work/bt-dense && pwd)
 docker run --rm --entrypoint /code/SuperBuild/install/bin/Obj2Tiles \
   -v "$PARENT":/datasets opendronemap/odm:latest \
-  /datasets/odm/odm_texturing/buildings_only.obj \
+  /datasets/odm/odm_texturing/buildings_only_yup.obj \
   /datasets/odm/3d_tiles_buildings \
   --divisions 4 --lat <lat> --lon <lon> --alt 0.0
 
-python3 export_footprints.py --osm /tmp/osm_buildings.json --site <site> \
-  --obj work/bt-dense/odm/odm_texturing/odm_textured_model_geo.obj \
-  --out ../../src/data/building_footprints.json
+# UNLIT, or the roofs blow out to white. Obj2Tiles emits ordinary PBR
+# materials, so Cesium lights a texture that already contains the sun.
+python3 unlit_tiles.py --tiles work/bt-dense/odm/3d_tiles_buildings
 
+python3 export_footprints.py --osm /tmp/osm_buildings.json --site <site> \
+  --obj     work/bt-dense/odm/odm_texturing/odm_textured_model_geo.obj \
+  --clipped work/bt-dense/odm/odm_texturing/buildings_only.obj \
+  --out     ../../src/data/building_footprints.json
+
+# ALWAYS pass the directory. With no argument it resolves the NEWEST
+# tileset under work/, which is usually ODM's own 3d_tiles/ — the full
+# reconstruction, ground included, 96 MB.
 python3 serve_tiles.py 8778 work/bt-dense/odm/3d_tiles_buildings
 ```
 
-Takes about six seconds.
+Takes about ten seconds.
+
+**Check the orientation before looking at anything.** The small half-axis
+must be the third one:
+
+```bash
+python3 -c "
+import json; b=json.load(open('work/bt-dense/odm/3d_tiles_buildings/tileset.json'))['root']['boundingVolume']['box']
+ax=[round(b[3],1),round(b[7],1),round(b[11],1)]
+print(ax, 'OK' if min(map(abs,ax))==abs(ax[2]) else 'ROTATED — run to_yup.py')"
+```
+
+Buildings are wide and low, so exactly one of the three must be small.
+When it is not the third, the mesh was tiled Z-up. `__isr_siteMesh.debug()`
+reports the same check in the running app as `looksRotated`.
+
+## This section was wrong for two commits
+
+`to_yup.py` shipped in `3f5467b`, a seven-file change that touched no
+documentation, so this page went on telling people to tile the Z-up
+file. `unlit_tiles.py` was untracked entirely. Anyone following the
+recipe in between reproduced the floating slab and the blown-out roofs,
+which is exactly the failure the rest of this file is about.
+
+**A pipeline fix that does not update this page is not finished.**
 
 **Why not clip at render time.** Cesium can clip a tileset to polygons,
 and doing that to the full reconstruction looked attractive: no extra
