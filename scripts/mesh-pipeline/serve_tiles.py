@@ -74,8 +74,18 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return "application/octet-stream"
         return super().guess_type(path)
 
-    def log_message(self, *a):
-        pass  # one line per tile is thousands of lines
+    def log_message(self, fmt, *a):
+        # To a file, not the console: one line per tile is thousands.
+        #
+        # Worth having because "I changed the mesh and nothing changed"
+        # has twice turned out to be the artifact never reaching the
+        # browser rather than anything wrong with the mesh. This is the
+        # only direct evidence of what was actually fetched.
+        try:
+            with open("/tmp/tile_requests.log", "a") as f:
+                f.write(f"{self.log_date_time_string()} {fmt % a}\n")
+        except Exception:
+            pass
 
 
 if not (ROOT / "tileset.json").exists():

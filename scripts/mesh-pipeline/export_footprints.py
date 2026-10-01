@@ -161,10 +161,13 @@ def main():
         # deleting unreplaced buildings restored them along with
         # everything else.
         has_mesh = counts.get(n, 0) >= a.min_faces if counts else True
-        if poly["solid"] and not has_mesh:
+        if not has_mesh and not poly["bogus_box"]:
+            # A real building with no reconstruction, parking decks
+            # included. Its white box is the best thing available and
+            # must keep drawing.
             skipped_empty += 1
             continue
-        if not poly["solid"]:
+        if not has_mesh:
             dropped_kind += 1
         ring = [[round(p["lon"], 7), round(p["lat"], 7)] for p in way["geometry"]]
         # Cesium closes the ring itself, and a duplicated last point

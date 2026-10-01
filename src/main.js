@@ -1092,6 +1092,22 @@ async function main() {
   // the right value is whatever puts the runway on the runway.
   const DK_GEOID_SEPARATION_M = 36.8;
 
+  // TEMPORARY. Flip to false to ship. See the tint block in _loadSiteMesh.
+  let _MESH_TINT_DIAGNOSTIC = false;
+
+  // Brightness multiply on the reconstruction, 1.0 being untouched.
+  //
+  // Skraafoto is exposed for mapping and comes out brighter than the
+  // SDFI orthophoto the map drapes on terrain, so a pale membrane roof
+  // reads as a glaring white slab against its own surroundings. The
+  // lever is the tile style colour, not lighting: colorBlendMode
+  // defaults to HIGHLIGHT, which multiplies, so it dims without
+  // flattening the photographic detail. This is the same treatment the
+  // day branch already applies to Google's photoreal tiles, and the
+  // reason it is a multiply rather than a lighting change is written
+  // out there.
+  let _MESH_BRIGHTNESS = 0.82;
+
   // Per-site meshes. A site with no entry is unaffected, which is what
   // keeps this from touching the eight sites that already look right.
   //
@@ -1163,6 +1179,19 @@ async function main() {
       });
       _applyMeshHeight(ts, heightOffsetM);
       _matchPhotorealLighting(ts);
+
+      // TEMPORARY DIAGNOSTIC — remove once identified.
+      //
+      // Six consecutive rebuilds produced no visible change, while the
+      // tile server's request log proves the browser fetched every one
+      // of them. Those two facts cannot both be about this mesh, so the
+      // thing being looked at may not be this mesh.
+      //
+      // Magenta appears nowhere else in the map, so one screenshot says
+      // which pixels are this tileset and which are the extruded OSM
+      // boxes underneath it. colorBlendMode defaults to HIGHLIGHT, a
+      // multiply, so detail survives and the shape stays readable.
+      _applyMeshTone(ts);
       viewer.scene.primitives.add(ts);
       _siteMesh = ts;
       _siteMeshId = siteId;
@@ -1208,6 +1237,23 @@ async function main() {
   // known-good day configuration and is off limits. Switching imagery
   // mode therefore does not restyle this tileset, which is a gap worth
   // knowing about rather than a reason to edit that function.
+  // One place that owns the tileset's style, so the diagnostic tint and
+  // the brightness multiply cannot overwrite each other.
+  function _applyMeshTone(ts) {
+    if (!ts) return;
+    if (_MESH_TINT_DIAGNOSTIC) {
+      ts.style = new Cesium.Cesium3DTileStyle({ color: "color('#ff00ff')" });
+      console.warn('[site_mesh] DIAGNOSTIC TINT ON — the reconstruction is '
+        + 'magenta. Anything NOT magenta is not this mesh.');
+      return;
+    }
+    if (_MESH_BRIGHTNESS === 1) { ts.style = undefined; return; }
+    const v = Math.max(0, Math.min(1, _MESH_BRIGHTNESS));
+    ts.style = new Cesium.Cesium3DTileStyle({
+      color: `rgb(${Math.round(v * 255)}, ${Math.round(v * 255)}, ${Math.round(v * 255)})`,
+    });
+  }
+
   function _matchPhotorealLighting(ts) {
     ts.lightColor = undefined;
     ts.style = undefined;
@@ -1291,6 +1337,20 @@ async function main() {
       return { siteId, count: f.length, named: f.filter((b) => b.name).map((b) => b.name) };
     },
     footprintSites: () => sitesWithFootprints(),
+    async tint(on = true) {
+      const ts = await _settledSiteMesh();
+      _MESH_TINT_DIAGNOSTIC = !!on;
+      _applyMeshTone(ts);
+      return ts ? (on ? 'mesh tinted magenta' : 'tint cleared') : 'no mesh loaded';
+    },
+    // The dial for matching the reconstruction to the imagery around
+    // it. 1.0 is the raw photograph; lower dims it.
+    async brightness(v = 0.82) {
+      const ts = await _settledSiteMesh();
+      _MESH_BRIGHTNESS = v;
+      _applyMeshTone(ts);
+      return ts ? `mesh brightness ${v}` : 'no mesh loaded';
+    },
 
     // Everything needed to tell apart the ways this can look like
     // nothing happened: the mesh never rendered, the mesh rendered
@@ -2921,6 +2981,21 @@ async function main() {
   // switch, so the sweep is what keeps the globe honest.
   for (const siteKey of Object.keys(SITES)) {
     renderSite(SITES[siteKey]);
+  }
+
+  // Load the reconstructed buildings for any site that has them.
+  //
+  // This was deliberately manual while the mesh still contained ground,
+  // because loading it laid a square of tarmac over the map. It is cut
+  // to buildings now, so the reason is gone and the manual step only
+  // costs confusion: every page reload silently dropped the mesh, and a
+  // map with no mesh is indistinguishable from a mesh that failed to
+  // render. That cost a full round trip.
+  //
+  // Awaiting nothing on purpose. A site with no mesh is the normal case
+  // and a mesh that fails to load must never hold up the map.
+  for (const siteKey of Object.keys(SITE_MESHES)) {
+    if (SITES[siteKey]) _loadSiteMesh(siteKey);
   }
 
   // Account scope on the globe. Hides every entity belonging to a site

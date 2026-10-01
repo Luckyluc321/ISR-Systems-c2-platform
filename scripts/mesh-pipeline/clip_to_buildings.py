@@ -99,7 +99,20 @@ def ring_area(ring):
 
 
 def is_solid_building(tags, area_m2):
-    """Whether this outline describes a walled building.
+    """Whether this outline describes a walled building that reconstructs.
+
+    PARKING DECKS ARE EXCLUDED, and that reversed an earlier call.
+
+    They were kept at first because they are genuinely multi-storey
+    buildings and two of the three largest structures on the site. That
+    is true and it is beside the point: a parking deck is open-sided, so
+    photogrammetry sees a roof, a smeared flank and no wall, exactly as
+    it sees a canopy. Billund's P2 and P4 came out as dark blocks with a
+    band of grass texture smeared up their sides, and they are what kept
+    reading as odd buildings standing in the car park.
+
+    The test is the same one used for `building=roof`: not "is this a
+    building" but "does this reconstruct into something worth drawing".
 
     Deliberately a TAG test, not a geographic one. The offenders at
     Billund sit 98 to 322 m from the terminal, interleaved with real
@@ -108,17 +121,40 @@ def is_solid_building(tags, area_m2):
     deletes P4 and three other real buildings. A tag test is exact,
     needs no tuning, and travels to the next site unchanged.
 
-    `amenity=parking` is NOT tested. At Billund it appears only on P2 and
-    P4, which are genuine multi-storey decks and among the largest
-    buildings on the site. A surface car park carries no `building` tag
-    at all, so the Overpass query never returns one.
+    A surface car park carries no `building` tag at all, so the Overpass
+    query never returns one; everything caught here is a deck.
     """
-    b = (tags or {}).get("building")
+    t = tags or {}
+    b = t.get("building")
     if not b or b in NOT_A_BUILDING:
+        return False
+    if b == "parking" or t.get("amenity") == "parking":
         return False
     if (tags or {}).get("building:part") == "yes":
         return False
     return area_m2 >= MIN_FOOTPRINT_M2
+
+
+def box_is_bogus(tags, area_m2):
+    """Whether this outline's extruded white box is wrong in the map.
+
+    A DIFFERENT QUESTION from is_solid_building, and conflating the two
+    put a hole in the map.
+
+    `is_solid_building` asks whether the reconstruction is worth
+    drawing. A parking deck fails that, because it is open-sided and
+    comes out as a smeared block. But it is still a real multi-storey
+    building, so its white box is CORRECT and must keep drawing.
+    Excluding it from both left the decks with no mesh and no box, and
+    they flattened into bare orthophoto.
+
+    Only a canopy or a cabinet-sized way is wrong as a solid volume. A
+    `building=roof` is a roof on posts, and a 12 m2 way extruded to any
+    default height is a pillar.
+    """
+    t = tags or {}
+    b = t.get("building")
+    return (not b) or b in NOT_A_BUILDING or area_m2 < MIN_FOOTPRINT_M2
 
 
 def load_footprints(osm_path):
@@ -146,6 +182,7 @@ def load_footprints(osm_path):
             "tags": tags,
             "area": area,
             "solid": is_solid_building(tags, area),
+            "bogus_box": box_is_bogus(tags, area),
         })
     return polys
 
@@ -231,8 +268,9 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--min-height", type=float, default=2.0,
                     help="metres above local ground a triangle must sit to be kept")
-    ap.add_argument("--pad", type=float, default=1.5,
-                    help="metres to grow each footprint, to keep eaves and wall thickness")
+    ap.add_argument("--pad", type=float, default=8.0,
+                    help="metres to grow each footprint. Wide on purpose: this "
+                         "is what captures the real photographed facade")
     ap.add_argument("--walls", action="store_true", default=True,
                     help="build vertical walls from the roofline down to ground")
     ap.add_argument("--no-walls", dest="walls", action="store_false",
@@ -240,10 +278,12 @@ def main():
                          "nothing under a roof")
     ap.add_argument("--wall-sink", type=float, default=0.5,
                     help="metres to sink the wall base below local ground")
-    ap.add_argument("--wall-reach", type=float, default=4.0,
+    ap.add_argument("--wall-reach", type=float, default=10.0,
                     help="metres from a footprint outline within which a "
                          "boundary edge counts as a real perimeter rather "
-                         "than the rim of a hole in the roof")
+                         "than the rim of a hole in the roof. Keep it above "
+                         "--pad, or the real facade's own lower edge is "
+                         "mistaken for a hole")
     ap.add_argument("--ground-tolerance", type=float, default=2.5,
                     help="metres a ground cell may differ from its neighbours "
                          "before it is replaced by them")
