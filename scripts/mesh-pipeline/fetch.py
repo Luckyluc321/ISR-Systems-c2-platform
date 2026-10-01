@@ -51,31 +51,46 @@ DEFAULT_COLLECTION = "skraafotos2025"
 # reconstructing is defined by where the buildings are. Anything else
 # spends the whole triangle budget on ground the map already draws.
 SITE_BBOX = {
-    # Billund Airport, aerodrome and terminal.
-    "billund": (9.145, 55.735, 9.172, 55.746),
+    # Billund Airport. Derived from the extent of every aeroway-tagged
+    # building plus 150 m, NOT typed.
+    #
+    # The previous box, 9.145,55.735,9.172,55.746, was typed and started
+    # 1.4 km too far east: it missed five of the ten hangars, including
+    # the two largest. Same mistake as the terminal box, found the same
+    # way, by asking the footprints where the buildings are.
+    # 5.13 km2, 232 buildings, 10 hangars, the terminal and the tower.
+    "billund": (9.1228, 55.7329, 9.1718, 55.7479),
     # The terminal itself, plus the P2 and P4 decks.
     # 14 footprints, 43k m2 of roof, terminal alone 21k m2.
     "billund-terminal": (9.14189, 55.74272, 9.15307, 55.74900),
 }
 
 
-def load_token() -> str:
-    """Read VITE_SDFI_TOKEN from the repo .env.local.
+# Both names are accepted. The app reads VITE_SDFI_TOKEN because Vite
+# only exposes VITE_-prefixed variables to the browser; a token used by
+# these scripts has no such constraint and DATAFORSYNINGEN_TOKEN says
+# plainly whose token it is.
+TOKEN_KEYS = ("DATAFORSYNINGEN_TOKEN", "VITE_SDFI_TOKEN")
 
-    Falls back to the environment so CI or a workstation can supply it
-    without a file. Never printed, never written to the output tree.
+
+def load_token() -> str:
+    """Read the Dataforsyningen token from the environment or .env.local.
+
+    Never printed, never written to the output tree.
     """
-    env = os.environ.get("VITE_SDFI_TOKEN")
-    if env:
-        return env.strip()
+    for key in TOKEN_KEYS:
+        env = os.environ.get(key)
+        if env:
+            return env.strip()
     env_path = Path(__file__).resolve().parents[2] / ".env.local"
     if env_path.exists():
         for line in env_path.read_text().splitlines():
-            if line.startswith("VITE_SDFI_TOKEN="):
-                return line.split("=", 1)[1].strip().strip('"').strip("'")
+            for key in TOKEN_KEYS:
+                if line.startswith(f"{key}="):
+                    return line.split("=", 1)[1].strip().strip('"').strip("'")
     sys.exit(
-        "No Dataforsyningen token. Set VITE_SDFI_TOKEN in the environment "
-        "or in .env.local at the repo root."
+        "No Dataforsyningen token. Set " + " or ".join(TOKEN_KEYS)
+        + " in the environment or in .env.local at the repo root."
     )
 
 
@@ -221,6 +236,11 @@ def main() -> None:
     ap.add_argument("--collection", default=DEFAULT_COLLECTION)
     ap.add_argument("--out", default="./work/out")
     ap.add_argument("--dry-run", action="store_true", help="count only")
+    ap.add_argument("--direction", action="append",
+                    choices=["nadir", "north", "south", "east", "west"],
+                    help="only these look directions; repeatable. Roofs need "
+                         "only nadir, and one nadir frame covers about 2 km, "
+                         "so this is most of the download saved")
     a = ap.parse_args()
 
     if a.site:
@@ -242,10 +262,18 @@ def main() -> None:
     print(f"{a.collection}  bbox={bbox}")
     print(f"{len(items)} images: " + ", ".join(f"{k} {len(v)}" for k, v in sorted(by_dir.items())))
 
+    if a.direction:
+        want = set(a.direction)
+        items = [i for i in items if i["properties"].get("direction") in want]
+        by_dir = {k: v for k, v in by_dir.items() if k in want}
+        print(f"--direction {'/'.join(sorted(want))}: keeping {len(items)} images")
+        if not items:
+            sys.exit("No image in the requested direction(s).")
+
     # Five directions is what reconstructs facades rather than only
     # roofs. Fewer is not fatal but it is worth knowing before a long run.
     missing = {"nadir", "north", "south", "east", "west"} - set(by_dir)
-    if missing:
+    if missing and not a.direction:
         print(f"WARNING: no imagery from {', '.join(sorted(missing))}. Facades on those sides will be poor.")
 
     poses = [pose_of(i) for i in items]
