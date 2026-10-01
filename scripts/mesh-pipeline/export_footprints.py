@@ -38,7 +38,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
-from clip_to_buildings import utm32n, load_footprints  # noqa: E402
+from clip_to_buildings import load_footprints, inside  # noqa: E402
 
 
 def mesh_extent(obj_path, offset_path=None):
@@ -68,7 +68,7 @@ def mesh_extent(obj_path, offset_path=None):
                 ys.append(float(p[2]) + off_y)
     if not xs:
         sys.exit(f"No vertices in {obj}")
-    return min(xs), min(ys), max(xs), max(ys)
+    return (min(xs), min(ys), max(xs), max(ys)), (off_x, off_y)
 
 
 def main():
@@ -81,9 +81,15 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--pad", type=float, default=1.5,
                     help="metres to grow each outline, matching clip_to_buildings")
+    ap.add_argument("--clipped",
+                    help="the buildings-only mesh. Given this, only footprints "
+                         "that actually carry geometry are exported")
+    ap.add_argument("--min-faces", type=int, default=40,
+                    help="triangles a footprint needs before its white box is "
+                         "taken away")
     a = ap.parse_args()
 
-    box = mesh_extent(a.obj, a.offset)
+    box, (off_x, off_y) = mesh_extent(a.obj, a.offset)
     print(f"mesh extent  E {box[0]:.0f}..{box[2]:.0f}  N {box[1]:.0f}..{box[3]:.0f}")
 
     polys = load_footprints(a.osm)
@@ -95,15 +101,71 @@ def main():
     if len(ways) != len(polys):
         sys.exit("Footprint and way counts disagree; the two loaders are out of step.")
 
+    # Which footprints have geometry actually standing in them.
+    #
+    # Overlapping the mesh's bounding box is not the same as being
+    # replaced by it. At Billund 19 footprints overlapped the box and
+    # only 9 carried any reconstruction, so exporting all 19 told the
+    # map to delete 10 white boxes and put nothing in their place. A
+    # building that simply vanishes is worse than a white one, and it is
+    # most of why the surviving fragments read as standing in the middle
+    # of nowhere.
+    counts = {}
+    if a.clipped and Path(a.clipped).exists():
+        cverts = []
+        with open(a.clipped) as f:
+            for line in f:
+                if line.startswith("v "):
+                    p = line.split()
+                    cverts.append((float(p[1]) + off_x, float(p[2]) + off_y))
+                elif line.startswith("f "):
+                    ids = [int(t.split("/")[0]) - 1 for t in line.split()[1:]]
+                    try:
+                        pts = [cverts[i] for i in ids]
+                    except IndexError:
+                        continue
+                    cx = sum(p[0] for p in pts) / len(pts)
+                    cy = sum(p[1] for p in pts) / len(pts)
+                    for n, poly in enumerate(polys):
+                        b = poly["bbox"]
+                        if b[0] <= cx <= b[2] and b[1] <= cy <= b[3] \
+                                and inside(cx, cy, poly["ring"]):
+                            counts[n] = counts.get(n, 0) + 1
+                            break
+        print(f"{len(counts)} footprints carry reconstructed geometry")
+
     # Projected only to decide which ways are on the mesh. What gets
     # written is the original longitude and latitude, because Cesium
     # wants those and a round trip through the projection would add
     # error for nothing.
-    kept = []
-    for way, poly in zip(ways, polys):
+    kept, skipped_empty, dropped_kind = [], 0, 0
+    for n, (way, poly) in enumerate(zip(ways, polys)):
         x0, y0, x1, y1 = poly["bbox"]
         if x1 < box[0] or x0 > box[2] or y1 < box[1] or y0 > box[3]:
             continue
+        # Whether this outline's white box should be taken away, which
+        # is NOT the same question as whether the mesh replaces it.
+        #
+        # Replaced by mesh      -> hide the box, the reconstruction is there
+        # Not a walled building -> hide the box, it is wrong either way.
+        #                          OSM draws a `building=roof` canopy and a
+        #                          12 m2 way as solid extruded volumes, and
+        #                          a 4 x 3 m volume at any default height is
+        #                          a pillar standing in a car park. Eight of
+        #                          those sit 98 to 322 m out at Billund.
+        # Real building, no mesh -> KEEP the box. A building that simply
+        #                          vanishes is worse than a white one.
+        #
+        # Exporting only the first case is what put the eight pillars
+        # back on the map: they had been hidden, and the fix that stopped
+        # deleting unreplaced buildings restored them along with
+        # everything else.
+        has_mesh = counts.get(n, 0) >= a.min_faces if counts else True
+        if poly["solid"] and not has_mesh:
+            skipped_empty += 1
+            continue
+        if not poly["solid"]:
+            dropped_kind += 1
         ring = [[round(p["lon"], 7), round(p["lat"], 7)] for p in way["geometry"]]
         # Cesium closes the ring itself, and a duplicated last point
         # makes a zero-length edge in the signed distance field.
@@ -113,11 +175,20 @@ def main():
             continue
         tags = way.get("tags") or {}
         kept.append({
+            "hasMesh": has_mesh,
+            "solid": poly["solid"],
             "id": way.get("id"),
             "name": tags.get("name") or None,
             "ring": ring,
         })
 
+    if skipped_empty:
+        print(f"{skipped_empty} real buildings have no reconstruction; "
+              "their white boxes are LEFT ALONE")
+    if dropped_kind:
+        print(f"{dropped_kind} outlines are not walled buildings (roof/canopy "
+              "or tiny); their white boxes are HIDDEN with nothing to replace "
+              "them, because an extruded canopy is a pillar")
     if not kept:
         sys.exit("No footprint falls on this mesh. Check the box with pick_bbox.py "
                  "before exporting.")

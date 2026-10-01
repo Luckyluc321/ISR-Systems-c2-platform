@@ -1131,8 +1131,8 @@ async function main() {
   // them answer about the mesh rather than about the timing.
   let _siteMeshLoading = null;
 
-  function _loadSiteMesh(siteId, heightOffsetM = DK_GEOID_SEPARATION_M) {
-    _siteMeshLoading = _loadSiteMeshNow(siteId, heightOffsetM)
+  function _loadSiteMesh(siteId, heightOffsetM = DK_GEOID_SEPARATION_M, force = false) {
+    _siteMeshLoading = _loadSiteMeshNow(siteId, heightOffsetM, force)
       .finally(() => { _siteMeshLoading = null; });
     return _siteMeshLoading;
   }
@@ -1143,8 +1143,13 @@ async function main() {
     return _siteMesh;
   }
 
-  async function _loadSiteMeshNow(siteId, heightOffsetM = DK_GEOID_SEPARATION_M) {
-    if (_siteMeshId === siteId && _siteMesh) return _siteMesh;
+  async function _loadSiteMeshNow(siteId, heightOffsetM = DK_GEOID_SEPARATION_M, force = false) {
+    // Reloading the same site used to hand back the existing tileset
+    // without fetching anything. That is right for switching between
+    // sites and wrong for the one gesture a rebuilt mesh invites:
+    // calling load() again to see the new one. It is a guaranteed
+    // no-op, which looks exactly like a fix that changed nothing.
+    if (!force && _siteMeshId === siteId && _siteMesh) return _siteMesh;
     _unloadSiteMesh();
     const entry = SITE_MESHES[siteId];
     if (!entry) return null;
@@ -1238,7 +1243,10 @@ async function main() {
   // Console handle for tuning the height against the real terrain, and
   // for turning the mesh off to compare against the extruded boxes.
   window.__isr_siteMesh = {
-    load: (siteId = 'billund', h) => _loadSiteMesh(siteId, h ?? DK_GEOID_SEPARATION_M),
+    // force defaults TRUE: the reason to type this is almost always to
+    // look at a mesh that was just rebuilt.
+    load: (siteId = 'billund', h, force = true) =>
+      _loadSiteMesh(siteId, h ?? DK_GEOID_SEPARATION_M, force),
     unload: _unloadSiteMesh,
     // Every one of these waits for a load in flight, so pasting several
     // commands at once reports on the mesh instead of on the clock.
@@ -1300,6 +1308,26 @@ async function main() {
           height: +c.height.toFixed(1),
         };
         out.radius = +ts.boundingSphere.radius.toFixed(0);
+
+        // The three half-axes of the root bounding box, sorted.
+        //
+        // This is the check that would have found the up-axis rotation
+        // on day one. Buildings are wide and low, so exactly one of the
+        // three must be small. When the tiler hands Cesium a Z-up mesh
+        // as though it were Y-up, height lands in a horizontal axis and
+        // the small number moves: 415 x 12.5 x 282 became an 800 m
+        // vertical slab and nothing reported an error, because the
+        // bounding box had been rotated to match.
+        const bv = ts.root?.boundingVolume?.boundingVolume;
+        if (bv?.halfAxes) {
+          const h = bv.halfAxes;
+          const ax = [0, 3, 6].map((i) => Math.hypot(h[i], h[i + 1], h[i + 2]));
+          out.boxHalfAxes = ax.map((v) => +v.toFixed(1));
+          out.looksRotated = Math.min(...ax) !== ax[2]
+            ? 'YES — the smallest axis is not the vertical one. The mesh is '
+              + 'almost certainly Z-up tiled as Y-up. Run to_yup.py before Obj2Tiles.'
+            : 'no';
+        }
         const terrain = viewer.scene.globe.getHeight(c);
         out.terrainHeightHere = terrain == null ? null : +terrain.toFixed(1);
         // The number that matters: a mesh sitting far below the ground

@@ -32,6 +32,7 @@ Usage:
 """
 
 import argparse
+import collections
 import json
 import math
 import sys
@@ -66,8 +67,68 @@ def utm32n(lon, lat):
     return x, y
 
 
+# OSM `building` values that are NOT a walled building.
+#
+# This matters because walls are generated. `building=roof` means a roof
+# on posts with nothing under it: a covered walkway, a drop-off shelter,
+# a fuel canopy. Reconstruct its roof, drop walls from the perimeter to
+# the ground, and an open shelter becomes a solid block standing in open
+# tarmac. Billund's forecourt has eight of them.
+#
+# The same values are also the ones whose extruded white box is wrong in
+# the map to begin with, since a canopy is not a solid volume either.
+NOT_A_BUILDING = {
+    "roof", "carport", "canopy", "shelter", "bridge",
+    "no", "entrance", "tent", "construction", "ruins",
+}
+
+# Below this, an OSM way is a bin store, a substation cabinet or a
+# mapping artifact. Extruded it is a pillar; reconstructed it is noise.
+# Billund has an 11 m2 and a 14 m2 one, both drawn as pillars.
+MIN_FOOTPRINT_M2 = 25.0
+
+
+def ring_area(ring):
+    """Shoelace, in square metres. The ring is already projected."""
+    s = 0.0
+    for i in range(len(ring)):
+        x1, y1 = ring[i]
+        x2, y2 = ring[(i + 1) % len(ring)]
+        s += x1 * y2 - x2 * y1
+    return abs(s) / 2
+
+
+def is_solid_building(tags, area_m2):
+    """Whether this outline describes a walled building.
+
+    Deliberately a TAG test, not a geographic one. The offenders at
+    Billund sit 98 to 322 m from the terminal, interleaved with real
+    buildings at 155, 162, 182 and 294 m, so no radius or bounding box
+    separates them: a cut tight enough to catch the nearest canopy also
+    deletes P4 and three other real buildings. A tag test is exact,
+    needs no tuning, and travels to the next site unchanged.
+
+    `amenity=parking` is NOT tested. At Billund it appears only on P2 and
+    P4, which are genuine multi-storey decks and among the largest
+    buildings on the site. A surface car park carries no `building` tag
+    at all, so the Overpass query never returns one.
+    """
+    b = (tags or {}).get("building")
+    if not b or b in NOT_A_BUILDING:
+        return False
+    if (tags or {}).get("building:part") == "yes":
+        return False
+    return area_m2 >= MIN_FOOTPRINT_M2
+
+
 def load_footprints(osm_path):
-    """OSM ways tagged building, projected into the mesh's CRS."""
+    """OSM ways tagged building, projected into the mesh's CRS.
+
+    Returns every way, including the ones that are not solid buildings,
+    with enough information to decide. Filtering here would break
+    export_footprints.py, which zips this list against the raw ways and
+    checks the two lengths agree.
+    """
     data = json.loads(Path(osm_path).read_text())
     polys = []
     for el in data.get("elements", []):
@@ -77,7 +138,15 @@ def load_footprints(osm_path):
         ring = [utm32n(p["lon"], p["lat"]) for p in geom]
         xs = [p[0] for p in ring]
         ys = [p[1] for p in ring]
-        polys.append({"ring": ring, "bbox": (min(xs), min(ys), max(xs), max(ys))})
+        tags = el.get("tags") or {}
+        area = ring_area(ring)
+        polys.append({
+            "ring": ring,
+            "bbox": (min(xs), min(ys), max(xs), max(ys)),
+            "tags": tags,
+            "area": area,
+            "solid": is_solid_building(tags, area),
+        })
     return polys
 
 
@@ -164,6 +233,20 @@ def main():
                     help="metres above local ground a triangle must sit to be kept")
     ap.add_argument("--pad", type=float, default=1.5,
                     help="metres to grow each footprint, to keep eaves and wall thickness")
+    ap.add_argument("--walls", action="store_true", default=True,
+                    help="build vertical walls from the roofline down to ground")
+    ap.add_argument("--no-walls", dest="walls", action="store_false",
+                    help="roofs only; they will float, photogrammetry puts "
+                         "nothing under a roof")
+    ap.add_argument("--wall-sink", type=float, default=0.5,
+                    help="metres to sink the wall base below local ground")
+    ap.add_argument("--wall-reach", type=float, default=4.0,
+                    help="metres from a footprint outline within which a "
+                         "boundary edge counts as a real perimeter rather "
+                         "than the rim of a hole in the roof")
+    ap.add_argument("--ground-tolerance", type=float, default=2.5,
+                    help="metres a ground cell may differ from its neighbours "
+                         "before it is replaced by them")
     ap.add_argument("--min-faces", type=int, default=40,
                     help="drop connected pieces smaller than this; they are "
                          "reconstruction specks, not buildings")
@@ -198,6 +281,16 @@ def main():
     polys = load_footprints(a.osm)
     if not polys:
         sys.exit(f"No building footprints in {a.osm}")
+    # Only walled buildings get reconstructed. A canopy given generated
+    # walls becomes a solid block standing in the open, and a 12 m2 way
+    # becomes a pillar.
+    dropped_kind = sum(1 for p in polys if not p["solid"])
+    polys = [p for p in polys if p["solid"]]
+    if not polys:
+        sys.exit("No outline in this set is a walled building.")
+    if dropped_kind:
+        print(f"{dropped_kind} outlines are not walled buildings "
+              f"(roof/canopy/shelter, or under {MIN_FOOTPRINT_M2:.0f} m2) and are skipped")
     if a.pad:
         for p in polys:
             x0, y0, x1, y1 = p["bbox"]
@@ -256,26 +349,147 @@ def main():
             f"    python3 pick_bbox.py --osm {a.osm} --rank 5\n"
             f"    python3 pick_bbox.py --osm {a.osm} --name '<building name>'\n")
 
-    # Local ground height per 20 m cell, taken as a low percentile so a
-    # building standing in the cell does not raise its own ground.
+    # Ground height per 20 m cell, built ONLY from vertices that are not
+    # standing on a building.
+    #
+    # This is the bug that made every previous attempt look like
+    # floating blocks, and it is worth stating plainly.
+    #
+    # The first version took a low percentile of every vertex in a cell,
+    # on the reasoning that a building occupies the top of the
+    # distribution and the ground sits underneath it. That holds for a
+    # house in a garden. It fails completely in the middle of a large
+    # roof: a 20 m cell well inside a 383 m terminal contains NOTHING
+    # BUT ROOF, so the percentile returns the roof height, the roof is
+    # then not 2 m above its own "ground", and the whole roof is
+    # discarded as terrain.
+    #
+    # What survived was a narrow strip around each building, where a
+    # cell happened to span both roof and real ground. 77,355 faces were
+    # being thrown away this way, which is why the plan view of the
+    # result was building outlines with empty middles, and why the
+    # fragments that remained had nothing under them.
+    #
+    # Ground is terrain, and terrain is by definition where the
+    # buildings are not. The footprints already say where that is, so
+    # the estimate is built from vertices outside them and then spread
+    # across the gaps the buildings leave.
+    CELL = 20.0
+
+    # A vertex may speak for the ground only if the KEEP TEST would not
+    # have claimed it for a building. Same predicate, pad included.
+    #
+    # Using bare inside() here while keeping on inside() OR near_edge()
+    # let every roof vertex in the 1.5 m pad band count as both. An
+    # OpenStreetMap outline is simplified, so it routinely cuts across a
+    # real roof, and the sliver left outside the line became "terrain"
+    # at roof height. Measured worst cell at Billund: 92 samples, every
+    # one of them roof at 111.2-113.0 m and all within 2.2 m of the
+    # outline, giving a ground of 111.80 m where the truth is 94.63 m.
+    # Everything under that was then deleted for not clearing it by 2 m.
+    def on_building(ax, ay):
+        hits = idx.get((int(ax // cell), int(ay // cell)), ())
+        return any(
+            inside(ax, ay, polys[i]["ring"])
+            or (a.pad and near_edge(ax, ay, polys[i]["ring"], a.pad))
+            for i in hits
+        )
+
+    off = [(x + off_x, y + off_y, z) for x, y, z in verts
+           if not on_building(x + off_x, y + off_y)]
+    if not off:
+        sys.exit("No vertex outside a footprint, so ground cannot be estimated. "
+                 "The box is almost certainly wrong.")
+
+    # Drop the underside of the shell.
+    #
+    # The reconstruction is a closed Poisson surface, so it wraps
+    # underneath and carries vertices far below the terrain: 5,350 below
+    # 80 m here, down to -128 m. A low percentile per cell lands on that
+    # underside rather than on the ground, pulling cells to 78 m and
+    # then letting the underside itself pass the height test. One such
+    # slab rendered 16 m below ground.
+    zs_all = sorted(p[2] for p in off)
+    floor = zs_all[int(len(zs_all) * 0.01)] - 1.0
+    off = [p for p in off if p[2] >= floor]
+
+    ground_src = {}
+    for ax, ay, z in off:
+        ground_src.setdefault((int(ax // CELL), int(ay // CELL)), []).append(z)
     ground = {}
-    for x, y, z in verts:
-        ground.setdefault((int((x + off_x) // 20), int((y + off_y) // 20)), []).append(z)
-    for k, zs in ground.items():
+    for k, zs in ground_src.items():
         zs.sort()
         ground[k] = zs[int(len(zs) * 0.15)]
 
+    # Reject cells that disagree with their neighbours.
+    #
+    # Terrain is continuous. A cell sitting metres above the ground
+    # around it is not a hill, it is a surviving piece of building, and
+    # it is better replaced by what its neighbours say than trusted.
+    med = {}
+    for k in ground:
+        near = [ground[(k[0] + i, k[1] + j)]
+                for i in (-1, 0, 1) for j in (-1, 0, 1)
+                if (i or j) and (k[0] + i, k[1] + j) in ground]
+        if near:
+            near.sort()
+            med[k] = near[len(near) // 2]
+    fixed = 0
+    for k, m in med.items():
+        if abs(ground[k] - m) > a.ground_tolerance:
+            ground[k] = m
+            fixed += 1
+
+    # Spread outward into the cells the buildings cover. Nearest
+    # measured cell wins, which over a building means its surroundings.
+    filled, frontier = dict(ground), list(ground)
+    for _ in range(40):                   # 40 cells = 800 m, ample
+        nxt = []
+        for (cx_, cy_) in frontier:
+            for dx in (-1, 0, 1):
+                for dy in (-1, 0, 1):
+                    k = (cx_ + dx, cy_ + dy)
+                    if k not in filled:
+                        filled[k] = filled[(cx_, cy_)]
+                        nxt.append(k)
+        if not nxt:
+            break
+        frontier = nxt
+    ground = filled
+    gz = sorted(ground_src)
+    print(f"ground model: {len(ground_src)} cells measured off-building "
+          f"(floor {floor:.1f} m), {fixed} rejected against neighbours, "
+          f"{len(ground) - len(ground_src)} filled across buildings")
+    vals = sorted(ground[k] for k in gz)
+    print(f"  measured ground spans {vals[0]:.1f} .. {vals[-1]:.1f} m, "
+          f"median {vals[len(vals) // 2]:.1f} m")
+
     def ground_at(x, y):
-        k = (int(x // 20), int(y // 20))
-        if k in ground:
-            return ground[k]
-        near = [ground[(k[0]+i, k[1]+j)] for i in (-1, 0, 1) for j in (-1, 0, 1)
-                if (k[0]+i, k[1]+j) in ground]
-        return sum(near) / len(near) if near else None
+        """Bilinear between cell centres.
+
+        A per-cell lookup is a step function, and across neighbouring
+        20 m cells the step reached 16 m. Every building was then cut at
+        a different arbitrary height cell by cell, which punched
+        rectangular holes through roofs and hung a short wall curtain
+        from each hole rim. Those rims are the blocks in the air.
+        """
+        fx = x / CELL - 0.5
+        fy = y / CELL - 0.5
+        i, j = math.floor(fx), math.floor(fy)
+        tx, ty = fx - i, fy - j
+        acc = w = 0.0
+        for di, dj, wt in ((0, 0, (1 - tx) * (1 - ty)), (1, 0, tx * (1 - ty)),
+                           (0, 1, (1 - tx) * ty), (1, 1, tx * ty)):
+            v = ground.get((i + di, j + dj))
+            if v is not None and wt > 0:
+                acc += v * wt
+                w += wt
+        return acc / w if w else None
 
     # Pass 2: keep faces whose centroid is in a footprint and high enough.
     kept, dropped_out, dropped_low = [], 0, 0
     kept_ids = []          # vertex indices per kept face, for the island pass
+    vt_of = {}             # vertex index -> a texture index seen with it
     other = []
     with open(a.obj) as f:
         for line in f:
@@ -322,6 +536,13 @@ def main():
 
                 kept.append(line)
                 kept_ids.append(ids)
+                # Remember one texture coordinate per vertex, so a wall
+                # built off a roof edge can borrow the roof's own colour
+                # there instead of needing a second material.
+                for p, vi in zip(parts, ids):
+                    bits = p.split("/")
+                    if len(bits) > 1 and bits[1] and vi not in vt_of:
+                        vt_of[vi] = int(bits[1]) - 1
             elif not line.startswith(("v ", "vt ", "f ")):
                 other.append(line)
 
@@ -409,6 +630,13 @@ def main():
 
     drop = set()
     dropped_small = dropped_island = 0
+    comp_vt = {}        # component root -> one texture coordinate from its roof
+    for root, face_ns in members.items():
+        for n in face_ns:
+            t = next((vt_of[v] for v in kept_ids[n] if v in vt_of), None)
+            if t is not None:
+                comp_vt[root] = t
+                break
     for face_ns in members.values():
         if len(face_ns) < a.min_faces:
             drop.update(face_ns)
@@ -434,6 +662,144 @@ def main():
     if not kept:
         sys.exit("Island filtering removed everything. --min-faces is probably "
                  "too high for this mesh's density.")
+
+    # ── Pass 4: build the walls ─────────────────────────────────────
+    #
+    # Without this every building is a roof with nothing holding it up.
+    #
+    # Photogrammetry only reconstructs what a camera can see, and nobody
+    # can see inside a building, so there is no geometry under a roof at
+    # all. The sides do get reconstructed, but as a skirt that flares
+    # OUTWARD from the roof edge down to the ground. Measured on the
+    # Billund terminal, by height above ground against distance from the
+    # outline:
+    #
+    #            inside>3m  edge -3..0  pad 0..1.5  ring 1.5..5  outside>5
+    #     9-15m      7,365       3,190       1,480        2,139      2,608
+    #      5-9m        210         349         503        2,490     10,642
+    #      2-5m         47         118          85          515     55,568
+    #
+    # Inside the footprint there is NOTHING between the ground and 9 m.
+    # Everything connecting roof to ground is more than 5 m outside the
+    # outline, mixed in with the tarmac, so clipping to the footprint
+    # correctly discards it and correctly leaves a slab in the air.
+    #
+    # Widening the pad to catch the skirt is not the answer: at 2-5 m up
+    # the ring beyond 5 m is 55,568 vertices, nearly all of it ground.
+    # That trades floating roofs for a collar of tarmac around every
+    # building.
+    #
+    # So the wall is generated. Every edge on the boundary of the kept
+    # surface gets a vertical quad down to local ground, which is exactly
+    # the outline the white box was extruding anyway, except now it is
+    # the real roofline carrying real roof imagery.
+    #
+    # The wall borrows the texture coordinate of the roof edge above it,
+    # stretched down. That is an approximation, not a facade: these are
+    # near-vertical surfaces photographed from above, so there is no
+    # facade imagery in the atlas to use. It reads as the building's own
+    # colour rather than as a grey block, and it needs no second
+    # material.
+    walls_added = 0
+    if a.walls:
+        edge_count = collections.Counter()
+        for ids in kept_ids:
+            n = len(ids)
+            for i in range(n):
+                v1, v2 = ids[i], ids[(i + 1) % n]
+                edge_count[(v1, v2) if v1 < v2 else (v2, v1)] += 1
+
+        # An edge shared by two triangles is interior. An edge used once
+        # is where the surface stops.
+        #
+        # But "where the surface stops" is two different things, and
+        # only one of them is a wall. The outer roofline is a wall. The
+        # rim of a HOLE in the middle of a roof, left where the
+        # reconstruction failed, is not: a curtain dropped from it hangs
+        # inside the building and shows through the gap as a flat
+        # coloured smear lying across the roof.
+        #
+        # 545 of 3,397 boundary edges at Billund were hole rims, giving
+        # 2,180 wall faces, 16 per cent of all walls, every one of them
+        # an artifact on top of a building rather than a side of one.
+        #
+        # A real perimeter follows the footprint outline, so that is the
+        # test. A hole in the middle of a roof is nowhere near it.
+        all_boundary = [e for e, c in edge_count.items() if c == 1]
+        boundary, holes = [], 0
+        for e in all_boundary:
+            mx = (verts[e[0]][0] + verts[e[1]][0]) / 2 + off_x
+            my = (verts[e[0]][1] + verts[e[1]][1]) / 2 + off_y
+            hits = idx.get((int(mx // cell), int(my // cell)), ())
+            if any(near_edge(mx, my, polys[i]["ring"], a.wall_reach) for i in hits):
+                boundary.append(e)
+            else:
+                holes += 1
+
+        for v1, v2 in boundary:
+            x1, y1, z1 = verts[v1]
+            x2, y2, z2 = verts[v2]
+            g1 = ground_at(x1 + off_x, y1 + off_y)
+            g2 = ground_at(x2 + off_x, y2 + off_y)
+            if g1 is None or g2 is None:
+                continue
+            # Sink it slightly so the wall meets terrain instead of
+            # hovering a few centimetres over it.
+            b1 = g1 - a.wall_sink
+            b2 = g2 - a.wall_sink
+            if z1 - b1 < 0.5 and z2 - b2 < 0.5:
+                continue
+            i1 = len(verts); verts.append((x1, y1, b1))
+            i2 = len(verts); verts.append((x2, y2, b2))
+
+            # ONE texture coordinate for the whole wall, shared by all
+            # four corners, taken from this building's own roof.
+            #
+            # The obvious thing is to give each wall corner the texture
+            # coordinate of the roof vertex above it, stretched down.
+            # That produced a 2.6 GB tileset from a 7.6 MB one.
+            #
+            # A texture atlas is not laid out spatially: two vertices
+            # that are neighbours along a roofline can sit at opposite
+            # ends of it. A wall triangle spanning that distance covers
+            # an enormous area of the atlas, and Obj2Tiles crops the
+            # texture to the area its tile's faces touch, so nearly
+            # every tile ended up cropping nearly the whole atlas.
+            #
+            # Collapsing the wall to a single texel makes it one flat
+            # colour, sampled from the roof it hangs under, so each
+            # building's walls match that building. There is no facade
+            # imagery to use anyway: these surfaces were photographed
+            # from above.
+            # `or` would reject texture index 0, which is legitimate.
+            t = comp_vt.get(_find(v1))
+            if t is None:
+                t = vt_of.get(v1)
+            if t is None:
+                t = vt_of.get(v2)
+            if t is None:
+                continue
+            vt_of[i1] = t
+            vt_of[i2] = t
+
+            def tok(v, _t=t):
+                return f"{v + 1}/{_t + 1}"
+
+            # Both windings.
+            #
+            # Which way a wall faces depends on the winding of the roof
+            # triangle its edge came from, and a clipped surface has no
+            # guarantee of consistent winding. Emitting both is two
+            # triangles where one would do, on a part of the mesh that is
+            # a few per cent of it, and removes the possibility of a
+            # building whose walls are invisible from outside because
+            # they were all culled.
+            for tri in ((v1, v2, i2), (v1, i2, i1), (v2, v1, i1), (v2, i1, i2)):
+                kept.append("f " + " ".join(tok(v) for v in tri) + "\n")
+                kept_ids.append(list(tri))
+                walls_added += 1
+        print(f"  walls: {len(boundary):,} perimeter edges -> {walls_added:,} faces "
+              f"({holes:,} hole rims left open)")
 
     # Keep only the vertices and texture coordinates the surviving faces
     # actually reference, and renumber them.

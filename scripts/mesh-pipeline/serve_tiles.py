@@ -52,7 +52,19 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def end_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Cache-Control", "public, max-age=3600")
+        # no-store, deliberately.
+        #
+        # This served `public, max-age=3600`, which is right for the CDN
+        # this becomes in production and badly wrong for development.
+        # Tile filenames never change between reconstructions:
+        # LOD-0/Mesh-XR-YR-....b3dm is the same URL every time, with no
+        # content hash. Same cache key, different mesh.
+        #
+        # So a rebuild would be judged against the previous build, and a
+        # fresh cache entry means the browser does not even ask, which
+        # is indistinguishable from a fix that did nothing.
+        self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        self.send_header("Pragma", "no-cache")
         super().end_headers()
 
     def guess_type(self, path):
