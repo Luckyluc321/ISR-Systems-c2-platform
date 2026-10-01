@@ -1130,8 +1130,23 @@ async function main() {
   // laid a lit square of tarmac and car park over the map. Cutting the
   // geometry removes the failure mode rather than guarding against it,
   // and takes the tileset from 96 MB to 7.6 MB on the way.
+  //
+  // `geoid` is the DVR90 to ellipsoidal separation AT THIS SITE. It is
+  // per site because it runs 34.5 m at Rønne to 40.8 m at Esbjerg, so no
+  // single constant is right nationally, and DK_GEOID_SEPARATION_M is
+  // only the fallback for a site that has not been measured.
+  //
+  // The old 36.8 was being tuned against a photogrammetry mesh that was
+  // itself about 23 m too high, which is why no value ever looked
+  // correct. Heights now come from Danmarks Højdemodel and are verified
+  // against the imagery, so this is a real datum conversion rather than
+  // a fudge factor.
   const SITE_MESHES = {
-    billund: { url: `${_meshHost}/tileset.json`, buildingsOnly: true },
+    billund: {
+      url: `${_meshHost}/tileset.json`,
+      buildingsOnly: true,
+      geoid: 40.3,
+    },
   };
 
   let _siteMesh = null;
@@ -1170,6 +1185,9 @@ async function main() {
     const entry = SITE_MESHES[siteId];
     if (!entry) return null;
     const { url, buildingsOnly } = entry;
+    if (entry.geoid != null && heightOffsetM === DK_GEOID_SEPARATION_M) {
+      heightOffsetM = entry.geoid;
+    }
     try {
       const ts = await Cesium.Cesium3DTileset.fromUrl(url, {
         // The reconstruction is the most accurate thing on screen for

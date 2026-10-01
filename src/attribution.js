@@ -298,8 +298,8 @@ export function renderAttributionPanel(event, activeRole, opts = {}) {
   }).join('');
 
   return `
-    <div class="c-panel c-panel-collapsible" style="border-top: 3px solid #9d8ec9;">
-      <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #9d8ec9;">Attribution assessment</div>
+    <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--sec-accent);">
+      <div class="c-panel-title" style="margin-bottom: var(--space-2);">Attribution assessment</div>
       <div class="c-panel-body">
         <div class="attr-lede">
           ${displayName ? `Assessed platform: <span style="color:var(--text);">${_esc(displayName)}</span>. ` : ''}Overall confidence <span style="color:${_TIER_COLOR[overall] || 'var(--text-dim)'};">${_esc(overall)}</span>. Confidence is not inherited between lines.

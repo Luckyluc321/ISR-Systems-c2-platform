@@ -38,6 +38,15 @@
      `rail` for accent-side stripes (state-driven). */
   --border:            rgba(180, 200, 220, 0.10);   /* hairline (default) */
   --border-strong:     rgba(180, 200, 220, 0.18);
+
+  /* One accent for every section and step in an event's right-hand
+     pillar. Replaces a per-archetype palette of purple, pink, teal,
+     blue, amber and green, which made a case file read as eight
+     unrelated colours rather than one document. Desaturated on purpose:
+     it marks structure, it does not compete with the severity and
+     status colours that carry meaning. */
+  --sec-accent:        #c0817c;
+  --sec-accent-dim:    rgba(192, 129, 124, 0.42);
   --border-accent:     rgba(77, 210, 255, 0.35);
   --border-danger:     rgba(255, 90, 90, 0.35);
   --border-ok:         rgba(77, 255, 156, 0.35);
@@ -5790,8 +5799,8 @@ body.mode-receiver #receiver-view { display: flex; }
   width: 26px; height: 26px;
   flex-shrink: 0;
   border-radius: 50%;
-  border: 1px solid var(--border-strong);
-  color: var(--text);
+  border: 1px solid var(--sec-accent-dim);
+  color: var(--sec-accent);
   display: flex; align-items: center; justify-content: center;
   font-family: var(--font-mono);
   font-size: 11px; font-weight: 600;
@@ -7838,14 +7847,14 @@ body.view-fleet #fleet-view { display: block; }
 }
 .chapter-arch-badge-primary   { color: var(--text); border-color: var(--border-strong); background: rgba(180, 200, 220, 0.05); }
 .chapter-arch-badge-secondary { color: var(--text-mute); }
-.chapter-arch-badge-kinetic-response              { border-left: 2px solid var(--danger); }
-.chapter-arch-badge-coordination-command          { border-left: 2px solid var(--warn); }
-.chapter-arch-badge-intelligence-attribution      { border-left: 2px solid var(--accent); }
-.chapter-arch-badge-forensic-cyber                { border-left: 2px solid #b593ff; }
-.chapter-arch-badge-medical-consequence           { border-left: 2px solid #ff8ac7; }
-.chapter-arch-badge-regulatory-advisory           { border-left: 2px solid #4dffd2; }
-.chapter-arch-badge-public-safety-communication   { border-left: 2px solid var(--ok); }
-.chapter-arch-badge-international-liaison         { border-left: 2px solid var(--text-mute); }
+.chapter-arch-badge-kinetic-response              { border-left: 2px solid var(--sec-accent); }
+.chapter-arch-badge-coordination-command          { border-left: 2px solid var(--sec-accent); }
+.chapter-arch-badge-intelligence-attribution      { border-left: 2px solid var(--sec-accent); }
+.chapter-arch-badge-forensic-cyber                { border-left: 2px solid var(--sec-accent); }
+.chapter-arch-badge-medical-consequence           { border-left: 2px solid var(--sec-accent); }
+.chapter-arch-badge-regulatory-advisory           { border-left: 2px solid var(--sec-accent); }
+.chapter-arch-badge-public-safety-communication   { border-left: 2px solid var(--sec-accent); }
+.chapter-arch-badge-international-liaison         { border-left: 2px solid var(--sec-accent); }
 
 .chapter-canonical {
   display: grid;
@@ -8147,14 +8156,14 @@ body.view-fleet #fleet-view { display: block; }
   flex-wrap: wrap;
   gap: 5px;
 }
-.arch-picker-group-kinetic-response              { border-left: 2px solid var(--danger); }
-.arch-picker-group-coordination-command          { border-left: 2px solid var(--warn); }
-.arch-picker-group-intelligence-attribution      { border-left: 2px solid var(--accent); }
-.arch-picker-group-forensic-cyber                { border-left: 2px solid #b593ff; }
-.arch-picker-group-medical-consequence           { border-left: 2px solid #ff8ac7; }
-.arch-picker-group-regulatory-advisory           { border-left: 2px solid #4dffd2; }
-.arch-picker-group-public-safety-communication   { border-left: 2px solid var(--ok); }
-.arch-picker-group-international-liaison         { border-left: 2px solid var(--text-mute); }
+.arch-picker-group-kinetic-response              { border-left: 2px solid var(--sec-accent); }
+.arch-picker-group-coordination-command          { border-left: 2px solid var(--sec-accent); }
+.arch-picker-group-intelligence-attribution      { border-left: 2px solid var(--sec-accent); }
+.arch-picker-group-forensic-cyber                { border-left: 2px solid var(--sec-accent); }
+.arch-picker-group-medical-consequence           { border-left: 2px solid var(--sec-accent); }
+.arch-picker-group-regulatory-advisory           { border-left: 2px solid var(--sec-accent); }
+.arch-picker-group-public-safety-communication   { border-left: 2px solid var(--sec-accent); }
+.arch-picker-group-international-liaison         { border-left: 2px solid var(--sec-accent); }
 
 .arch-picker-chip {
   display: inline-flex;
@@ -8505,14 +8514,14 @@ body.view-fleet #fleet-view { display: block; }
 .ksub-timing { color: var(--text-dim); font-size: var(--fs-2xs); }
 .ksub-duration { color: var(--text); font-family: var(--font-mono); font-size: var(--fs-2xs); }
 /* Per-archetype border-left tint */
-.chapter-subsec-kinetic-response          { border-left-color: var(--danger); }
-.chapter-subsec-coordination-command      { border-left-color: var(--warn); }
-.chapter-subsec-intelligence-attribution  { border-left-color: var(--accent); }
-.chapter-subsec-forensic-cyber            { border-left-color: #b593ff; }
-.chapter-subsec-medical-consequence       { border-left-color: #ff8ac7; }
-.chapter-subsec-regulatory-advisory       { border-left-color: #4dffd2; }
-.chapter-subsec-public-safety-communication { border-left-color: var(--ok); }
-.chapter-subsec-international-liaison     { border-left-color: var(--text-mute); }
+.chapter-subsec-kinetic-response          { border-left-color: var(--sec-accent); }
+.chapter-subsec-coordination-command      { border-left-color: var(--sec-accent); }
+.chapter-subsec-intelligence-attribution  { border-left-color: var(--sec-accent); }
+.chapter-subsec-forensic-cyber            { border-left-color: var(--sec-accent); }
+.chapter-subsec-medical-consequence       { border-left-color: var(--sec-accent); }
+.chapter-subsec-regulatory-advisory       { border-left-color: var(--sec-accent); }
+.chapter-subsec-public-safety-communication { border-left-color: var(--sec-accent); }
+.chapter-subsec-international-liaison     { border-left-color: var(--sec-accent); }
 
 /* Other agencies on case — Mission Console panel showing agencies
    actually involved (received escalation OR fired dispatch), each
@@ -9325,8 +9334,11 @@ body.workspace-map-active #receiver-view {
 .mon-eng-wrapped > .c-panel-title { color: #6b7280 !important; }
 
 /* Historical pattern panel (receiver-tier site intelligence) */
-.hist-pattern-panel { border-top: 3px solid #c084fc; }
-.hist-pattern-panel > .c-panel-title { color: #c084fc; }
+/* Was a purple top rule and a purple title, which made this panel shout
+   next to every neutral one beside it. Structure uses the one section
+   accent; the heading is the same white as its neighbours. */
+.hist-pattern-panel { border-top: 3px solid var(--sec-accent); }
+.hist-pattern-panel > .c-panel-title { color: var(--text); }
 .hist-pattern-lead,
 .hist-pattern-empty {
   font-size: var(--fs-xs);
@@ -9343,7 +9355,7 @@ body.workspace-map-active #receiver-view {
   border-radius: 6px;
   transition: border-color 120ms, background 120ms;
 }
-.hist-pattern-clickable:hover { border-color: rgba(192, 132, 252, 0.45); background: rgba(255, 255, 255, 0.04); }
+.hist-pattern-clickable:hover { border-color: var(--sec-accent-dim); background: rgba(255, 255, 255, 0.04); }
 .hist-pattern-row-main {
   display: flex;
   align-items: center;
@@ -9362,7 +9374,7 @@ body.workspace-map-active #receiver-view {
   font-size: 15px;
   flex: 0 0 auto;
 }
-.hist-pattern-clickable:hover .hist-pattern-open { color: #c084fc; }
+.hist-pattern-clickable:hover .hist-pattern-open { color: var(--sec-accent); }
 .hist-pattern-sub {
   display: flex;
   align-items: baseline;
@@ -9391,9 +9403,9 @@ body.workspace-map-active #receiver-view {
 .hist-pattern-link {
   padding: 3px 10px;
   font-size: var(--fs-2xs);
-  background: rgba(192, 132, 252, 0.08);
-  color: #c084fc;
-  border: 1px solid rgba(192, 132, 252, 0.35);
+  background: rgba(192, 129, 124, 0.10);
+  color: var(--sec-accent);
+  border: 1px solid var(--sec-accent-dim);
   border-radius: 2px;
   cursor: pointer;
   font-family: var(--font-mono);

@@ -155,7 +155,15 @@ export function invalidateNarrativeCache(eventOrId) {
 export function readNarrativeCacheIfSignalMatch(event, currentSignalHash) {
   const cached = readNarrativeCache(event);
   if (!cached) return null;
-  if (!currentSignalHash) return cached;   // caller has no signal — fall back to any cached
+  // No signal hash means we cannot prove this narrative belongs to what
+  // is on screen now, so it is not reused.
+  //
+  // This used to return any cached narrative in that case, which is why
+  // the briefing read identically event after event: one cached body
+  // was being served for signals it was never written about. Missing
+  // the cache costs one call. Serving the wrong briefing costs trust in
+  // every briefing.
+  if (!currentSignalHash) return null;
   if (cached.signalHash !== currentSignalHash) return null;
   return cached;
 }
