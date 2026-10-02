@@ -2,6 +2,8 @@ import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import './style.css';
 import { siteLoaderCoverage } from './site_loader.js';
+// billund-sovereign only: owns the Bing/SDFI basemap decision.
+import { createBasemapRule } from './basemap_rule.js';
 import { SITES, SITE_LOAD_ERRORS as _siteLoaderErrors } from './sites_registry.js';
 // Phase 2 rendering carve-out — pure HTML string modules extracted
 // from main.js. Each module exports render functions that take state
@@ -1553,6 +1555,15 @@ async function main() {
     console.warn('[render_profile] sovereign profile active but SDFI_TOKEN missing.');
   }
   window.__isr_sdfiLayer = sdfiLayer;
+
+  // ── Which basemap, and where — see basemap_rule.js ──────────────
+  // One owner for the Bing/SDFI decision. Every call site asks it rather
+  // than setting the layers itself, because when they each decided for
+  // themselves they disagreed: entering a receiver's workspace map forced
+  // SDFI on even over Copenhagen, where the rule says Google's photoreal
+  // mesh should be what you look at.
+  const basemapRule = createBasemapRule({ Cesium, viewer, sdfiLayer, bingLayer });
+  window.__isr_basemap = basemapRule;
 
   // ── Sovereign layer registry — see sovereign_layers.js ──
   // Additive: only initialised on sovereign profile. On photoreal, the
@@ -23373,14 +23384,13 @@ async function main() {
   // transitions and initial workspace entry when default mode is map.
   function _enterMapMode(event) {
     document.body.classList.add('workspace-map-active');
-    // Swap to sovereign SDFI imagery over Denmark if the token was
-    // provided at platform init. Bing stays loaded but is hidden while
-    // the receiver is in workspace map mode.
-    const sdfi = window.__isr_sdfiLayer;
-    if (sdfi) {
-      sdfi.show = true;
-      if (bingLayer) bingLayer.alpha = 0;
-    }
+    // Ask the basemap rule rather than forcing SDFI on. Over Copenhagen
+    // or any other city Google's photoreal mesh covers, the rule says
+    // Bing, because the mesh is what you are actually looking at there
+    // and an orthophoto under it buys nothing. Forcing SDFI on here used
+    // to override that silently, and only in workspace map mode.
+    // Called again after the flight lands, since the rule reads altitude.
+    if (window.__isr_basemap) window.__isr_basemap.apply('workspace map');
     if (!_preWorkspaceCameraState) _saveCameraState();
     const pos = _eventFocusCoords(event);
     if (!pos) return;
@@ -23405,12 +23415,12 @@ async function main() {
   }
   function _exitMapMode() {
     document.body.classList.remove('workspace-map-active');
-    const sdfi = window.__isr_sdfiLayer;
-    if (sdfi) {
-      sdfi.show = false;
-      if (bingLayer) bingLayer.alpha = 1;
-    }
+    // Not sdfi.show = false. Leaving map mode over Billund used to drop
+    // back to Bing and stay there until the next camera move, which is
+    // the same bug in the other direction. _restoreCameraState flies, and
+    // the flight's moveEnd re-evaluates; this handles the no-flight case.
     _restoreCameraState();
+    if (window.__isr_basemap) window.__isr_basemap.apply('left workspace map');
   }
 
   // ─────────────────────────────────────────────────────────────
