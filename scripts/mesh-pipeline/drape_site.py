@@ -195,6 +195,11 @@ def main():
     ap.add_argument("--osm", required=True)
     ap.add_argument("--dhm", required=True)
     ap.add_argument("--bbox", required=True, help="minLon,minLat,maxLon,maxLat")
+    ap.add_argument("--exclude-bbox", action="append", default=[],
+                    help="skip footprints whose centre falls in this box; "
+                         "repeatable. For ground already covered by another "
+                         "build, so the two tilesets do not draw the same "
+                         "building twice")
     ap.add_argument("--images", default=None)
     ap.add_argument("--out", required=True, help="output directory")
     ap.add_argument("--gsd", type=float, default=0.12, help="texture metres per pixel")
@@ -218,6 +223,8 @@ def main():
     print(f"{len(frames)} frames, {len(surf.tiles)} surface tiles, "
           f"{len(terr.tiles)} terrain tiles")
 
+    excl = [tuple(float(v) for v in e.split(",")) for e in a.exclude_bbox]
+    n_excluded = 0
     doc = json.loads(Path(a.osm).read_text())
     cands = []
     for el in doc.get("elements", []):
@@ -227,6 +234,9 @@ def main():
         clon = sum(p["lon"] for p in g) / len(g)
         clat = sum(p["lat"] for p in g) / len(g)
         if not (bbox[0] <= clon <= bbox[2] and bbox[1] <= clat <= bbox[3]):
+            continue
+        if any(x[0] <= clon <= x[2] and x[1] <= clat <= x[3] for x in excl):
+            n_excluded += 1
             continue
         ring = [utm32n(p["lon"], p["lat"]) for p in g]
         if ring[0] == ring[-1]:
@@ -251,7 +261,8 @@ def main():
                       "area": ring_area(ring),
                       "no_walls": tags.get("building") in ("roof", "canopy",
                                                            "carport", "shelter")})
-    print(f"{len(cands)} footprints in the box")
+    print(f"{len(cands)} footprints in the box"
+          + (f", {n_excluded} excluded as already built" if n_excluded else ""))
 
     # Heights, and the reasons for dropping anything.
     builds, skipped = [], {"no_dhm": 0, "too_low": 0, "no_frame": 0}
