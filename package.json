@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check:event-mutations && npm run check:tenant-stamping && npm run check:impact-cascade && npm run check:scene-lifecycle && npm run check:site-assets && npm run check:attribution && npm run check:provenance && npm run check:track-identity && npm run check:signal-tier && npm run check:eval-fixtures && vite build",
+    "build": "npm run check:event-mutations && npm run check:tenant-stamping && npm run check:impact-cascade && npm run check:scene-lifecycle && npm run check:site-assets && npm run check:attribution && npm run check:provenance && npm run check:track-identity && npm run check:signal-tier && npm run check:eval-fixtures && npm run check:sim-clock && vite build",
     "preview": "vite preview",
     "check:event-mutations": "node scripts/check-event-mutations.mjs",
     "check:tenant-stamping": "node scripts/check-tenant-stamping.mjs",
@@ -18,7 +18,8 @@
     "check:provenance": "node scripts/check-provenance.mjs",
     "check:track-identity": "node scripts/check-track-identity.mjs",
     "check:signal-tier": "node scripts/check-signal-tier.mjs",
-    "check:eval-fixtures": "node scripts/check-eval-fixtures.mjs"
+    "check:eval-fixtures": "node scripts/check-eval-fixtures.mjs",
+    "check:sim-clock": "node scripts/check-sim-clock.mjs"
   },
   "devDependencies": {
     "vite": "^8.1.1"

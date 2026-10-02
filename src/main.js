@@ -2,6 +2,15 @@ import * as Cesium from 'cesium';
 import 'cesium/Build/Cesium/Widgets/widgets.css';
 import './style.css';
 import { siteLoaderCoverage } from './site_loader.js';
+// The simulation clock. Every read that derives or compares simulation
+// state goes through monoNow/wallNow so that one pause freezes the whole
+// scene at once. Record timestamps, the UTC clock and the live-telemetry
+// staleness check deliberately keep the real clock — see sim_clock.js.
+import {
+  monoNow, wallNow, isPaused as simIsPaused, toggle as simToggle,
+  onChange as onSimClockChange, after as simAfter,
+} from './sim_clock.js';
+import { markup as simPauseMarkup, wire as simPauseWire } from './sim_pause_control.js';
 import { SITES, SITE_LOAD_ERRORS as _siteLoaderErrors } from './sites_registry.js';
 // Phase 2 rendering carve-out — pure HTML string modules extracted
 // from main.js. Each module exports render functions that take state
@@ -4416,7 +4425,7 @@ async function main() {
     // Widens the practical dispatch window from ~30 s to ~2 min.
     const BJ_DETECT_SEC = 240;
     const aimDistM = haversineM(SKRYDSTRUP.lat, SKRYDSTRUP.lon, projLat, projLon);
-    const missileElapsedSec = event.spawnTs ? (Date.now() - event.spawnTs) / 1000 : 0;
+    const missileElapsedSec = event.spawnTs ? (wallNow() - event.spawnTs) / 1000 : 0;
     const timeToBjDetect = Math.max(30, BJ_DETECT_SEC - missileElapsedSec);
     const requiredCruiseSpeed = aimDistM / timeToBjDetect;
     _f35.cruiseSpeed = Math.min(1500, Math.max(750, requiredCruiseSpeed));
@@ -4424,7 +4433,7 @@ async function main() {
     _f35.airborne = true;
     _f35.mode = 'cruise';
     _f35.dispatchTs = Date.now();
-    _f35.lastFrameTs = Date.now();
+    _f35.lastFrameTs = wallNow();
     _f35.dispatchedForEventId = eventId;
     _f35.targetEventId = null;
     _f35.cruiseBearing = cruiseBearing;
@@ -4831,7 +4840,7 @@ async function main() {
       }],
       provenance: { breakawayOf: event.id, sourceMemberId: sw.memberId || null, promotedAt: nowIso },
       linkedEventIds: [event.id],
-      spawnTs: Date.now(),
+      spawnTs: wallNow(),
     };
     addEvent(child);
     appendEventArray(event.id, 'linkedEventIds', childId);
@@ -5423,9 +5432,9 @@ async function main() {
       // guess, and so a mixed scene is legible.
       telemetrySource: 'sim',
       dispatchedTs: Date.now(),
-      lastFrameTs: Date.now(),
+      lastFrameTs: wallNow(),
       arrivedTs: isStatic ? Date.now() : null,
-      engageStartTs: isStatic ? Date.now() : null,
+      engageStartTs: isStatic ? wallNow() : null,
       curLat: originLat, curLon: originLon,
       // Airborne cruise altitude (m AGL). Interceptor climbs from
       // this baseline toward the enemy drone's altitude during chase.
@@ -5776,7 +5785,7 @@ async function main() {
       const gh = viewer.scene.globe.getHeight(Cesium.Cartographic.fromDegrees(swLon, swLat));
       const groundAlt = (typeof gh === 'number') ? gh : 0;
       sw._jamFall = {
-        startTs: Date.now(),
+        startTs: wallNow(),
         durMs: _fallDurMsForModel(sw.model),
         startLat: swLat, startLon: swLon, startAlt: swAlt,
         // Small horizontal drift on descent — not a straight vertical
@@ -6037,7 +6046,7 @@ async function main() {
   function _startCounterDispatchLoop() {
     if (_cdRafId) return;
     const tick = () => {
-      const now = Date.now();
+      const now = wallNow();
       for (const [, d] of _counterDispatches) {
         _tickCounterDispatch(d, now);
         // LIVE POSITION AUTHORITY. Re-assert the last real fix over
@@ -6903,7 +6912,7 @@ async function main() {
                   // Explosion — hide drone billboard promptly since the
                   // airframe is gone (fireball is what the eye tracks).
                   if (stTarget) {
-                    stTarget.closedAt = performance.now();
+                    stTarget.closedAt = monoNow();
                     setTimeout(() => {
                       if (stTarget.billboard) stTarget.billboard.show = false;
                       if (stTarget.trail) stTarget.trail.show = false;
@@ -6920,7 +6929,7 @@ async function main() {
                     wreckLon = impact.impactLon;
                     wreckDelayMs = impact.fallMs + 200;
                   }
-                  if (stTarget) stTarget.closedAt = performance.now();
+                  if (stTarget) stTarget.closedAt = monoNow();
                 }
               } catch (err) { console.warn('[kill visuals] failed:', err.message); }
 
@@ -6928,7 +6937,7 @@ async function main() {
               // impact time for physics-fall so the DOWNED marker lands
               // where the drone actually hits ground (not where it was
               // hit in mid-air). Same code path swarm scenario uses.
-              setTimeout(() => {
+              simAfter(() => {
                 const wreckId = `wr-${targetEv.id}-${(targetEv.wreckages?.length || 0) + 1}`;
                 const wreck = {
                   id: wreckId,
@@ -7532,7 +7541,7 @@ async function main() {
     const impactLat = killLat + (driftM / 111320) * Math.cos(headingRad);
     const impactLon = killLon + (driftM / (111320 * Math.cos(killLat * Math.PI / 180))) * Math.sin(headingRad);
 
-    const startTs = Date.now();
+    const startTs = wallNow();
     const fallMs = fallSec * 1000;
 
     // Dashed white trail behind the fall — updated via CallbackProperty.
@@ -7551,7 +7560,7 @@ async function main() {
 
     if (state?.billboard) {
       state.billboard.position = new Cesium.CallbackProperty(() => {
-        const t = Math.min(1, (Date.now() - startTs) / fallMs);
+        const t = Math.min(1, (wallNow() - startTs) / fallMs);
         const curLat = killLat + (impactLat - killLat) * t;
         const curLon = killLon + (impactLon - killLon) * t;
         const elapsedSec = t * fallSec;
@@ -7570,7 +7579,7 @@ async function main() {
     // operator is in POV of this drone at impact, kick the TV-static
     // signal-loss overlay so they experience the loss-of-signal beat
     // before being pushed back to overhead view.
-    setTimeout(() => {
+    simAfter(() => {
       _spawnFlashEntity(impactLon, impactLat, 900,  'rgba(190,170,140,0.80)', 22, 60, 4);
       _spawnFlashEntity(impactLon, impactLat, 1800, 'rgba(160,145,120,0.55)', 28, 78, 10);
       _spawnFlashEntity(impactLon, impactLat, 4500, 'rgba(130,115,100,0.32)', 20, 65, 24);
@@ -7640,7 +7649,7 @@ async function main() {
           // it threw a ReferenceError that aborted the rAF callback
           // before reschedule, freezing every dispatch for the session
           // (verify-agent finding).
-          d.lastFrameTs = Date.now();
+          d.lastFrameTs = wallNow();
           return;
         }
         // Hit animation at THIS drone's live position
@@ -7757,7 +7766,7 @@ async function main() {
         d._nextTracerTs = null;
         d._firedAtLeastOnce = false;
         d._roundsFired = 0;   // reset kill-gate for new target
-        d.lastFrameTs = Date.now();
+        d.lastFrameTs = wallNow();
         const newCart = nearest.billboard?.position?.getValue?.(Cesium.JulianDate.now());
         if (newCart) {
           const nc = Cesium.Cartographic.fromCartesian(newCart);
@@ -7903,7 +7912,7 @@ async function main() {
         d.state = 'rtb_home';
         d.rtbTargetLat = d.originLat;
         d.rtbTargetLon = d.originLon;
-        d.lastFrameTs = Date.now();
+        d.lastFrameTs = wallNow();
         if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
         if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
         return;
@@ -7959,7 +7968,7 @@ async function main() {
       // callback before it reschedules, freezing every dispatch on the
       // map for the session. Date.now() is also the right timebase:
       // the sweep compares this against Date.now().
-      if (typeof d.cordonHoldSinceMs !== 'number') d.cordonHoldSinceMs = Date.now();
+      if (typeof d.cordonHoldSinceMs !== 'number') d.cordonHoldSinceMs = wallNow();
       if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
         if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
       return;
@@ -7973,7 +7982,7 @@ async function main() {
         return Cesium.Color.WHITE.withAlpha(1 - t * 0.9);
       }, false);
     }
-    setTimeout(() => {
+    simAfter(() => {
       if (d.entity) { viewer.entities.remove(d.entity); d.entity = null; }
       if (d.trail) { viewer.entities.remove(d.trail); d.trail = null; }
       if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
@@ -8574,7 +8583,7 @@ async function main() {
   function _startF35Loop() {
     const step = () => {
       if (!_f35.airborne) return;
-      const now = Date.now();
+      const now = wallNow();
       const dt = Math.max(0, (now - _f35.lastFrameTs) / 1000);
       _f35.lastFrameTs = now;
 
@@ -8707,14 +8716,14 @@ async function main() {
     _friendlyMissile.curLon = fromLon;
     _friendlyMissile.heading = 0;
     _friendlyMissile.headingInit = false;
-    _friendlyMissile.spawnTs = Date.now();
-    _friendlyMissile.lastFrameTs = Date.now();
+    _friendlyMissile.spawnTs = wallNow();
+    _friendlyMissile.lastFrameTs = wallNow();
     _friendlyMissile.targetEventId = targetEventId;
     _friendlyMissile.impacted = false;
 
     const advance = () => {
       if (!_friendlyMissile.active) return;
-      const now = Date.now();
+      const now = wallNow();
       const dt = Math.max(0, (now - _friendlyMissile.lastFrameTs) / 1000);
       _friendlyMissile.lastFrameTs = now;
 
@@ -8782,7 +8791,7 @@ async function main() {
         //                          radar seeker, terminal homing mode,
         //                          maximum acceleration/velocity phase
         text: new Cesium.CallbackProperty(() => {
-          const elapsed = (Date.now() - _friendlyMissile.spawnTs) / 1000;
+          const elapsed = (wallNow() - _friendlyMissile.spawnTs) / 1000;
           if (elapsed < 1.5) return 'AIM-120 AMRAAM · FOX 3 · Launched';
           return 'AIM-120 AMRAAM · PIT BULL · Active Homing (Terminal)';
         }, false),
@@ -9387,7 +9396,7 @@ async function main() {
   // down, else 'lost contact'.
   const _SWEEP_GRACE_MS = 15000;
   function _sweepUnobservedActiveEvents() {
-    const now = Date.now();
+    const now = wallNow();
     for (const ev of EVENTS) {
       if (ev.status !== 'active') continue;
       if (ev.detected !== true) continue;             // pre-detection transits are not ours to kill
@@ -9449,7 +9458,7 @@ async function main() {
   //
   // rtb_home moves by bearing and ignores routePositions, so the route
   // state is dropped rather than left stale.
-  function _sendDispatchHome(d, nowMs = Date.now()) {
+  function _sendDispatchHome(d, nowMs = wallNow()) {
     if (!d) return;
     d.assignedWreckageId = null;
     d.sceneWreckageId = null;
@@ -9464,7 +9473,7 @@ async function main() {
   }
 
   function _sweepSceneLifecycle() {
-    const now = Date.now();
+    const now = wallNow();
     const dispatches = Array.from(_counterDispatches.values());
     for (const d of dispatches) {
       // Both fields. A wreck attended only by ambulances is still a
@@ -9611,7 +9620,7 @@ async function main() {
     // 3. Remove the entities of tracks closed longer than the ghost
     //    period. The check the tick loop could never reach.
     let _removedAny = false;
-    for (const eventId of expiredGhostEventIds(droneState, { now: performance.now(), ghostMs: GHOST_MS })) {
+    for (const eventId of expiredGhostEventIds(droneState, { now: monoNow(), ghostMs: GHOST_MS })) {
       const state = droneState.get(eventId);
       if (!state) continue;
       // Persist BEFORE teardown. removeDroneEntities deletes the
@@ -9821,7 +9830,7 @@ async function main() {
     // Source-agnostic (mock and WebSocket both flow through here),
     // which is the IF-1 seam the sweeper is allowed to trust.
     if ((batch.sensors || []).some(se => se.status !== 'offline' && (se.detections || []).length)) {
-      targetEvent._lastDetectionTs = Date.now();
+      targetEvent._lastDetectionTs = wallNow();
     }
     for (const sEntry of batch.sensors) {
       if (sEntry.status === 'offline') continue;
@@ -10072,7 +10081,7 @@ async function main() {
             history: [{ status: mt.status, at: new Date().toISOString() }],
           }))
         : undefined,
-      spawnTs: Date.now(),
+      spawnTs: wallNow(),
       // Both events are FIRST-CLASS. linkedEventId (singular) is a
       // "source-of-recording-data" pointer used by the tick loop to
       // extract this event's sample slice from the primary's stream at
@@ -13813,7 +13822,7 @@ async function main() {
       billboard, trail, shadow,
       swarmBillboards,   // formation[1..N] only — LEAD is state.leadSwarmMember
       leadSwarmMember,   // formation[0] wrapper, same shape as swarmBillboards entries
-      spawnMs: performance.now(),   // shared timing reference for swarm interpolation
+      spawnMs: monoNow(),   // shared timing reference for swarm interpolation
       trailPositions, shadowPositions,
       stateHolder,      // { headingRad } — updated in tick, read by billboard rotation callback
       entryDropped: false, entryMarker: null,
@@ -13931,7 +13940,7 @@ async function main() {
       if (_f35.airborne && event.platform === 'missile' && event.classification === 'hostile' && !state.closedAt && event.lastPosition) {
         const neutralized = tryNeutralize(event.id, event.lastPosition);
         if (neutralized) {
-          state.closedAt = performance.now();
+          state.closedAt = monoNow();
           markTrackClosed(p.eventId);
           closeEvent(p.eventId, event.exit || null);
           if (state.billboard) state.billboard.show = false;
@@ -14111,7 +14120,7 @@ async function main() {
             // render the countdown section, and the same graceMs is
             // reused every subsequent tick so the countdown is stable.
             if (!state._outOfAllCoverageSinceMs) {
-              state._outOfAllCoverageSinceMs = performance.now();
+              state._outOfAllCoverageSinceMs = monoNow();
               const loss = _classifyDetectionLoss(event);
               mutateEvent(event.id, {
                 temporaryLoss: {
@@ -14127,8 +14136,8 @@ async function main() {
               });
             }
             const activeGraceMs = event.temporaryLoss?.graceMs || 12000;
-            if (performance.now() - state._outOfAllCoverageSinceMs >= activeGraceMs) {
-              state.closedAt = performance.now();
+            if (monoNow() - state._outOfAllCoverageSinceMs >= activeGraceMs) {
+              state.closedAt = monoNow();
               const exitPoint = event.lastKnownPosition
                 ? { lat: event.lastKnownPosition.lat, lon: event.lastKnownPosition.lon,
                     alt: event.lastKnownPosition.alt, timestamp: new Date().toISOString(),
@@ -14254,7 +14263,7 @@ async function main() {
             if (!state.recording) {
               _initSingleDroneRecording(event, state, _tpl_single);
             }
-            const _nowMs_single = performance.now();
+            const _nowMs_single = monoNow();
             const _interval_single = _sampleIntervalForEvent(event);
             if (!state._singleLastSampleMs || (_nowMs_single - state._singleLastSampleMs) >= _interval_single) {
               const _drone0 = state.recording.meta.drones[0];
@@ -14436,7 +14445,7 @@ async function main() {
         if (state.outOfRangeDropped && !state.closedAt && !event.awaitingNeutralization
             && !event.multiSiteTrack && event.status === 'active'
             && !cov?.inCoverage && !_onboardTrackMaintained(event, p)) {
-          state.closedAt = performance.now();
+          state.closedAt = monoNow();
           markTrackClosed(p.eventId);
           closeEvent(p.eventId, event.exit || null, { autoOutcome: 'lost contact' });
           updateContributingRings();
@@ -14459,7 +14468,7 @@ async function main() {
         if (!state.recording && _template_for_rec?.swarm) {
           _initRecording(event, state, _template_for_rec);
         }
-        const nowMs = performance.now();
+        const nowMs = monoNow();
         const tSec = (nowMs - (state.spawnMs || nowMs)) / 1000;
         const M_PER_DEG_LAT = 111320;
 
@@ -14696,7 +14705,7 @@ async function main() {
             const jf = sw._jamFall;
             // startTs is Date.now() wall clock (see _initiateJamFall);
             // tick's nowMs is performance.now(), different scale.
-            const t = Math.min(1, (Date.now() - jf.startTs) / jf.durMs);
+            const t = Math.min(1, (wallNow() - jf.startTs) / jf.durMs);
             // Ease-in altitude — drone stabiliser fails, tips, then plummets
             const altT = t < 0.35 ? (t / 0.35) * 0.15 : 0.15 + ((t - 0.35) / 0.65) * 0.85;
             const alt = jf.startAlt - (jf.startAlt - jf.groundAlt) * altT;
@@ -14901,7 +14910,7 @@ async function main() {
           } else if (sw._breakawayChildId && !sw.neutralised) {
             const childEv = getEvent(sw._breakawayChildId);
             if (childEv && childEv.status === 'active') {
-              if (swShouldShow) childEv._lastDetectionTs = Date.now();
+              if (swShouldShow) childEv._lastDetectionTs = wallNow();
               mutateEvent(childEv.id, {
                 lastPosition: { lat: pos.lat, lon: pos.lon, alt: pos.alt, heading: hdgDeg, speed: speedMs, timestamp: new Date().toISOString() },
                 // Sticky-once-true, matching every other detected write
@@ -15101,7 +15110,7 @@ async function main() {
         return false;
       })();
       if (p.completed && !state.closedAt && event.status === 'active' && !event.awaitingNeutralization && !_resolvingEngagement) {
-        state.closedAt = performance.now();
+        state.closedAt = monoNow();
         markTrackClosed(p.eventId);
         // Terminal impact: attack-profile templates (Shahed, Geran-3)
         // declare terminalImpact so waypoint completion means warhead
@@ -15266,9 +15275,9 @@ async function main() {
       }
 
       // P5A: periodic in-flight persistence every 30 s (crash safety)
-      if (state.recording && (!state._lastPersistMs || performance.now() - state._lastPersistMs >= 30000)) {
+      if (state.recording && (!state._lastPersistMs || monoNow() - state._lastPersistMs >= 30000)) {
         _persistRecording(p.eventId);
-        state._lastPersistMs = performance.now();
+        state._lastPersistMs = monoNow();
       }
 
       // Ghost-period teardown used to live here and was unreachable.
@@ -15430,7 +15439,7 @@ async function main() {
             history: [{ status: 'tracked', at: new Date().toISOString() }],
           }))
         : undefined,
-      spawnTs: Date.now(),
+      spawnTs: wallNow(),
     };
     addEvent(event);
     // P8: run detection-similarity correlator against active + recently
@@ -16697,7 +16706,9 @@ async function main() {
           ${pathsForSel.map(e => `<option value="${esc(e.pathLabel)}" ${e.pathLabel === _simSelPath ? 'selected' : ''}>${e.pathLabel}</option>`).join('')}
         </select>
       </div>
-      <button class="cp-btn wide sim-btn sim-launch" data-comp-launch ${selEntry ? '' : 'disabled'}>Launch simulation</button>`;
+      <button class="cp-btn wide sim-btn sim-launch" data-comp-launch ${selEntry ? '' : 'disabled'}>Launch simulation</button>
+      ${simPauseMarkup(simIsPaused(), anyTrackLive())}`;
+    simPauseWire(simPanel, () => { simToggle(); });
     const thSel = simPanel.querySelector('#sim-comp-threat');
     if (thSel) thSel.addEventListener('change', () => {
       _simSelThreat = thSel.value || null;
@@ -16713,9 +16724,47 @@ async function main() {
     if (launchBtn && selEntry) launchBtn.addEventListener('click', () => {
       if (anyTrackLive()) return;
       flyTo(site);
-      setTimeout(() => window.__spawnDrone(selEntry.key), 1500);
+      simAfter(() => window.__spawnDrone(selEntry.key), 1500);
     });
   }
+
+  // ── Keeping the pause button honest ──────────────────────────────
+  // Two things make the sim panel re-render: the clock changing, so the
+  // button's label follows the clock rather than the click (a pause
+  // triggered by the spacebar relabels this button too), and a track
+  // starting or stopping, so the button appears and disappears with
+  // something to pause.
+  //
+  // Liveness is polled rather than hooked. The drone engine's update
+  // callback fires every animation frame, and re-rendering a panel's
+  // innerHTML at 60 Hz to catch a transition that happens twice per
+  // scenario is the wrong trade. One comparison a second is not.
+  onSimClockChange(() => renderSimPanel());
+  let _simPauseLastLive = false;
+  setInterval(() => {
+    const live = anyTrackLive();
+    if (live === _simPauseLastLive) return;
+    _simPauseLastLive = live;
+    renderSimPanel();
+  }, 1000);
+
+  // Spacebar freezes and resumes. Lives with the other global key
+  // handlers because it has to work whether or not the sim panel is on
+  // screen, which during a walkthrough it often is not. Same guards the
+  // existing handlers use, plus preventDefault so the page does not
+  // scroll and a focused button is not re-triggered.
+  window.addEventListener('keydown', (ev) => {
+    if (ev.code !== 'Space' && ev.key !== ' ') return;
+    if (ev.metaKey || ev.ctrlKey || ev.altKey) return;
+    const t = ev.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA'
+              || t.tagName === 'SELECT' || t.isContentEditable)) return;
+    if (!anyTrackLive()) return;
+    ev.preventDefault();
+    const paused = simToggle();
+    toast(paused ? 'Simulation frozen' : 'Simulation resumed', 'info');
+  });
+
   let _simSelThreat = null;
   let _simSelPath = null;
   // Threat/path annotation for the composer. Keys not listed fall
@@ -21092,7 +21141,7 @@ async function main() {
         node.textContent = `Closing in ${Math.round(graceMs / 1000)} seconds`;
         return;
       }
-      const elapsedMs = performance.now() - startedMs;
+      const elapsedMs = monoNow() - startedMs;
       const remainMs = Math.max(0, graceMs - elapsedMs);
       const remainS = Math.max(0, Math.ceil(remainMs / 1000));
       node.textContent = remainS > 0

@@ -3,6 +3,12 @@
 // once through its trajectory, then closes. Real detection pipeline will replace
 // this module with a WebSocket subscription that streams the same update shape.
 
+// Time comes from the simulation clock, never the browser's. A track's
+// position is a pure function of elapsed time, so freezing that clock
+// freezes the track exactly and resuming continues from the same point.
+// See sim_clock.js for why there are two readers.
+import { monoNow } from './sim_clock.js';
+
 // ── Trajectory templates ──
 // Each template is a full flight path (list of waypoints). Spawn wraps it into
 // a live track with startTime = now.
@@ -1320,7 +1326,7 @@ function _tick() {
   const updates = [];
   for (const [eventId, live] of _liveTracks) {
     if (live.closed) continue;
-    const elapsed = (performance.now() - live.startTime) / 1000;
+    const elapsed = (monoNow() - live.startTime) / 1000;
     const p = interpolate(live.template.waypoints, elapsed);
     updates.push({
       eventId,
@@ -1340,7 +1346,9 @@ function _tick() {
 }
 
 export function addLiveTrack(eventId, template) {
-  _liveTracks.set(eventId, { template, startTime: performance.now(), closed: false });
+  // Stamped on the simulation clock, not the browser's, so that
+  // `monoNow() - startTime` in _tick stays a frozen-aware elapsed.
+  _liveTracks.set(eventId, { template, startTime: monoNow(), closed: false });
   if (!_rafId) _rafId = requestAnimationFrame(_tick);
 }
 

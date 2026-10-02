@@ -3346,6 +3346,38 @@ body.replay-dragging * {
   background: rgba(255, 56, 56, 0.12) !important;
   color: #ff3838 !important;
 }
+/* Pause control. Neutral rather than red: freezing the scene is not a
+   threat action, and it sits directly under the red launch button where
+   a second red button would read as a second way to fire something.
+   Turns amber while frozen, because "the scene is not advancing" is a
+   state an operator should notice without reading the label. */
+.sim-pause {
+  border-color: rgba(180, 200, 220, 0.35) !important;
+  color: var(--text-dim) !important;
+  display: flex !important;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  margin-top: 6px;
+}
+.sim-pause:hover:not(:disabled) {
+  background: rgba(180, 200, 220, 0.10) !important;
+  color: var(--text) !important;
+}
+.sim-pause.is-paused {
+  border-color: rgba(255, 176, 32, 0.55) !important;
+  color: #ffc14d !important;
+  background: rgba(255, 176, 32, 0.08) !important;
+}
+.sim-pause.is-paused:hover:not(:disabled) {
+  background: rgba(255, 176, 32, 0.16) !important;
+}
+.sim-pause-glyph {
+  font-size: 9px;
+  letter-spacing: -1px;
+  opacity: 0.85;
+}
+
 .sim-btn.friendly {
   border-color: rgba(77, 255, 156, 0.4) !important;
   color: #7fee9d !important;
