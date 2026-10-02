@@ -312,10 +312,38 @@ def main() -> None:
 
     out = Path(a.out)
     (out / "images").mkdir(parents=True, exist_ok=True)
+
+    # MERGE with any poses already recorded, never overwrite.
+    #
+    # A --direction run otherwise throws away the camera models for every
+    # image fetched by an earlier run. Fetching the nadirs for roofs and
+    # then the obliques for walls left poses.json describing only the
+    # obliques, while 54 nadir TIFFs sat on disk with no way to project
+    # into them. The images survive that; the camera models do not, and
+    # nothing downstream can tell the difference until it finds no frame
+    # that sees a roof.
+    merged = {}
+    existing = out / "poses.json"
+    if existing.exists():
+        try:
+            prev = json.loads(existing.read_text()).get("images", [])
+            for p in prev:
+                if p.get("id"):
+                    merged[p["id"]] = p
+        except Exception as err:
+            print(f"WARNING: could not read existing poses.json ({err}); starting fresh")
+    before = len(merged)
+    for p in poses:
+        if p.get("id"):
+            merged[p["id"]] = p
+    allposes = list(merged.values())
     (out / "poses.json").write_text(
-        json.dumps({"collection": a.collection, "bbox": bbox, "images": poses}, indent=2)
+        json.dumps({"collection": a.collection, "bbox": bbox,
+                    "images": allposes}, indent=2)
     )
-    print(f"wrote {out/'poses.json'}")
+    kept = before - (len(merged) - len(poses)) if before else 0
+    print(f"wrote {out/'poses.json'}  ({len(allposes)} poses, "
+          f"{len(poses)} from this run, {max(0, len(allposes)-len(poses))} kept from earlier)")
 
     fetched = skipped = failed = 0
     for n, it in enumerate(items, 1):

@@ -56,6 +56,36 @@ Image.MAX_IMAGE_PIXELS = None
 
 
 # ── geometry ────────────────────────────────────────────────────────
+def _inv_utm32n(x, y):
+    """EPSG:25832 back to WGS84 lon/lat.
+
+    The inverse of utm32n in clip_to_buildings, needed only to tell
+    Obj2Tiles where the local origin sits.
+    """
+    a, f_ = 6378137.0, 1 / 298.257223563
+    e2 = f_ * (2 - f_)
+    e1 = (1 - math.sqrt(1 - e2)) / (1 + math.sqrt(1 - e2))
+    k0, E0, lon0 = 0.9996, 500000.0, math.radians(9.0)
+    M = y / k0
+    mu = M / (a * (1 - e2/4 - 3*e2**2/64 - 5*e2**3/256))
+    phi1 = (mu + (3*e1/2 - 27*e1**3/32) * math.sin(2*mu)
+            + (21*e1**2/16 - 55*e1**4/32) * math.sin(4*mu)
+            + (151*e1**3/96) * math.sin(6*mu))
+    ep2 = e2 / (1 - e2)
+    C1 = ep2 * math.cos(phi1) ** 2
+    T1 = math.tan(phi1) ** 2
+    N1 = a / math.sqrt(1 - e2 * math.sin(phi1) ** 2)
+    R1 = a * (1 - e2) / (1 - e2 * math.sin(phi1) ** 2) ** 1.5
+    D = (x - E0) / (N1 * k0)
+    lat = phi1 - (N1 * math.tan(phi1) / R1) * (
+        D*D/2 - (5 + 3*T1 + 10*C1 - 4*C1*C1 - 9*ep2) * D**4/24
+        + (61 + 90*T1 + 298*C1 + 45*T1*T1 - 252*ep2 - 3*C1*C1) * D**6/720)
+    lon = lon0 + (D - (1 + 2*T1 + C1) * D**3/6
+                  + (5 - 2*C1 + 28*T1 - 3*C1*C1 + 8*ep2 + 24*T1*T1) * D**5/120
+                  ) / math.cos(phi1)
+    return math.degrees(lon), math.degrees(lat)
+
+
 def signed_area(ring):
     s = 0.0
     for i in range(len(ring)):
@@ -66,16 +96,30 @@ def signed_area(ring):
 
 
 def triangulate(ring):
-    """Ear clipping.
+    """Ear clipping, returning indices numbered against the ring AS GIVEN.
 
     A fan from the centroid is wrong here: real footprints are concave,
     an L-shaped terminal most of all, and a fan puts triangles outside
     the building. Ear clipping handles any simple polygon and these are
     small enough that its cost does not matter.
+
+    Ear clipping needs a counter-clockwise polygon, so a clockwise one is
+    reversed first. Returning indices into that reversed copy, while the
+    caller wrote its vertices in the original order, scrambles every
+    triangle. 138 of 232 footprints at Billund are clockwise, so roughly
+    sixty per cent of the roofs were built from the wrong three corners:
+    triangulated area came out 1.293 times the polygon area, hard
+    triangles appeared across open ground, and the gaps let the dark wall
+    colour show through the roof.
+
+    `order` carries the mapping back, so the caller never has to know
+    which way its ring was wound.
     """
     pts = list(ring)
+    order = list(range(len(pts)))
     if signed_area(pts) < 0:
         pts.reverse()
+        order.reverse()
     idx = list(range(len(pts)))
     out = []
     guard = 0
@@ -90,14 +134,14 @@ def triangulate(ring):
                 continue                      # reflex, not an ear
             if any(_in_tri(pts[j], a, b, c) for j in idx if j not in (i0, i1, i2)):
                 continue                      # something inside it
-            out.append((i0, i1, i2))
+            out.append((order[i0], order[i1], order[i2]))
             idx.pop(k)
             clipped = True
             break
         if not clipped:
             break
     if len(idx) == 3:
-        out.append(tuple(idx))
+        out.append(tuple(order[i] for i in idx))
     return out
 
 
@@ -156,6 +200,10 @@ def main():
     ap.add_argument("--gsd", type=float, default=0.12, help="texture metres per pixel")
     ap.add_argument("--min-height", type=float, default=2.0,
                     help="skip anything standing lower than this")
+    ap.add_argument("--wall-gsd", type=float, default=0.20,
+                    help="wall texture metres per pixel. Coarser than the "
+                         "roof on purpose: a wall is always seen at an angle "
+                         "and it is most of the atlas area")
     ap.add_argument("--atlas-max", type=int, default=8192)
     a = ap.parse_args()
 
@@ -186,8 +234,23 @@ def main():
         if len(ring) < 3:
             continue
         tags = el.get("tags") or {}
+        # Counter-clockwise, always.
+        #
+        # Wall normals are derived from edge direction, so the winding
+        # decides which way every wall faces. 138 of 232 Billund
+        # footprints are clockwise, and on those every outward normal
+        # would point into the building, so each wall would be matched
+        # with a camera on the far side and painted with the view through
+        # the building.
+        if signed_area(ring) < 0:
+            ring.reverse()
+        # `building=roof` is a canopy: a roof on posts with nothing under
+        # it. It gets a roof plate and no walls, which is both correct and
+        # the cleanest thing this pipeline produces.
         cands.append({"id": el.get("id"), "tags": tags, "ring": ring,
-                      "area": ring_area(ring)})
+                      "area": ring_area(ring),
+                      "no_walls": tags.get("building") in ("roof", "canopy",
+                                                           "carport", "shelter")})
     print(f"{len(cands)} footprints in the box")
 
     # Heights, and the reasons for dropping anything.
@@ -216,118 +279,292 @@ def main():
     hs = sorted(b["height"] for b in builds)
     print(f"heights {hs[0]:.1f} .. {hs[-1]:.1f} m, median {hs[len(hs)//2]:.1f} m")
 
-    # ── atlas layout: shelf packing, tallest first ──────────────────
+    # ── wall faces, and which oblique can see each one ─────────────
+    #
+    # A roof needs the camera looking DOWN at it, so one nadir frame
+    # serves dozens. A wall needs a camera looking AT IT, which means the
+    # oblique shot from the side the wall faces: a south-facing wall is
+    # photographed by the frame flown to its south looking north. That is
+    # what `incidence` measures, and it is why five frames per location
+    # is plenty to photograph a building even though it is far too few to
+    # reconstruct one.
+    #
+    # Rings are normalised counter-clockwise when the candidates are
+    # built, so for edge i to j the outward normal is (dy, -dx).
+    # Footprint bounding boxes first: the occlusion grid, the atlas
+    # layout and the UV mapping all key off them.
     for b in builds:
-        xs = [p[0] for p in b["ring"]]
-        ys = [p[1] for p in b["ring"]]
+        xs = [q[0] for q in b["ring"]]
+        ys = [q[1] for q in b["ring"]]
         b["bx"] = (min(xs), min(ys), max(xs), max(ys))
-        b["tw"] = max(1, int((b["bx"][2] - b["bx"][0]) / a.gsd) + 1)
-        b["th"] = max(1, int((b["bx"][3] - b["bx"][1]) / a.gsd) + 1)
-    order = sorted(builds, key=lambda b: -b["th"])
+
+    occ_cells = {}
+    for b in builds:
+        x0, y0, x1, y1 = b["bx"]
+        for cx in range(int(x0 // 50), int(x1 // 50) + 1):
+            for cy in range(int(y0 // 50), int(y1 // 50) + 1):
+                occ_cells.setdefault((cx, cy), []).append(b)
+
+    def occluded(P, frame, skip):
+        """Does anything stand between this point and the camera?
+
+        Walks the segment in 4 m steps and asks whether it passes through
+        another building's prism. Without it a wall facing away from the
+        apron gets painted with whatever building stands in front of it,
+        which is worse than leaving it flat.
+        """
+        C = frame.C
+        n = max(2, int(math.dist((P[0], P[1]), (C[0], C[1])) / 4.0))
+        n = min(n, 400)
+        for k in range(1, n):
+            t = k / n
+            qx = P[0] + (C[0] - P[0]) * t
+            qy = P[1] + (C[1] - P[1]) * t
+            qz = P[2] + (C[2] - P[2]) * t
+            for o in occ_cells.get((int(qx // 50), int(qy // 50)), ()):
+                if o is skip or qz > o["top"] or qz < o["ground"]:
+                    continue
+                bx = o["bx"]
+                if bx[0] <= qx <= bx[2] and bx[1] <= qy <= bx[3] \
+                        and inside(qx, qy, o["ring"]):
+                    return True
+        return False
+
+    obliques = [f for f in frames if f.direction != "nadir"]
+    patches = []          # every rectangle that needs painting
+    walls_lit = walls_flat = 0
+
+    for b in builds:
+        x0, y0, x1, y1 = b["bx"]
+        # roof patch
+        b["tw"] = max(1, int((x1 - x0) / a.gsd) + 1)
+        b["th"] = max(1, int((y1 - y0) / a.gsd) + 1)
+        patches.append({"kind": "roof", "b": b, "frame": b["frame"],
+                        "w": b["tw"], "h": b["th"]})
+        if b.get("no_walls"):
+            continue
+        n = len(b["ring"])
+        h = b["top"] - b["ground"]
+        b["walls"] = []
+        for i in range(n):
+            j = (i + 1) % n
+            A, B = b["ring"][i], b["ring"][j]
+            L = math.dist(A, B)
+            if L < 0.6:
+                b["walls"].append(None)
+                continue
+            nx, ny = (B[1] - A[1]) / L, -(B[0] - A[0]) / L
+            mid = ((A[0] + B[0]) / 2, (A[1] + B[1]) / 2, b["ground"] + h / 2)
+            corners = [(A[0], A[1], b["top"]), (B[0], B[1], b["top"]),
+                       (B[0], B[1], b["ground"]), (A[0], A[1], b["ground"])]
+            # VISIBILITY FIRST, then angle.
+            #
+            # Ranking all 176 obliques by incidence and trying the best
+            # few fails most of the time: the frames with the finest
+            # angle on a wall are usually ones flown somewhere else
+            # entirely, which do not contain the building at all. Doing
+            # it that way found a view for 535 of 1,751 walls. Keeping
+            # only the frames that actually contain the wall, and then
+            # picking the best angle among those, is both correct and
+            # the same cost.
+            seen = [f for f in obliques
+                    if all(f.sees(c, margin=30) for c in corners)]
+            ranked = sorted(((f.incidence(mid, (nx, ny, 0.0)), f) for f in seen),
+                            key=lambda t: -t[0])
+            chosen = None
+            for inc, f in ranked:
+                if inc < 0.20:          # too glancing to carry detail
+                    break
+                if occluded(mid, f, b):
+                    continue
+                chosen = f
+                break
+            pw = max(1, int(L / a.wall_gsd) + 1)
+            ph = max(1, int(h / a.wall_gsd) + 1)
+            w = {"i": i, "j": j, "A": A, "B": B, "L": L, "frame": chosen,
+                 "w": pw, "h": ph}
+            b["walls"].append(w)
+            if chosen is not None:
+                patches.append({"kind": "wall", "b": b, "wall": w,
+                                "frame": chosen, "w": pw, "h": ph})
+                walls_lit += 1
+            else:
+                walls_flat += 1
+
+    print(f"{walls_lit:,} walls have an oblique that sees them, "
+          f"{walls_flat:,} fall back to flat colour")
+
+    # ── atlas layout: shelf packing, tallest first ──────────────────
+    order = sorted(patches, key=lambda q: -q["h"])
     PAD = 2
     x = y = shelf = 0
     W = a.atlas_max
-    for b in order:
-        if x + b["tw"] + PAD > W:
+    for q in order:
+        if x + q["w"] + PAD > W:
             x = 0
             y += shelf + PAD
             shelf = 0
-        b["ax"], b["ay"] = x, y
-        x += b["tw"] + PAD
-        shelf = max(shelf, b["th"])
+        q["ax"], q["ay"] = x, y
+        x += q["w"] + PAD
+        shelf = max(shelf, q["h"])
     H = y + shelf + PAD
-    if H > a.atlas_max:
-        print(f"NOTE: atlas is {W} x {H}, taller than {a.atlas_max}. "
-              f"Raise --gsd to shrink it.")
-    print(f"atlas {W} x {H} px at {a.gsd} m/px")
+    print(f"atlas {W} x {H} px  ({len(patches):,} patches)")
+    if H > 16384:
+        sys.exit(f"Atlas {W}x{H} is too tall. Raise --gsd or --wall-gsd.")
 
     atlas = Image.new("RGB", (W, H), (0, 0, 0))
     ap_px = atlas.load()
 
-    # ── paint each roof ────────────────────────────────────────────
+    # ── paint, grouped by frame so each TIFF opens once ────────────
     by_frame = {}
-    for b in builds:
-        by_frame.setdefault(b["frame"].id, []).append(b)
-    print(f"{len(by_frame)} frames needed")
+    for q in patches:
+        by_frame.setdefault(q["frame"].id, []).append(q)
+    print(f"{len(by_frame)} frames to open")
 
-    painted = 0
     for n, (fid, group) in enumerate(sorted(by_frame.items()), 1):
         tif = next(img_dir.glob(f"{fid}*.tif"), None)
         if not tif:
-            print(f"  [{n}/{len(by_frame)}] {fid}: NO TIFF, skipping {len(group)}")
+            print(f"  [{n}/{len(by_frame)}] {fid}: NO TIFF, {len(group)} patches skipped")
             continue
         frame = group[0]["frame"]
         src, lw = open_level(tif, frame.size[0])
         scale = lw / frame.size[0]
         sp = src.load()
         sw, sh = src.size
-        for b in group:
-            x0, y0, x1, y1 = b["bx"]
-            z = b["top"]
-            for j in range(b["th"]):
-                wy = y1 - j * a.gsd
-                for i in range(b["tw"]):
-                    wx = x0 + i * a.gsd
-                    if not inside(wx, wy, b["ring"]):
-                        continue
-                    q = frame.project((wx, wy, z))
-                    if q is None:
-                        continue
-                    ic, ir = int(q[0] * scale), int(q[1] * scale)
-                    if 0 <= ic < sw and 0 <= ir < sh:
-                        ap_px[b["ax"] + i, b["ay"] + j] = sp[ic, ir]
-            painted += 1
+        for q in group:
+            b = q["b"]
+            if q["kind"] == "roof":
+                bx0, by0, bx1, by1 = b["bx"]
+                for jj in range(q["h"]):
+                    wy = by1 - jj * a.gsd
+                    for ii in range(q["w"]):
+                        wx = bx0 + ii * a.gsd
+                        if not inside(wx, wy, b["ring"]):
+                            continue
+                        pr = frame.project((wx, wy, b["top"]))
+                        if pr is None:
+                            continue
+                        ic, ir = int(pr[0] * scale), int(pr[1] * scale)
+                        if 0 <= ic < sw and 0 <= ir < sh:
+                            ap_px[q["ax"] + ii, q["ay"] + jj] = sp[ic, ir]
+            else:
+                # A wall is a vertical plane, so the mapping from patch
+                # pixel to world point is exact: slide along the base,
+                # climb by height. No interpolation of an interpolation.
+                w = q["wall"]
+                A, B = w["A"], w["B"]
+                top, grd = b["top"], b["ground"]
+                for jj in range(q["h"]):
+                    fv = 1.0 - jj / max(1, q["h"] - 1)      # 1 at the top
+                    wz = grd + (top - grd) * fv
+                    for ii in range(q["w"]):
+                        fu = ii / max(1, q["w"] - 1)
+                        wx = A[0] + (B[0] - A[0]) * fu
+                        wy = A[1] + (B[1] - A[1]) * fu
+                        pr = frame.project((wx, wy, wz))
+                        if pr is None:
+                            continue
+                        ic, ir = int(pr[0] * scale), int(pr[1] * scale)
+                        if 0 <= ic < sw and 0 <= ir < sh:
+                            ap_px[q["ax"] + ii, q["ay"] + jj] = sp[ic, ir]
         src.close()
-        print(f"  [{n}/{len(by_frame)}] {tif.name}: {len(group)} roofs")
+        print(f"  [{n}/{len(by_frame)}] {tif.name}: {len(group)} patches")
 
     atlas_name = "site_atlas.jpg"
-    atlas.save(out / atlas_name, quality=92)
-    print(f"\nwrote {out/atlas_name}  ({painted} roofs painted)")
+    atlas.save(out / atlas_name, quality=90)
+    print(f"\nwrote {out/atlas_name}")
 
     # ── OBJ ────────────────────────────────────────────────────────
     V, VT, F = [], [], []
+    bad_tri = []
     for b in builds:
-        x0, y0, x1, y1 = b["bx"]
-        base = len(V)
+        bx0, by0, bx1, by1 = b["bx"]
+        rq = next(q for q in patches if q["kind"] == "roof" and q["b"] is b)
+        vbase, tbase = len(V), len(VT)
+        n = len(b["ring"])
         for (px, py) in b["ring"]:
             V.append((px, py, b["top"]))
-            u = (b["ax"] + (px - x0) / a.gsd) / W
-            v = 1.0 - (b["ay"] + (y1 - py) / a.gsd) / H
-            VT.append((u, v))
-        for (i0, i1, i2) in triangulate(b["ring"]):
-            F.append(((base+i0+1, base+i0+1), (base+i1+1, base+i1+1),
-                      (base+i2+1, base+i2+1)))
-        # Walls: one flat colour per building, from the middle of its own
-        # roof patch, until the oblique pass paints them properly.
-        wu = (b["ax"] + b["tw"] / 2) / W
-        wv = 1.0 - (b["ay"] + b["th"] / 2) / H
-        VT.append((wu, wv))
-        wt = len(VT)
-        bot = len(V)
+            VT.append(((rq["ax"] + (px - bx0) / a.gsd) / W,
+                       1.0 - (rq["ay"] + (by1 - py) / a.gsd) / H))
+        tris = triangulate(b["ring"])
+        ta = sum(abs((b["ring"][jj][0]-b["ring"][ii][0]) * (b["ring"][kk][1]-b["ring"][ii][1])
+                     - (b["ring"][jj][1]-b["ring"][ii][1]) * (b["ring"][kk][0]-b["ring"][ii][0])) / 2
+                 for ii, jj, kk in tris)
+        if tris and abs(ta / max(b["area"], 1e-6) - 1.0) > 0.02:
+            bad_tri.append((b["id"], ta / b["area"]))
+        for (i0, i1, i2) in tris:
+            F.append(((vbase+i0+1, tbase+i0+1), (vbase+i1+1, tbase+i1+1),
+                      (vbase+i2+1, tbase+i2+1)))
+        if b.get("no_walls"):
+            continue
+        # Flat fallback colour for any wall with no view of its own.
+        VT.append(((rq["ax"] + rq["w"] / 2) / W,
+                   1.0 - (rq["ay"] + rq["h"] / 2) / H))
+        flat = len(VT)
+        vbot = len(V)
         for (px, py) in b["ring"]:
             V.append((px, py, b["ground"] - 0.5))
-        n = len(b["ring"])
         for i in range(n):
+            w = b["walls"][i] if b.get("walls") else None
             j = (i + 1) % n
-            t0, t1 = base + i + 1, base + j + 1
-            b0, b1 = bot + i + 1, bot + j + 1
-            F.append(((t0, wt), (t1, wt), (b1, wt)))
-            F.append(((t0, wt), (b1, wt), (b0, wt)))
+            t0, t1 = vbase + i + 1, vbase + j + 1
+            b0, b1 = vbot + i + 1, vbot + j + 1
+            if w is None or w["frame"] is None:
+                F.append(((t0, flat), (t1, flat), (b1, flat)))
+                F.append(((t0, flat), (b1, flat), (b0, flat)))
+                continue
+            q = next(qq for qq in patches
+                     if qq["kind"] == "wall" and qq["wall"] is w)
+            u0 = q["ax"] / W
+            u1 = (q["ax"] + q["w"]) / W
+            v1 = 1.0 - q["ay"] / H                  # top of the patch
+            v0 = 1.0 - (q["ay"] + q["h"]) / H       # bottom
+            VT.append((u0, v1)); ta0 = len(VT)
+            VT.append((u1, v1)); ta1 = len(VT)
+            VT.append((u1, v0)); tb1 = len(VT)
+            VT.append((u0, v0)); tb0 = len(VT)
+            F.append(((t0, ta0), (t1, ta1), (b1, tb1)))
+            F.append(((t0, ta0), (b1, tb1), (b0, tb0)))
+
+    # Vertices go out RELATIVE to a local origin, height left absolute.
+    # glTF positions are float32, about seven significant digits, so a
+    # raw northing of 6177804.5 resolves to half a metre and the whole
+    # model would quantise onto a visible grid.
+    ox = (min(q[0] for q in V) + max(q[0] for q in V)) / 2.0
+    oy = (min(q[1] for q in V) + max(q[1] for q in V)) / 2.0
+    olon, olat = _inv_utm32n(ox, oy)
+    (out / "origin.json").write_text(json.dumps({
+        "easting": ox, "northing": oy, "lon": olon, "lat": olat,
+        "epsg": 25832, "vertical": "DVR90 (EPSG:5799), absolute in z",
+        "obj2tiles": f"--lat {olat:.9f} --lon {olon:.9f} --alt 0.0",
+    }, indent=1) + "\n")
+    print(f"origin {ox:.1f} {oy:.1f}  =  {olon:.6f}, {olat:.6f}")
 
     obj = out / "site.obj"
     with open(obj, "w") as f:
         f.write("mtllib site.mtl\nusemtl site\n")
         for (px, py, pz) in V:
-            f.write(f"v {px:.3f} {py:.3f} {pz:.3f}\n")
+            f.write(f"v {px-ox:.3f} {py-oy:.3f} {pz:.3f}\n")
         for (u, v) in VT:
             f.write(f"vt {u:.6f} {v:.6f}\n")
         for tri in F:
-            f.write("f " + " ".join(f"{a_}/{b_}" for a_, b_ in tri) + "\n")
+            f.write("f " + " ".join(f"{m}/{n_}" for m, n_ in tri) + "\n")
     (out / "site.mtl").write_text(
         f"newmtl site\nKa 1 1 1\nKd 1 1 1\nd 1\nillum 1\nmap_Kd {atlas_name}\n")
 
+    if bad_tri:
+        print(f"\nWARNING: {len(bad_tri)} roofs whose triangles do not cover "
+              f"their footprint. Worst ratio {max(r for _, r in bad_tri):.3f}. "
+              f"Expect torn roofs.")
+        for wid, r in bad_tri[:5]:
+            print(f"   way {wid}  ratio {r:.3f}")
+    else:
+        print("roof triangulation: every footprint covered exactly once")
+
     print(f"wrote {obj}  ({len(V):,} verts, {len(F):,} faces)")
-    print(f"\nnext:\n  python3 to_yup.py --in {obj} --out {out/'site_yup.obj'}")
+    print(f"\nnext:")
+    print(f"  python3 to_yup.py --in {obj} --out {out/'site_yup.obj'}")
+    print(f"  Obj2Tiles ... --divisions 3 --lat {olat:.9f} --lon {olon:.9f} --alt 0.0")
 
 
 if __name__ == "__main__":
