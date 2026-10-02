@@ -16,6 +16,7 @@ already hosts. Push the scripts; refetch the data.
 | --- | --- | --- |
 | `scripts/mesh-pipeline/*.py` | **yes, in git** | the only thing that is not reproducible |
 | `src/data/building_footprints.json` | **yes, in git** | small, and the app reads it |
+| `work/osm_*.json` | yes, locally | 3 MB of footprints, and Overpass is rate limited and occasionally hostile. Cheap to keep, annoying to refetch |
 | `work/<site>/tiles/` | yes, locally | the output. ~16 MB. Deploys to object storage |
 | `work/<site>/drape/` | yes, locally | atlas and OBJ, ~6 MB, rebuild takes minutes |
 | `work/dhm/` | yes, locally | slow to refetch, the service is rate limited |
@@ -32,11 +33,22 @@ token in `.env.local`. Timings are from the Billund Airport run,
 cd scripts/mesh-pipeline
 
 # 1. Footprints. Overpass, no token needed. Seconds.
-#    Widen the bbox to whatever the site needs.
-curl -s https://overpass-api.de/api/interpreter --data-urlencode 'data=
-  [out:json][timeout:120];
+#    Widen the bbox to whatever the site needs. Note the bbox order is
+#    south,west,north,east — the opposite of every other tool here.
+#
+#    THE USER AGENT IS LOAD BEARING. Overpass answers curl's default
+#    agent with 406 Not Acceptable and an HTML body, which `curl -s`
+#    writes to the output file without complaint. You then get
+#    "Expecting value: line 1 column 1" from json.load one step later and
+#    go looking for a parser bug. Send an agent, and check the body is
+#    really JSON before trusting it.
+curl -sS -H 'User-Agent: ISR-Labs mesh-pipeline (contact: you@example.com)' \
+  -H 'Accept: application/json' \
+  https://overpass-api.de/api/interpreter --data-urlencode 'data=
+  [out:json][timeout:180];
   way["building"](55.7196,9.0989,55.7596,9.2004);
-  out geom;' > /tmp/osm_buildings.json
+  out geom;' -o work/osm_billund_town.json
+python3 -c "import json;print(len(json.load(open('work/osm_billund_town.json'))['elements']),'footprints')"
 
 # 2. Imagery. Nadir only for roofs; one nadir frame covers about 2 km.
 #    54 frames, 19 GB, about 40 minutes.
@@ -72,6 +84,57 @@ python3 serve_tiles.py 8778 work/billund-airport/tiles
 
 The `--lat/--lon` for step 5 come from `drape/origin.json`, which step 4
 writes.
+
+## Billund today: three builds, one tileset
+
+Billund is not one build. Three runs share the same imagery and height
+tiles and are composed by `combine_tilesets.py`, which the app loads as a
+single URL.
+
+| build | buildings | texture | tiles | what it is |
+| --- | --- | --- | --- | --- |
+| `billund-airport` | 232 | 0.12 m/px, roofs **and walls** | 16 MB | the terminal and airside. All five camera directions were fetched, so walls are photographic |
+| `billund-city` | 2,367 | 0.20 m/px, roofs only | 68 MB | the town core: Lalandia, the centre, the housing around it |
+| `billund-outer` | 1,144 | 0.20 m/px, roofs only | 16 MB | everything else inside the town box: the eastern wedge, the western edge, the outlying scatter |
+
+Separate runs rather than one, because each keeps its own atlas, texture
+resolution and local origin, and rebuilding one does not rebuild the
+others. A terminal and a holiday cottage do not belong in one atlas.
+
+`billund-outer` is built from the **whole** town box with the other two
+boxes excluded, so no building is drawn twice:
+
+```bash
+python3 drape_site.py \
+  --poses work/billund-city/poses.json \
+  --osm work/osm_billund_town.json --dhm work/dhm \
+  --bbox 9.0989,55.7196,9.2004,55.7596 \
+  --exclude-bbox 9.1228,55.7329,9.1718,55.7479 \
+  --exclude-bbox 9.10441,55.71595,9.14589,55.73931 \
+  --out work/billund-outer/drape --gsd 0.20
+```
+
+Cost scales with building count, not box area, so one big box with holes
+beats ten small boxes. Then the usual `to_yup.py` → Obj2Tiles →
+`unlit_tiles.py`, and recompose:
+
+```bash
+python3 combine_tilesets.py --out work/billund-combined \
+  --child billund-airport:work/billund-airport/tiles:9.1228,55.7329,9.1718,55.7479 \
+  --child billund-city:work/billund-city/tiles:9.10441,55.71595,9.14589,55.73931 \
+  --child billund-outer:work/billund-outer/tiles:9.0989,55.7196,9.2004,55.7596
+```
+
+Children overlap on purpose: the outer box contains the other two. The
+parent uses `refine: ADD`, so children are additive and the exclusions,
+not the regions, are what prevent double-drawing.
+
+**Walls are only photographic at the airport.** The town fetch was nadir
+only, so `billund-city` and `billund-outer` report "0 walls have an
+oblique that sees them" and fall back to flat colour. Roofs land
+correctly either way, which is what you see from any realistic camera
+angle. Fixing it means fetching the four oblique directions for the town,
+another ~9 GB.
 
 ## Reclaiming space
 
