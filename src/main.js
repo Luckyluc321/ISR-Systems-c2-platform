@@ -1512,42 +1512,47 @@ async function main() {
   let sdfiLayer = null;
   if (SDFI_TOKEN) {
     try {
-      const sdfi = new Cesium.WebMapTileServiceImageryProvider({
-        url: `https://api.dataforsyningen.dk/orto_foraar_wmts_DAF?token=${SDFI_TOKEN}`,
-        layer: 'orto_foraar_wmts',
-        style: 'default',
-        format: 'image/jpeg',
-        tileMatrixSetID: 'KortforsyningTilingDK',
-        maximumLevel: 17,
-        // Constrain to Denmark's bounding box. Without this, SDFI is
-        // requested for the whole globe; JPEG (opaque) responses outside
-        // Denmark paint white over the Bing basemap. With the rectangle
-        // set, Cesium only requests tiles inside DK, and Bing shows
-        // through everywhere else.
+      // ── SDFI GeoDanmark orthophoto, WMS. THIS ENVIRONMENT ONLY ──
+      //
+      // billund-sovereign branch, separate worktree. The C2 platform is
+      // not touched.
+      //
+      // The WMTS provider that used to be here is GONE, not disabled.
+      // SDFI publishes WMTS on a custom EPSG:25832 TileMatrixSet that
+      // Cesium cannot address, so it answered 200 with white JPEGs and
+      // painted over the map. Leaving it constructed but hidden was not
+      // enough: _enterMapMode sets __isr_sdfiLayer.show = true, so every
+      // basemap toggle switched the broken layer back on.
+      //
+      // The same imagery as WMS advertises EPSG:3857, so the server
+      // reprojects and Cesium consumes it with no tiling scheme at all.
+      // Verified against the live service.
+      //
+      // __isr_sdfiLayer is bound to THIS layer, so every existing
+      // toggle, workspace map mode included, now drives the working one.
+      const sdfiWms = new Cesium.WebMapServiceImageryProvider({
+        url: `https://api.dataforsyningen.dk/orto_foraar_DAF?token=${SDFI_TOKEN}`,
+        layers: 'orto_foraar',
+        parameters: { format: 'image/jpeg', transparent: false },
+        // Denmark only. The response is opaque JPEG, so without this it
+        // would paint over Bing across the whole globe.
         rectangle: Cesium.Rectangle.fromDegrees(7.5, 54.4, 15.6, 58.0),
-        credit: new Cesium.Credit('© GeoDanmark / Klimadatastyrelsen (CC BY 4.0)', true),
+        maximumLevel: 19,
+        credit: new Cesium.Credit(
+          '© GeoDanmark / Klimadatastyrelsen (CC BY 4.0)', true),
       });
-      sdfiLayer = viewer.imageryLayers.addImageryProvider(sdfi);
-      // Hidden in both profiles right now. SDFI publishes tiles in
-      // EPSG:25832 (Danish UTM32N) via a custom TileMatrixSet
-      // `KortforsyningTilingDK`. Cesium's default WebMapTileServiceImageryProvider
-      // assumes Web Mercator globally, so tile-coord math is wrong and
-      // requests miss the actual grid — SDFI returns 200s with white
-      // JPEG content that paints a solid white rectangle over Bing.
-      // TODO: wire a proper EPSG:25832 TilingScheme (ProjectionType +
-      // resolution table + origin) so Cesium can consume SDFI natively.
-      // Until then, Bing is the base globally and sovereign identity
-      // comes from the GDK feature layers + BBR buildings + VD traffic
-      // overlays (all live).
-      sdfiLayer.show = false;
-      if (_renderProfile === 'sovereign') {
-        console.log('[render_profile] sovereign: SDFI ortho disabled pending EPSG:25832 TilingScheme wiring. Bing base + Danish overlays active.');
-      }
+      sdfiLayer = viewer.imageryLayers.addImageryProvider(sdfiWms);
+      // On by default here. This environment exists to be on Danish
+      // imagery everywhere in Denmark, not to offer it as an option.
+      sdfiLayer.show = true;
+      console.log('[billund-sovereign] SDFI GeoDanmark orthophoto active '
+        + '(WMS, EPSG:3857), Danish imagery across DK. Bing remains only '
+        + 'outside the Danish rectangle.');
     } catch (err) { console.warn('SDFI GeoDanmark failed:', err); }
   } else if (_renderProfile === 'sovereign') {
-    console.warn('[render_profile] sovereign profile active but SDFI_TOKEN missing — falling back to Bing imagery. Register at dataforsyningen.dk (My page → Token).');
+    console.warn('[render_profile] sovereign profile active but SDFI_TOKEN missing.');
   }
-  window.__isr_sdfiLayer = sdfiLayer;   // exposed for workspace map mode toggle
+  window.__isr_sdfiLayer = sdfiLayer;
 
   // ── Sovereign layer registry — see sovereign_layers.js ──
   // Additive: only initialised on sovereign profile. On photoreal, the
