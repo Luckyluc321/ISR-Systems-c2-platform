@@ -127,6 +127,46 @@ def main():
         print(f"  {d.parent.name:18s} {x1-x0:7.0f} x {y1-y0:6.0f} m   "
               f"lon {lo0:.4f}..{lo1:.4f}  lat {la0:.4f}..{la1:.4f}   {n:,} verts")
 
+    # Drop any rectangle another one already contains.
+    #
+    # Cesium builds one signed distance field for the whole collection,
+    # and nested or overlapping polygons are a known source of artifacts
+    # in it: regions inside two polygons at once get a distance neither
+    # polygon would have given alone, and the clip leaves patches
+    # standing. Billund hit this exactly — the outer build's rectangle
+    # contains both the airport's and the city's, because the outer
+    # build IS the whole town box with those two excluded.
+    #
+    # Containment is also the normal case rather than an edge case. A
+    # site is usually built as one wide pass plus denser inner passes,
+    # so the wide one swallows the rest and the right answer is one
+    # rectangle.
+    def bounds(r):
+        xs = [p[0] for p in r["ring"]]
+        ys = [p[1] for p in r["ring"]]
+        return min(xs), min(ys), max(xs), max(ys)
+
+    keep = []
+    for r in rects:
+        bx = bounds(r)
+        inside = next((o for o in rects if o is not r
+                       and bounds(o)[0] <= bx[0] and bounds(o)[1] <= bx[1]
+                       and bounds(o)[2] >= bx[2] and bounds(o)[3] >= bx[3]), None)
+        if inside:
+            print(f"  dropping {r['build']}: already inside {inside['build']}")
+        else:
+            keep.append(r)
+    # A partial overlap is not something this can resolve by dropping,
+    # so it is reported rather than silently shipped.
+    for i, r in enumerate(keep):
+        for o in keep[i + 1:]:
+            a0, b0, a1, b1 = bounds(r)
+            c0, d0, c1, d1 = bounds(o)
+            if a0 < c1 and c0 < a1 and b0 < d1 and d0 < b1:
+                print(f"  WARNING: {r['build']} and {o['build']} partially overlap. "
+                      "Cesium's clip may leave boxes standing in the overlap.")
+    rects = keep
+
     out = Path(a.out)
     doc = json.loads(out.read_text()) if out.exists() else {}
     doc.setdefault("sites", {})
