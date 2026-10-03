@@ -117,10 +117,18 @@ export function activeFootprintAdapter() {
 // The default source: outlines exported by
 // scripts/mesh-pipeline/export_footprints.py, covering exactly the
 // ground each site's mesh reconstructed.
+//
+// A site built by the DRAPE pipeline publishes `coverage` instead:
+// one rectangle per build, covering the ground where its mesh draws
+// every building there is. See coverageFor below for why that is a
+// different thing and not a shortcut.
 registerFootprintAdapter('bundled', {
   source: 'bundled',
   footprintsFor(siteId) {
     return BUNDLED?.sites?.[siteId]?.buildings || [];
+  },
+  coverageFor(siteId) {
+    return BUNDLED?.sites?.[siteId]?.coverage || [];
   },
 });
 
@@ -139,9 +147,29 @@ export function footprintsFor(siteId) {
   }
 }
 
+/**
+ * Areas where a site's mesh draws every building, as the same
+ * `[{ ring }]` shape outlines use.
+ *
+ * Only the draped pipeline publishes these, and the distinction from
+ * footprintsFor is the whole point. An outline says "a building stands
+ * here". A coverage rectangle says "inside here, the mesh is the
+ * complete set of buildings, so nothing else needs to draw one".
+ */
+export function coverageFor(siteId) {
+  const adapter = _active && _adapters.get(_active);
+  if (!adapter || typeof adapter.coverageFor !== 'function') return [];
+  try {
+    return adapter.coverageFor(siteId) || [];
+  } catch (err) {
+    console.warn(`[footprints] ${_active} coverage failed for ${siteId}:`, err?.message || err);
+    return [];
+  }
+}
+
 /** Cesium clipping polygons for a site, or an empty array. */
-export function clipPolygonsFor(siteId) {
-  const prints = footprintsFor(siteId);
+export function clipPolygonsFor(siteId, rings) {
+  const prints = rings || footprintsFor(siteId);
   const polygons = [];
   for (const b of prints) {
     const ring = b?.ring;
@@ -175,27 +203,65 @@ export function clipPolygonsFor(siteId) {
  * assuming it worked.
  */
 export function applyBuildingSwap({ siteId, meshTileset, boxTileset, quality } = {}) {
-  const polygons = clipPolygonsFor(siteId);
-  const result = { siteId, polygons: polygons.length, mesh: false, boxes: false };
-  if (!polygons.length) return result;
+  const coverage = coverageFor(siteId);
+  const result = {
+    siteId, mode: null, polygons: 0, mesh: false, boxes: false,
+  };
 
-  const collection = (inverse) => {
+  const collection = (polygons, inverse) => {
     const c = new Cesium.ClippingPolygonCollection({ polygons, inverse });
     if (quality > 0) c.quality = quality;
     return c;
   };
 
+  // ── Draped site: coverage rectangles, and the mesh is left alone ──
+  //
+  // drape_site.py builds only buildings — a roof per footprint and
+  // walls down to the ground, about twenty faces each and no terrain.
+  // So there is nothing in the mesh to clip away, and clipping it can
+  // only delete buildings that should be drawn.
+  //
+  // That is not hypothetical. Billund kept the outline set from the
+  // first photogrammetry run: 15 buildings over an 835 m box. Those 15
+  // outlines were clipping a 3,743-building mesh down to 15, and the
+  // rest of the town showed as white boxes. It looked exactly like a
+  // mesh that had failed to load.
+  //
+  // The boxes still have to go, but inside the covered area the mesh
+  // is the complete set of buildings, so every box in it is redundant
+  // and one rectangle per build removes the lot. Three polygons rather
+  // than 3,743, which also keeps it under the budget below.
+  if (coverage.length) {
+    const polygons = clipPolygonsFor(siteId, coverage);
+    result.mode = 'coverage';
+    result.polygons = polygons.length;
+    if (!polygons.length) return result;
+    if (meshTileset) meshTileset.clippingPolygons = undefined;
+    if (boxTileset) {
+      boxTileset.clippingPolygons = collection(polygons, false);
+      result.boxes = true;
+    }
+    return result;
+  }
+
+  // ── Photogrammetry site: per-building outlines, both halves cut ──
+  //
+  // The original mesh reconstructed everything the cameras saw, so one
+  // set of outlines does both jobs: keep only what is inside them in
+  // the mesh, remove only what is inside them in the boxes. The
+  // symmetry is why this clips rather than hiding the boxes some other
+  // way — neither can leave a sliver beside a real building.
+  const polygons = clipPolygonsFor(siteId);
+  result.mode = 'outlines';
+  result.polygons = polygons.length;
+  if (!polygons.length) return result;
+
   if (meshTileset) {
-    // Keep only what stands inside a building outline. This is what
-    // turns a reconstruction of half a square kilometre of airport
-    // into a reconstruction of its buildings.
-    meshTileset.clippingPolygons = collection(true);
+    meshTileset.clippingPolygons = collection(polygons, true);
     result.mesh = true;
   }
   if (boxTileset) {
-    // And take the placeholder away in exactly those outlines, so the
-    // two never draw over each other.
-    boxTileset.clippingPolygons = collection(false);
+    boxTileset.clippingPolygons = collection(polygons, false);
     result.boxes = true;
   }
   return result;

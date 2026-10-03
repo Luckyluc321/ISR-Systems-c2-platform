@@ -1227,7 +1227,8 @@ async function main() {
       });
       console.log(
         `[site_mesh] ${siteId} loaded, height offset ${heightOffsetM} m, ` +
-        `${swap.polygons} outlines: boxes hidden ${swap.boxes ? 'yes' : 'no'}, ` +
+        `${swap.polygons} ${swap.mode === 'coverage' ? 'coverage rectangle(s)' : 'outlines'}: ` +
+        `boxes hidden ${swap.boxes ? 'yes' : 'no'}, ` +
         `mesh ${buildingsOnly ? 'pre-cut to buildings' : (swap.mesh ? 'clipped' : 'not clipped')}`,
       );
       return ts;
@@ -1343,7 +1344,11 @@ async function main() {
           meshTileset: pre ? null : ts,
           boxTileset: osmBuildings,
         });
-        return `${r.polygons} outlines: boxes hidden` + (pre ? ', mesh already buildings-only' : ', mesh clipped');
+        return r.mode === 'coverage'
+          ? `${r.polygons} coverage rectangle(s): every OSM box inside the `
+            + 'built area hidden, mesh left whole'
+          : `${r.polygons} outlines: boxes hidden`
+            + (pre ? ', mesh already buildings-only' : ', mesh clipped');
       }
       clearBuildingSwap({ meshTileset: ts, boxTileset: osmBuildings });
       // Says what to expect, because on a buildings-only mesh turning
