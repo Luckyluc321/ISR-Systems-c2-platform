@@ -156,15 +156,44 @@ def main():
             print(f"  dropping {r['build']}: already inside {inside['build']}")
         else:
             keep.append(r)
-    # A partial overlap is not something this can resolve by dropping,
-    # so it is reported rather than silently shipped.
+    # A partial overlap cannot be fixed by dropping, so it is trimmed.
+    #
+    # Builds meet at the boundary they were excluded along, and a mesh
+    # reaches a little past it: a building whose centre is on the south
+    # side still has eaves on the north side, and each rectangle carries
+    # a pad so a box on the very edge is still cut. Billund's south strip
+    # overlapped the outer build by 55 m along the whole seam, which is
+    # small and would still have left a line of white boxes standing
+    # through the middle of an industrial estate.
+    #
+    # Trimming on the axis of LEAST overlap is what keeps this safe. Two
+    # rectangles that meet along a seam overlap by metres on one axis and
+    # kilometres on the other; cutting the thin direction gives up the
+    # strip the neighbour already covers, and cutting the thick one would
+    # give up half a build.
+    def rebuild(r, bx):
+        x0, y0, x1, y1 = bx
+        r["ring"] = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]
+        return r
+
     for i, r in enumerate(keep):
-        for o in keep[i + 1:]:
+        for o in keep[:i]:
             a0, b0, a1, b1 = bounds(r)
             c0, d0, c1, d1 = bounds(o)
-            if a0 < c1 and c0 < a1 and b0 < d1 and d0 < b1:
-                print(f"  WARNING: {r['build']} and {o['build']} partially overlap. "
-                      "Cesium's clip may leave boxes standing in the overlap.")
+            if not (a0 < c1 and c0 < a1 and b0 < d1 and d0 < b1):
+                continue
+            ox = min(a1, c1) - max(a0, c0)
+            oy = min(b1, d1) - max(b0, d0)
+            if oy <= ox:
+                # Trim r away from o vertically, on whichever side touches.
+                nb = (a0, d1, a1, b1) if b0 < d1 <= b1 else (a0, b0, a1, d0)
+                axis, amount = "lat", oy * 111320
+            else:
+                nb = (c1, b0, a1, b1) if a0 < c1 <= a1 else (a0, b0, c0, b1)
+                axis, amount = "lon", ox * 111320 * 0.563
+            print(f"  trimming {r['build']} off {o['build']}: "
+                  f"{amount:.0f} m of {axis} overlap removed")
+            rebuild(r, nb)
     rects = keep
 
     out = Path(a.out)
