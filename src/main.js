@@ -752,7 +752,7 @@ import {
   fetchGeoDanmarkFeatures,
   GeoDanmarkFeatureRenderer,
 } from './sovereign_geodanmark_features.js';
-import { applyBuildingSwap, clearBuildingSwap, footprintsFor, sitesWithFootprints } from './building_footprints.js';
+import { applyBuildingSwap, clearBuildingSwap, footprintsFor, coverageFor, sitesWithFootprints } from './building_footprints.js';
 import { primeDagiCache, receiverIdsForPoint, dagiCacheStats } from './sovereign_geo_routing.js';
 import { runbookFor } from './runbooks.js';
 import { TARGETS as TARGETS_CORE } from './targets.js';
@@ -1360,6 +1360,37 @@ async function main() {
     footprints: (siteId = _siteMeshId || 'billund') => {
       const f = footprintsFor(siteId);
       return { siteId, count: f.length, named: f.filter((b) => b.name).map((b) => b.name) };
+    },
+    // Is the camera standing somewhere the mesh is supposed to cover?
+    // Answers in one line what a screenshot cannot: a white box inside
+    // coverage is a clip that failed, a white box outside it is a
+    // building nobody has built yet. Those need opposite fixes, and
+    // they look identical.
+    coverage: (siteId = _siteMeshId || 'billund') => {
+      const rects = coverageFor(siteId);
+      const c = viewer.camera.positionCartographic;
+      const lon = c ? Cesium.Math.toDegrees(c.longitude) : null;
+      const lat = c ? Cesium.Math.toDegrees(c.latitude) : null;
+      const covering = rects.filter((r) => {
+        const xs = r.ring.map((p) => p[0]);
+        const ys = r.ring.map((p) => p[1]);
+        return lon >= Math.min(...xs) && lon <= Math.max(...xs)
+            && lat >= Math.min(...ys) && lat <= Math.max(...ys);
+      });
+      return {
+        siteId,
+        rectangles: rects.length,
+        cameraLon: lon == null ? null : +lon.toFixed(5),
+        cameraLat: lat == null ? null : +lat.toFixed(5),
+        inside: covering.length > 0,
+        insideWhich: covering.map((r) => r.build),
+        extent: rects.map((r) => {
+          const xs = r.ring.map((p) => p[0]);
+          const ys = r.ring.map((p) => p[1]);
+          return `${r.build}: lon ${Math.min(...xs).toFixed(4)}..${Math.max(...xs).toFixed(4)}`
+               + ` lat ${Math.min(...ys).toFixed(4)}..${Math.max(...ys).toFixed(4)}`;
+        }),
+      };
     },
     footprintSites: () => sitesWithFootprints(),
     async tint(on = true) {
