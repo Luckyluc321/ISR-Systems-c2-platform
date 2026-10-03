@@ -78,12 +78,32 @@ docker run --rm --entrypoint /code/SuperBuild/install/bin/Obj2Tiles \
   --divisions 3 --lat 55.740374285 --lon 9.146054746 --alt 0.0
 python3 unlit_tiles.py --tiles work/billund-airport/tiles
 
-# 6. Serve.
+# 6. Tell the app where the mesh covers, so it stops drawing its own
+#    white boxes there. EASY TO FORGET AND LOOKS LIKE A BROKEN MESH.
+#    Pass every build for the site; contained rectangles are dropped.
+python3 export_coverage.py --site billund \
+  --build work/billund-airport/drape \
+  --out ../../src/data/building_footprints.json
+
+# 7. Serve.
 python3 serve_tiles.py 8778 work/billund-airport/tiles
 ```
 
 The `--lat/--lon` for step 5 come from `drape/origin.json`, which step 4
 writes.
+
+**Step 6 is the one that will cost you an afternoon.** Skip it and the
+mesh loads perfectly and you still see white boxes, because the extruded
+OSM buildings keep drawing on top of it. Billund sat like that through
+three rebuilds: the clip file still held the 15 outlines from the first
+photogrammetry run, over an 835 m box, against a mesh that had grown to
+3,743 buildings over 6.4 km. It reads as "the mesh did not load" and it
+is not.
+
+Re-run step 6 after **every** build that changes a site's extent, and
+pass all of that site's builds in one call. The script reads the extents
+from the meshes themselves, so the file cannot drift from what was
+actually built.
 
 ## Billund today: three builds, one tileset
 
@@ -128,6 +148,23 @@ python3 combine_tilesets.py --out work/billund-combined \
 Children overlap on purpose: the outer box contains the other two. The
 parent uses `refine: ADD`, so children are additive and the exclusions,
 not the regions, are what prevent double-drawing.
+
+Then regenerate the coverage, passing every build:
+
+```bash
+python3 export_coverage.py --site billund \
+  --build work/billund-airport/drape \
+  --build work/billund-city/drape \
+  --build work/billund-outer/drape \
+  --out ../../src/data/building_footprints.json
+```
+
+Billund collapses to **one** rectangle, because the outer build is the
+whole town box and contains the other two. That is not a tidy-up: Cesium
+builds one signed distance field for the whole clipping collection, and
+a point inside two polygons gets a distance neither would have given
+alone, so an overlap leaves boxes standing. Three overlapping rectangles
+looked exactly like no fix at all.
 
 **Walls are only photographic at the airport.** The town fetch was nadir
 only, so `billund-city` and `billund-outer` report "0 walls have an
