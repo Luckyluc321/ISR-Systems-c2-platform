@@ -155,6 +155,18 @@ about twenty faces per building and not one triangle of terrain.
   area**, so one wide box with holes beats ten small boxes.
 - `--min-height` defaults to 2.0 m. Anything shorter is skipped, which is
   carports, sheds and bin stores. Expect about 5% of footprints.
+- `--roof-relief 5000` gives every footprint over 5,000 m² a height per
+  outline vertex instead of one flat roof. **Off by default, and off
+  produces byte-identical output**, so it is free to try and free to
+  revert. Use it where one OSM polygon covers buildings of different
+  heights: Billund's terminal is a single 379 m polygon holding a
+  three-level hall at 17-20 m and a single-level gate pier at 10-13 m,
+  and flat renders the pier six metres too tall.
+
+  **It samples the outline only**, so a step inside the polygon becomes
+  a ramp across it, and a domed roof reads at its eaves rather than its
+  ridge. Good for wings at different heights, not a substitute for real
+  roof geometry.
 
 Read the output. `roof triangulation: every footprint covered exactly
 once` is a permanent gate and it has caught a real winding bug.

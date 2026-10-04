@@ -145,6 +145,101 @@ def triangulate(ring):
     return out
 
 
+def roof_relief(surf, terr, ring, top, ground, inset=2.5, radius=1.5,
+                pct=0.90):
+    """A height per outline vertex, instead of one height for the roof.
+
+    The flat roof is right for a house and wrong for a terminal. Billund
+    Lufthavn is one 379 m polygon holding two buildings: a three-level
+    departure hall at 17-20 m and a single-level gate pier at 10-13 m.
+    The height model shows them as two clean modes. Laid flat at the
+    80th percentile the whole thing becomes one 18.2 m slab, so the
+    pier stands six metres too tall and the building has no shape.
+
+    This samples the surface model near each vertex of the outline and
+    gives that vertex its own height. The walls need no change at all:
+    they already extrude from the roof ring down to ground, so moving a
+    roof vertex moves the wall under it.
+
+    Only the outline is sampled, not the interior, so a step inside the
+    polygon becomes a ramp across it rather than a wall. For a long thin
+    pier that is nearly right, because every interior point is close to
+    an edge. For a courtyard block it would not be, which is one reason
+    this is opt-in by area rather than on for everything.
+
+    Two guards, both learned the hard way on this data:
+
+    INSET ALONG THE INWARD BISECTOR, NOT TOWARD THE CENTROID. A vertex
+    sits ON the outline, where the height model is half roof and half
+    the ground beside it, so the sample point has to be pulled inside
+    first. The obvious direction is the centroid, and it is wrong: this
+    polygon is 379 m long and L-shaped, so its centroid is not inside
+    the part most vertices belong to. Pulling a hall corner "toward the
+    centroid" walks it off the hall. Measured, that sank 11 of 71
+    vertices onto bare ground and left only 9 reaching the hall, against
+    a height model that says 38% of the roof is up there. The bisector
+    of the two edges meeting at the vertex points into the building
+    whatever shape it is.
+
+    REJECT SAMPLES THAT ARE NOT ROOF. A sample below ground plus a floor
+    height is the ground beside the building, not a one-metre roof.
+    Those are discarded rather than averaged in, and if too few roof
+    samples survive, the vertex falls back to the building's own flat
+    height. Guessing low is worse than not guessing: a clamped vertex
+    drags a wall and a roof triangle down with it.
+
+    A HIGH PERCENTILE OF THE LOCAL DISC, not its median. The sample
+    point sits near the roof edge, and on a curved or stepped roof the
+    edge is the lowest part of it: Billund's departure hall rises north
+    to south, so its eaves read 2-3 m under its ridge. The median of the
+    disc picks the falloff, the 90th picks the roof. Swept on this
+    building, 0.90 put 16 of 71 vertices into the hall band against 3 at
+    the median, with no low outliers either way.
+
+    CLAMP. One tree leaning over a parapet, or a gap in the roof, would
+    otherwise spike a corner. Every vertex is held inside the band the
+    building already measured, so relief can reshape a roof but never
+    invent a height the building does not have.
+    """
+    n = len(ring)
+    ccw = signed_area(ring) > 0
+    lo, hi = ground + 1.0, top + 0.5
+    floor = ground + 2.0            # below this it is the ground, not a roof
+    out = []
+    for i, (px, py) in enumerate(ring):
+        ax, ay = ring[i - 1]
+        bx, by = ring[(i + 1) % n]
+        nx, ny = 0.0, 0.0
+        for (x0, y0), (x1, y1) in (((ax, ay), (px, py)), ((px, py), (bx, by))):
+            dx, dy = x1 - x0, y1 - y0
+            d = math.hypot(dx, dy)
+            if not d:
+                continue
+            # Interior is left of the edge on a counter-clockwise ring.
+            nx += (-dy / d) if ccw else (dy / d)
+            ny += (dx / d) if ccw else (-dx / d)
+        d = math.hypot(nx, ny)
+        if not d:
+            out.append(top)
+            continue
+        sx, sy = px + nx / d * inset, py + ny / d * inset
+        vals, tried = [], 0
+        for ox in (-radius, 0.0, radius):
+            for oy in (-radius, 0.0, radius):
+                v = surf.at(sx + ox, sy + oy)
+                tried += 1
+                if v is not None and v >= floor:
+                    vals.append(v)
+        # Fewer than half the samples look like roof: this vertex is over
+        # a gap, a courtyard or the edge. Do not guess it low.
+        if len(vals) * 2 < tried:
+            out.append(top)
+            continue
+        vals.sort()
+        out.append(min(hi, max(lo, vals[min(len(vals) - 1, int(len(vals) * pct))])))
+    return out
+
+
 def _in_tri(p, a, b, c):
     d1 = (p[0]-b[0])*(a[1]-b[1]) - (a[0]-b[0])*(p[1]-b[1])
     d2 = (p[0]-c[0])*(b[1]-c[1]) - (b[0]-c[0])*(p[1]-c[1])
@@ -205,6 +300,13 @@ def main():
     ap.add_argument("--gsd", type=float, default=0.12, help="texture metres per pixel")
     ap.add_argument("--min-height", type=float, default=2.0,
                     help="skip anything standing lower than this")
+    ap.add_argument("--roof-relief", type=float, default=0.0, metavar="M2",
+                    help="give every footprint at least this large a height "
+                         "per outline vertex instead of one flat roof. OFF by "
+                         "default (0), and off means byte-identical output to "
+                         "before this existed. 5000 catches terminals, "
+                         "factories and anything with wings at different "
+                         "heights; below that a flat roof is right and cheaper")
     ap.add_argument("--wall-gsd", type=float, default=0.20,
                     help="wall texture metres per pixel. Coarser than the "
                          "roof on purpose: a wall is always seen at an angle "
@@ -488,13 +590,24 @@ def main():
     # ── OBJ ────────────────────────────────────────────────────────
     V, VT, F = [], [], []
     bad_tri = []
+    relieved = []
     for b in builds:
         bx0, by0, bx1, by1 = b["bx"]
         rq = next(q for q in patches if q["kind"] == "roof" and q["b"] is b)
         vbase, tbase = len(V), len(VT)
         n = len(b["ring"])
-        for (px, py) in b["ring"]:
-            V.append((px, py, b["top"]))
+        # One height for the whole roof unless this building is big
+        # enough to be several buildings, which is what --roof-relief
+        # decides. The walls below pick these same vertices up, so a
+        # reshaped roof carries its walls with it and no wall code
+        # changes.
+        if a.roof_relief and b["area"] >= a.roof_relief:
+            zs = roof_relief(surf, terr, b["ring"], b["top"], b["ground"])
+            relieved.append((b["id"], max(zs) - min(zs)))
+        else:
+            zs = [b["top"]] * n
+        for (px, py), pz in zip(b["ring"], zs):
+            V.append((px, py, pz))
             VT.append(((rq["ax"] + (px - bx0) / a.gsd) / W,
                        1.0 - (rq["ay"] + (by1 - py) / a.gsd) / H))
         tris = triangulate(b["ring"])
@@ -571,6 +684,12 @@ def main():
             print(f"   way {wid}  ratio {r:.3f}")
     else:
         print("roof triangulation: every footprint covered exactly once")
+    if relieved:
+        relieved.sort(key=lambda r: -r[1])
+        spread = sum(r[1] for r in relieved) / len(relieved)
+        print(f"roof relief on {len(relieved)} footprint(s) over "
+              f"{a.roof_relief:,.0f} m2; mean height spread {spread:.1f} m, "
+              f"largest {relieved[0][1]:.1f} m")
 
     print(f"wrote {obj}  ({len(V):,} verts, {len(F):,} faces)")
     print(f"\nnext:")
