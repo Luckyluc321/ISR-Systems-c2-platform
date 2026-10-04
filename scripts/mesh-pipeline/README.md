@@ -6,7 +6,9 @@ photography, in-house, with open-source tools and no licence fees.
 > **Doing this for a town? Read [PLAYBOOK.md](PLAYBOOK.md).** Ten steps
 > from nothing to a working tileset, with the real costs from the five
 > Billund builds. This README is background on why the method is what it
-> is; the playbook is how to run it.
+> is; the playbook is how to run it. An agent should follow
+> [AGENT_RUNBOOK.md](AGENT_RUNBOOK.md) instead, which is the same
+> steps with pass/fail gates on every one.
 
 ## Why this exists
 
@@ -57,14 +59,22 @@ rather than just roofs. It is the same input Aarhus used.
 
 ```mermaid
 flowchart LR
-    STAC["Skråfoto STAC API<br/>5 directions, 10cm, poses included"]
+    OSM["OpenStreetMap<br/>building footprints"] --> GEO
+    DHM["Danmarks Højdemodel<br/>surface minus terrain"] --> GEO
+    GEO["geometry, taken as given<br/>roof polygon + walls to ground"] --> DRAPE
+    STAC["Skråfoto STAC API<br/>5 directions, 10 cm, poses published"]
     STAC -->|fetch.py| RAW["images + exterior orientation"]
-    RAW --> MVS["Dense multi-view stereo<br/>poses are KNOWN, no SfM"]
-    MVS --> MESH["textured mesh"]
-    MESH --> TILES["3D Tiles"]
-    TILES --> HOST["Scaleway Object Storage<br/>deploy script already exists"]
-    HOST --> APP["Cesium3DTileset in the C2 map"]
+    RAW --> DRAPE["drape_site.py<br/>project the photographs onto it"]
+    DRAPE --> TILES["to_yup + Obj2Tiles + unlit"]
+    TILES --> COV["export_coverage.py<br/>tells the app to stop drawing boxes"]
+    COV --> APP["Cesium3DTileset in the C2 map"]
 ```
+
+**The geometry is never reconstructed.** That was the original plan and
+it was wrong: five oblique frames per point is not enough to reconstruct
+from, and it is plenty to texture with. Footprints and heights already
+exist as published open data, so the job is to project the photographs
+onto geometry that is already known.
 
 ## Tooling, all free
 
@@ -85,15 +95,17 @@ wants a GPU.
 | Stage | State |
 | --- | --- |
 | API access and data availability | **Proven.** Token works |
-| `fetch.py` | **Works.** 68 images and verified poses on disk for the terminal box |
-| Interior orientation | **Resolved. It was never a blocker.** Published on every image |
-| Dense stereo | **Not attempted.** This is the step that decides whether the whole thing works |
-| Mesh to 3D Tiles | Not attempted. Well-trodden, but see the vertical datum trap below |
-| App integration | Not started. The tileset-loading block in `main.js` needs a per-site gate, not one global URL |
+| `fetch.py` | **Works.** 212 GB fetched across five Billund builds |
+| Interior orientation | **Resolved. It was never a blocker.** Published on every image, 0.000 px reprojection error on all 63 test frames |
+| Dense stereo | **Abandoned, deliberately.** Not enough frames to reconstruct from. Replaced by draping onto published geometry |
+| Draped mesh | **Works.** 6,309 buildings over Billund |
+| Mesh to 3D Tiles | **Works.** 146 MB, DVR90 handled by a per-site geoid offset of 40.3 m |
+| App integration | **Works.** Per-site `SITE_MESHES` entry plus coverage rectangles that clip the OSM boxes away |
+| Hosting | **Not done.** The tiles exist on one laptop, served from `serve_tiles.py` on 8778. `VITE_SITE_MESH_URL` is the seam |
 
-**Nobody should claim this works until the dense-stereo stage has run
-once and been looked at.** Everything above that line is confirmed;
-everything below it is expected-to-work rather than known-to-work.
+Billund has been built and looked at. The one thing nobody should claim
+is that this is deployed: until the tiles are in object storage, the
+result lives on a single machine.
 
 ## The camera model, resolved
 

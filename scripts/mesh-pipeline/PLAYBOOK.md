@@ -29,6 +29,11 @@ worth reading; the commands are not. **This file is the current method.**
 
 ---
 
+> **Running this as an agent? Use [AGENT_RUNBOOK.md](AGENT_RUNBOOK.md)** —
+> the same steps as literal commands, each with a gate that must pass
+> before the next, and explicit stop-and-ask conditions. This file is
+> the reasoning behind them.
+
 ## A. Choose the area from the buildings, never by typing a box
 
 **This step exists because a box was typed from memory three times and
@@ -55,23 +60,39 @@ the file, and `json.load` then fails with "Expecting value: line 1 column
 1" one step later, which reads as a parser bug. Always check the body is
 really JSON.
 
-Then find the town rather than guessing at it. Grid the footprints, apply
-a density floor, and flood-fill from the centre:
+Then let the buildings decide where the town is:
 
 ```bash
-python3 pick_bbox.py --osm work/osm_<town>_wide.json --rank 10
+python3 pick_town.py --osm work/osm_<town>_wide.json
 ```
 
-A density floor of about **5 buildings per 0.005° cell** is what
-separates a town from countryside. At a floor of 1, Danish rural building
-density connects every village to every other and the fill runs to the
-edge of whatever you sampled — that happened, and it reported a 12.8 km
-box that was mostly farmland.
+It grids the footprints, keeps cells above a density floor, floods
+outward from the densest one, and splits the result into compact blocks.
+It prints the imagery cost and peak disk for each block **before**
+anything is downloaded.
 
-**Build compact boxes, not strips.** Frames scale with the flight lines
-you cross, not with area: a 27 km² block cost 7.5 frames/km², an 8 km²
-strip 1.8 km wide cost 17.5. More than twice the imagery per square
-kilometre for the same ground.
+A density floor of **5 buildings per 0.005° cell** is what separates a
+town from countryside. At a floor of 1, Danish rural building density
+connects every village to every other and the fill runs to the edge of
+whatever you sampled — that happened, and reported a 12.8 km box that was
+mostly farmland.
+
+**Build compact blocks, not strips**, which is why the script splits the
+way it does. A frame covers a strip of ground along a flight line, so a
+wide block shares frames between its rows while a narrow strip pays for
+every line it crosses and shares nothing. Measured: a 27 km² block cost
+7.5 frames/km², an 8 km² strip 1.8 km wide cost 17.5.
+
+`pick_bbox.py` is the older tool. It ranks 700 m tiles by roof area,
+which is right for finding one named building such as a terminal, and
+wrong for scoping a town.
+
+**Worth knowing before you copy Billund's numbers:** run against the same
+data, `pick_town.py` returns lon 9.0750..9.1750, lat 55.7050..55.7500 —
+31 km² and 5,599 footprints in two blocks, about 81 GB. Billund was
+actually built as five builds over 212 GB, because the boxes were chosen
+by hand and reached east into farmland. The script would have produced
+the same town for roughly a third of the downloading.
 
 ## B. Heights
 
