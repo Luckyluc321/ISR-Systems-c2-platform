@@ -1220,17 +1220,45 @@ async function main() {
       // them. The mesh itself is only clipped when it still contains
       // ground; a buildings-only mesh has nothing to cut away, and
       // clipping it is the step that once removed all of it.
-      const swap = applyBuildingSwap({
-        siteId,
-        meshTileset: buildingsOnly ? null : ts,
-        boxTileset: osmBuildings,
-      });
-      console.log(
-        `[site_mesh] ${siteId} loaded, height offset ${heightOffsetM} m, ` +
-        `${swap.polygons} ${swap.mode === 'coverage' ? 'coverage rectangle(s)' : 'outlines'}: ` +
-        `boxes hidden ${swap.boxes ? 'yes' : 'no'}, ` +
-        `mesh ${buildingsOnly ? 'pre-cut to buildings' : (swap.mesh ? 'clipped' : 'not clipped')}`,
-      );
+      //
+      // WAIT FOR TILES, NOT FOR THE TILESET. `fromUrl` resolves as soon
+      // as tileset.json arrives, which is a few kilobytes; the geometry
+      // is 146 MB behind it. Swapping here took every white box away
+      // town-wide while nothing had yet drawn to replace them, so on a
+      // slow connection the whole of Billund rendered as flat
+      // orthophoto. That window used to be invisible because only 15
+      // boxes were being removed; once coverage rectangles took them all
+      // away it became the entire town.
+      //
+      // initialTilesLoaded fires once the tiles for the current view are
+      // in. If the camera is nowhere near this site it will not fire
+      // until someone flies there, which is exactly right: the boxes
+      // stay until there is something better to show.
+      let swapped = false;
+      const swapOnce = (why) => {
+        if (swapped) return;
+        swapped = true;
+        const swap = applyBuildingSwap({
+          siteId,
+          meshTileset: buildingsOnly ? null : ts,
+          boxTileset: osmBuildings,
+        });
+        console.log(
+          `[site_mesh] ${siteId} ${why}, height offset ${heightOffsetM} m, ` +
+          `${swap.polygons} ${swap.mode === 'coverage' ? 'coverage rectangle(s)' : 'outlines'}: ` +
+          `boxes hidden ${swap.boxes ? 'yes' : 'no'}, ` +
+          `mesh ${buildingsOnly ? 'pre-cut to buildings' : (swap.mesh ? 'clipped' : 'not clipped')}`,
+        );
+      };
+      if (ts.initialTilesLoaded) {
+        ts.initialTilesLoaded.addEventListener(() => swapOnce('tiles visible'));
+        // Belt and braces: a tileset that renders nothing at all would
+        // otherwise never swap, leaving white boxes forever. allTilesLoaded
+        // also fires when the set settles with zero tiles in view.
+        ts.allTilesLoaded.addEventListener(() => swapOnce('tiles settled'));
+      } else {
+        swapOnce('loaded');
+      }
       return ts;
     } catch (err) {
       // A missing mesh must never stop a site loading. Most sites have
