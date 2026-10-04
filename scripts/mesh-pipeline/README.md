@@ -3,6 +3,11 @@
 Build photorealistic 3D meshes of Danish sites from national oblique
 photography, in-house, with open-source tools and no licence fees.
 
+> **Doing this for a town? Read [PLAYBOOK.md](PLAYBOOK.md).** Ten steps
+> from nothing to a working tileset, with the real costs from the five
+> Billund builds. This README is background on why the method is what it
+> is; the playbook is how to run it.
+
 ## Why this exists
 
 Google Photorealistic 3D Tiles covers six Danish cities: Aalborg,
@@ -147,20 +152,28 @@ appears when the mesh is loaded in the app.
 
 ## Order of work
 
-1. ~~Resolve interior orientation~~ **Done.** It is published per image.
-2. ~~Fetch a small area first~~ **Done.** 68 images, 7.4 GB, on disk at
-   `work/billund-terminal/` with a verified `poses.json`.
-3. **Dense stereo on that patch. This is the go/no-go and the next
-   thing to do.** Poses and intrinsics are known, so no Structure from
-   Motion: the route is a COLMAP model written directly from
-   `poses.json`, one camera per `camera_id`, then dense stereo, then
-   OpenMVS for the mesh and texture.
-4. Subtract a local origin before anything consumes the coordinates.
-   UTM northings here are around 6,177,000 and will lose precision in
-   single-precision maths.
-5. If the patch looks right, scale to the full aerodrome and convert to
-   3D Tiles, handling DVR90 to ellipsoidal height as above.
-6. Host, and add a per-site tileset gate in the app.
+Settled. The method is draping, not reconstruction, and it is written up
+step by step in [PLAYBOOK.md](PLAYBOOK.md).
+
+1. ~~Resolve interior orientation~~ **Done.** It is published per image,
+   per frame, and projects to 0.000 px error on all 63 test frames.
+2. ~~Fetch a small area first~~ **Done.**
+3. ~~Dense stereo, as the go/no-go~~ **Abandoned, and that was the
+   turning point.** Five oblique frames per point is not enough to
+   reconstruct geometry from, and it is plenty to texture with. The
+   footprints and heights already exist as published data, so the job
+   was never to rebuild the geometry: take it as given and project the
+   photographs onto it. See `drape_site.py`.
+4. ~~Subtract a local origin~~ **Done.** UTM northings here are around
+   6,177,000 and lose precision in single-precision maths; every build
+   writes its own `origin.json`.
+5. ~~Scale up and convert to 3D Tiles~~ **Done.** Billund is 6,309
+   buildings across five builds, DVR90 to ellipsoidal handled by a
+   per-site geoid offset of 40.3 m.
+6. **Host.** The one thing still open. The tiles exist only on one
+   laptop, served from `serve_tiles.py` on port 8778, and the app reads
+   `VITE_SITE_MESH_URL`. Put them in object storage and point that at
+   it.
 
 ## Licence
 

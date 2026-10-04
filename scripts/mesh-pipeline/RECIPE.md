@@ -1,5 +1,21 @@
 # The recipe that works
 
+> **HISTORICAL. The commands here are not the current method.**
+>
+> This documents the photogrammetry route: reconstructing geometry out of
+> the photographs with ODM, then clipping the result to building
+> outlines. It was abandoned because five oblique frames per point is not
+> enough to reconstruct from, and because the footprints and heights
+> already exist as published data. The current method takes the geometry
+> as given and projects the photographs onto it. See
+> [PLAYBOOK.md](PLAYBOOK.md).
+>
+> Kept because the failures in it are real and several still bite the
+> current pipeline: the up-axis rotation that fails silently, the unlit
+> materials, the box that was typed from memory and landed on a runway,
+> and the ground model that was estimated from the very mesh it was
+> cutting. Read it for those. Do not run it.
+
 Verified twice on Billund Airport terminal. Do not change any of it
 without a copy of the output saved somewhere else first.
 
