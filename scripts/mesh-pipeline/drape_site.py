@@ -201,10 +201,50 @@ def roof_relief(surf, terr, ring, top, ground, inset=2.5, radius=1.5,
     building already measured, so relief can reshape a roof but never
     invent a height the building does not have.
     """
+    # WHAT THE BUILDING ACTUALLY HAS, measured inside it, before
+    # touching a single vertex. Two things come out of this and both are
+    # guards that were missing:
+    #
+    #   Is it multi-level at all? Relief is for one polygon holding
+    #   buildings of different heights. A single-level hall does not need
+    #   it and is actively harmed by it: the edge samples catch parapets,
+    #   loading bays and lower adjoining wings, and the roof ends up
+    #   warped across its own span. Measured on Billund airport, 2 of 9
+    #   relieved footprints were single-level and came out wrong, the
+    #   worst running 4.1 to 19.4 m on an 18.9 m building.
+    #
+    #   How low may a vertex go? The old floor was ground plus a metre,
+    #   which is not a bound at all — it let a roof dive almost to the
+    #   pavement and took its walls down with it, which is what a hollow
+    #   building looks like. The honest bound is the building's own lower
+    #   level, so relief can express the steps a building has and cannot
+    #   invent one it does not.
+    xs_r = [p[0] for p in ring]
+    ys_r = [p[1] for p in ring]
+    interior = []
+    yy = min(ys_r)
+    while yy <= max(ys_r):
+        xx = min(xs_r)
+        while xx <= max(xs_r):
+            if inside(xx, yy, ring):
+                sv = surf.at(xx, yy)
+                if sv is not None:
+                    interior.append(sv - ground)
+            xx += 2.0
+        yy += 2.0
+    if len(interior) < 20:
+        return [top] * len(ring)
+    interior.sort()
+    p20 = interior[int(len(interior) * 0.20)]
+    p80 = interior[int(len(interior) * 0.80)]
+    if p80 - p20 < 3.0:
+        # One level. Leave it flat; relief here can only make it worse.
+        return [top] * len(ring)
+
     n = len(ring)
     ccw = signed_area(ring) > 0
-    lo, hi = ground + 1.0, top + 0.5
-    floor = ground + 2.0            # below this it is the ground, not a roof
+    lo, hi = ground + p20, top + 0.5
+    floor = ground + max(2.0, p20 * 0.5)   # below this it is not this roof
     out = []
     for i, (px, py) in enumerate(ring):
         ax, ay = ring[i - 1]
