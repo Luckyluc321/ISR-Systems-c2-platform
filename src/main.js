@@ -760,6 +760,9 @@ import {
   GeoDanmarkFeatureRenderer,
 } from './sovereign_geodanmark_features.js';
 import { applyBuildingSwap, clearBuildingSwap, footprintsFor, coverageFor, sitesWithFootprints } from './building_footprints.js';
+// Danish imagery over ground where we built the buildings, and nowhere
+// else. Default stays Bing + Google photoreal. See basemap_meshed_sites.js.
+import { createMeshedSiteBasemap } from './basemap_meshed_sites.js';
 import { primeDagiCache, receiverIdsForPoint, dagiCacheStats } from './sovereign_geo_routing.js';
 import { runbookFor } from './runbooks.js';
 import { TARGETS as TARGETS_CORE } from './targets.js';
@@ -1584,42 +1587,50 @@ async function main() {
   let sdfiLayer = null;
   if (SDFI_TOKEN) {
     try {
-      const sdfi = new Cesium.WebMapTileServiceImageryProvider({
-        url: `https://api.dataforsyningen.dk/orto_foraar_wmts_DAF?token=${SDFI_TOKEN}`,
-        layer: 'orto_foraar_wmts',
-        style: 'default',
-        format: 'image/jpeg',
-        tileMatrixSetID: 'KortforsyningTilingDK',
-        maximumLevel: 17,
-        // Constrain to Denmark's bounding box. Without this, SDFI is
-        // requested for the whole globe; JPEG (opaque) responses outside
-        // Denmark paint white over the Bing basemap. With the rectangle
-        // set, Cesium only requests tiles inside DK, and Bing shows
-        // through everywhere else.
+      // WMS, not WMTS. SDFI publishes WMTS on a custom EPSG:25832
+      // TileMatrixSet (`KortforsyningTilingDK`) that Cesium cannot
+      // address: tile-coord maths lands off the grid, the service
+      // answers 200 with white JPEG, and it paints a solid white
+      // rectangle over Bing. That is why this layer was built and then
+      // immediately hidden, and why _enterMapMode turning it on was a
+      // latent white screen.
+      //
+      // The same imagery as WMS advertises EPSG:3857, so the server
+      // reprojects and Cesium consumes it with no tiling scheme at all.
+      // Verified against the live service.
+      const sdfi = new Cesium.WebMapServiceImageryProvider({
+        url: `https://api.dataforsyningen.dk/orto_foraar_DAF?token=${SDFI_TOKEN}`,
+        layers: 'orto_foraar',
+        parameters: { format: 'image/jpeg', transparent: false },
+        // Denmark only. The response is opaque JPEG, so without this it
+        // would paint over Bing across the whole globe.
         rectangle: Cesium.Rectangle.fromDegrees(7.5, 54.4, 15.6, 58.0),
+        maximumLevel: 19,
         credit: new Cesium.Credit('© GeoDanmark / Klimadatastyrelsen (CC BY 4.0)', true),
       });
       sdfiLayer = viewer.imageryLayers.addImageryProvider(sdfi);
-      // Hidden in both profiles right now. SDFI publishes tiles in
-      // EPSG:25832 (Danish UTM32N) via a custom TileMatrixSet
-      // `KortforsyningTilingDK`. Cesium's default WebMapTileServiceImageryProvider
-      // assumes Web Mercator globally, so tile-coord math is wrong and
-      // requests miss the actual grid — SDFI returns 200s with white
-      // JPEG content that paints a solid white rectangle over Bing.
-      // TODO: wire a proper EPSG:25832 TilingScheme (ProjectionType +
-      // resolution table + origin) so Cesium can consume SDFI natively.
-      // Until then, Bing is the base globally and sovereign identity
-      // comes from the GDK feature layers + BBR buildings + VD traffic
-      // overlays (all live).
+      // Starts hidden. basemap_meshed_sites.js turns it on only where we
+      // have built a mesh, which today is Billund and nowhere else.
       sdfiLayer.show = false;
-      if (_renderProfile === 'sovereign') {
-        console.log('[render_profile] sovereign: SDFI ortho disabled pending EPSG:25832 TilingScheme wiring. Bing base + Danish overlays active.');
-      }
     } catch (err) { console.warn('SDFI GeoDanmark failed:', err); }
   } else if (_renderProfile === 'sovereign') {
     console.warn('[render_profile] sovereign profile active but SDFI_TOKEN missing — falling back to Bing imagery. Register at dataforsyningen.dk (My page → Token).');
   }
   window.__isr_sdfiLayer = sdfiLayer;   // exposed for workspace map mode toggle
+
+  // Keyed off the coverage rectangles, which are generated from the
+  // built meshes, so this cannot claim ground that was not built and
+  // there is no second list to drift. Today that is Billund alone;
+  // every other site renders exactly as it did before this existed.
+  const meshBasemap = createMeshedSiteBasemap({
+    Cesium, viewer, sdfiLayer, bingLayer,
+    meshedSiteIds: () => Object.keys(SITE_MESHES),
+    coverageFor,
+    // Night mode turns this layer off on purpose. Respect that instead
+    // of flipping it back on at the next camera move.
+    allow: () => imageryMode !== 'night',
+  });
+  window.__isr_basemap = meshBasemap;
 
   // ── Sovereign layer registry — see sovereign_layers.js ──
   // Additive: only initialised on sovereign profile. On photoreal, the
@@ -23487,11 +23498,12 @@ async function main() {
     // Swap to sovereign SDFI imagery over Denmark if the token was
     // provided at platform init. Bing stays loaded but is hidden while
     // the receiver is in workspace map mode.
-    const sdfi = window.__isr_sdfiLayer;
-    if (sdfi) {
-      sdfi.show = true;
-      if (bingLayer) bingLayer.alpha = 0;
-    }
+    // Ask the basemap rule rather than forcing SDFI on. Forcing it here
+    // turned on a layer that paints white over Bing, and zeroed Bing's
+    // alpha at the same time, so a receiver opening a workspace map got
+    // a white screen. Called again after the flight lands, since the
+    // rule reads altitude.
+    if (window.__isr_basemap) window.__isr_basemap.apply('workspace map');
     if (!_preWorkspaceCameraState) _saveCameraState();
     const pos = _eventFocusCoords(event);
     if (!pos) return;
@@ -23516,12 +23528,11 @@ async function main() {
   }
   function _exitMapMode() {
     document.body.classList.remove('workspace-map-active');
-    const sdfi = window.__isr_sdfiLayer;
-    if (sdfi) {
-      sdfi.show = false;
-      if (bingLayer) bingLayer.alpha = 1;
-    }
+    // Not sdfi.show = false. Leaving map mode over a meshed site would
+    // otherwise drop back to Bing and stay there until the next camera
+    // move, which is the same bug in the other direction.
     _restoreCameraState();
+    if (window.__isr_basemap) window.__isr_basemap.apply('left workspace map');
   }
 
   // ─────────────────────────────────────────────────────────────
