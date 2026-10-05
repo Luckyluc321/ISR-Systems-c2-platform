@@ -73,8 +73,25 @@ sensors:
   - { sensor_id: N17, label: "Esbjerg Node 17",        position: { lat: 55.45244, lon: 8.46083 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 1, issues: null }
   - { sensor_id: N18, label: "Esbjerg Node 18",        position: { lat: 55.45725, lon: 8.47638 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 2, issues: null }
 
-sensorsOnline: 16
-sensorsTotal: 18
+# Added 2026-10-05 to reach the three-eye policy. The original 18
+# left 35% of the harbour under three sensors and 15% at ZERO, all of it
+# the southern basins: the existing nodes sit between 55.452 and 55.484
+# and the site runs down to 55.443. Every original position is unchanged.
+#
+# WATER. Esbjerg is a working harbour and the solver knows polygons, not
+# quays. These are positions inside the site boundary; some may fall on
+# water rather than something a node can be bolted to, and they need an
+# eye before anyone orders hardware.
+  - { sensor_id: N19, label: "Esbjerg Node 19", position: { lat: 55.45175, lon: 8.48182 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N20, label: "Esbjerg Node 20", position: { lat: 55.45055, lon: 8.48662 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N21, label: "Esbjerg Node 21", position: { lat: 55.44995, lon: 8.49682 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N22, label: "Esbjerg Node 22", position: { lat: 55.44935, lon: 8.46922 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N23, label: "Esbjerg Node 23", position: { lat: 55.44815, lon: 8.49322 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N24, label: "Esbjerg Node 24", position: { lat: 55.44755, lon: 8.47282 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N25, label: "Esbjerg Node 25", position: { lat: 55.44755, lon: 8.48842 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+
+sensorsOnline: 23
+sensorsTotal: 25
 stats:
   flaggedEvents24h: 4
   hostileEvents24h: 0

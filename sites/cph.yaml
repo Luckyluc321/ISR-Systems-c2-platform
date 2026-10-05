@@ -133,8 +133,27 @@ sensors:
   - { sensor_id: N23, label: "N Perimeter Bulge",           position: { lat: 55.63030, lon: 12.65800 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0,  issues: null }
   - { sensor_id: N24, label: "NE Perimeter Corner",         position: { lat: 55.63170, lon: 12.66250 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0,  issues: null }
 
-sensorsOnline: 22
-sensorsTotal: 24
+# Added 2026-10-05 to reach the three-eye policy. The original 24 left
+# 23% of the site under three sensors, none at zero, and the gap was not
+# scattered: every one of the nine worst clusters sat in the southwest
+# between the ILS glidepath 04L site and Brandstation Vest, which is the
+# final approach corridor. Thin coverage anywhere is a problem; thin
+# coverage under aircraft on final is the wrong place for it. Every
+# original position is unchanged.
+  - { sensor_id: N25, label: "CPH Node 25", position: { lat: 55.62235, lon: 12.62767 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N26, label: "CPH Node 26", position: { lat: 55.61875, lon: 12.67087 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N27, label: "CPH Node 27", position: { lat: 55.61875, lon: 12.67567 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N28, label: "CPH Node 28", position: { lat: 55.61575, lon: 12.67207 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N29, label: "CPH Node 29", position: { lat: 55.61575, lon: 12.67687 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N30, label: "CPH Node 30", position: { lat: 55.60675, lon: 12.65707 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N31, label: "CPH Node 31", position: { lat: 55.60315, lon: 12.62167 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N32, label: "CPH Node 32", position: { lat: 55.60315, lon: 12.62827 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N33, label: "CPH Node 33", position: { lat: 55.59535, lon: 12.60967 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N34, label: "CPH Node 34", position: { lat: 55.58755, lon: 12.60487 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N35, label: "CPH Node 35", position: { lat: 55.58695, lon: 12.59947 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+
+sensorsOnline: 33
+sensorsTotal: 35
 stats:
   flaggedEvents24h: 11
   hostileEvents24h: 1
