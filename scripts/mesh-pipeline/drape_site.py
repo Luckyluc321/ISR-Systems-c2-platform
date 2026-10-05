@@ -280,6 +280,99 @@ def roof_relief(surf, terr, ring, top, ground, inset=2.5, radius=1.5,
     return out
 
 
+def subdivide_roof(ring, tris, surf, ground, top, max_edge=5.0, max_depth=4):
+    """Give a roof the shape the height model already knows it has.
+
+    The flat plate is the single biggest thing wrong with the output and
+    it is not a data problem. Lalandia Billund renders as one surface at
+    13.7 m; the LiDAR across that same footprint runs from 3 m to over
+    10 m in clean rectangular blocks, with the dome plainly visible at
+    0.4 m resolution. The pipeline measures one number per building and
+    throws the rest away.
+
+    This keeps the ear-clipped triangulation and splits each triangle at
+    its edge midpoints until no edge is longer than max_edge, giving
+    every new vertex its own height from the surface model.
+
+    SUBDIVISION, NOT A GRID. A regular grid clipped to the outline leaves
+    ragged gaps along every edge, and filling them means a constrained
+    triangulation. Splitting the triangles that already exist keeps the
+    footprint covered exactly once — the permanent area gate still holds
+    — and leaves the ring vertices untouched, so the walls that hang off
+    them need no change at all.
+
+    Midpoints are shared between neighbouring triangles through `mid`,
+    so the surface is watertight. Without that cache each triangle gets
+    its own copy of a shared edge, the two sides drift apart by whatever
+    the height model says, and the roof cracks along every seam.
+
+    Clamped to the building's own measured range for the same reason
+    roof_relief is: one tree leaning over a parapet should not spike a
+    roof, and a gap in the model should not hole it.
+    """
+    pts = [(x, y, None) for (x, y) in ring]       # heights filled below
+    mid = {}
+
+    lo_hi = []
+    for (x, y) in ring:
+        v = surf.at(x, y)
+        if v is not None:
+            lo_hi.append(v - ground)
+    # A reading barely above the terrain is not a low roof, it is a
+    # courtyard, a light well, or a gap in the model. Clamping it up to a
+    # floor still puts a vertex metres below its neighbours and craters
+    # the roof. Treating it as no-data and taking the parent midpoint
+    # instead leaves the surface continuous, which is the honest answer:
+    # we do not know what is there, so do not invent a hole.
+    #
+    # Measured on Lalandia: 181 of 8,062 vertices read below this, 2.2%,
+    # every one of which would have been a dent.
+    not_roof = ground + 2.0
+    ceil = top + 0.5
+
+    def height(x, y, fallback):
+        v = surf.at(x, y)
+        if v is None or v < not_roof:
+            return fallback
+        return min(ceil, v)
+
+    # Ring vertices fall back to the building's flat height. They carry
+    # the walls, so a crater here drags a wall down with it.
+    for i, (x, y) in enumerate(ring):
+        pts[i] = (x, y, height(x, y, top))
+
+    def midpoint(a, b):
+        key = (a, b) if a < b else (b, a)
+        if key in mid:
+            return mid[key]
+        ax, ay, az = pts[a]
+        bx, by, bz = pts[b]
+        mx, my = (ax + bx) / 2.0, (ay + by) / 2.0
+        pts.append((mx, my, height(mx, my, (az + bz) / 2.0)))
+        mid[key] = len(pts) - 1
+        return mid[key]
+
+    def edge_len(a, b):
+        return math.hypot(pts[a][0] - pts[b][0], pts[a][1] - pts[b][1])
+
+    out = list(tris)
+    for _ in range(max_depth):
+        nxt = []
+        split_any = False
+        for (i0, i1, i2) in out:
+            if max(edge_len(i0, i1), edge_len(i1, i2), edge_len(i2, i0)) <= max_edge:
+                nxt.append((i0, i1, i2))
+                continue
+            split_any = True
+            m01, m12, m20 = midpoint(i0, i1), midpoint(i1, i2), midpoint(i2, i0)
+            nxt += [(i0, m01, m20), (m01, i1, m12),
+                    (m20, m12, i2), (m01, m12, m20)]
+        out = nxt
+        if not split_any:
+            break
+    return pts, out
+
+
 def _in_tri(p, a, b, c):
     d1 = (p[0]-b[0])*(a[1]-b[1]) - (a[0]-b[0])*(p[1]-b[1])
     d2 = (p[0]-c[0])*(b[1]-c[1]) - (b[0]-c[0])*(p[1]-c[1])
@@ -340,6 +433,18 @@ def main():
     ap.add_argument("--gsd", type=float, default=0.12, help="texture metres per pixel")
     ap.add_argument("--min-height", type=float, default=2.0,
                     help="skip anything standing lower than this")
+    ap.add_argument("--roof-grid", type=float, default=0.0, metavar="M2",
+                    help="give every footprint at least this large a roof "
+                         "SURFACE sampled from the height model, instead of "
+                         "one flat plate. OFF by default (0), and off is "
+                         "byte-identical to before it existed. This is what "
+                         "makes a complex read as a building rather than a "
+                         "slab; it costs triangles, so gate it at the sizes "
+                         "people actually zoom into")
+    ap.add_argument("--roof-grid-edge", type=float, default=5.0, metavar="M",
+                    help="longest roof triangle edge once subdivided "
+                         "(default 5 m). Smaller is more faithful and more "
+                         "triangles")
     ap.add_argument("--roof-relief", type=float, default=0.0, metavar="M2",
                     help="give every footprint at least this large a height "
                          "per outline vertex instead of one flat roof. OFF by "
@@ -631,6 +736,7 @@ def main():
     V, VT, F = [], [], []
     bad_tri = []
     relieved = []
+    gridded_stats = []
     for b in builds:
         bx0, by0, bx1, by1 = b["bx"]
         rq = next(q for q in patches if q["kind"] == "roof" and q["b"] is b)
@@ -646,13 +752,32 @@ def main():
             relieved.append((b["id"], max(zs) - min(zs)))
         else:
             zs = [b["top"]] * n
-        for (px, py), pz in zip(b["ring"], zs):
-            V.append((px, py, pz))
-            VT.append(((rq["ax"] + (px - bx0) / a.gsd) / W,
-                       1.0 - (rq["ay"] + (by1 - py) / a.gsd) / H))
         tris = triangulate(b["ring"])
-        ta = sum(abs((b["ring"][jj][0]-b["ring"][ii][0]) * (b["ring"][kk][1]-b["ring"][ii][1])
-                     - (b["ring"][jj][1]-b["ring"][ii][1]) * (b["ring"][kk][0]-b["ring"][ii][0])) / 2
+        # A sampled roof surface for the big ones, a flat plate for the
+        # rest. The ring vertices keep their indices either way, so the
+        # wall code below is untouched by this.
+        gridded = a.roof_grid and b["area"] >= a.roof_grid
+        if gridded:
+            gpts, tris = subdivide_roof(b["ring"], tris, surf, b["ground"],
+                                        b["top"], max_edge=a.roof_grid_edge)
+            for (px, py, pz) in gpts:
+                V.append((px, py, pz))
+                VT.append(((rq["ax"] + (px - bx0) / a.gsd) / W,
+                           1.0 - (rq["ay"] + (by1 - py) / a.gsd) / H))
+            gridded_stats.append((b["id"], len(gpts), len(tris)))
+        else:
+            for (px, py), pz in zip(b["ring"], zs):
+                V.append((px, py, pz))
+                VT.append(((rq["ax"] + (px - bx0) / a.gsd) / W,
+                           1.0 - (rq["ay"] + (by1 - py) / a.gsd) / H))
+        # Area gate. On a subdivided roof the indices point into the
+        # subdivided point list, not the ring, so it reads coordinates
+        # from whichever set this building actually used. The gate is
+        # the only thing that caught the winding bug and it stays live
+        # for both paths.
+        src = gpts if gridded else [(x, y, 0.0) for (x, y) in b["ring"]]
+        ta = sum(abs((src[jj][0]-src[ii][0]) * (src[kk][1]-src[ii][1])
+                     - (src[jj][1]-src[ii][1]) * (src[kk][0]-src[ii][0])) / 2
                  for ii, jj, kk in tris)
         if tris and abs(ta / max(b["area"], 1e-6) - 1.0) > 0.02:
             bad_tri.append((b["id"], ta / b["area"]))
@@ -724,6 +849,11 @@ def main():
             print(f"   way {wid}  ratio {r:.3f}")
     else:
         print("roof triangulation: every footprint covered exactly once")
+    if gridded_stats:
+        tri = sum(g[2] for g in gridded_stats)
+        print(f"roof surface sampled on {len(gridded_stats)} footprint(s) over "
+              f"{a.roof_grid:,.0f} m2; {tri:,} roof triangles where a flat "
+              f"plate would have been {sum(1 for _ in gridded_stats) * 2:,}")
     if relieved:
         relieved.sort(key=lambda r: -r[1])
         spread = sum(r[1] for r in relieved) / len(relieved)

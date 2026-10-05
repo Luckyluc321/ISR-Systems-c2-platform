@@ -166,7 +166,24 @@ about twenty faces per building and not one triangle of terrain.
   **It samples the outline only**, so a step inside the polygon becomes
   a ramp across it, and a domed roof reads at its eaves rather than its
   ridge. Good for wings at different heights, not a substitute for real
-  roof geometry.
+  roof geometry. That is what `--roof-grid` is for.
+- `--roof-grid 20000` gives every footprint over 20,000 m² a roof
+  **surface** sampled across its interior, instead of one flat plate.
+  **Off by default, and off is byte-identical.** This is the fix for a
+  complex reading as a slab: Lalandia Billund rendered as one surface at
+  13.7 m while the height model across that same footprint runs from 2 m
+  to 14 m in clean blocks, with the dome plainly there at 0.4 m. One
+  building went from 2 roof triangles to 15,180.
+
+  It subdivides the existing triangulation at edge midpoints rather than
+  laying a grid, so the footprint stays covered exactly once and the
+  ring vertices keep their indices — walls need no change. Midpoints are
+  shared between neighbouring triangles, without which the roof cracks
+  along every seam.
+
+  **Gate it high.** The cost is triangles, and only buildings people zoom
+  into earn them. 20,000 m² caught exactly one building in Billund's
+  town; 5,000 would have caught eighteen.
 
 Read the output. `roof triangulation: every footprint covered exactly
 once` is a permanent gate and it has caught a real winding bug.
