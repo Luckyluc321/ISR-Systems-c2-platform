@@ -16637,6 +16637,10 @@ async function main() {
       { key: 'billund_quad_hostile', label: 'Quadcopter, hostile (low pass over terminal + cargo)' },
       { key: 'billund_fixedwing_hostile', label: 'Fixed wing recon (E-W runway axis)' },
       { key: 'billund_swarm_recon', label: 'SWARM · 4-drone recon over CHBA cargo apron', cls: 'critical' },
+      // The benign counterpart to the line above, over the same ground.
+      // Shown next to it on purpose: the pair is what demonstrates the
+      // platform tells them apart, and either alone demonstrates nothing.
+      { key: 'billund_commercial_survey', label: 'SWARM · 3-drone pavement survey, authorised', cls: 'friendly' },
       { key: 'billund_missile_hostile', label: 'Cruise missile from S, critical', cls: 'critical' },
       { key: 'billund_lego_recon', label: 'LEGO adjacency recon (transits BLL → LEGO HQ)', cls: 'recon' },
     ],

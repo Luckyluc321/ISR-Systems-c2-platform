@@ -793,6 +793,95 @@ export const TEMPLATES = {
     durationSec: 180,
   },
 
+  // ── SWARM · 3-drone commercial pavement survey, authorised ──
+  //
+  // The only multi-drone operation in the set that is not an attack, and
+  // the reason it exists: 24 of the 27 scenarios before it were hostile.
+  // A detection platform that has only ever been shown threats has never
+  // been shown declining to raise one, and "does it cry wolf" is the
+  // first question an airport asks.
+  //
+  // Classified friendly rather than a new 'commercial' value. The
+  // platform branches on classification in 41 places and styles four
+  // values; inventing a fifth would mean touching all of them to express
+  // something the taxonomy already covers. An authorised contractor
+  // flying a filed job IS friendly here, exactly as the SAS approach is.
+  //
+  // Classification still arrives with the track, as if from the
+  // classifier. Nothing in the C2 decides this is benign by rule.
+  //
+  // Everything an operator would read is deliberately the opposite of
+  // billund_swarm_recon, which crosses the same ground:
+  //
+  //            commercial survey          hostile recon
+  //   formation line abreast, 45 m        loose diamond, 240 m deep
+  //   altitude  45 m, constant            85-140 m, varying
+  //   speed     12 m/s                    22 m/s
+  //   track     inside the fence,         transits W to E, loiters
+  //             lawnmower over 09/27      over the cargo apron
+  //   RF        one link, licensed band   three bands, one unknown
+  //   evidence  flight plan match         no plan, formation geometry
+  //
+  // The pair is the demonstration. Either one alone proves nothing.
+  billund_commercial_survey: {
+    siteId: 'billund',
+    classification: 'friendly',
+    threat: null,
+    platform: 'quadcopter',
+    droneType: '3x DJI Matrice 350 RTK (pavement survey)',
+    confidence: 0.96,
+    confidenceTrend: 'Flight plan correlated, operator ID match on first pass',
+    contributingSensors: [
+      { id: 'BLL-N08', confidence: 0.96 },   // Runway centre, directly under
+      { id: 'BLL-N07', confidence: 0.94 },   // Runway mid-W
+      { id: 'BLL-N12', confidence: 0.91 },
+      { id: 'BLL-N03', confidence: 0.88 },   // Passenger terminal
+      { id: 'BLL-N09', confidence: 0.84 },   // GA apron, launch and recovery
+    ],
+    evidence: {
+      rfCarrier: '2.420 GHz',
+      rfBandwidth: 'Single OFDM control link per airframe, licensed band',
+      rfMatch: 'DJI Matrice 350 RTK 96%, operator ID broadcast present',
+      modality: 'RF + acoustic + visual',
+      evidenceSize: '118 MB',
+      note: 'NO ACTION REQUIRED. Authorised pavement and lighting survey over runway 09/27, filed with the operator and coordinated with ATC. Three airframes line abreast at 45 m separation, 45 m AGL, 12 m/s, flying a lawnmower pattern inside the aerodrome fence. Remote operator ID broadcasting throughout. Logged for audit; no escalation.',
+    },
+    swarm: {
+      size: 3,
+      // Line abreast, 45 m apart, no depth. A survey covers adjacent
+      // strips in one pass; it has no reason to stack in depth, and that
+      // is what separates it from a formation built for overwatch.
+      formation: [
+        { role: 'survey-lead',  model: 'DJI Matrice 350 RTK', rfMHz: 2420, offset: { forward: 0, right:   0, up: 0 } },
+        { role: 'survey-left',  model: 'DJI Matrice 350 RTK', rfMHz: 2420, offset: { forward: 0, right: -45, up: 0 } },
+        { role: 'survey-right', model: 'DJI Matrice 350 RTK', rfMHz: 2420, offset: { forward: 0, right:  45, up: 0 } },
+      ],
+    },
+    // Lawnmower over runway 09/27: launch from the GA apron, three
+    // passes along the runway axis stepping north each time, recover
+    // where it started. Never leaves the aerodrome.
+    waypoints: [
+      { lat: 55.74150, lon: 9.14600, alt:  0, heading:  90, tSec:   0 },   // GA apron, on the ground
+      { lat: 55.74150, lon: 9.14600, alt: 45, heading:  90, tSec:  12 },   // vertical climb to survey height
+      { lat: 55.74030, lon: 9.14000, alt: 45, heading: 250, tSec:  28 },   // reposition to W threshold
+      { lat: 55.74030, lon: 9.15000, alt: 45, heading:  90, tSec:  55 },   // pass 1, W to E
+      { lat: 55.74030, lon: 9.16200, alt: 45, heading:  90, tSec:  85 },
+      { lat: 55.74030, lon: 9.17000, alt: 45, heading:  90, tSec: 105 },   // E end of pass 1
+      { lat: 55.74055, lon: 9.17100, alt: 45, heading:   0, tSec: 115 },   // step north
+      { lat: 55.74055, lon: 9.16200, alt: 45, heading: 270, tSec: 138 },   // pass 2, E to W
+      { lat: 55.74055, lon: 9.15000, alt: 45, heading: 270, tSec: 168 },
+      { lat: 55.74055, lon: 9.14000, alt: 45, heading: 270, tSec: 193 },   // W end of pass 2
+      { lat: 55.74080, lon: 9.13950, alt: 45, heading:   0, tSec: 203 },   // step north
+      { lat: 55.74080, lon: 9.15000, alt: 45, heading:  90, tSec: 230 },   // pass 3, W to E
+      { lat: 55.74080, lon: 9.16200, alt: 45, heading:  90, tSec: 258 },
+      { lat: 55.74080, lon: 9.16900, alt: 45, heading:  90, tSec: 276 },   // E end of pass 3
+      { lat: 55.74150, lon: 9.15600, alt: 45, heading: 250, tSec: 305 },   // return to GA apron
+      { lat: 55.74150, lon: 9.14600, alt: 30, heading: 270, tSec: 325 },
+      { lat: 55.74150, lon: 9.14600, alt:  0, heading: 270, tSec: 338 },   // recovered
+    ],
+    durationSec: 338,
+  },
+
   // ── Cruise missile (low altitude ingress from S, hits runway) ──
   billund_missile_hostile: {
     siteId: 'billund',
