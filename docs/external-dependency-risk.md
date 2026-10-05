@@ -14,7 +14,7 @@ Ordered by what it costs when it fails, not by likelihood.
 
 ---
 
-## 1. Cesium ion — single token, and everything 3D hangs off it
+## 1. Cesium ion — commercially fine, answer it if asked
 
 `Cesium.Ion.defaultAccessToken` from `VITE_CESIUM_ION_TOKEN`, used for:
 
@@ -24,17 +24,17 @@ Ordered by what it costs when it fails, not by likelihood.
 | 96188 | Cesium OSM Buildings — the extruded white boxes everywhere else |
 | Bing | the base imagery under all of it |
 
-**If this token lapses, is revoked, or the account exceeds its tier, the
-platform loses every building outside Billund and its basemap at the same
-time.** Billund survives only because its mesh is self-hosted.
+**Not a risk we are carrying.** An enterprise contract covers uptime and
+tier, which is what the failure modes here actually are. This is a paid
+dependency like any other and it is treated as one.
 
-That is one credential, one account, one vendor, for the entire visual
-layer of a sovereignty product. It is the largest single point of failure
-in the system and it is worth saying plainly.
+The only reason it is in this document at all is so the answer exists
+when a customer asks where the imagery comes from. The answer is that
+the platform renders anywhere today on commercial imagery, and renders
+entirely on Danish state data at any site we have built through the
+mesh pipeline. Billund is the worked example.
 
-**Mitigation that already exists:** the skråfoto mesh pipeline. Any site
-built through it needs none of the above. Billund is proof it works;
-nothing else has been built yet.
+Nobody needs to do anything about this unless a customer raises it.
 
 ## 2. Google Photorealistic 3D Tiles — a published EEA restriction
 
@@ -113,24 +113,19 @@ credentials with no rotation procedure written down.
 
 ---
 
-## What this adds up to
+## What actually needs doing
 
-**The sovereignty story and the dependency graph do not currently
-agree.** The pitch is Danish data on European infrastructure with nothing
-that can be switched off from outside. The map today is Bing imagery and
-Google building meshes, both reached through one American vendor's token,
-with one of them carrying a published European restriction.
+Two things, and neither is this week:
 
-Billund is the counter-example and it is the whole argument: built from
-Danish state orthophotos, Danish state height models and OpenStreetMap,
-hosted in `fr-par`, and it needs none of the three.
+**BBR REST has a date on it: end of 2026.** The migration target is
+known and the work has not started. This is the only entry here with a
+hard deadline.
 
-**The honest framing for a customer** is that the platform renders
-anywhere in the world today using commercial imagery, and renders
-*sovereign* at any site we have built — which is a decision per site, not
-a limitation.
+**OSRM runs on the project's public demo server.** Known-bad for
+production, warned about in its own file, and the fix is an endpoint
+swap to a self-hosted or commercial instance. It will bite under a
+customer's traffic rather than ours.
 
-**Nothing here is urgent this week.** One item has a date (BBR, end of
-2026), one is a known-bad endpoint that nobody has swapped (OSRM), and
-the rest are watch-items. The point of writing them down is that none of
-them will announce themselves.
+Everything else is a watch-item or a paid dependency behaving normally.
+The point of the list is that none of these announce themselves — the
+symptom is a map that renders less than it did yesterday.
