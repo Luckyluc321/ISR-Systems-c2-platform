@@ -759,7 +759,7 @@ import {
   fetchGeoDanmarkFeatures,
   GeoDanmarkFeatureRenderer,
 } from './sovereign_geodanmark_features.js';
-import { applyBuildingSwap, clearBuildingSwap, footprintsFor, sitesWithFootprints } from './building_footprints.js';
+import { applyBuildingSwap, clearBuildingSwap, footprintsFor, coverageFor, sitesWithFootprints } from './building_footprints.js';
 import { primeDagiCache, receiverIdsForPoint, dagiCacheStats } from './sovereign_geo_routing.js';
 import { runbookFor } from './runbooks.js';
 import { TARGETS as TARGETS_CORE } from './targets.js';
@@ -1227,16 +1227,44 @@ async function main() {
       // them. The mesh itself is only clipped when it still contains
       // ground; a buildings-only mesh has nothing to cut away, and
       // clipping it is the step that once removed all of it.
-      const swap = applyBuildingSwap({
-        siteId,
-        meshTileset: buildingsOnly ? null : ts,
-        boxTileset: osmBuildings,
-      });
-      console.log(
-        `[site_mesh] ${siteId} loaded, height offset ${heightOffsetM} m, ` +
-        `${swap.polygons} outlines: boxes hidden ${swap.boxes ? 'yes' : 'no'}, ` +
-        `mesh ${buildingsOnly ? 'pre-cut to buildings' : (swap.mesh ? 'clipped' : 'not clipped')}`,
-      );
+      // WAIT FOR TILES, NOT FOR THE TILESET. `fromUrl` resolves as soon
+      // as tileset.json arrives, which is a few kilobytes; the geometry
+      // is 146 MB behind it. Swapping here took every white box away
+      // town-wide while nothing had yet drawn to replace them, so on a
+      // slow connection the whole of Billund rendered as flat
+      // orthophoto. That window used to be invisible because only 15
+      // boxes were being removed; once coverage rectangles took them all
+      // away it became the entire town.
+      //
+      // initialTilesLoaded fires once the tiles for the current view are
+      // in. If the camera is nowhere near this site it will not fire
+      // until someone flies there, which is exactly right: the boxes
+      // stay until there is something better to show.
+      let swapped = false;
+      const swapOnce = (why) => {
+        if (swapped) return;
+        swapped = true;
+        const swap = applyBuildingSwap({
+          siteId,
+          meshTileset: buildingsOnly ? null : ts,
+          boxTileset: osmBuildings,
+        });
+        console.log(
+          `[site_mesh] ${siteId} ${why}, height offset ${heightOffsetM} m, ` +
+          `${swap.polygons} ${swap.mode === 'coverage' ? 'coverage rectangle(s)' : 'outlines'}: ` +
+          `boxes hidden ${swap.boxes ? 'yes' : 'no'}, ` +
+          `mesh ${buildingsOnly ? 'pre-cut to buildings' : (swap.mesh ? 'clipped' : 'not clipped')}`,
+        );
+      };
+      if (ts.initialTilesLoaded) {
+        ts.initialTilesLoaded.addEventListener(() => swapOnce('tiles visible'));
+        // Belt and braces: a tileset that renders nothing at all would
+        // otherwise never swap, leaving white boxes forever. allTilesLoaded
+        // also fires when the set settles with zero tiles in view.
+        ts.allTilesLoaded.addEventListener(() => swapOnce('tiles settled'));
+      } else {
+        swapOnce('loaded');
+      }
       return ts;
     } catch (err) {
       // A missing mesh must never stop a site loading. Most sites have
@@ -1350,7 +1378,11 @@ async function main() {
           meshTileset: pre ? null : ts,
           boxTileset: osmBuildings,
         });
-        return `${r.polygons} outlines: boxes hidden` + (pre ? ', mesh already buildings-only' : ', mesh clipped');
+        return r.mode === 'coverage'
+          ? `${r.polygons} coverage rectangle(s): every OSM box inside the `
+            + 'built area hidden, mesh left whole'
+          : `${r.polygons} outlines: boxes hidden`
+            + (pre ? ', mesh already buildings-only' : ', mesh clipped');
       }
       clearBuildingSwap({ meshTileset: ts, boxTileset: osmBuildings });
       // Says what to expect, because on a buildings-only mesh turning
@@ -1358,6 +1390,37 @@ async function main() {
       return pre
         ? 'white boxes back on, mesh unchanged (it holds no ground to clip)'
         : 'clipping off, raw reconstruction and white boxes both drawing';
+    },
+    // Is the camera standing somewhere the mesh is supposed to cover?
+    // Answers in one line what a screenshot cannot: a white box inside
+    // coverage is a clip that failed, a white box outside it is a
+    // building nobody has built yet. Those need opposite fixes, and
+    // they look identical.
+    coverage: (siteId = _siteMeshId || 'billund') => {
+      const rects = coverageFor(siteId);
+      const c = viewer.camera.positionCartographic;
+      const lon = c ? Cesium.Math.toDegrees(c.longitude) : null;
+      const lat = c ? Cesium.Math.toDegrees(c.latitude) : null;
+      const covering = rects.filter((r) => {
+        const xs = r.ring.map((p) => p[0]);
+        const ys = r.ring.map((p) => p[1]);
+        return lon >= Math.min(...xs) && lon <= Math.max(...xs)
+            && lat >= Math.min(...ys) && lat <= Math.max(...ys);
+      });
+      return {
+        siteId,
+        rectangles: rects.length,
+        cameraLon: lon == null ? null : +lon.toFixed(5),
+        cameraLat: lat == null ? null : +lat.toFixed(5),
+        inside: covering.length > 0,
+        insideWhich: covering.map((r) => r.build),
+        extent: rects.map((r) => {
+          const xs = r.ring.map((p) => p[0]);
+          const ys = r.ring.map((p) => p[1]);
+          return `${r.build}: lon ${Math.min(...xs).toFixed(4)}..${Math.max(...xs).toFixed(4)}`
+               + ` lat ${Math.min(...ys).toFixed(4)}..${Math.max(...ys).toFixed(4)}`;
+        }),
+      };
     },
     footprints: (siteId = _siteMeshId || 'billund') => {
       const f = footprintsFor(siteId);
