@@ -2112,6 +2112,9 @@ async function main() {
 
   // ── Imagery mode ──
   let imageryMode = 'day';   // default landing view — day mode
+  // Safe to evaluate the basemap rule now: it reads imageryMode, which
+  // did not exist when the rule was constructed further up.
+  try { meshBasemap.apply('init'); } catch (err) { console.warn('[basemap] init failed:', err?.message || err); }
   // Declared here (not at its original ~19280 location) because
   // applyImageryMode() below calls _isSimMode(), and applyImageryMode()
   // runs during main()'s own synchronous setup, before main() has reached

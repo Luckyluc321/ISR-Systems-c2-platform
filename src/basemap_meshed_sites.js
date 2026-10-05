@@ -111,11 +111,21 @@ export function createMeshedSiteBasemap({
     return { lon, lat, height: c.height, box, low, want: !!box && low };
   }
 
+  // `allow` closes over the caller's state. If that is not ready yet,
+  // or throws for any other reason, the honest answer is "do not switch
+  // the basemap", not "take the render loop down with you". This runs
+  // inside Cesium's frame callback via moveEnd, where an uncaught throw
+  // stops rendering entirely and shows a dead globe.
+  function allowed() {
+    try { return allow(); } catch (_) { return false; }
+  }
+
   function apply(reason) {
     if (!sdfiLayer) return null;
-    const e = evaluate();
+    let e;
+    try { e = evaluate(); } catch (_) { return null; }
     if (!e) return null;
-    const want = allow() && (pinned ? pinned === 'sdfi' : e.want);
+    const want = allowed() && (pinned ? pinned === 'sdfi' : e.want);
     // Bing is the base and SDFI draws over it, so visibility is SDFI's
     // show flag alone and Bing stays fully opaque. Zeroing Bing's alpha
     // leaves a transparent hole anywhere SDFI is hidden, which is what
@@ -123,7 +133,7 @@ export function createMeshedSiteBasemap({
     if (bingLayer) bingLayer.alpha = 1.0;
     if (want !== sdfiLayer.show) {
       sdfiLayer.show = want;
-      const why = !allow() ? 'vetoed by imagery mode'
+      const why = !allowed() ? 'vetoed by imagery mode'
         : pinned ? `pinned ${pinned}`
         : e.box ? `over ${e.box.build}, alt ${Math.round(e.height)} m`
         : 'no mesh here';
@@ -137,7 +147,13 @@ export function createMeshedSiteBasemap({
   // camera stops. Flights fire it on arrival, which is what makes
   // picking a site re-evaluate with nobody calling apply().
   viewer.camera.moveEnd.addEventListener(() => apply('camera'));
-  apply('init');
+  // NO apply() HERE. This is constructed while main.js is still setting
+  // itself up, and `allow` closes over state declared further down that
+  // file. Calling it now reads a `let` in its temporal dead zone and
+  // throws ReferenceError inside Cesium's render loop, which surfaces as
+  // "An error occurred while rendering. Rendering has stopped." — a dead
+  // globe, not a stack trace anyone would connect to a basemap rule.
+  // The caller applies once it is ready.
 
   return {
     apply,
