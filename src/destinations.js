@@ -80,11 +80,23 @@ const CONSEQUENCE_DESTINATIONS = [
   { id: 'hospital-kolding-sygehus', siteId: null, tier: 3, type: 'agency',
     name: 'Kolding Sygehus',
     contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  // Fyn's traumecenter and 24-hour fælles akutmodtagelse, 14 km from
+  // Odense Lufthavn. The consequence routing for 'odense' names it, and
+  // without a destination here that escalation would be written to an id
+  // resolving to nothing.
+  { id: 'hospital-ouh-odense', siteId: null, tier: 3, type: 'agency',
+    name: 'Odense Universitetshospital (OUH)',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
   { id: 'hospital-suh-koege', siteId: null, tier: 3, type: 'agency',
     name: 'Sjællands Universitetshospital, Køge',
     contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
   { id: 'kbr-brsj', siteId: null, tier: 3, type: 'agency',
     name: 'Brand & Redning Sønderjylland',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
+  // §60 shared service for all nine Fyn kommuner, Nordfyns included, so
+  // it is first-line fire and rescue for Odense Lufthavn at Beldringe.
+  { id: 'kbr-fyn', siteId: null, tier: 3, type: 'agency',
+    name: 'Beredskab Fyn',
     contactMethods: ['phone', 'in-app'], availabilityStatus: '24-7' },
   { id: 'kbr-frederiksborg', siteId: null, tier: 3, type: 'agency',
     name: 'Frederiksborg Brand & Redning',
@@ -587,6 +599,80 @@ const DESTINATIONS = [
 
   // Tier 5, NATO / international air coordination
   { id: 'bll-t5-nato-airc', siteId: 'billund', tier: 5, type: 'agency',
+    name: 'NATO Combined Air Operations Centre, Uedem',
+    contactMethods: ['api'], availabilityStatus: 'on-shift' },
+
+  // ── Odense Lufthavn (EKOD), Beldringe ──────────────────────────────
+  //
+  // Mirrors Billund's ladder, with Fyn's agencies substituted. The
+  // tier-2 Politikreds is Fyns Politi and it is wired into that role's
+  // destinationIds in roles.js; without that the impact cascade would
+  // alert medical and fire that the scene is not declared safe, with no
+  // police district able to declare it safe or release it.
+  //
+  // UNVERIFIED, and named neutrally for that reason: whether the
+  // aerodrome runs full ATC or an AFIS service, and who provides it.
+  // Billund's entry names Naviair's remote tower centre because that is
+  // established there. Asserting the same here would be a guess printed
+  // in front of an operator.
+  { id: 'ode-t1-sec-ops', siteId: 'odense', tier: 1, type: 'internal',
+    name: 'Odense Lufthavn Security Operations',
+    contactMethods: ['in-app', 'phone'], availabilityStatus: '24-7' },
+  { id: 'ode-t1-duty-mgr', siteId: 'odense', tier: 1, type: 'internal',
+    name: 'Odense Lufthavn Duty Manager',
+    contactMethods: ['in-app', 'phone'], availabilityStatus: '24-7' },
+  { id: 'ode-t1-atc', siteId: 'odense', tier: 1, type: 'internal',
+    name: 'Odense Lufthavn Tower',
+    contactMethods: ['phone', 'radio'], availabilityStatus: 'on-shift' },
+  { id: 'ode-t1-arff', siteId: 'odense', tier: 1, type: 'internal',
+    name: 'Odense Lufthavn ARFF (fire station)',
+    contactMethods: ['radio', 'phone'], availabilityStatus: 'on-shift' },
+  { id: 'ode-t1-ground', siteId: 'odense', tier: 1, type: 'internal',
+    name: 'Ground Operations Control',
+    contactMethods: ['in-app', 'radio'], availabilityStatus: 'on-shift' },
+  { id: 'ode-sys-cameras', siteId: 'odense', tier: 1, type: 'system',
+    name: 'Odense Lufthavn CCTV / Video Management System',
+    contactMethods: ['api'], availabilityStatus: '24-7' },
+  { id: 'ode-sys-broker', siteId: 'odense', tier: 1, type: 'system',
+    name: 'Odense Lufthavn Operations Data Broker',
+    contactMethods: ['api'], availabilityStatus: '24-7' },
+  { id: 'ode-t2-politi', siteId: 'odense', tier: 2, type: 'agency',
+    name: 'Fyns Politi',
+    contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
+  { id: 'ode-t2-pet', siteId: 'odense', tier: 2, type: 'agency',
+    name: 'PET, Politiets Efterretningstjeneste',
+    contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
+  { id: 'ode-t2-beredskab-fyn', siteId: 'odense', tier: 2, type: 'agency',
+    name: 'Beredskab Fyn',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: 'on-shift' },
+  { id: 'ode-sys-eurocontrol', siteId: 'odense', tier: 2, type: 'system',
+    name: 'EUROCONTROL Network Manager',
+    contactMethods: ['api'], availabilityStatus: 'on-shift' },
+  { id: 'ode-t3-rigspoliti', siteId: 'odense', tier: 3, type: 'agency',
+    name: 'Rigspolitiet',
+    contactMethods: ['encrypted-email'], availabilityStatus: 'on-shift' },
+  { id: 'ode-t3-fe', siteId: 'odense', tier: 3, type: 'agency',
+    name: 'Forsvarets Efterretningstjeneste (FE)',
+    contactMethods: ['encrypted-email'], availabilityStatus: 'on-shift' },
+  { id: 'ode-t3-beredskab', siteId: 'odense', tier: 3, type: 'agency',
+    name: 'Beredskabsstyrelsen',
+    contactMethods: ['phone', 'encrypted-email'], availabilityStatus: '24-7' },
+  { id: 'ode-t3-traf', siteId: 'odense', tier: 3, type: 'agency',
+    name: 'Trafikstyrelsen (Danish Civil Aviation Authority)',
+    contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
+  { id: 'ode-t4-qra', siteId: 'odense', tier: 4, type: 'agency',
+    name: 'Flyvestation Karup (nearest air response base)',
+    contactMethods: ['encrypted-email', 'phone'], availabilityStatus: '24-7' },
+  { id: 'ode-t4-qra-skrydstrup', siteId: 'odense', tier: 4, type: 'agency',
+    name: 'Flyvevåbnet Quick Reaction Alert, Skrydstrup (F-35)',
+    contactMethods: ['encrypted-email', 'phone'], availabilityStatus: '24-7' },
+  { id: 'ode-t4-forsvar', siteId: 'odense', tier: 4, type: 'agency',
+    name: 'Forsvarskommandoen',
+    contactMethods: ['encrypted-email'], availabilityStatus: 'on-shift' },
+  { id: 'ode-t4-hjv', siteId: 'odense', tier: 4, type: 'agency',
+    name: 'Hjemmeværnsdistrikt Fyn',
+    contactMethods: ['phone', 'in-app'], availabilityStatus: 'on-shift' },
+  { id: 'ode-t5-nato-airc', siteId: 'odense', tier: 5, type: 'agency',
     name: 'NATO Combined Air Operations Centre, Uedem',
     contactMethods: ['api'], availabilityStatus: 'on-shift' },
 ];

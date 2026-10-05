@@ -1,0 +1,146 @@
+# Odense Airport (EKOD) site manifest
+# Wire contract: docs/integration-contracts.md Section 3 "Site definition"
+
+site_id: odense
+label: Odense Airport
+code: ODE
+tenant: op-odense-airport
+site_type: airport
+# Environment this manifest describes. SIMULATED: positions come from
+# scenario templates, not from a sensor feed.
+mode: sim
+
+# Centroid of the boundary below, not a map pin. The airport is at
+# Beldringe, 11 km north of Odense city.
+coordinates:
+  lat: 55.47445
+  lon: 10.32890
+
+domain_scope:
+  - aviation
+  - ground
+
+# Aerodrome boundary — traced by Lucas in geojson.io and handed over as
+# two LineStrings, joined here into one closed ring. The two segments met
+# within 0.5 m and the loop closed within 6.3 m, so no vertex was moved
+# or invented. 18 vertices, 1.34 km², 2.39 x 1.80 km.
+boundary:
+  - [10.3080948, 55.4709219]
+  - [10.3108581, 55.4681609]
+  - [10.3159632, 55.4698246]
+  - [10.3196017, 55.4710512]
+  - [10.3259690, 55.4685704]
+  - [10.3287608, 55.4681524]
+  - [10.3306308, 55.4712278]
+  - [10.3312366, 55.4722430]
+  - [10.3333775, 55.4735207]
+  - [10.3357223, 55.4753846]
+  - [10.3393569, 55.4772654]
+  - [10.3437685, 55.4789800]
+  - [10.3460072, 55.4798158]
+  - [10.3419519, 55.4842920]
+  - [10.3385017, 55.4810086]
+  - [10.3259393, 55.4768690]
+  - [10.3226471, 55.4773318]
+  - [10.3218569, 55.4755256]
+
+# 9 sensors, computed against the THREE-EYE policy: every point inside
+# the boundary is within 1000 m of at least three nodes. Six would have
+# given dual coverage only, which is what Billund's layout comment
+# describes and is under current policy.
+#
+# Placed by greedy set cover over a 17 m sample grid, with two
+# constraints that are not negotiable and are why this is not a grid:
+#
+#   INSIDE THE FENCE. Candidates are restricted to the boundary polygon.
+#   A bounding-box grid put four of six nodes on land the airport does
+#   not control.
+#
+#   500 m MINIMUM SEPARATION. Without it the solver stacks nodes 60 m
+#   apart, which satisfies "three eyes" on paper and gives almost no
+#   baseline for fusing a bearing. Three readings from one spot are one
+#   reading.
+#
+# Statuses and detection counts below are scenario seed values, same as
+# every other shipped site.
+sensors:
+  - { sensor_id: N01, label: "Odense Node 01",        position: { lat: 55.48355, lon: 10.34134 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N02, label: "Odense Node 02",        position: { lat: 55.47970, lon: 10.34554 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 1, issues: null }
+  - { sensor_id: N03, label: "Odense Node 03",        position: { lat: 55.47725, lon: 10.33889 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N04, label: "Odense Node 04 (Core)", position: { lat: 55.47690, lon: 10.33084 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE + HackRF", detectionsLast24h: 3, issues: null, isCore: true }
+  - { sensor_id: N05, label: "Odense Node 05",        position: { lat: 55.47445, lon: 10.32419 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 1, issues: null }
+  - { sensor_id: N06, label: "Odense Node 06",        position: { lat: 55.47200, lon: 10.31579 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N07, label: "Odense Node 07",        position: { lat: 55.47200, lon: 10.33084 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 2, issues: null }
+  - { sensor_id: N08, label: "Odense Node 08",        position: { lat: 55.46955, lon: 10.32349 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 0, issues: null }
+  - { sensor_id: N09, label: "Odense Node 09",        position: { lat: 55.46850, lon: 10.31054 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online,   hardware: "Radxa Rock 4SE",          detectionsLast24h: 1, issues: null }
+
+sensorsOnline: 9
+sensorsTotal: 9
+stats:
+  flaggedEvents24h: 1
+  hostileEvents24h: 0
+  falseAlarms24h: 1
+
+# Routing is to FYN, not to Odense city, and the distinction is load
+# bearing. The aerodrome sits in NORDFYNS Kommune at Beldringe, verified
+# against the municipal boundary — kom-odense would have been the wrong
+# municipal crisis contact despite the airport's name.
+#
+# Beredskab Fyn rather than a Beredskabsstyrelsen centre: it is the §60
+# shared service and its own manifest lists kom-nordfyns as a member, so
+# it is the first-line fire and rescue here. Billund routes to BRS
+# Haderslev because Haderslev is its regional centre; Fyn has its own.
+receivers:
+  # Actors
+  - { id: politi-fyn,              mode: actor,    role: primary-response,   tier: 1 }
+  - { id: kbr-fyn,                 mode: actor,    role: emergency-response, tier: 2 }
+  - { id: flv-karup,               mode: actor,    role: air-response,       tier: 3 }
+  - { id: agency-traf,             mode: actor,    role: regulator,          tier: 4 }
+  - { id: kom-nordfyns,            mode: actor,    role: municipal-crisis,   tier: 4 }
+  # Observers
+  - { id: rigspoliti,              mode: observer }
+  - { id: pet,                     mode: observer }
+  - { id: forsvaret,               mode: observer }
+  - { id: fe,                      mode: observer }
+  - { id: agency-cfcs,             mode: observer }
+  - { id: min-just,                mode: observer }
+  - { id: min-erhverv,             mode: observer }
+  # Conditional observers
+  - { id: region-syd,              mode: observer, condition: casualty-scenario }
+  - { id: brs-kemisk,              mode: observer, condition: cbrn-threat }
+  - { id: brs-nukleart,            mode: observer, condition: nuclear-threat }
+  - { id: hjv-distrikt-fyn,        mode: observer, condition: sustained-incident }
+
+default_cascade_recipients:
+  hostile_any:
+    - pet
+    - fe
+    - politi-fyn
+  hostile_high:
+    - forsvarskmd
+    - rigspoliti
+    - beredskab
+    - agency-traf
+  cruise_missile:
+    - flv-karup
+    - flv-skrydstrup
+
+always_observers:
+  - agency-traf
+
+escalation_sla_minutes:
+  hostile_high: 4
+
+regulatory_context: |
+  NOT YET FILLED IN. Billund and CPH carry airspace class, ATC
+  frequencies and NOTAM authority here. Those are operational facts for
+  this aerodrome that have not been sourced, and inventing them would put
+  wrong frequencies in front of an operator.
+
+  What is established: NOTAM authority for Danish aerodromes is
+  Trafikstyrelsen, and the aerodrome lies in Nordfyns Kommune within
+  Fyns Politi's district and Region Syddanmark.
+
+  To complete: airspace class and ceiling, Tower and Ground frequencies,
+  runway designators, and whether single-runway operations make NOTAM
+  decisions as heavy as they are at Billund.

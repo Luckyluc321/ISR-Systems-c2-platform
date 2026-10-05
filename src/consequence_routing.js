@@ -146,6 +146,19 @@ export const CONSEQUENCE_BY_SITE = {
     hospitals: ['hospital-esbjerg-sygehus'],
     rescue: 'brs-haderslev',
   },
+  odense: {
+    region: 'region-syd',
+    // Nordfyns kommune, ikke Odense. Pladsen ligger ved Beldringe, og
+    // Beredskab Fyn er §60-selskabet der dækker alle fynske kommuner
+    // inklusive Nordfyns, så det er førsteindsatsen her.
+    fire: 'kbr-fyn',
+    // OUH i Odense er Fyns traumecenter og har døgnåben fælles
+    // akutmodtagelse, 14 km fra pladsen.
+    hospitals: ['hospital-ouh-odense'],
+    // Beredskabsstyrelsen Sydjylland i Haderslev er statsligt
+    // forstærkningsniveau for hele Region Syddanmark, Fyn medregnet.
+    rescue: 'brs-haderslev',
+  },
   energinet_kassoe: {
     region: 'region-syd',
     fire: 'kbr-brsj',   // Aabenraa kommune

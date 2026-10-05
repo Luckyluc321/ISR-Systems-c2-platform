@@ -63,6 +63,25 @@ export const OPERATORS = [
     brandTint: '#ff6b4d',
   },
   {
+    id: 'op-odense-airport',
+    kind: 'operator',
+    org: 'Odense Lufthavn',
+    label: 'Odense Airport',
+    person: 'Duty Officer',
+    initials: 'OA',
+    scope: 'assigned-sites',
+    destinationIds: [],
+    siteIds: ['odense'],
+    sensorCount: 9,
+    isMultiSite: false,
+    sector: 'Aviation',
+    // Beldringe, ikke Odense by. Pladsen ligger i Nordfyns Kommune,
+    // 11 km nord for byen den er opkaldt efter, hvilket er grunden til
+    // at manifestets kommunale modtager er kom-nordfyns.
+    description: 'Odense Lufthavn (EKOD) ved Beldringe i Nordfyns Kommune. Regional plads på Fyn.',
+    brandTint: '#4dd98f',
+  },
+  {
     id: 'op-esbjerg-port',
     kind: 'operator',
     org: 'Port of Esbjerg',
@@ -384,7 +403,7 @@ export const RECEIVERS = [
   {
     id: 'politi-fyn', kind: 'receiver', type: 'leaf', parentId: 'politi',
     org: 'Fyns Politi', label: 'Fyns Politi', initials: 'FP',
-    scope: 'regional', destinationIds: [],
+    scope: 'regional', destinationIds: ['ode-t2-politi'],   // Odense Lufthavn
     description: 'Funen district. Covers Odense + Svendborg.',
   },
   {
@@ -1213,7 +1232,7 @@ export const RECEIVERS = [
   // ── Syddanmark ───────────────────────────────────────────────────────────
   { id: 'kbr-fyn', kind: 'receiver', type: 'leaf',
   org: 'Beredskab Fyn', label: 'Beredskab Fyn', initials: 'BFN',
-  scope: 'regional', destinationIds: [],
+  scope: 'regional', destinationIds: ['kbr-fyn'],   // Odense Lufthavn
   meta: { member_kommuner: ['kom-assens', 'kom-faaborg-midtfyn', 'kom-kerteminde', 'kom-langeland', 'kom-nordfyns', 'kom-nyborg', 'kom-odense', 'kom-svendborg', 'kom-aeroe'] },
   description: '§60 shared, all Fyn kommuner. 3,181 km².' },
   { id: 'kbr-trekantbrand', kind: 'receiver', type: 'leaf',
@@ -1356,7 +1375,7 @@ export const RECEIVERS = [
   // ── Region Syddanmark (5 akuthospitaler) ─────────────────────────────────
   { id: 'hospital-ouh-odense', kind: 'receiver', type: 'leaf',
   org: 'Odense Universitetshospital', label: 'Odense Universitetshospital (OUH)', initials: 'OUH',
-  scope: 'regional', destinationIds: [],
+  scope: 'regional', destinationIds: ['hospital-ouh-odense'],   // Odense Lufthavn
   meta: { region_parent: 'region-syd' },
   description: 'University hospital, Odense. Level-1 trauma centre for Syddanmark.' },
   { id: 'hospital-kolding-sygehus', kind: 'receiver', type: 'leaf',
