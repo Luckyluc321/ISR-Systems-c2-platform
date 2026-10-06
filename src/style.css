@@ -5499,7 +5499,7 @@ body.mode-receiver #receiver-view { display: flex; }
   cursor: default;
   user-select: none;
 }
-.step-placeholder-chevron { color: var(--text-dimmer, rgba(255,255,255,0.20)); font-size: 12px; }
+.step-placeholder-chevron { color: var(--text-dimmer, rgba(255,255,255,0.20)); font-size: var(--fs-md); }
 .step-placeholder-num     { color: var(--text-dim); font-weight: 600; }
 .step-placeholder-sep     { color: var(--text-dimmer, rgba(255,255,255,0.20)); }
 .step-placeholder-title   { color: var(--text-dim); }
@@ -8766,11 +8766,16 @@ body.view-fleet #fleet-view { display: block; }
 .agency-oc-hdr:hover {
   background: rgba(180, 200, 220, 0.03);
 }
+/* Same size as the pseudo-element arrow on .c-panel-collapsible and as
+   .c-row-chevron. The pillar has three separate disclosure idioms and
+   enlarging only one of them made two neighbouring panels disagree about
+   how big an arrow is. Until they are unified they at least have to
+   match. */
 .agency-oc-chevron {
   font-family: var(--font-mono);
   color: var(--text-dim);
-  font-size: var(--fs-xs);
-  width: 12px;
+  font-size: var(--fs-md);
+  width: 14px;
   flex-shrink: 0;
 }
 .agency-oc-title-block {

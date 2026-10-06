@@ -8079,7 +8079,7 @@ async function main() {
       if (d.entity) { viewer.entities.remove(d.entity); d.entity = null; }
       if (d.trail) { viewer.entities.remove(d.trail); d.trail = null; }
       if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
-        if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
+      if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
       if (d.routeEntity) { viewer.entities.remove(d.routeEntity); d.routeEntity = null; }
       _counterDispatches.delete(d.id);
     }, 5000);
