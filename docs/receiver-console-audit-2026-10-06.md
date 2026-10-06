@@ -17,12 +17,114 @@ The scenario throughout is the one in the screenshots: an incident at
 Billund Airport, escalated to **Sydøstjyllands Politi** (`politi-sydostjyl`),
 viewed in that profile's receiver console.
 
-**Read section 1 if you only read one thing.** The visual problems are real
-but cosmetic. The correctness problems are not.
+**Read section 1 and stop.** It is the only part that asks anything of the
+reader. Everything after it is evidence, there so any single claim can be
+checked without taking the rest on trust. The visual problems that prompted
+this audit are real but cosmetic. The correctness problems are not.
 
 \newpage
 
-# 1. Severity-ranked findings
+# 1. Decisions
+
+Three items need no decision. They are plain bugs and will be fixed unless
+someone objects.
+
+| | Fix | Section |
+|---|-----|---------|
+| A | Note timestamp frozen at 2026-07-24 | 4.3 |
+| B | Notes do not appear in the Audit trail the button names | 4.3 |
+| C | Dead CSS class, and the grid bug squashing the chapter meta line | 3.3, 5.6 |
+
+The following eight are real choices. Each carries a recommendation, and the
+recommendation is an opinion, not a conclusion of the audit.
+
+## 1. The two dispatch buttons that do nothing
+
+| | Option | Consequence |
+|---|--------|-------------|
+| a | Hide the dispatch group for profiles with no asset inventory | Honest immediately. 18 districts lose two buttons they could not use |
+| b | Write real inventories for all 18 police districts | Correct end state. Needs real inventory data we do not have |
+| c | Leave as is | A demo risk every time a district profile is opened |
+
+**Recommended: a now, b per district as each is onboarded.** The buttons
+currently claim to command units the system has no record of.
+
+## 2. The four counters that cannot hold a real number
+
+| | Option | Consequence |
+|---|--------|-------------|
+| a | Hide counters that cannot yet be populated | Report shrinks but stops lying |
+| b | Wire them: resolve destination id to role id, start writing catalog entries | Report becomes true. Roughly a week |
+
+**Recommended: a now, b when the identifier work in decision 4 lands.**
+A zero that can only ever be zero is worse than an absent field.
+
+## 3. The chapter headline shows the wrong archetype
+
+| | Option | Consequence |
+|---|--------|-------------|
+| a | Headline what the role actually did on this event | Headline becomes event-specific and true |
+| b | Keep both rows, relabel so the distinction is legible | Keeps the org's standing taxonomy visible |
+
+**Recommended: a.** A police chapter headlined KINETIC RESPONSE on an event
+where they dispatched nothing reads as a system that is not paying attention.
+
+## 4. Identifier drift across three data files
+
+Six of twelve police districts are keyed differently in `roles.js` and
+`response_assets.js`. Only 14 of 44 national-pool ids match a role id.
+
+| | Option | Consequence |
+|---|--------|-------------|
+| a | Converge on one scheme now | Cheap today, touches three files |
+| b | Add a mapping layer and keep both | Permanent translation surface |
+
+**Recommended: a, before any real district is onboarded.** This is the same
+defect as decision 2 and the hardest one to unpick later.
+
+## 5. The site capability gate is role-blind
+
+| | Option | Consequence |
+|---|--------|-------------|
+| a | Add a role dimension to the gate | Small. Removes Bornholm being offered patrols at Copenhagen |
+| b | Defer | Keeps the current wrong-but-permissive behaviour |
+
+**Recommended: a.**
+
+## 6. Move the action rail onto the archetype engine
+
+A rule engine covering all 386 roles already exists and the action rail does
+not consult it. The rail is a hand-written branch ladder.
+
+| | Option | Consequence |
+|---|--------|-------------|
+| a | Do it | Largest item here. Removes the per-agency `else if` growth |
+| b | Defer | Each new agency type keeps costing a code change |
+
+**Recommended: b for now.** It is the right destination and the wrong week.
+
+## 7. The pillar's four arrow idioms and three collapse stores
+
+| | Option | Consequence |
+|---|--------|-------------|
+| a | Unify to one idiom, one store, one keying scheme | Mostly deletion. Fixes the silent collapse-state reset |
+| b | Defer | Inconsistency compounds with each new panel |
+
+**Recommended: a.**
+
+## 8. Colour
+
+| | Option | Consequence |
+|---|--------|-------------|
+| a | Finish the single-accent pass; spend the colour budget on the 8 archetype badges, which already have hooks and today all set one identical colour | Section identity comes from structure, colour carries meaning |
+| b | Colour the section arrows per section | Rebuilds the rainbow `--sec-accent` was introduced to remove |
+
+**Recommended: a.** The token file already states the rule: colour is for
+state, one accent, not many. Option b contradicts the system's own design.
+
+\newpage
+
+# 2. Severity-ranked findings
 
 ## Tier 1: the product states things that are not true
 
@@ -47,25 +149,25 @@ These are what a customer notices in a demo.
 | 10 | Of 21 police-branch roles, 3 have one. 18 districts land on the stub rail | 86 percent uncovered |
 | 11 | The site capability gate takes no role parameter. It is role-blind | `main.js:24426` |
 | 12 | The action list is a hardcoded branch ladder, while a working 386-role archetype engine sits unused beside it | `main.js:24523` |
-| 13 | Three data files key the same agency differently. 6 of 12 police districts diverge | see 5.3 |
+| 13 | Three data files key the same agency differently. 6 of 12 police districts diverge | see 6.3 |
 
 ## Tier 3: visual and structural
 
 | # | Finding | Where |
 |---|---------|-------|
-| 14 | Four different disclosure-arrow idioms in one pillar | see 2.2 |
+| 14 | Four different disclosure-arrow idioms in one pillar | see 3.3 |
 | 15 | Three independent collapse-state stores, one with inverted polarity | `main.js:25563` |
 | 16 | `.c-row-collapsible` is applied in markup and has zero CSS rules | `main.js:22095` |
 | 17 | Collapse state is keyed by title text, so a title change silently resets it | `main.js:25577` |
-| 18 | The single-accent rule is about 20 percent applied: 2 panels against 8 | see 2.4 |
+| 18 | The single-accent rule is about 20 percent applied: 2 panels against 8 | see 3.4 |
 | 19 | A pseudo-element consumes a grid cell, collapsing a column to one word wide | `style.css:8405` |
 | 20 | All 8 archetype badge classes set the identical colour | `style.css:7882` |
 
 \newpage
 
-# 2. The right-hand pillar
+# 3. The right-hand pillar
 
-## 2.1 The brown line is not where it appears to be
+## 3.1 The brown line is not where it appears to be
 
 The salmon rule reads as though it belongs to RESPONSE OPTIONS. It does not.
 
@@ -83,7 +185,7 @@ upward and sits directly beneath it.
 The only other panel carrying that colour is Attribution, set inline at
 `attribution.js:301`.
 
-## 2.2 Why the bottom section has no arrow
+## 3.2 Why the bottom section has no arrow
 
 It is not a missing arrow. "Request from other agencies" is **structurally
 not a disclosure**.
@@ -104,7 +206,7 @@ Three things make that final:
 3. The click binding only attaches to `.c-panel-collapsible > .c-panel-title`,
    so the title is not clickable.
 
-## 2.3 Four arrow idioms, three state stores
+## 3.3 Four arrow idioms, three state stores
 
 | Section | Collapsible | Arrow mechanism | State store |
 |---------|-------------|-----------------|-------------|
@@ -127,7 +229,7 @@ Three consequences:
 - Section 5's rows have no first-child suppression, so the first row draws
   a hairline directly under the lede paragraph.
 
-## 2.4 The single-accent rule is 20 percent applied
+## 3.4 The single-accent rule is 20 percent applied
 
 The token file states the intent at `style.css:41-47`:
 
@@ -149,7 +251,7 @@ The pillar's actual 3px top rules:
 Eight panels still carry the old per-step palette. The comment describes an
 intention, not the current state.
 
-## 2.5 Recommendation on colour
+## 3.5 Recommendation on colour
 
 **Do not colour the arrows.** The design header states the rule plainly:
 *"semantic colour for state only"* and *"One accent, not many."*
@@ -172,9 +274,9 @@ already have CSS hooks and would carry real meaning. See section 4.4.
 
 \newpage
 
-# 3. The ten response buttons
+# 4. The ten response buttons
 
-## 3.1 Why those two dispatch buttons exist
+## 4.1 Why those two dispatch buttons exist
 
 ```
 main.js:24681-24685
@@ -193,7 +295,7 @@ The original instinct was correct, and more precisely correct than expected:
 the buttons are not merely disconnected, they are the fallback shown when
 the connection is known to be absent.
 
-## 3.2 What each button does today
+## 4.2 What each button does today
 
 | Button | Wired | Effect on click |
 |--------|-------|-----------------|
@@ -208,7 +310,7 @@ the connection is known to be absent.
 | Loop in observer | Wired | Real participant entry, visible in the participants strip |
 | Add note | Wired to store, broken downstream | See 3.3 |
 
-## 3.3 Three confirmed defects
+## 4.3 Three confirmed defects
 
 **The dispatch audit record is write-only exhaust.** The mock adapter writes
 an interaction with `flow: 'action-dispatched'`. Searching the whole of
@@ -231,7 +333,7 @@ at `main.js:24931` reads `event.createdAt`, `rec.statusHistory`,
 button labelled "Append to audit trail", clicked from a panel whose final
 section is titled "Audit trail", produces no visible change in that section.
 
-## 3.4 The site gate is role-blind
+## 4.4 The site gate is role-blind
 
 ```
 main.js:24426
@@ -253,7 +355,7 @@ Site capability data is real and well-formed. All nine declared sites carry
 `['brs-standby', 'hjv-reinforce']`, so a police profile there correctly sees
 no dispatch buttons. The gate works. It is simply only half the question.
 
-## 3.5 Scalability: two lanes
+## 4.5 Scalability: two lanes
 
 **The lane that scales.** `receiver_assets.js` is a clean plug-in: add a
 top-level key per role with `dispatchable[]` and `requestable[]`, and the
@@ -280,7 +382,7 @@ engine that stamps all 386 receivers at boot, documented as doing exactly
 that. The action rail does not consult it at all. Archetypes are used only
 for report chapters and the cascade picker's grouping.
 
-## 3.6 Flows that are off
+## 4.6 Flows that are off
 
 **Decline cascade appears on things that were never cascades.** The record
 is chosen at `main.js:23567` as `_cascades[0] || _matching[0]`, where
@@ -308,9 +410,9 @@ the adapter seam.
 
 \newpage
 
-# 4. The contributor chapters panel
+# 5. The contributor chapters panel
 
-## 4.1 What it is
+## 5.1 What it is
 
 Not a stray panel. It is the Post-Incident Report, generated at `closeEvent`
 and designed in `docs/report-shape-overview.md`: one chapter per agency that
@@ -320,7 +422,7 @@ A chapter is not a stored object. There is no `event.chapters`. It is derived
 at render time from live `event.escalations`, `event.counterDispatches` and
 `event.catalog`. The report object itself is never consulted for chapters.
 
-## 4.2 Four of six counters cannot report a real number
+## 5.2 Four of six counters cannot report a real number
 
 | Counter | Status |
 |---------|--------|
@@ -343,7 +445,7 @@ destination**, so the compensation is inert as well.
 A reading of `0 / 7 / 0 / 0 / 0 / 0` therefore does not mean "nothing
 happened". It largely means "cannot be counted".
 
-## 4.3 The archetype pills contradict each other, and both are right
+## 5.3 The archetype pills contradict each other, and both are right
 
 The white pill reads KINETIC RESPONSE. POPULATED ARCHETYPES reads
 Coordination and command. They measure different things:
@@ -364,7 +466,7 @@ There is a load-bearing note at `archetypes.js:121` confirming that
 reclassifying a role does not change the report, because chapter composition
 never reads archetype at all.
 
-## 4.4 Eight colour hooks doing nothing
+## 5.4 Eight colour hooks doing nothing
 
 ```
 style.css:7882-7889
@@ -377,7 +479,7 @@ Eight selectors, one colour. The markup implies per-archetype colour-coding
 that does not exist. This is where a colour budget would buy real meaning,
 rather than on the pillar's section arrows.
 
-## 4.5 There is no commenting feature
+## 5.5 There is no commenting feature
 
 Searching the chapter composer, the sub-section renderers and the report
 module for `textarea`, `button`, `contenteditable`, `input`, `comment`,
@@ -393,7 +495,7 @@ the post-incident report.
 And notes never reach the report. Operator notes render in exactly three
 places, none of which is the post-incident report or any chapter.
 
-## 4.6 Why the meta line wraps one word per line
+## 5.6 Why the meta line wraps one word per line
 
 ```
 style.css:8393
@@ -424,19 +526,19 @@ It is not a `min-width`. It is a pseudo-element consuming a grid cell.
 
 \newpage
 
-# 5. Cross-cutting findings
+# 6. Cross-cutting findings
 
-## 5.1 Stale architecture documentation
+## 6.1 Stale architecture documentation
 
 `docs/agentic-receiver-asset-plugin-architecture.md` closes with "Current
 profiles configured" listing three: Politi København, Aktionsstyrken,
 Rigspolitiet. The file now has 28. The document is stale by 25 profiles.
 
-## 5.2 Stale count comments in code
+## 6.2 Stale count comments in code
 
 `main.js:17015` says "242 receiver profiles". The number is 386.
 
-## 5.3 Three identifier schemes for the same agency
+## 6.3 Three identifier schemes for the same agency
 
 `roles.js`, `response_assets.js` and `receiver_assets.js` do not share keys.
 Six of twelve police districts diverge:
@@ -455,7 +557,7 @@ the role tree cannot be joined by key today. This is the same class of
 problem as the destination-versus-role mismatch in 4.2, and it is the single
 most load-bearing thing to fix before onboarding a real district.
 
-## 5.4 Two dispatch systems, which is easy to confuse
+## 6.4 Two dispatch systems, which is easy to confuse
 
 Per `docs/agentic-receiver-asset-plugin-architecture.md` these are separate
 by design:
@@ -470,46 +572,6 @@ An empty right pillar therefore does not imply the left pane is unwired. In
 the audited case neither had data for this profile.
 
 \newpage
-
-# 6. Recommended order of work
-
-Nothing in this audit has been changed. This is a proposal, not a plan of
-record.
-
-## Tier 1 first
-
-The product currently states things that are not true, and a customer will
-catch these in a demo before noticing any visual inconsistency.
-
-1. Decide what the two stub dispatch buttons should do. Either give
-   Sydøstjylland and the other 17 districts a real asset inventory, or stop
-   showing a dispatch group to profiles with no declared assets.
-2. Fix the note timestamp. One line.
-3. Make `_buildAuditJournal` read `event.notes`, so the button labelled
-   "Append to audit trail" does so visibly.
-4. Decide the fate of the four dead counters. Either resolve destination id
-   to role id in the chapter composer and start writing catalog entries, or
-   hide counters that cannot yet be populated. Showing a zero that cannot be
-   anything else is worse than showing nothing.
-5. Swap which archetype the chapter headline shows, or label the two pill
-   rows so the difference is legible.
-
-## Tier 2 next
-
-6. Add a role dimension to the site capability gate.
-7. Resolve the identifier drift in 5.3 before any real district is onboarded.
-8. Move the action rail onto the archetype engine that already covers all
-   386 roles.
-
-## Tier 3 last
-
-9. One arrow idiom, one collapse-state store, one keying scheme.
-10. Remove the dead `.c-row-collapsible` class.
-11. Fix the grid-cell bug in the chapter card summary.
-12. Finish the single-accent pass, or formally abandon it and document what
-    replaced it.
-13. Give the eight archetype badge classes eight distinguishable treatments,
-    since the hooks already exist.
 
 \newpage
 
