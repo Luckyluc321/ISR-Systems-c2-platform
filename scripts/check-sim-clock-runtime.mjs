@@ -20,6 +20,10 @@ const {
   monoNow, wallNow, pause, resume, isPaused, pausedMs, after, pendingCount,
 } = await import(CLOCK);
 
+// The pause control is loaded the same way, because check 6 below is
+// about the clock and its control being able to undo each other.
+const { markup } = await import(new URL('../src/sim_pause_control.js', import.meta.url));
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let failures = 0;
 function ok(name, cond, detail = '') {
@@ -74,6 +78,26 @@ ok('it fires once its remaining time elapses', fired === true);
 // 5. Idempotent, because the spacebar and the button can both fire.
 ok('a second pause() reports no change', pause() === true && pause() === false);
 ok('a second resume() reports no change', resume() === true && resume() === false);
+
+// 6. THE CONTROL MUST BE ABLE TO UNDO ITSELF.
+//
+//    The pause control is hidden when nothing is live, because a pause
+//    button with nothing to pause reads as broken. That reasoning holds
+//    only in one direction. Gated on liveness alone it strands the
+//    clock: freeze the sim, cancel the threat, every track ends, the
+//    control disappears while still frozen, and nothing on the sim clock
+//    ever moves again for the session. Dispatches park mid-air and their
+//    removal timers are held rather than cancelled, so they never clear
+//    either. A helicopter was found over Billund this way.
+ok('the control is offered while something is live',
+   markup(false, true) !== '');
+ok('it is hidden when nothing is live and the clock is running',
+   markup(false, false) === '');
+ok('IT IS STILL OFFERED WHEN NOTHING IS LIVE AND THE CLOCK IS FROZEN',
+   markup(true, false) !== '',
+   'a frozen clock with no live track would be unresumable');
+ok('and it offers resume, not pause, in that state',
+   /Resume simulation/.test(markup(true, false)));
 
 if (failures) {
   console.error(`\n${failures} simulation-clock behaviour failure(s).\n`);

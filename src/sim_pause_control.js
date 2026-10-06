@@ -7,15 +7,27 @@
 // collision between Map Controls and the account dropdown. Adding a
 // fourth floating thing there would be the fifth.
 //
-// Only shown while something is actually live. A pause button with
-// nothing to pause reads as a broken control.
+// Hidden while nothing is live AND the clock is running: a pause button
+// with nothing to pause reads as a broken control.
+//
+// NEVER hidden while the clock is paused, whatever else is true. That
+// asymmetry is the whole point. Hiding it on `!anyLive` alone strands
+// the clock: freeze the sim, then cancel the threat, and every track
+// ends, so the control disappears with the clock still frozen and no way
+// left to resume it. Everything on the sim clock stops for the rest of
+// the session — dispatches stop advancing mid-air, and their removal
+// timers are held rather than cancelled, so they never clear either.
+// That is how a helicopter was found parked over Billund.
+//
+// A control that can enter a state must be able to leave it.
 //
 // The spacebar is wired separately in main.js, because a key handler
 // belongs with the other global key handlers and has to work whether or
 // not this panel is on screen.
 //
 // Contract:
-//   markup(paused)         HTML string, or '' when there is nothing live
+//   markup(paused, anyLive)  HTML string, or '' only when nothing is live
+//                            AND the clock is not paused
 //   wire(root, onToggle)   attach the click handler to whatever markup()
 //                          produced inside `root`
 //
@@ -30,7 +42,9 @@ const SEL = '[data-sim-pause]';
  * @param {boolean} anyLive  whether a track is running at all
  */
 export function markup(paused, anyLive) {
-  if (!anyLive) return '';
+  // `|| paused` is load-bearing. See the header: without it a frozen
+  // clock whose tracks have all ended can never be resumed.
+  if (!anyLive && !paused) return '';
   // aria-pressed rather than a disabled/enabled pair: it is one toggle
   // with two labels, and a screen reader should hear it that way.
   return `

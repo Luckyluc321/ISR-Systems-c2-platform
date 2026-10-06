@@ -16856,7 +16856,11 @@ async function main() {
     const t = ev.target;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA'
               || t.tagName === 'SELECT' || t.isContentEditable)) return;
-    if (!anyTrackLive()) return;
+    // Same asymmetry as the button: refuse to PAUSE when there is
+    // nothing running, but always allow a RESUME. Gating both directions
+    // on a live track stranded the clock, because cancelling a threat
+    // while frozen ends every track and took away both ways out at once.
+    if (!anyTrackLive() && !simIsPaused()) return;
     ev.preventDefault();
     const paused = simToggle();
     toast(paused ? 'Simulation frozen' : 'Simulation resumed', 'info');
