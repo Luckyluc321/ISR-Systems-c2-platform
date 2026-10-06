@@ -190,3 +190,72 @@ is hundreds of megabytes and Vite copies `public/` into every build.
 `scripts/mesh-pipeline/serve_tiles.py` serves them locally with the
 CORS headers Cesium needs; production is object storage behind a CDN,
 set by `VITE_SITE_MESH_URL`.
+
+## Buildings the data cannot place
+
+Some footprints inside a site's coverage produce no geometry at all, and
+the result reads as a bug: the orthophoto shows a finished building, the
+mesh draws nothing, and the C2 renders a perfect picture lying flat on
+the terrain. The worst case at Billund is way `1512060083` at
+9.1281 E / 55.7209 N, 17,167 m2, which is the single biggest hole in the
+site.
+
+It is not a bug. Three inputs build a building and they do not share a
+vintage:
+
+```mermaid
+flowchart LR
+    OSM["OpenStreetMap footprint<br/>building=construction"] --> GATE{"is_solid_building"}
+    DHM["Danmarks Hoejdemodel<br/>0.1 m above its own ground"] --> EXT{"drape_site<br/>--min-height"}
+    IMG["SDFI orthophoto, 10 cm<br/>shows it finished"] --> DRAPE["draped texture"]
+    GATE -- rejected --> NONE["no geometry"]
+    EXT -- too low --> NONE
+    DRAPE --> FLAT["a photograph with no height"]
+    NONE --> FLAT
+```
+
+Both the footprint and the height model say the building does not exist,
+and they agree with each other. Only the photograph is current. So
+nothing on our side fixes it: allow-listing the tag gets the footprint
+as far as the height model, which then extrudes it to 0.1 m.
+
+The fix arrives when the area is flown again. Denmark is split into 55
+scanning blocks, about 11 are flown a year, and new blocks land in the
+web service roughly July to October. There is no published plan naming
+which block is flown in which year.
+
+### The monthly check
+
+`scripts/mesh-pipeline/watch_height_model.py` polls the data rather than
+a calendar, because the calendar is not published. For each watched
+footprint it measures the p80 of the surface model inside the outline
+minus the median ground just outside, and compares that against a stored
+baseline. Billund's worst case reads 0.1 m today and will read fifteen
+or more once its block refreshes.
+
+As of 2026-10-06 it watches 39 Billund footprints of 500 m2 or larger.
+One of them, way `1443935982` at 682 m2, **already stands at 10.8 m**:
+the height model has it and only the stale `building=construction` tag
+keeps it out of the mesh. That one is buildable today. The other 38 are
+genuinely absent from the height model.
+
+The monthly job is a launchd agent, `com.isrsystems.heightwatch`, and it
+runs from `~/Library/Application Support/ISRSystems/heightwatch/` rather
+than from this repository. That is not tidiness: a launchd agent does
+not inherit the Terminal's permission to read `~/Desktop`, so a job
+pointed at the repository fails with `Operation not permitted` before
+bash reads the script. The job is therefore self-contained, carrying its
+own copy of the checker plus an exported watch list, baseline and token.
+
+**The watch list goes stale if the mesh is rebuilt with different
+coverage.** Re-export it as part of any rebuild:
+
+```
+python3 watch_height_model.py --site billund \
+  --export-watchlist "$HOME/Library/Application Support/ISRSystems/heightwatch/watchlist-billund.json"
+```
+
+Exit codes are three-valued on purpose. `0` is checked and unchanged,
+`1` is checked and something now stands, `2` is could-not-check. A
+monitor that folded `2` into `0` would report "nothing changed" on the
+month its own inputs were unreadable, which is the exact wrong answer.
