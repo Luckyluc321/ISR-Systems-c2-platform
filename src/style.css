@@ -47,6 +47,20 @@
      status colours that carry meaning. */
   --sec-accent:        #c0817c;
   --sec-accent-dim:    rgba(192, 129, 124, 0.42);
+
+  /* Recessed and raised grounds for nesting inside a panel. `recess`
+     sinks a body below its own title so the two are not read as
+     siblings; `raise` lifts a row above the card it sits in. Both are
+     neutral on purpose — depth, not hue. */
+  --surface-recess:    rgba(0, 0, 0, 0.22);
+  --surface-raise:     rgba(255, 255, 255, 0.022);
+  --surface-raise-hi:  rgba(255, 255, 255, 0.045);
+
+  /* Muted red for "this step is not yours to take". Deliberately not
+     --danger: that is an alarm, and an unavailable option is not one. */
+  --chip-none:         #c98585;
+  --chip-none-soft:    rgba(201, 133, 133, 0.10);
+  --chip-none-edge:    rgba(201, 133, 133, 0.55);
   --border-accent:     rgba(77, 210, 255, 0.35);
   --border-danger:     rgba(255, 90, 90, 0.35);
   --border-ok:         rgba(77, 255, 156, 0.35);
@@ -7272,7 +7286,9 @@ body.view-fleet #fleet-view { display: block; }
   align-items: center;
   gap: var(--space-2);
   margin: var(--space-5) 0 var(--space-2);
-  padding: 0 var(--space-4);
+  /* 6px card margin + 1px border + 12px card padding = 19px, so the
+     label starts on the same vertical as the card text it introduces. */
+  padding: 0 19px;
   font-family: var(--font-mono);
   font-size: var(--fs-2xs);
   letter-spacing: var(--ls-label);
@@ -7284,6 +7300,121 @@ body.view-fleet #fleet-view { display: block; }
   flex: 1;
   height: 1px;
   background: var(--border);
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   PILLAR PANELS AS OBJECTS
+
+   Everything in this rail used to be transparent on one flat ground,
+   divided only by hairlines. Nothing read as a thing you could point
+   at, so the whole column looked like one undifferentiated surface and
+   you could not tell a section from its own contents.
+
+   Each panel is now a card: a recessed ground, a hairline all the way
+   round, and real space between it and the next. Scoped to .rws-console
+   on purpose. .c-panel is used across the whole application and this
+   is a statement about THIS rail, not about every panel in the product.
+   ───────────────────────────────────────────────────────────────── */
+.rws-console .c-panel {
+  background: var(--surface-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  /* Horizontal chrome is deliberately mean. The rail is a hard 380px and
+     several grids inside it are already at their min-content floor: the
+     chapter card summary fails below about 300px of usable width. A card
+     adds margin, border and its body adds more, and a first cut of this
+     spent 44px and pushed that grid past its failure point, where
+     overflow: hidden clipped it silently. 6px of side margin buys the
+     card edge without the cost. */
+  margin: var(--space-2) 6px;
+  padding: var(--space-3);
+}
+
+/* Doing versus reading. The rail mixes things you act on with things
+   you consult, and they looked identical. Cyan is already the token for
+   "interactive" — the design header says use it for primary actions and
+   interactive states — so an action surface carries a cyan rail and
+   reference material carries none. This is state, not decoration, which
+   is the bar the tokens set for using colour at all. */
+.rws-console .c-panel-action {
+  border-left: 2px solid var(--border-accent);
+  background: linear-gradient(90deg, var(--accent-softer), var(--surface-inset) 60%);
+}
+
+/* A panel body is inside its header, and read as a sibling of it. Sunk
+   a step further down and inset from the title so the hierarchy is
+   visible without another colour. */
+.rws-console .c-panel-collapsible > .c-panel-body {
+  background: var(--surface-recess);
+  border-radius: var(--radius-sm);
+  /* No border. The recessed ground already separates body from title,
+     and two more vertical pixels of chrome are not affordable here. */
+  padding: var(--space-2) 10px;
+  margin-top: var(--space-2);
+}
+
+/* The disclosure arrow was 10px at 55% opacity, which is a hard target
+   to find and a harder one to read. */
+.rws-console .c-panel-collapsible > .c-panel-title::before {
+  font-size: var(--fs-md);
+  opacity: 0.85;
+  margin-right: 2px;
+}
+/* Restores the hover brighten. The rule above matches the base hover
+   selector's specificity and sits later in the file, so without this the
+   arrow stopped responding to hover inside the pillar. */
+.rws-console .c-panel-collapsible > .c-panel-title:hover::before { opacity: 1; }
+
+/* Marks a step the active department cannot take. Muted on purpose:
+   this is "not yours to do", not an alarm, and --danger at full strength
+   next to real threat colouring would read as something going wrong. */
+/* The title is display:flex with a gap, so this span is a flex item.
+   inline-block is blockified away and vertical-align never applies; an
+   explicit margin-left would compound with the container's gap. */
+.c-panel-chip {
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  align-self: center;
+}
+/* Border carried enough alpha to read as a pill outline. At 0.28 it
+   measured 1.4:1 against the panel ground, under the 3:1 a non-text
+   boundary needs, so the chip read as floating text. */
+.c-panel-chip-none {
+  color: var(--chip-none);
+  background: var(--chip-none-soft);
+  border: 1px solid var(--chip-none-edge);
+}
+
+/* Cross-agency option rows. This class was applied in the markup and
+   had no rules at all, so the rows were held together by inline styles
+   and read as loose text rather than as things you choose between. */
+.c-row-collapsible {
+  background: var(--surface-raise);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-top: 6px;
+  padding: 8px 10px;
+  transition: background var(--motion) var(--ease), border-color var(--motion) var(--ease);
+}
+.c-row-collapsible:hover { background: var(--surface-raise-hi); border-color: var(--border-strong); }
+.c-row-collapsible.is-open { background: var(--surface-raise-hi); border-color: var(--border-strong); }
+.c-row-collapsible-hd { display: flex; align-items: center; gap: var(--space-2); cursor: pointer; }
+.c-row-chevron {
+  font-family: var(--font-mono);
+  color: var(--text-dim);
+  font-size: var(--fs-md);
+  width: 14px;
+  flex: 0 0 14px;
+}
+/* No border-top. The first agency row inside carries its own, and the
+   two sat two pixels apart. */
+.c-row-collapsible-body {
+  padding-left: 22px;
+  margin-top: 6px;
 }
 
 /* Palantir-themed dispatch button hover — subtle fill + border brighten */
@@ -8432,7 +8563,15 @@ body.view-fleet #fleet-view { display: block; }
 .chapter-card-viewer[open] { background: rgba(77, 210, 255, 0.04); }
 .chapter-card-summary {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  /* FOUR columns, not three. ::before below is a grid ITEM, not a marker,
+     so the old `1fr auto auto` placed the arrow in the 1fr track, pushed
+     the name and archetype into the two auto tracks, and wrapped the
+     stats line onto row 2 into whatever was left of the 1fr. The two auto
+     tracks take max-content first, so on a 380px rail that remainder
+     collapsed to the longest single word and the stats read one word per
+     line. Giving the arrow its own auto track puts all four items on one
+     row, and the 1fr sits where it can actually absorb slack. */
+  grid-template-columns: auto 1fr auto auto;
   align-items: center;
   gap: var(--space-3);
   padding: 10px 12px;
@@ -8482,7 +8621,18 @@ body.view-fleet #fleet-view { display: block; }
   font-size: 10px;
   letter-spacing: 0.04em;
   color: var(--text-mute);
+  /* The rail is fixed and the two neighbouring tracks are max-content, so
+     this cell can still be squeezed. Truncate rather than wrap: a count
+     of sub-sections is worth less than the row staying one line, and the
+     card clips its overflow anyway so a wrap would simply vanish. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }
+/* Same reasoning for the name, which holds the longest string in the row
+   and would otherwise push the stats cell to nothing. */
+.chapter-card-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .chapter-card-body {
   padding: 0 var(--space-3) var(--space-3) var(--space-3);
   border-top: 1px solid var(--border);

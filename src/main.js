@@ -22108,15 +22108,15 @@ async function main() {
           </div>`;
       }).join('');
       return `
-        <div class="c-row-collapsible" style="border-top:1px solid var(--border);padding:10px 0;">
-          <div style="display:flex;align-items:center;gap:var(--space-2);cursor:pointer;" data-rcv="other-agency-toggle" data-kind-key="${kindKey}">
-            <span style="font-family:var(--font-mono);color:var(--text-dim);font-size:var(--fs-xs);width:12px;">${chevron}</span>
+        <div class="c-row-collapsible${isExpanded ? ' is-open' : ''}">
+          <div class="c-row-collapsible-hd" data-rcv="other-agency-toggle" data-kind-key="${kindKey}">
+            <span class="c-row-chevron">${chevron}</span>
             <div style="flex:1 1 auto;min-width:0;">
               <div style="font-size:var(--fs-sm);color:var(--text);font-weight:500;">${_otherKindLabel(kind)}</div>
               <div class="c-label" style="color:var(--text-dim);margin-top:2px;">${list.length} agenc${list.length === 1 ? 'y' : 'ies'} available · ${closestDistText}</div>
             </div>
           </div>
-          ${isExpanded ? `<div style="padding-left:20px;margin-top:6px;">${agenciesHtml}</div>` : ''}
+          ${isExpanded ? `<div class="c-row-collapsible-body">${agenciesHtml}</div>` : ''}
         </div>`;
     };
     const otherAgenciesHtml = Object.keys(otherByKind).map(otherKindRow).join('');
@@ -22171,12 +22171,19 @@ async function main() {
     // parse.
     const _step2Html = (() => {
       if (!(isAcked || !rec)) return '';
+      // Number the rung only when there IS a ladder. With no escalation
+      // record the role raised this event itself, so there was no receipt
+      // to acknowledge and Step 1 renders nothing. Calling this "Step 2"
+      // in that state opens the pillar on a second rung with no first,
+      // which is the exact confusion the Step 1 placeholder exists to
+      // prevent.
+      const _stepPfx = rec ? 'Step 2 · ' : '';
 
       // Counter-drone options, unchanged.
       if (mineList.length) {
         return `
-        <div class="c-panel c-panel-collapsible">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">${isAcked ? 'Step 2 · Select response option' : 'Your Response Options'}</div>
+        <div class="c-panel c-panel-collapsible c-panel-action">
+          <div class="c-panel-title" style="margin-bottom: var(--space-2);">${_stepPfx}${rec ? 'Select response option' : 'Your response options'}</div>
           <div class="c-panel-body">
           <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${mineList.length} option${mineList.length === 1 ? '' : 's'} available. Multiple can be dispatched concurrently. Recommended pick is the closest by ETA.</div>
           <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-3);">
@@ -22206,8 +22213,8 @@ async function main() {
             </div>`;
         }).join('');
         return `
-        <div class="c-panel c-panel-collapsible">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">${isAcked ? 'Step 2 · Dispatch your units' : 'Your units'}</div>
+        <div class="c-panel c-panel-collapsible c-panel-action">
+          <div class="c-panel-title" style="margin-bottom: var(--space-2);">${_stepPfx}${rec ? 'Dispatch your units' : 'Your units'}</div>
           <div class="c-panel-body">
             <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-2);">Units under your own command, dispatched from your base. Other agencies below can be asked for anything you do not hold.</div>
             ${rows}
@@ -22217,8 +22224,8 @@ async function main() {
 
       // Genuinely nothing to offer.
       return `
-        <div class="c-panel c-panel-collapsible">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Response Options</div>
+        <div class="c-panel c-panel-collapsible c-panel-action">
+          <div class="c-panel-title" style="margin-bottom: var(--space-2);">${_stepPfx}Response options<span class="c-panel-chip c-panel-chip-none">no units</span></div>
           <div class="c-panel-body"><div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">You hold no units for this incident. Other agencies below can act.</div></div>
         </div>`;
     })();
@@ -22271,7 +22278,7 @@ async function main() {
         const _crossAgency = [
           _renderAgenciesOnCasePanel(event, activeRole),
           otherList.length ? `
-            <div class="c-panel">
+            <div class="c-panel c-panel-action">
               <div class="c-panel-title" style="margin-bottom: var(--space-2);">Request from other agencies</div>
               <div class="c-label" style="margin-bottom: var(--space-2); text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">Response products available to pull in. Ranked by real distance to the threat. Click Send request to route it to that agency for their acceptance.</div>
               ${otherAgenciesHtml}
