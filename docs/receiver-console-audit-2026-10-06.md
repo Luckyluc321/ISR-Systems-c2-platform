@@ -34,17 +34,30 @@ the evidence stays checkable. What has since been decided and done:
 |------|----------|-------|
 | Bug A, note timestamp | fix | **done** |
 | Bug B, notes absent from the audit trail | fix | **done** |
-| Bug C, dead class and the chapter grid bug | fix | open |
+| Bug C, dead class and the chapter grid bug | fix | **done** |
 | D1, dispatch buttons with no assets behind them | a, then b per district | **a done** |
 | D2, counters that can only read zero | a | open |
 | D3, chapter headline archetype | a | open |
-| D4, identifier drift | a | open |
+| D4, identifier drift | a | in progress |
 | D5, role-blind site gate | a | open |
 | D6, action rail onto the archetype engine | a, sequenced after D4 | planned |
-| D7, four arrow idioms | a | open |
-| D8, colour | a | partly done |
+| D7, four arrow idioms | a | sizes matched, idioms not yet merged |
+| D8, colour | a | dividers done, 8 per-step rules remain |
 | Step 1 missing from the ladder | fix | **done** |
 | Pillar sectioning | divider-based | **done** |
+| Panels as cards, bodies recessed | raised after review | **done** |
+
+Found and fixed while acting on the above, not part of the original audit:
+
+- The simulation clock could be frozen into a state with no way to resume
+  it. Freezing the sim and then cancelling the threat ended every track,
+  which hid the pause control and disabled its keyboard path while the
+  clock was still stopped. Everything on that clock then stayed stopped
+  for the session, which is what left a dispatched helicopter parked in
+  mid-air. The runtime clock check gained a case for it.
+- Four separate disclosure-arrow idioms were drawn at different sizes
+  once one of them was enlarged. All four now match, which is a stopgap
+  rather than D7.
 
 Consequently these passages describe code that no longer exists: the
 `--sec-accent` top rule on the historical-pattern panel and on the attribution
