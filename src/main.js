@@ -736,6 +736,22 @@ import './adapters/escalation_mock.js';
 // real per-receiver adapters). Any new stub CTA action added to
 // availableCTAsForReceiver must also be added here or it won't reach
 // the adapter and will silently drop.
+// Of the stub actions below, these are the ones that claim to put
+// physical units on the ground or in the air. They are withheld from any
+// profile with no entry in RECEIVER_ASSETS, because offering them tells
+// an operator they command something the system has no record of. The
+// rest of the stub set is administrative — a NOTAM, an airspace
+// restriction, a shelter notification, an intel log — and needs no
+// vehicle, so it is offered regardless.
+const PHYSICAL_DISPATCH_ACTIONS = new Set([
+  'deploy-patrol', 'set-cordon',
+  'brs-standby', 'brs-deploy',
+  'army-c-uas', 'army-ground',
+  'qra-dispatch',
+  'hjv-reinforce',
+  'region-ambulance-standby',
+]);
+
 const STUB_DISPATCH_ACTIONS = new Set([
   'deploy-patrol', 'set-cordon', 'request-aks',
   'brs-standby', 'brs-deploy',
@@ -22129,11 +22145,22 @@ async function main() {
     // Receipt button in the case-file's Your Response section rather
     // than duplicating it here. Two ack buttons for the same action was
     // confusing UX. This block just tells them WHERE to look.
-    const ackGateHtml = !isAcked && rec ? `
+    // Step 1 survives acknowledgement. It used to vanish the moment the
+    // receipt landed, so from then on the pillar opened at Step 2 and the
+    // ladder had no first rung. _renderStepPlaceholder already exists for
+    // exactly this — its own comment says it "keeps the workflow sequence
+    // (1-7) visible so the reader never wonders why did we jump from Step
+    // 3 to Step 7" — and the same reasoning was never applied to Step 1.
+    const ackGateHtml = !rec ? '' : (!isAcked ? `
       <div class="c-panel c-panel-collapsible" style="border-top: 3px solid #ffb84d;">
         <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #ffb84d;">Step 1 · Acknowledge receipt</div>
         <div class="c-panel-body"><div style="font-size: var(--fs-xs); color: var(--text); line-height: 1.55;">Click <b style="color: #4dff9c;">Acknowledge receipt</b> in the case-file to the left. Response options unlock once acknowledged.</div></div>
-      </div>` : '';
+      </div>`
+      // No timestamp here. isAcked is `!!ackTs`, so the time is always
+      // available, but the Acked badge in the Recommended Response header
+      // already shows it about forty pixels above. One clock reading per
+      // screen.
+      : _renderStepPlaceholder(1, 'ACKNOWLEDGE RECEIPT', 'complete', true));
 
     const ackedBadge = isAcked ? `<span style="font-size: var(--fs-2xs); color: var(--ok); letter-spacing: 0.10em; text-transform: uppercase; font-family: var(--font-mono);">✓ Acked ${ackTs ? ackTs.slice(11,19) + 'Z' : ''}</span>` : '';
 
@@ -22217,26 +22244,43 @@ async function main() {
       ${_renderStepOrPlaceholder(6, 'CLOSE EVENT',            _renderStep6CloseEvent(event, activeRole),        event)}
       ${_renderPostIncidentReportPanel(event, activeRole)}
 
-      ${renderHistoricalPatternPanel(event, activeRole, { hasReportFor: (id) => !!getEvent(id)?.postIncidentReport })}
       ${(() => {
-        // Attribution sits directly under the historical pattern
-        // because it consumes the same priors. The family and the
-        // prior list are resolved ONCE here and passed in, so the two
-        // panels can never disagree about what platform this is.
-        const _hp = getHistoricalPattern(event);
-        return renderAttributionPanel(event, activeRole, { priors: _hp.priors, family: _hp.family });
+        // The pillar holds three different kinds of thing and used to run
+        // them together as one undifferentiated stack: a numbered ladder
+        // you work through, material you consult, and cross-agency
+        // surfaces. Separated by a labelled rule rather than by colour —
+        // the tokens reserve colour for state, and --sec-accent exists
+        // precisely to stop sections being told apart by hue.
+        //
+        // Each divider is emitted only when its group has content, so a
+        // quiet event can never show a heading above nothing.
+        const _context = [
+          renderHistoricalPatternPanel(event, activeRole,
+            { hasReportFor: (id) => !!getEvent(id)?.postIncidentReport }),
+          (() => {
+            // Attribution sits directly under the historical pattern
+            // because it consumes the same priors. The family and the
+            // prior list are resolved ONCE here and passed in, so the two
+            // panels can never disagree about what platform this is.
+            const _hp = getHistoricalPattern(event);
+            return renderAttributionPanel(event, activeRole, { priors: _hp.priors, family: _hp.family });
+          })(),
+          _renderAnnulHistoryBlock(event, activeRole),
+        ].filter(Boolean).join('\n');
+
+        const _crossAgency = [
+          _renderAgenciesOnCasePanel(event, activeRole),
+          otherList.length ? `
+            <div class="c-panel">
+              <div class="c-panel-title" style="margin-bottom: var(--space-2);">Request from other agencies</div>
+              <div class="c-label" style="margin-bottom: var(--space-2); text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">Response products available to pull in. Ranked by real distance to the threat. Click Send request to route it to that agency for their acceptance.</div>
+              ${otherAgenciesHtml}
+            </div>` : '',
+        ].filter(Boolean).join('\n');
+
+        return (_context ? _groupDivider('Case context') + _context : '')
+             + (_crossAgency ? _groupDivider('Cross-agency') + _crossAgency : '');
       })()}
-
-      ${_renderAnnulHistoryBlock(event, activeRole)}
-
-      ${_renderAgenciesOnCasePanel(event, activeRole)}
-
-      ${otherList.length ? `
-        <div class="c-panel">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Request from other agencies</div>
-          <div class="c-label" style="margin-bottom: var(--space-2); text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">Response products available to pull in. Ranked by real distance to the threat. Click Send request to route it to that agency for their acceptance.</div>
-          ${otherAgenciesHtml}
-        </div>` : ''}
     `;
   }
 
@@ -22411,20 +22455,36 @@ async function main() {
       </div>`;
   }
 
-  // Placeholder for a step whose active renderer returned empty on a
-  // CLOSED event. Keeps the workflow sequence (1-7) visible so the
+  // A labelled rule marking where one kind of pillar content ends and
+  // the next begins. Typographic only: a hairline, a small caps label
+  // and generous space above it. No colour, because the design tokens
+  // reserve colour for state and the section accent exists to stop
+  // sections being distinguished by hue.
+  function _groupDivider(label) {
+    return `<div class="rws-group-divider"><span>${label}</span></div>`;
+  }
+
+  // Thin, non-interactive row standing in for a step that is not an
+  // action right now. Keeps the workflow sequence (1-7) visible so the
   // reader never wonders "why did we jump from Step 3 to Step 7."
-  // Non-interactive, thin (one line), muted. Shows a status hint on
-  // the right that tells the truth about why the step didn't fire
-  // (Step 6 gets the closedAt timestamp when known; Steps 4/5 get
-  // "not applicable" — nothing was skipped by mistake).
   //
-  // Only surfaces on closed events. On a live event, an empty step
-  // renderer means "hasn't fired yet" and should stay quiet.
-  function _renderStepPlaceholder(stepNum, titleUpper, statusText) {
+  // Two different meanings share this row, and `done` separates them:
+  //
+  //   done = false   the step never fired. Steps 4/5 on a closed event
+  //                  read "not applicable"; nothing was skipped by
+  //                  mistake. Muted throughout, reads as inert.
+  //   done = true    the step was completed. Step 1 after receipt is
+  //                  acknowledged. Same geometry, but the status reads
+  //                  in the ok colour so a finished rung is not mistaken
+  //                  for one that never happened.
+  //
+  // Previously this only ever surfaced on closed events, which is why
+  // the single muted treatment was enough. Step 1 now uses it on live
+  // events too.
+  function _renderStepPlaceholder(stepNum, titleUpper, statusText, done = false) {
     return `
-      <div class="step-placeholder">
-        <span class="step-placeholder-chevron">▸</span>
+      <div class="step-placeholder${done ? ' step-placeholder-done' : ''}">
+        <span class="step-placeholder-chevron">${done ? '✓' : '▸'}</span>
         <span class="step-placeholder-num">STEP ${stepNum}</span>
         <span class="step-placeholder-sep">·</span>
         <span class="step-placeholder-title">${titleUpper}</span>
@@ -24913,6 +24973,24 @@ async function main() {
       tooltip: 'Appends a note to the event audit trail. Visible to all participants.',
     });
 
+    // A profile with no declared inventory must not be offered buttons
+    // that claim to move physical units.
+    //
+    // The group these sit in is captioned "Units this profile controls
+    // directly", and the politi pair was rendered on the condition
+    // `!_receiverAssetSpec` — that is, precisely BECAUSE the system held
+    // no record of the profile controlling anything. 18 of 21 police
+    // districts land there, and clicking either one fires a mock that
+    // moves nothing.
+    //
+    // Scoped to actions that put people or vehicles somewhere. An agency
+    // can legitimately issue a NOTAM, restrict airspace, alert a crisis
+    // staff or log to the intel picture without owning a single vehicle,
+    // so those stay. Requests to other agencies stay too: asking someone
+    // else to send a unit does not require owning one.
+    if (!_receiverAssetSpec) {
+      return ctas.filter(c => !PHYSICAL_DISPATCH_ACTIONS.has(c.action));
+    }
     return ctas;
   }
 
@@ -24960,6 +25038,24 @@ async function main() {
         actor: rec.response.respondedBy || 'You',
       });
     }
+    // Notes belong here. The CTA that writes them is labelled "Append to
+    // audit trail" and sits in the same panel whose last section is
+    // titled Audit trail, yet this builder never read event.notes, so
+    // clicking it changed nothing the author could see.
+    //
+    // Includes system-authored notes (reclassification, scene release and
+    // the rest), which are part of the record and were equally invisible.
+    (event.notes || []).forEach(n => {
+      if (!n?.text) return;
+      entries.push({
+        ts: _fmtTs(n.timestamp),
+        title: n.type && n.type !== 'note'
+          ? n.type.replace(/[-_]/g, ' ').replace(/^./, c => c.toUpperCase())
+          : 'Note added',
+        detail: n.text.length > 90 ? n.text.slice(0, 90) + '…' : n.text,
+        actor: n.author || 'Unknown',
+      });
+    });
     if (event.closedAt) {
       entries.push({
         ts: _fmtTs(event.closedAt),

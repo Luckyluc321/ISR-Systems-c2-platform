@@ -5458,12 +5458,17 @@ body.mode-receiver #receiver-view { display: flex; }
 .rcv-card.rcv-card-report.unknown { border-left-color: rgba(255, 184, 77, 0.45); }
 .rcv-card.rcv-card-report { background: rgba(255, 255, 255, 0.015); }
 
-/* Step placeholder row — thin non-interactive line rendered in
-   the receiver Case File workflow when a Step's active renderer
-   returned empty on a CLOSED event. Preserves the workflow
-   sequence (1-7) so the reader never wonders "why did we jump
-   from Step 3 to Step 7." Muted throughout so it reads as
-   inert-but-present, not as a missed step. */
+/* Step placeholder row — thin non-interactive line standing in for a
+   step that is not an action right now. Preserves the workflow sequence
+   (1-7) so the reader never wonders "why did we jump from Step 3 to
+   Step 7."
+
+   Two meanings share this row. Muted by default: the step never fired,
+   so it reads as inert-but-present rather than as a missed step. With
+   .step-placeholder-done it was COMPLETED, and the status takes the ok
+   colour so a finished rung cannot be mistaken for one that never
+   happened. Step 1 after acknowledgement is the latter, and it is the
+   only one that surfaces on a live rather than a closed event. */
 .step-placeholder {
   display: flex;
   align-items: center;
@@ -5485,6 +5490,8 @@ body.mode-receiver #receiver-view { display: flex; }
 .step-placeholder-sep     { color: var(--text-dimmer, rgba(255,255,255,0.20)); }
 .step-placeholder-title   { color: var(--text-dim); }
 .step-placeholder-status  { margin-left: auto; color: var(--text-dimmer, rgba(255,255,255,0.30)); text-transform: none; font-family: var(--font-body); letter-spacing: 0; font-size: var(--fs-xs); }
+.step-placeholder-done .step-placeholder-status  { color: var(--ok); }
+.step-placeholder-done .step-placeholder-chevron { color: var(--ok); }
 .rcv-card-hdr {
   display: flex; align-items: center; gap: 8px;
   margin-bottom: 4px;
@@ -7244,6 +7251,39 @@ body.view-fleet #fleet-view { display: block; }
   border-left: 1px solid var(--border);
   background: var(--surface-panel);
   overflow-y: auto;
+}
+
+/* Boundary between the pillar's numbered response ladder, the material
+   you consult, and the cross-agency surfaces. Those three used to run
+   together as one stack with nothing to tell them apart.
+
+   Deliberately colourless. The tokens reserve colour for state, and
+   --sec-accent was introduced to stop sections being distinguished by
+   hue. Separation here comes from space and type instead: the rule sits
+   on a wide top margin so the gap itself reads as the division, and the
+   label names what follows rather than decorating it.
+
+   --text-dim, not --text-mute. These labels are now the pillar's primary
+   structural signal, and mute on this ground measures 3.2:1 at 9px,
+   under the 4.5:1 that size needs. dim measures 6.0:1. A structural cue
+   nobody can read is not a structural cue. */
+.rws-group-divider {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: var(--space-5) 0 var(--space-2);
+  padding: 0 var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--fs-2xs);
+  letter-spacing: var(--ls-label);
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+.rws-group-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
 }
 
 /* Palantir-themed dispatch button hover — subtle fill + border brighten */
@@ -9369,7 +9409,15 @@ body.workspace-map-active #receiver-view {
 /* Was a purple top rule and a purple title, which made this panel shout
    next to every neutral one beside it. Structure uses the one section
    accent; the heading is the same white as its neighbours. */
-.hist-pattern-panel { border-top: 3px solid var(--sec-accent); }
+/* No top rule here any more. This 3px salmon line was the only coloured
+   rule among the pillar's lower panels, and because Steps 3-6 return
+   empty on a live event it came to rest directly under RESPONSE OPTIONS
+   and read as that panel's underline. It marked a section boundary that
+   the Case context divider above now marks explicitly and unambiguously.
+   --sec-accent keeps its other jobs: archetype badges, archetype picker
+   groups, chapter sub-section rails and this panel's own hover states
+   below. */
+.hist-pattern-panel { border-top: none; }
 .hist-pattern-panel > .c-panel-title { color: var(--text); }
 .hist-pattern-lead,
 .hist-pattern-empty {

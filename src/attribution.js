@@ -298,7 +298,7 @@ export function renderAttributionPanel(event, activeRole, opts = {}) {
   }).join('');
 
   return `
-    <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--sec-accent);">
+    <div class="c-panel c-panel-collapsible">
       <div class="c-panel-title" style="margin-bottom: var(--space-2);">Attribution assessment</div>
       <div class="c-panel-body">
         <div class="attr-lede">

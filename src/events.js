@@ -914,7 +914,10 @@ export function addNote(id, text, author = 'L. Flindt') {
   const e = EVENTS.find(x => x.id === id);
   if (!e || !text || !text.trim()) return;
   e.notes.push({
-    timestamp: new Date('2026-07-24T14:32:41Z').toISOString(), // demo reference time
+    // Was pinned to a demo reference date, so every note ever written
+    // carried the same timestamp and the audit trail could not be read
+    // in order. Real time, like every other stamp in this file.
+    timestamp: new Date().toISOString(),
     author, text: text.trim(), type: 'note',
   });
   _listeners.forEach(fn => fn(id));

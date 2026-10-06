@@ -24,6 +24,36 @@ this audit are real but cosmetic. The correctness problems are not.
 
 \newpage
 
+# Status
+
+This audit is a point-in-time record. The findings below describe the code
+as it stood on 2026-10-06 before any change, and they are left as written so
+the evidence stays checkable. What has since been decided and done:
+
+| Item | Decision | State |
+|------|----------|-------|
+| Bug A, note timestamp | fix | **done** |
+| Bug B, notes absent from the audit trail | fix | **done** |
+| Bug C, dead class and the chapter grid bug | fix | open |
+| D1, dispatch buttons with no assets behind them | a, then b per district | **a done** |
+| D2, counters that can only read zero | a | open |
+| D3, chapter headline archetype | a | open |
+| D4, identifier drift | a | open |
+| D5, role-blind site gate | a | open |
+| D6, action rail onto the archetype engine | a, sequenced after D4 | planned |
+| D7, four arrow idioms | a | open |
+| D8, colour | a | partly done |
+| Step 1 missing from the ladder | fix | **done** |
+| Pillar sectioning | divider-based | **done** |
+
+Consequently these passages describe code that no longer exists: the
+`--sec-accent` top rule on the historical-pattern panel and on the attribution
+panel has been removed in favour of labelled dividers, so the colour-budget
+table in section 2.4 now undercounts what changed. Eight per-step coloured
+rules remain, which is the unfinished half of D8.
+
+\newpage
+
 # Decisions
 
 ## Just fix these
