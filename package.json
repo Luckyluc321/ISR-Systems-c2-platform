@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check:id-namespaces && npm run check:event-mutations && npm run check:tenant-stamping && npm run check:impact-cascade && npm run check:scene-lifecycle && npm run check:site-assets && npm run check:attribution && npm run check:provenance && npm run check:track-identity && npm run check:signal-tier && npm run check:eval-fixtures && npm run check:sim-clock && npm run check:sim-clock-runtime && vite build",
+    "build": "npm run check:id-namespaces && npm run check:receiver-ctas && npm run check:event-mutations && npm run check:tenant-stamping && npm run check:impact-cascade && npm run check:scene-lifecycle && npm run check:site-assets && npm run check:attribution && npm run check:provenance && npm run check:track-identity && npm run check:signal-tier && npm run check:eval-fixtures && npm run check:sim-clock && npm run check:sim-clock-runtime && vite build",
     "preview": "vite preview",
     "check:event-mutations": "node scripts/check-event-mutations.mjs",
     "check:tenant-stamping": "node scripts/check-tenant-stamping.mjs",
@@ -21,7 +21,8 @@
     "check:eval-fixtures": "node scripts/check-eval-fixtures.mjs",
     "check:sim-clock": "node scripts/check-sim-clock.mjs",
     "check:sim-clock-runtime": "node scripts/check-sim-clock-runtime.mjs",
-    "check:id-namespaces": "node scripts/check-id-namespaces.mjs"
+    "check:id-namespaces": "node scripts/check-id-namespaces.mjs",
+    "check:receiver-ctas": "node scripts/check-receiver-ctas.mjs"
   },
   "devDependencies": {
     "vite": "^8.1.1"
