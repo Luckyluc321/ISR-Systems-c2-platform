@@ -144,6 +144,636 @@ export const RECEIVER_ASSETS = {
     ],
   },
 
+
+  // ── The twelve police districts ──────────────────────────────────
+  //
+  // Baseline inventory, not a claimed order of battle.
+  //
+  // These districts had no entry at all, so the console told an operator
+  // that Sydøstjyllands Politi holds "no units". Every Danish police
+  // district operates patrol cars and can establish a perimeter; that is
+  // ordinary policing, not a capability claim. The absence was a fact
+  // about our data and it was being presented as a fact about them.
+  //
+  // DELIBERATELY NO COUNTS. Københavns Politi carries count: 12 because
+  // that came from somewhere; these do not, and a number invented to
+  // fill a field is the same mistake as the counter-drone jamming copy.
+  // A count can be added the day a district tells us one.
+  //
+  // No specialist equipment either. Patrol and cordon are what every
+  // district demonstrably has. Dog units, forensics and counter-drone
+  // teams differ by district and are added per district as each is
+  // onboarded, from their own doctrine rather than from a guess.
+  //
+  // Stations are the real district headquarters addresses already in
+  // receiver_bases.js.
+
+  'politi-vestegn': {
+    label: 'Vestegnens Politi',
+    baseId: 'politi-koebenhavnsvestegn',
+    dispatchable: [
+      {
+        assetKey: 'vestegn-patrol-car',
+        kind: 'receiver-patrol-car',
+        name: 'Patrol car',
+        icon: '🚔',
+        useCases: [
+          'First ground responder to an incident in the district',
+          'Perimeter presence and civilian management',
+          'Locating witnesses and taking initial statements',
+        ],
+        capabilities: {
+          coordination: true,
+          civilian_management: true,
+          armed: true,
+          kinetic_counter_drone: false,
+        },
+        deployTime: 'From Albertslund via road routing',
+        limitations: 'District only. No airspace jurisdiction.',
+      },
+      {
+        assetKey: 'vestegn-cordon',
+        kind: 'receiver-cordon-squad',
+        name: 'Perimeter cordon',
+        icon: '⚑',
+        useCases: [
+          'Establishing and holding a perimeter around an incident',
+          'Traffic diversion and civilian standoff distance',
+          'Preserving a scene for evidence',
+        ],
+        capabilities: {
+          crowd_management: true,
+          traffic_control: true,
+        },
+        deployTime: 'From Albertslund via road routing',
+        limitations: 'Stationary once established. Needs officers drawn from district strength.',
+      },
+    ],
+    requestable: [
+      {
+        requestKey: 'req-aks',
+        from: 'politi-aks',
+        name: 'Tactical intervention',
+        useCases: [
+          'Armed or barricaded suspect',
+          'Terminal-phase intercept in a populated area',
+        ],
+        priority: 'critical',
+        expectedResponse: 'Aktionsstyrken tactical van or strike team',
+      },
+    ],
+  },
+  'politi-nordsj': {
+    label: 'Nordsjællands Politi',
+    baseId: 'politi-nordsjaelland',
+    dispatchable: [
+      {
+        assetKey: 'nordsj-patrol-car',
+        kind: 'receiver-patrol-car',
+        name: 'Patrol car',
+        icon: '🚔',
+        useCases: [
+          'First ground responder to an incident in the district',
+          'Perimeter presence and civilian management',
+          'Locating witnesses and taking initial statements',
+        ],
+        capabilities: {
+          coordination: true,
+          civilian_management: true,
+          armed: true,
+          kinetic_counter_drone: false,
+        },
+        deployTime: 'From Hillerød via road routing',
+        limitations: 'District only. No airspace jurisdiction.',
+      },
+      {
+        assetKey: 'nordsj-cordon',
+        kind: 'receiver-cordon-squad',
+        name: 'Perimeter cordon',
+        icon: '⚑',
+        useCases: [
+          'Establishing and holding a perimeter around an incident',
+          'Traffic diversion and civilian standoff distance',
+          'Preserving a scene for evidence',
+        ],
+        capabilities: {
+          crowd_management: true,
+          traffic_control: true,
+        },
+        deployTime: 'From Hillerød via road routing',
+        limitations: 'Stationary once established. Needs officers drawn from district strength.',
+      },
+    ],
+    requestable: [
+      {
+        requestKey: 'req-aks',
+        from: 'politi-aks',
+        name: 'Tactical intervention',
+        useCases: [
+          'Armed or barricaded suspect',
+          'Terminal-phase intercept in a populated area',
+        ],
+        priority: 'critical',
+        expectedResponse: 'Aktionsstyrken tactical van or strike team',
+      },
+    ],
+  },
+  'politi-midtvestsjaelland': {
+    label: 'Midt- og Vestsjællands Politi',
+    baseId: 'politi-midtvestsjaelland',
+    dispatchable: [
+      {
+        assetKey: 'midtvestsjaelland-patrol-car',
+        kind: 'receiver-patrol-car',
+        name: 'Patrol car',
+        icon: '🚔',
+        useCases: [
+          'First ground responder to an incident in the district',
+          'Perimeter presence and civilian management',
+          'Locating witnesses and taking initial statements',
+        ],
+        capabilities: {
+          coordination: true,
+          civilian_management: true,
+          armed: true,
+          kinetic_counter_drone: false,
+        },
+        deployTime: 'From Roskilde via road routing',
+        limitations: 'District only. No airspace jurisdiction.',
+      },
+      {
+        assetKey: 'midtvestsjaelland-cordon',
+        kind: 'receiver-cordon-squad',
+        name: 'Perimeter cordon',
+        icon: '⚑',
+        useCases: [
+          'Establishing and holding a perimeter around an incident',
+          'Traffic diversion and civilian standoff distance',
+          'Preserving a scene for evidence',
+        ],
+        capabilities: {
+          crowd_management: true,
+          traffic_control: true,
+        },
+        deployTime: 'From Roskilde via road routing',
+        limitations: 'Stationary once established. Needs officers drawn from district strength.',
+      },
+    ],
+    requestable: [
+      {
+        requestKey: 'req-aks',
+        from: 'politi-aks',
+        name: 'Tactical intervention',
+        useCases: [
+          'Armed or barricaded suspect',
+          'Terminal-phase intercept in a populated area',
+        ],
+        priority: 'critical',
+        expectedResponse: 'Aktionsstyrken tactical van or strike team',
+      },
+    ],
+  },
+  'politi-sydsjaelland': {
+    label: 'Sydsjællands og Lolland-Falsters Politi',
+    baseId: 'politi-sydsjaelland',
+    dispatchable: [
+      {
+        assetKey: 'sydsjaelland-patrol-car',
+        kind: 'receiver-patrol-car',
+        name: 'Patrol car',
+        icon: '🚔',
+        useCases: [
+          'First ground responder to an incident in the district',
+          'Perimeter presence and civilian management',
+          'Locating witnesses and taking initial statements',
+        ],
+        capabilities: {
+          coordination: true,
+          civilian_management: true,
+          armed: true,
+          kinetic_counter_drone: false,
+        },
+        deployTime: 'From Næstved via road routing',
+        limitations: 'District only. No airspace jurisdiction.',
+      },
+      {
+        assetKey: 'sydsjaelland-cordon',
+        kind: 'receiver-cordon-squad',
+        name: 'Perimeter cordon',
+        icon: '⚑',
+        useCases: [
+          'Establishing and holding a perimeter around an incident',
+          'Traffic diversion and civilian standoff distance',
+          'Preserving a scene for evidence',
+        ],
+        capabilities: {
+          crowd_management: true,
+          traffic_control: true,
+        },
+        deployTime: 'From Næstved via road routing',
+        limitations: 'Stationary once established. Needs officers drawn from district strength.',
+      },
+    ],
+    requestable: [
+      {
+        requestKey: 'req-aks',
+        from: 'politi-aks',
+        name: 'Tactical intervention',
+        useCases: [
+          'Armed or barricaded suspect',
+          'Terminal-phase intercept in a populated area',
+        ],
+        priority: 'critical',
+        expectedResponse: 'Aktionsstyrken tactical van or strike team',
+      },
+    ],
+  },
+  'politi-fyn': {
+    label: 'Fyns Politi',
+    baseId: 'politi-fyn',
+    dispatchable: [
+      {
+        assetKey: 'fyn-patrol-car',
+        kind: 'receiver-patrol-car',
+        name: 'Patrol car',
+        icon: '🚔',
+        useCases: [
+          'First ground responder to an incident in the district',
+          'Perimeter presence and civilian management',
+          'Locating witnesses and taking initial statements',
+        ],
+        capabilities: {
+          coordination: true,
+          civilian_management: true,
+          armed: true,
+          kinetic_counter_drone: false,
+        },
+        deployTime: 'From Odense via road routing',
+        limitations: 'District only. No airspace jurisdiction.',
+      },
+      {
+        assetKey: 'fyn-cordon',
+        kind: 'receiver-cordon-squad',
+        name: 'Perimeter cordon',
+        icon: '⚑',
+        useCases: [
+          'Establishing and holding a perimeter around an incident',
+          'Traffic diversion and civilian standoff distance',
+          'Preserving a scene for evidence',
+        ],
+        capabilities: {
+          crowd_management: true,
+          traffic_control: true,
+        },
+        deployTime: 'From Odense via road routing',
+        limitations: 'Stationary once established. Needs officers drawn from district strength.',
+      },
+    ],
+    requestable: [
+      {
+        requestKey: 'req-aks',
+        from: 'politi-aks',
+        name: 'Tactical intervention',
+        useCases: [
+          'Armed or barricaded suspect',
+          'Terminal-phase intercept in a populated area',
+        ],
+        priority: 'critical',
+        expectedResponse: 'Aktionsstyrken tactical van or strike team',
+      },
+    ],
+  },
+  'politi-sydsonderjyl': {
+    label: 'Syd- og Sønderjyllands Politi',
+    baseId: 'politi-sydsonderjyl',
+    dispatchable: [
+      {
+        assetKey: 'sydsonderjyl-patrol-car',
+        kind: 'receiver-patrol-car',
+        name: 'Patrol car',
+        icon: '🚔',
+        useCases: [
+          'First ground responder to an incident in the district',
+          'Perimeter presence and civilian management',
+          'Locating witnesses and taking initial statements',
+        ],
+        capabilities: {
+          coordination: true,
+          civilian_management: true,
+          armed: true,
+          kinetic_counter_drone: false,
+        },
+        deployTime: 'From Esbjerg via road routing',
+        limitations: 'District only. No airspace jurisdiction.',
+      },
+      {
+        assetKey: 'sydsonderjyl-cordon',
+        kind: 'receiver-cordon-squad',
+        name: 'Perimeter cordon',
+        icon: '⚑',
+        useCases: [
+          'Establishing and holding a perimeter around an incident',
+          'Traffic diversion and civilian standoff distance',
+          'Preserving a scene for evidence',
+        ],
+        capabilities: {
+          crowd_management: true,
+          traffic_control: true,
+        },
+        deployTime: 'From Esbjerg via road routing',
+        limitations: 'Stationary once established. Needs officers drawn from district strength.',
+      },
+    ],
+    requestable: [
+      {
+        requestKey: 'req-aks',
+        from: 'politi-aks',
+        name: 'Tactical intervention',
+        useCases: [
+          'Armed or barricaded suspect',
+          'Terminal-phase intercept in a populated area',
+        ],
+        priority: 'critical',
+        expectedResponse: 'Aktionsstyrken tactical van or strike team',
+      },
+    ],
+  },
+  'politi-sydostjyl': {
+    label: 'Sydøstjyllands Politi',
+    baseId: 'politi-sydoestjylland',
+    dispatchable: [
+      {
+        assetKey: 'sydostjyl-patrol-car',
+        kind: 'receiver-patrol-car',
+        name: 'Patrol car',
+        icon: '🚔',
+        useCases: [
+          'First ground responder to an incident in the district',
+          'Perimeter presence and civilian management',
+          'Locating witnesses and taking initial statements',
+        ],
+        capabilities: {
+          coordination: true,
+          civilian_management: true,
+          armed: true,
+          kinetic_counter_drone: false,
+        },
+        deployTime: 'From Horsens via road routing',
+        limitations: 'District only. No airspace jurisdiction.',
+      },
+      {
+        assetKey: 'sydostjyl-cordon',
+        kind: 'receiver-cordon-squad',
+        name: 'Perimeter cordon',
+        icon: '⚑',
+        useCases: [
+          'Establishing and holding a perimeter around an incident',
+          'Traffic diversion and civilian standoff distance',
+          'Preserving a scene for evidence',
+        ],
+        capabilities: {
+          crowd_management: true,
+          traffic_control: true,
+        },
+        deployTime: 'From Horsens via road routing',
+        limitations: 'Stationary once established. Needs officers drawn from district strength.',
+      },
+    ],
+    requestable: [
+      {
+        requestKey: 'req-aks',
+        from: 'politi-aks',
+        name: 'Tactical intervention',
+        useCases: [
+          'Armed or barricaded suspect',
+          'Terminal-phase intercept in a populated area',
+        ],
+        priority: 'critical',
+        expectedResponse: 'Aktionsstyrken tactical van or strike team',
+      },
+    ],
+  },
+  'politi-midtvestjyl': {
+    label: 'Midt- og Vestjyllands Politi',
+    baseId: 'politi-midtvestjylland',
+    dispatchable: [
+      {
+        assetKey: 'midtvestjyl-patrol-car',
+        kind: 'receiver-patrol-car',
+        name: 'Patrol car',
+        icon: '🚔',
+        useCases: [
+          'First ground responder to an incident in the district',
+          'Perimeter presence and civilian management',
+          'Locating witnesses and taking initial statements',
+        ],
+        capabilities: {
+          coordination: true,
+          civilian_management: true,
+          armed: true,
+          kinetic_counter_drone: false,
+        },
+        deployTime: 'From Holstebro via road routing',
+        limitations: 'District only. No airspace jurisdiction.',
+      },
+      {
+        assetKey: 'midtvestjyl-cordon',
+        kind: 'receiver-cordon-squad',
+        name: 'Perimeter cordon',
+        icon: '⚑',
+        useCases: [
+          'Establishing and holding a perimeter around an incident',
+          'Traffic diversion and civilian standoff distance',
+          'Preserving a scene for evidence',
+        ],
+        capabilities: {
+          crowd_management: true,
+          traffic_control: true,
+        },
+        deployTime: 'From Holstebro via road routing',
+        limitations: 'Stationary once established. Needs officers drawn from district strength.',
+      },
+    ],
+    requestable: [
+      {
+        requestKey: 'req-aks',
+        from: 'politi-aks',
+        name: 'Tactical intervention',
+        useCases: [
+          'Armed or barricaded suspect',
+          'Terminal-phase intercept in a populated area',
+        ],
+        priority: 'critical',
+        expectedResponse: 'Aktionsstyrken tactical van or strike team',
+      },
+    ],
+  },
+  'politi-ostjyl': {
+    label: 'Østjyllands Politi',
+    baseId: 'politi-oestjylland',
+    dispatchable: [
+      {
+        assetKey: 'ostjyl-patrol-car',
+        kind: 'receiver-patrol-car',
+        name: 'Patrol car',
+        icon: '🚔',
+        useCases: [
+          'First ground responder to an incident in the district',
+          'Perimeter presence and civilian management',
+          'Locating witnesses and taking initial statements',
+        ],
+        capabilities: {
+          coordination: true,
+          civilian_management: true,
+          armed: true,
+          kinetic_counter_drone: false,
+        },
+        deployTime: 'From Aarhus via road routing',
+        limitations: 'District only. No airspace jurisdiction.',
+      },
+      {
+        assetKey: 'ostjyl-cordon',
+        kind: 'receiver-cordon-squad',
+        name: 'Perimeter cordon',
+        icon: '⚑',
+        useCases: [
+          'Establishing and holding a perimeter around an incident',
+          'Traffic diversion and civilian standoff distance',
+          'Preserving a scene for evidence',
+        ],
+        capabilities: {
+          crowd_management: true,
+          traffic_control: true,
+        },
+        deployTime: 'From Aarhus via road routing',
+        limitations: 'Stationary once established. Needs officers drawn from district strength.',
+      },
+    ],
+    requestable: [
+      {
+        requestKey: 'req-aks',
+        from: 'politi-aks',
+        name: 'Tactical intervention',
+        useCases: [
+          'Armed or barricaded suspect',
+          'Terminal-phase intercept in a populated area',
+        ],
+        priority: 'critical',
+        expectedResponse: 'Aktionsstyrken tactical van or strike team',
+      },
+    ],
+  },
+  'politi-nordjyl': {
+    label: 'Nordjyllands Politi',
+    baseId: 'politi-nordjylland',
+    dispatchable: [
+      {
+        assetKey: 'nordjyl-patrol-car',
+        kind: 'receiver-patrol-car',
+        name: 'Patrol car',
+        icon: '🚔',
+        useCases: [
+          'First ground responder to an incident in the district',
+          'Perimeter presence and civilian management',
+          'Locating witnesses and taking initial statements',
+        ],
+        capabilities: {
+          coordination: true,
+          civilian_management: true,
+          armed: true,
+          kinetic_counter_drone: false,
+        },
+        deployTime: 'From Aalborg via road routing',
+        limitations: 'District only. No airspace jurisdiction.',
+      },
+      {
+        assetKey: 'nordjyl-cordon',
+        kind: 'receiver-cordon-squad',
+        name: 'Perimeter cordon',
+        icon: '⚑',
+        useCases: [
+          'Establishing and holding a perimeter around an incident',
+          'Traffic diversion and civilian standoff distance',
+          'Preserving a scene for evidence',
+        ],
+        capabilities: {
+          crowd_management: true,
+          traffic_control: true,
+        },
+        deployTime: 'From Aalborg via road routing',
+        limitations: 'Stationary once established. Needs officers drawn from district strength.',
+      },
+    ],
+    requestable: [
+      {
+        requestKey: 'req-aks',
+        from: 'politi-aks',
+        name: 'Tactical intervention',
+        useCases: [
+          'Armed or barricaded suspect',
+          'Terminal-phase intercept in a populated area',
+        ],
+        priority: 'critical',
+        expectedResponse: 'Aktionsstyrken tactical van or strike team',
+      },
+    ],
+  },
+  'politi-bornholm': {
+    label: 'Bornholms Politi',
+    baseId: 'politi-bornholm',
+    dispatchable: [
+      {
+        assetKey: 'bornholm-patrol-car',
+        kind: 'receiver-patrol-car',
+        name: 'Patrol car',
+        icon: '🚔',
+        useCases: [
+          'First ground responder to an incident in the district',
+          'Perimeter presence and civilian management',
+          'Locating witnesses and taking initial statements',
+        ],
+        capabilities: {
+          coordination: true,
+          civilian_management: true,
+          armed: true,
+          kinetic_counter_drone: false,
+        },
+        deployTime: 'From Rønne via road routing',
+        limitations: 'District only. No airspace jurisdiction.',
+      },
+      {
+        assetKey: 'bornholm-cordon',
+        kind: 'receiver-cordon-squad',
+        name: 'Perimeter cordon',
+        icon: '⚑',
+        useCases: [
+          'Establishing and holding a perimeter around an incident',
+          'Traffic diversion and civilian standoff distance',
+          'Preserving a scene for evidence',
+        ],
+        capabilities: {
+          crowd_management: true,
+          traffic_control: true,
+        },
+        deployTime: 'From Rønne via road routing',
+        limitations: 'Stationary once established. Needs officers drawn from district strength.',
+      },
+    ],
+    requestable: [
+      {
+        requestKey: 'req-aks',
+        from: 'politi-aks',
+        name: 'Tactical intervention',
+        useCases: [
+          'Armed or barricaded suspect',
+          'Terminal-phase intercept in a populated area',
+        ],
+        priority: 'critical',
+        expectedResponse: 'Aktionsstyrken tactical van or strike team',
+      },
+    ],
+  },
+
   // ── Aktionsstyrken (National Police Tactical Unit) ───────────
 
   'politi-aks': {

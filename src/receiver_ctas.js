@@ -130,6 +130,31 @@ function _siteAllowsAction(event, action) {
 //
 // Permissive when a site declares no receivers at all, matching the
 // capability check above: an undeclared site restricts nothing.
+// Agency families that answer for a geography, and so may only dispatch
+// to a site that names them.
+//
+// Keyed on family rather than on "is this role an actor at some site we
+// happen to model". That was the first attempt and it let Bornholms
+// Politi dispatch to Copenhagen Airport, because we model no site on
+// Bornholm, so the rule concluded it was not site-based. Whether a
+// district answers for a geography is a fact about the district, not
+// about which sites we have got round to building.
+//
+// politi  district policing, by definition geographic
+// kbr     municipal fire and rescue, same
+// brs     emergency management, regional centres with defined areas
+// hjv     home guard districts
+//
+// Hospitals, medical coordination centres and regions are deliberately
+// absent: they are reached through consequence routing rather than
+// through a site's responder list, and gating them this way would strip
+// every hospital's dispatch everywhere.
+const SITE_BASED_FAMILIES = new Set(['politi', 'kbr', 'brs', 'hjv']);
+
+function _isSiteBasedResponder(roleId) {
+  return SITE_BASED_FAMILIES.has(String(roleId || '').split('-')[0]);
+}
+
 function _siteAllowsRoleToDispatch(event, roleId, siteReceivers) {
   if (!event?.siteId || !roleId) return true;
   if (!Array.isArray(siteReceivers) || siteReceivers.length === 0) return true;
@@ -558,15 +583,27 @@ export function availableCTAsForReceiver(roleId, event, ctx = {}) {
 
   // An agency that is not an actor at this site does not dispatch to it.
   //
-  // Scoped to the stub actions, NOT to receiver-dispatch, and that is a
-  // measured decision rather than an oversight. Extending it to the real
-  // asset lane changes 28 roles instead of 4 and strips every hospital,
-  // because hospitals are actors at no site at all: they are reached
-  // through medical consequence routing, not through a site's actor
-  // list. The actor test is the right gate for "can you send a unit
-  // here" and the wrong gate for "were you called in".
+  // Applies to REAL asset dispatch too, not only the stubs, and the
+  // distinction that makes that safe is whether the agency is a
+  // site-based responder at all.
+  //
+  // A police district is: it answers for a geography, and every site
+  // names the district that covers it. Sydøstjyllands Politi holds
+  // Billund and has no business driving to Copenhagen Airport, whatever
+  // is parked at its station.
+  //
+  // A hospital is not. It appears as an actor at no site in the country,
+  // because it is reached through medical consequence routing rather
+  // than through a site's responder list. Gating it on actor status
+  // would strip every hospital's dispatch everywhere, which is what the
+  // measurement showed when this was first tried.
+  //
+  // So the gate binds for families that answer for a geography, and not
+  // for those reached by consequence routing. See SITE_BASED_FAMILIES.
+  const _siteBound = _isSiteBasedResponder(roleId);
   if (!_siteAllowsRoleToDispatch(event, roleId, ctx.siteReceivers)) {
-    out = out.filter(c => !PHYSICAL_DISPATCH_ACTIONS.has(c.action));
+    out = out.filter(c => !PHYSICAL_DISPATCH_ACTIONS.has(c.action)
+      && !(_siteBound && c.action === 'receiver-dispatch'));
   }
 
   // Archetypes that have been migrated take their capability set from

@@ -131,7 +131,8 @@ function evFor(role, m) {
       escalations: rec ? [rec] : [], wreckages, participants,
     },
     ctx: { rec, isAcked: m.isAcked, isActive: m.isActive, dispatches,
-           siteReceivers: SITE_REGISTRY[m.siteId]?.receivers },
+           siteReceivers: SITE_REGISTRY[m.siteId]?.receivers,
+           },
   };
 }
 
