@@ -32,6 +32,18 @@ export const TARGETS = [
   { id: 'meta-odense',        name: 'Meta Data Centre',         subtitle: 'Odense hyperscale',                    kind: 'data-centre', lat: 55.4038, lon: 10.4033 },
   { id: 'google-fredericia',  name: 'Google Data Centre',       subtitle: 'Fredericia hyperscale',                kind: 'data-centre', lat: 55.5644, lon: 9.7522  },
   { id: 'apple-foulum',       name: 'Apple Data Centre',        subtitle: 'Foulum hyperscale (near Viborg)',      kind: 'data-centre', lat: 56.4967, lon: 9.5744  },
+  // STACK Infrastructure, both Danish sites. COP02 is the campus under
+  // discussion as a site build; COP01 is included because it is the same
+  // operator and a drone over one is context for the other.
+  //
+  // COP02's coordinate came from the customer and was confirmed against
+  // the published address by reverse geocoding to Blekinge Boulevard.
+  // OpenStreetMap has NO building there: the nearest mapped footprints
+  // are an office block and a charity head office, because the campus is
+  // a new build and the basemap has not caught up. So this point is the
+  // parcel, not a footprint, until the perimeter arrives as GeoJSON.
+  { id: 'stack-cop02',        name: 'STACK COP02',              subtitle: 'Taastrup hyperscale campus, 100,000 m2', kind: 'data-centre', lat: 55.6467, lon: 12.2647 },
+  { id: 'stack-cop01',        name: 'STACK COP01',              subtitle: 'Holmbladsgade, Copenhagen',            kind: 'data-centre', lat: 55.6681, lon: 12.6217 },
 
   // ═══════════════════ HEALTHCARE (largest hospitals) ═══════════════════
   { id: 'rigshospitalet',     name: 'Rigshospitalet',           subtitle: 'National tertiary hospital, Copenhagen', kind: 'healthcare', lat: 55.6949, lon: 12.5688 },
