@@ -5893,20 +5893,25 @@ async function main() {
         //
         // Held at one angle past 6 km, where a blade is under a pixel and
         // the animation buys nothing but a redraw every frame.
-        // Static, and that is now the right answer.
+        // Blades turn at EVERY range, with no distance test.
         //
-        // This used to cycle 12 pre-rendered blade angles, because the
-        // billboard was all a helicopter had. It now has a 3D model with
-        // real turning rotors everywhere inside _HELI_MODEL_SWAP_M, and
-        // this billboard only draws BEYOND that, where a blade is a
-        // fraction of a pixel. So the cycling animated something nobody
-        // could see while taking a terrain sample every frame to decide
-        // whether to do it.
+        // The distance test is the thing that was wrong here, not the
+        // animation. It had two jobs, deciding whether a blade was big
+        // enough to be worth animating and whether the model had already
+        // taken over, and it paid for both by sampling terrain on every
+        // frame to find out how far away the aircraft was. Then the
+        // model swap moved and the band it tested for went empty, so it
+        // did all that work to always return the same frame.
         //
-        // Worse, after the swap distance moved out the band it tested
-        // for ("nearer than 6 km AND beyond the swap") became empty, so
-        // it did that work every frame to always return frame 0.
-        image: d.profile.icon === 'helicopter' ? _HELI_FRAMES[0] : iconUrl,
+        // Cycling unconditionally is both what we want and the cheaper
+        // of the two: the 12 frames are pre-rendered once at startup and
+        // land in Cesium's billboard atlas on first use, so a frame
+        // change is an atlas index rather than a texture upload. No
+        // position maths, no terrain sample, no camera read.
+        image: d.profile.icon === 'helicopter'
+          ? new Cesium.CallbackProperty(
+              () => _HELI_FRAMES[Math.floor(monoNow() / 70) % _HELI_FRAMES.length], false)
+          : iconUrl,
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
         // Airborne → absolute ellipsoid altitude (matches tracer math).
         // Ground → clamp.
