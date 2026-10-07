@@ -748,7 +748,7 @@ const STUB_DISPATCH_ACTIONS = new Set([
   'region-ambulance-standby', 'region-triage-prep',
 ]);
 import { ownerRoleIdForAsset } from './agency_ownership.js';
-import { availableCTAsForReceiver, PHYSICAL_DISPATCH_ACTIONS } from './receiver_ctas.js';
+import { availableCTAsForReceiver } from './receiver_ctas.js';
 import { AisShipRenderer, AirspaceRenderer, TrafficEventRenderer } from './sovereign_renderers.js';
 import { fetchDanishAirspaces } from './sovereign_services.js';
 import {
@@ -24559,7 +24559,7 @@ async function main() {
       // NOTE: rec is hardcoded null here, so four actions (ack,
       // respond-open, update-status, cascade-reject) are unreachable
       // through this helper. It is a console convenience, not a baseline
-      // source. Use scripts/snapshot-receiver-ctas.mjs for that.
+      // source. Use scripts/check-receiver-ctas.mjs for that.
       ctasForRole: (roleId, eventId) => availableCTAsForReceiver(roleId, getEvent(eventId), {
         dispatches: Array.from(_counterDispatches.values()),
         rec: null, isAcked: false, isActive: getEvent(eventId)?.status === 'active',

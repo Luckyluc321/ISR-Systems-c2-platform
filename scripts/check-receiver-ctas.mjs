@@ -22,11 +22,12 @@
 //
 // FOUR INVARIANTS, each one a failure that is otherwise silent:
 //
-//   1. Every action emitted has a handler in the click router. The
-//      router is a 46-branch if/else; an unhandled string renders a
-//      normal-looking button that does nothing. There is now a terminal
-//      warn, but a build-time check is better than a console message
-//      nobody is watching.
+//   1. Every action emitted has a handler in the RECEIVER click router.
+//      That router is a 46-branch if/else; an unhandled string renders a
+//      normal-looking button that does nothing. Scoped to that router
+//      on purpose: scanning the whole file also matched the operator
+//      event list's own action tests and quietly whitelisted names like
+//      'note' and 'escalate'.
 //
 //   2. Every category is one of the four buckets. An unknown one is
 //      silently filed under "Audit + participants", so a dispatch button
@@ -37,8 +38,15 @@
 //      claims to move physical units. This is the line that stops
 //      archetype derivation handing out 310 buttons that move nothing.
 //
-//   4. Every receiver-dispatch carries an assetKey that actually
-//      resolves, and every receiver-request a requestKey that does.
+//   4. Every receiver-dispatch carries an assetKey that resolves against
+//      the role's own inventory, and every receiver-request a requestKey
+//      that does. Resolution, not truthiness: a key that matches nothing
+//      fails at click time with "No asset spec for that receiver action",
+//      and that is a runtime error the build should have caught.
+//
+// The signature pins action AND category. Label, icon and tooltip are
+// deliberately excluded: they are copy, and churning the baseline on
+// every wording change would train everyone to regenerate it unread.
 //
 // Usage:  node scripts/check-receiver-ctas.mjs            verify
 //         node scripts/check-receiver-ctas.mjs --write     regenerate
@@ -79,6 +87,14 @@ const STATES = [
   { isActive: true, hasRec: true, isAcked: false },
   { isActive: true, hasRec: false, isAcked: false },
   { isActive: false, hasRec: true, isAcked: true },
+  // Two branches the first version of this matrix could not reach,
+  // because it hardcoded empty dispatches, no wreckage and no
+  // participants. Observer mode short-circuits the whole rail to two
+  // buttons, and scene release only appears once a ground unit is
+  // holding a cordon. Both were unpinned while this file claimed to pin
+  // what every agency is allowed to do.
+  { isActive: true, hasRec: true, isAcked: true, observer: true },
+  { isActive: true, hasRec: true, isAcked: true, wreckage: true, holding: true },
 ];
 
 function buildMatrix() {
@@ -96,13 +112,20 @@ function evFor(role, m) {
     ? { id: 'r1', destinationId: (role.destinationIds || [])[0] || role.id,
         status: 'acknowledged', assessmentPackage: {} }
     : null;
+  const participants = new Map();
+  if (m.observer) participants.set(role.id, { mode: 'observer', roleId: role.id });
+  const wreckages = m.wreckage ? [{ id: 'w1', lat: 55.7, lon: 9.15 }] : [];
+  const dispatches = m.holding
+    ? [{ id: 'd1', eventId: 'snap', state: 'holding-cordon',
+         assignedWreckageId: 'w1', ownerRoleId: role.id, profile: { useRoadRouting: true } }]
+    : [];
   return {
     ev: {
       id: 'snap', siteId: m.siteId, status: m.isActive ? 'active' : 'closed',
       classification: m.classification, threat: m.threat, platform: m.platform,
-      escalations: rec ? [rec] : [], wreckages: [], participants: new Map(),
+      escalations: rec ? [rec] : [], wreckages, participants,
     },
-    ctx: { rec, isAcked: m.isAcked, isActive: m.isActive, dispatches: [] },
+    ctx: { rec, isAcked: m.isAcked, isActive: m.isActive, dispatches },
   };
 }
 
@@ -133,15 +156,37 @@ for (const role of RECEIVERS) {
         errors.push(`${role.id} has no asset inventory but is offered '${c.action}', `
           + 'which claims to move physical units.');
       }
-      // 4. asset-lane CTAs must resolve
-      if (c.action === 'receiver-dispatch' && !c.assetKey) {
-        errors.push(`${role.id}: receiver-dispatch with no assetKey.`);
+      // 4. asset-lane CTAs must RESOLVE, not merely be truthy.
+      //
+      // This used to test truthiness alone while claiming to check
+      // resolution, so a CTA carrying a key that matched no asset passed
+      // cleanly. The button then fails at click time with "No asset spec
+      // for that receiver action", which is a runtime error the build
+      // should have caught.
+      if (c.action === 'receiver-dispatch') {
+        const spec = RECEIVER_ASSETS[role.id];
+        const hit = spec?.dispatchable?.some((a) => a.assetKey === c.assetKey);
+        if (!hit) {
+          errors.push(`${role.id}: receiver-dispatch carries assetKey `
+            + `'${c.assetKey}', which matches nothing in its inventory.`);
+        }
       }
-      if (c.action === 'receiver-request' && !c.requestId && !c.requestKey) {
-        errors.push(`${role.id}: receiver-request with no requestKey.`);
+      if (c.action === 'receiver-request') {
+        const key = c.requestId || c.requestKey;
+        const spec = RECEIVER_ASSETS[role.id];
+        const hit = spec?.requestable?.some((r) => r.requestKey === key);
+        if (!hit) {
+          errors.push(`${role.id}: receiver-request carries requestKey `
+            + `'${key}', which matches nothing in its inventory.`);
+        }
       }
     }
-    sigs.add(ctas.map((c) => c.action).join(','));
+    // Action AND category. Pinning the action alone let a dispatch
+    // button be refiled under Audit without the gate noticing, which is
+    // the exact failure described at the top of this file. Label, icon
+    // and tooltip stay out: they are copy, and churning the baseline on
+    // every wording change would train everyone to regenerate it blind.
+    sigs.add(ctas.map((c) => `${c.action}:${c.category}`).join(','));
   }
   perRole[role.id] = [...sigs].sort();
 }
@@ -153,8 +198,22 @@ for (const cat of emittedCategories) {
 }
 
 // 1. every action has a handler
+//
+// SCOPED to the receiver router, deliberately. Scanning the whole file
+// for `action === '...'` also matched nine `btn.dataset.action === '...'`
+// tests in the operator event list, a different UI entirely, which
+// injected names like 'note', 'escalate' and 'reclassify' into the
+// handled set. A receiver CTA called any of those would have passed this
+// check with no branch to run it, which is the precise silent failure
+// the check exists to prevent.
 const mainSrc = readFileSync(join(ROOT, 'src/main.js'), 'utf8');
-const handled = new Set([...mainSrc.matchAll(/action === '([a-z0-9-]+)'/g)].map((m) => m[1]));
+const routerAt = mainSrc.indexOf("receiverView.querySelectorAll('[data-rcv]')");
+if (routerAt < 0) {
+  errors.push('could not find the receiver click router in main.js; the handler '
+    + 'check cannot run and would otherwise pass vacuously.');
+}
+const routerSrc = routerAt < 0 ? '' : mainSrc.slice(routerAt);
+const handled = new Set([...routerSrc.matchAll(/action === '([a-z0-9-]+)'/g)].map((m) => m[1]));
 for (const m of mainSrc.matchAll(/STUB_DISPATCH_ACTIONS = new Set\(\[([\s\S]*?)\]\)/g)) {
   for (const s of m[1].matchAll(/'([a-z0-9-]+)'/g)) handled.add(s[1]);
 }

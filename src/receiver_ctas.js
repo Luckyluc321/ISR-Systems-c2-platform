@@ -29,7 +29,8 @@ import { sceneReleaseState } from './scene_lifecycle.js';
 import { releasedWreckageIds } from './events.js';
 import { contextForSite } from './site_context.js';
 
-// Of the stub actions below, these are the ones that claim to put
+// Of the stub actions in main.js's STUB_DISPATCH_ACTIONS, these are the
+// ones that claim to put
 // physical units on the ground or in the air. They are withheld from any
 // profile with no entry in RECEIVER_ASSETS, because offering them tells
 // an operator they command something the system has no record of. The
