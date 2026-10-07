@@ -5734,6 +5734,41 @@ async function main() {
     return (typeof t === 'number' ? t : 0) + relAlt;
   }
 
+  // Turn toward a heading at a bounded rate instead of snapping to it.
+  //
+  // Heading was assigned directly, so a 90 degree change happened in one
+  // frame: the icon simply faced a different way between two renders.
+  // Aircraft and vehicles do not do that, and on screen it reads as a
+  // glitch rather than a turn.
+  //
+  // Shortest way round, so a unit crossing north turns through 10
+  // degrees rather than 350.
+  //
+  // DECLARED HERE, at the top of main()'s body, and not inside
+  // _tickCounterDispatch where it used to live. Two functions need it
+  // now: _easeHeading in the tick, and the helicopter bank in
+  // _createCounterDispatchEntities below. Those two are SIBLINGS, so a
+  // declaration inside either is invisible to the other.
+  //
+  // It was invisible, and nothing caught it. node --check passes, since
+  // an unresolved identifier is a runtime error and not a parse error,
+  // and the repo has no linter or test runner to resolve identifiers.
+  // The build went green while the bundle carried TURN_RATE_RAD_S as a
+  // bare global, which would have thrown inside a Cesium
+  // CallbackProperty on the second render frame after a helicopter was
+  // dispatched, taking the render loop with it.
+  //
+  // The tell, if this ever happens again: every local gets renamed by
+  // the minifier, so a long name surviving in dist/ means the bundler
+  // treated it as a free global.
+  //   grep -c TURN_RATE_RAD_S dist/assets/index-*.js   -> 1 means broken, 0 means resolved
+  const TURN_RATE_RAD_S = Math.PI / 3;        // 60 deg/s, so 90 deg takes 1.5 s
+
+  // Shared empty object for the "no tuning set" case, so a per-frame
+  // read does not allocate. Frozen so a caller cannot write tuning into
+  // it by accident and have it apply to every unit.
+  const _NO_TUNING = Object.freeze({});
+
   function _createCounterDispatchEntities(d) {
     const iconCanvas = _counterDispatchIcon(d.profile.icon);
     if (!iconCanvas) return;
@@ -5743,8 +5778,15 @@ async function main() {
     // quad entities). Only these two icons qualify — 'sof' and
     // 'fighter' style interceptors have their own airframe class.
     const _INT_MODEL_SWAP_M = 250;
+    // A helicopter is about 20 m across where an interceptor quad is
+    // about 1 m, so its model is worth drawing from twenty times further
+    // out. Tunable because the right number is a judgement about when the
+    // model stops being worth its frame cost, not a fact.
+    const _HELI_MODEL_SWAP_M = (window.__isr_heli_tuning || {}).swapM ?? 1500;
     const _isQuadInterceptor = d.profile.airborne
       && (d.profile.icon === 'quadcopter' || d.profile.icon === 'counter-drone-interceptor');
+    const _isHelicopter = d.profile.airborne && d.profile.icon === 'helicopter';
+    const _modelSwapM = _isHelicopter ? _HELI_MODEL_SWAP_M : _INT_MODEL_SWAP_M;
     // Position callback captured once so both billboard + model share it.
     const _positionCb = new Cesium.CallbackProperty(() => (
       Cesium.Cartesian3.fromDegrees(
@@ -5795,16 +5837,24 @@ async function main() {
         // the animation buys nothing but a redraw every frame.
         image: d.profile.icon === 'helicopter'
           ? new Cesium.CallbackProperty(() => {
-              let near = false;
+              let dist = Infinity;
               try {
                 const p = Cesium.Cartesian3.fromDegrees(
                   d.curLon, d.curLat,
                   d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0
                 );
-                near = Cesium.Cartesian3.distance(viewer.camera.positionWC, p) < 6000;
-              } catch (_) { near = false; }
-              return near ? _HELI_FRAMES[Math.floor(monoNow() / 70) % _HELI_FRAMES.length]
-                          : _HELI_FRAMES[0];
+                dist = Cesium.Cartesian3.distance(viewer.camera.positionWC, p);
+              } catch (_) { dist = Infinity; }
+              // Blades cycle only in the band where this billboard is
+              // the thing actually on screen: nearer than 6 km, where a
+              // blade is more than a pixel, but beyond _modelSwapM,
+              // where the 3D model has taken over and the billboard is
+              // culled. Without the lower bound this kept re-rendering
+              // frames and sampling terrain every frame for a billboard
+              // nobody could see, which the model swap introduced.
+              const cycling = dist < 6000 && dist >= _modelSwapM;
+              return cycling ? _HELI_FRAMES[Math.floor(monoNow() / 70) % _HELI_FRAMES.length]
+                             : _HELI_FRAMES[0];
             }, false)
           : iconUrl,
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
@@ -5827,10 +5877,11 @@ async function main() {
         // Cesium's billboard rotation runs counter-clockwise. Same
         // convention the F-35 and the friendly missile already use.
         rotation: new Cesium.CallbackProperty(() => -(d.heading || 0), false),
-        // Quadcopter interceptors hide their billboard under 500m so
-        // the 3D GLB takes over. Other dispatch icons stay billboard.
-        distanceDisplayCondition: _isQuadInterceptor
-          ? new Cesium.DistanceDisplayCondition(_INT_MODEL_SWAP_M, Number.POSITIVE_INFINITY)
+        // Anything with a 3D model hides its billboard once the model
+        // takes over, so the two are never drawn at the same place.
+        // Everything else stays billboard at every range.
+        distanceDisplayCondition: (_isQuadInterceptor || _isHelicopter)
+          ? new Cesium.DistanceDisplayCondition(_modelSwapM, Number.POSITIVE_INFINITY)
           : undefined,
       },
       // No default label — icon alone. Click the icon to open the
@@ -5867,6 +5918,107 @@ async function main() {
         const pitch = -forwardPitch * Math.min(1, cruiseMs / 15) + pitchOffset;
         const hpr = new Cesium.HeadingPitchRoll(heading, pitch, 0);
         return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
+      }, false);
+    }
+
+    if (_isHelicopter) {
+      // _NO_TUNING, not a fresh `|| {}`, because this is read every
+      // frame and the default case would allocate an object per frame
+      // per helicopter for nothing.
+      const _hT = () => window.__isr_heli_tuning || _NO_TUNING;
+      _entitySpec.model = {
+        uri: '/aircraft/mi-24_hind.glb',
+        // Roughly life-size at 1. The file carries its own 0.839 root
+        // scale and measures about 23 m nose to tail, against a real
+        // 21.5 m, so it is artist-accurate rather than survey-accurate.
+        scale: _hT().scale ?? 1,
+        // Keeps it visible as a shape rather than a speck while the
+        // billboard is still suppressed.
+        minimumPixelSize: _hT().minimumPixelSize ?? 48,
+        maximumScale: 20000,
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, _HELI_MODEL_SWAP_M),
+        shadows: Cesium.ShadowMode.DISABLED,
+        // The rotors turn because the file animates them: Top_Rotor and
+        // Tail_Rotor each carry a rotation channel, 159 keyframes over
+        // 6.4 s. This is the first dispatch model that animates itself,
+        // so nothing here drives the blades by hand.
+        //
+        // Known cosmetic artifact: the file ships ONE clip, named
+        // 'Wheels and Rotor', and the undercarriage channels sit in it
+        // alongside the rotor ones. The entity model API plays a clip
+        // whole or not at all, so the gear retracts and extends on the
+        // same 6.4 s loop. Stripping the wheel channels from the GLB is
+        // the fix and it is a change to the asset, so it is not done
+        // here unasked.
+        runAnimations: true,
+      };
+
+      // Nose down in cruise, and bank into the turn.
+      //
+      // The bank is measured HERE, by diffing d.heading between frames,
+      // rather than in the tick. The tick calls _easeHeading in five
+      // places and not one of them records a rate; threading one through
+      // all five to feed a cosmetic tilt is a worse trade than reading
+      // the heading the renderer already has.
+      //
+      // monoNow(), not Date.now(), so a paused clock produces no turn and
+      // the aircraft holds its bank instead of snapping level. Held in
+      // closure locals rather than stamped on `d` so no new clock-bearing
+      // field appears on the dispatch record.
+      let _prevH = null;
+      let _prevT = null;
+      let _bank = 0;
+      _entitySpec.orientation = new Cesium.CallbackProperty(() => {
+        const cart = _positionCb.getValue?.(Cesium.JulianDate.now());
+        if (!cart) return undefined;
+        const T = _hT();
+        const TAU = Math.PI * 2;
+        const nowS = monoNow() / 1000;
+        const maxBank = ((T.maxBankDeg ?? 18) * Math.PI) / 180;
+
+        if (_prevH != null && _prevT != null) {
+          const dt = nowS - _prevT;
+          // dt <= 0 is a frozen clock. dt >= 1 is a tab that was in the
+          // background, where the heading delta spans seconds and the
+          // implied turn rate is meaningless. Neither should bank it.
+          if (dt > 0 && dt < 1) {
+            const dh = ((d.heading - _prevH + Math.PI) % TAU + TAU) % TAU - Math.PI;
+            // Signed rate as a fraction of the maximum the unit can turn,
+            // so a hard turn banks fully and a gentle one barely tips.
+            const frac = Math.max(-1, Math.min(1, (dh / dt) / TURN_RATE_RAD_S));
+            // Eased, so the roll leads into the turn and settles out of
+            // it rather than appearing on the frame the heading moves.
+            _bank += (frac * maxBank - _bank) * Math.min(1, dt * 3);
+          }
+        }
+        _prevH = d.heading;
+        _prevT = nowS;
+
+        const heading = (d.heading || 0) + (((T.headingOffsetDeg || 0) * Math.PI) / 180);
+        // Flat, not cruise-scaled. The interceptor above scales its
+        // pitch by Math.min(1, cruiseMs / 15), and I copied that shape
+        // before checking the only profile that reaches here:
+        // helicopter-intercept cruises at 250 km/h, which is 69 m/s, so
+        // the min() saturated at 1 and the scaling computed a constant.
+        // It read like speed-dependent attitude and was not. A nose-down
+        // of a few degrees in forward flight, and it is a transport
+        // helicopter rather than an attack dive, so it stays small.
+        const fwd = ((T.forwardPitchDeg ?? 7) * Math.PI) / 180;
+        let pitch = -fwd + (((T.pitchOffsetDeg || 0) * Math.PI) / 180);
+        let roll = _bank + (((T.rollOffsetDeg || 0) * Math.PI) / 180);
+
+        // Insurance, and an honest one. Cesium's heading/pitch/roll
+        // assumes the nose lies along +X; a glTF model's nose lands on
+        // +Y. Whether that leaves pitch and roll swapped for THIS file
+        // depends on a root matrix and a Body transform I could not
+        // settle analytically, having got it wrong three times trying.
+        // If the nose tips sideways and the bank tips it forward, set
+        // window.__isr_heli_tuning = { swapPitchRoll: true } and it is
+        // corrected without a rebuild.
+        if (T.swapPitchRoll) { const t = pitch; pitch = roll; roll = t; }
+
+        return Cesium.Transforms.headingPitchRollQuaternion(
+          cart, new Cesium.HeadingPitchRoll(heading, pitch, roll));
       }, false);
     }
     d.entity = viewer.entities.add(_entitySpec);
@@ -6811,16 +6963,9 @@ async function main() {
       }
     }
 
-  // Turn toward a heading at a bounded rate instead of snapping to it.
-  //
-  // Heading was assigned directly, so a 90 degree change happened in one
-  // frame: the icon simply faced a different way between two renders.
-  // Aircraft and vehicles do not do that, and on screen it reads as a
-  // glitch rather than a turn.
-  //
-  // Shortest way round, so a unit crossing north turns through 10
-  // degrees rather than 350.
-  const TURN_RATE_RAD_S = Math.PI / 3;        // 60 deg/s, so 90 deg takes 1.5 s
+  // TURN_RATE_RAD_S used to be declared here and is now up with
+  // _createCounterDispatchEntities, because two things need it and only
+  // one of them is in this function. See the note at its declaration.
 
   function _easeHeading(current, target, dtSec) {
     if (typeof current !== 'number' || !Number.isFinite(current)) return target;
