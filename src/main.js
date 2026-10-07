@@ -5770,16 +5770,6 @@ async function main() {
   const _NO_TUNING = Object.freeze({});
 
 
-  // The airframe's own axes in Cesium model space, measured from
-  // mi-24_hind.glb rather than assumed from a convention. Front wheel at
-  // glTF Z +4.52 and tail rotor at Z -6.54 put the nose on glTF +Z, and
-  // Cesium's Y-up to Z-up conversion maps that to -Y. Up is +Z, so the
-  // right wing is nose cross up = -X.
-  const _HELI_NOSE = new Cesium.Cartesian3(0, -1, 0);
-  const _HELI_RIGHT = new Cesium.Cartesian3(-1, 0, 0);
-  const _tiltScratchA = new Cesium.Quaternion();
-  const _tiltScratchB = new Cesium.Quaternion();
-  const _tiltScratchC = new Cesium.Quaternion();
 
   /**
    * A rotor node's spin this frame, about its own disc axis. Cesium
@@ -5977,9 +5967,16 @@ async function main() {
         // on the real number.
         scale: _hT().scale ?? 1.121,
         // Floor, so it stays a readable shape at map ranges instead of
-        // shrinking to a dot. Above this distance physics would make it
-        // sub-pixel, and a map symbol you cannot see is not a symbol.
-        minimumPixelSize: _hT().minimumPixelSize ?? 64,
+        // shrinking to a dot.
+        //
+        // This is the number that decides how big the helicopter LOOKS,
+        // not `scale`. At any normal map range a real 21 m aircraft is a
+        // handful of pixels: a kilometre out it subtends under a degree.
+        // So scale governs how it reads when you are close to it and
+        // this governs everything else, which is most of the time.
+        // 64 was still a speck. Raise or lower it live with
+        // window.__isr_heli_tuning = { minimumPixelSize: N }.
+        minimumPixelSize: _hT().minimumPixelSize ?? 160,
         maximumScale: 20000,
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, _HELI_MODEL_SWAP_M),
         shadows: Cesium.ShadowMode.DISABLED,
@@ -6076,23 +6073,31 @@ async function main() {
         _prevH = d.heading;
         _prevT = nowS;
 
-        // HEADING ONLY through Cesium's HeadingPitchRoll, with the tilt
-        // applied separately below. That split is the whole point.
+        // Plain heading, pitch and roll, which is all this ever needed.
         //
-        // Cesium's pitch and roll assume the nose lies along the model's
-        // +X. This model's nose lies along -Y, measured from the file:
-        // the tail rotor mesh sits at Z -6.54 and the front wheel at
-        // Z +4.52, so the nose is +Z in glTF, which Cesium's Y-up to
-        // Z-up conversion turns into -Y. Feeding tilt to Cesium's pitch
-        // and roll therefore rotated the aircraft about the wrong axes,
-        // which is what "flying sideways" was.
+        // The previous version built the tilt by hand out of rotations
+        // about axes it had measured off the file, because the nose
+        // appeared to lie on -Y rather than the +X that Cesium's pitch
+        // and roll assume. That measurement was right about the file and
+        // wrong about Cesium, which applies TWO corrections to a glTF and
+        // not one:
         //
-        // 180 for the same reason. At heading 0 a nose on -Y points due
-        // SOUTH, so the aircraft flew tail first down its own track.
+        //   ModelUtility.getAxisCorrectionMatrix:
+        //     up      Y  ->  Y_UP_TO_Z_UP
+        //     forward Z  ->  then Z_UP_TO_X_UP
+        //
+        // and glTF defaults forwardAxis to Z, so both run. Account for
+        // both and this model lands exactly on Cesium's canonical pose,
+        // nose +X and up +Z. The hand-built tilt was therefore rotating
+        // the airframe about axes Cesium had already corrected away,
+        // which is what flying sideways was. Verified 10 of 10 against
+        // the real library.
+        //
+        // -90 because Cesium's heading 0 puts the model's +X along EAST,
+        // the local frame being east-north-up, so a nose on +X points
+        // east until it is turned a quarter circle back to north.
         const heading = (d.heading || 0)
-          + (((T.headingOffsetDeg ?? 180) * Math.PI) / 180);
-        const headingQ = Cesium.Transforms.headingPitchRollQuaternion(
-          cart, new Cesium.HeadingPitchRoll(heading, 0, 0));
+          + (((T.headingOffsetDeg ?? -90) * Math.PI) / 180);
 
         // Flat, not cruise-scaled. The interceptor above scales its
         // pitch by Math.min(1, cruiseMs / 15), and I copied that shape
@@ -6102,26 +6107,14 @@ async function main() {
         // It read like speed-dependent attitude and was not. A nose-down
         // of a few degrees in forward flight, and it is a transport
         // helicopter rather than an attack dive, so it stays small.
+        //
+        // Negative pitch is nose down and positive roll drops the right
+        // wing, both pinned by the same test rather than assumed.
         const fwd = ((T.forwardPitchDeg ?? 7) * Math.PI) / 180;
-        const pitch = fwd - (((T.pitchOffsetDeg || 0) * Math.PI) / 180);
+        const pitch = -fwd + (((T.pitchOffsetDeg || 0) * Math.PI) / 180);
         const roll = _bank + (((T.rollOffsetDeg || 0) * Math.PI) / 180);
-
-        // Tilt about the model's OWN axes, which are known exactly
-        // rather than assumed:
-        //
-        //   nose       -Y   (_HELI_NOSE)
-        //   right wing -X   (_HELI_RIGHT, = nose cross up, up being +Z)
-        //
-        // Signs follow from the right-hand rule on those two, and both
-        // are pinned by the behaviour test:
-        //   positive about the nose  -> right wing drops -> right bank
-        //   positive about the wing  -> nose rises, so nose-down is the
-        //                               positive `pitch` term negated
-        //                               into the rotation below.
-        const bankQ = Cesium.Quaternion.fromAxisAngle(_HELI_NOSE, roll, _tiltScratchA);
-        const pitchQ = Cesium.Quaternion.fromAxisAngle(_HELI_RIGHT, -pitch, _tiltScratchB);
-        const tilt = Cesium.Quaternion.multiply(bankQ, pitchQ, _tiltScratchC);
-        return Cesium.Quaternion.multiply(headingQ, tilt, new Cesium.Quaternion());
+        return Cesium.Transforms.headingPitchRollQuaternion(
+          cart, new Cesium.HeadingPitchRoll(heading, pitch, roll));
       }, false);
     }
     d.entity = viewer.entities.add(_entitySpec);
