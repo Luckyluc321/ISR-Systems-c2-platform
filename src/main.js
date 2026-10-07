@@ -22162,8 +22162,8 @@ async function main() {
     // (1-7) visible so the reader never wonders why did we jump from Step
     // 3 to Step 7" — and the same reasoning was never applied to Step 1.
     const ackGateHtml = !rec ? '' : (!isAcked ? `
-      <div class="c-panel c-panel-collapsible" style="border-top: 3px solid #ffb84d;">
-        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #ffb84d;">Step 1 · Acknowledge receipt</div>
+      <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--sec-accent);">
+        <div class="c-panel-title" style="margin-bottom: var(--space-2);">Step 1 · Acknowledge receipt</div>
         <div class="c-panel-body"><div style="font-size: var(--fs-xs); color: var(--text); line-height: 1.55;">Click <b style="color: #4dff9c;">Acknowledge receipt</b> in the case-file to the left. Response options unlock once acknowledged.</div></div>
       </div>`
       // No timestamp here. isAcked is `!!ackTs`, so the time is always
@@ -22842,7 +22842,7 @@ async function main() {
     if (!res) return '';
     _startMonEngTick(event.id, activeRole);
     return `
-      <div class="c-panel c-panel-collapsible${res.wrapped ? ' mon-eng-wrapped' : ''}" data-mon-eng="${event.id}" style="border-top: 3px solid var(--accent);">
+      <div class="c-panel c-panel-collapsible${res.wrapped ? ' mon-eng-wrapped' : ''}" data-mon-eng="${event.id}" style="border-top: 3px solid var(--sec-accent);">
         <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--accent);">Step 3 · Monitor engagement</div>
         <div class="c-panel-body">
           ${res.html}
@@ -22892,8 +22892,8 @@ async function main() {
         </article>`;
     }).join('');
     return `
-      <div class="c-panel c-panel-collapsible" style="border-top: 3px solid #ffb84d;">
-        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #ffb84d;">Step 4 · Confirm outcome</div>
+      <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--sec-accent);">
+        <div class="c-panel-title" style="margin-bottom: var(--space-2);">Step 4 · Confirm outcome</div>
         <div class="c-panel-body">
           <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${dispatches.length} completed dispatch${dispatches.length === 1 ? '' : 'es'} awaiting formal outcome. Outcomes lock into the audit trail and unlock handoff options.</div>
           ${blocks}
@@ -22969,8 +22969,8 @@ async function main() {
     if (!pending.length && !chain.length) return '';
 
     return `
-      <div class="c-panel c-panel-collapsible" style="border-top: 3px solid #4dd2ff;">
-        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #4dd2ff;">Step 5 · Post-incident handoff</div>
+      <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--sec-accent);">
+        <div class="c-panel-title" style="margin-bottom: var(--space-2);">Step 5 · Post-incident handoff</div>
         <div class="c-panel-body">
           ${pending.length ? `
             <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-1);">${pending.length} ground-response destination${pending.length === 1 ? '' : 's'} available for cordon, evidence recovery, and civil handoff.</div>
@@ -22995,8 +22995,8 @@ async function main() {
     if (!Object.keys(outcomes).length) return '';
     if (event.status === 'closed' || event.outcome === 'closed') {
       return `
-        <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--ok);">
-          <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--ok);">Step 6 · Event closed</div>
+        <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--sec-accent);">
+          <div class="c-panel-title" style="margin-bottom: var(--space-2);">Step 6 · Event closed</div>
           <div class="c-panel-body"><div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">Event archived to history. Full incident record retained for audit.</div></div>
         </div>`;
     }
@@ -23010,8 +23010,8 @@ async function main() {
     const chain = Array.isArray(event.postIncidentChain) ? event.postIncidentChain : [];
     if (chain.length && !postIncidentChainAllLeavesResolved(event)) return '';
     return `
-      <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--ok);">
-        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: var(--ok);">Step 6 · Close event</div>
+      <div class="c-panel c-panel-collapsible" style="border-top: 3px solid var(--sec-accent);">
+        <div class="c-panel-title" style="margin-bottom: var(--space-2);">Step 6 · Close event</div>
         <div class="c-panel-body">
           <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">All outcomes confirmed. All applicable handoffs dispatched. Event ready for formal closure and archive.</div>
           <div style="display: flex; justify-content: flex-end;">
@@ -23138,8 +23138,8 @@ async function main() {
     `).join('');
 
     return `
-      <div class="c-panel c-panel-collapsible" data-pir-panel="${report.id}" style="border-top: 3px solid #ffb84d;">
-        <div class="c-panel-title" style="margin-bottom: var(--space-2); color: #ffb84d;">Step 7 · Incident Report</div>
+      <div class="c-panel c-panel-collapsible" data-pir-panel="${report.id}" style="border-top: 3px solid var(--sec-accent);">
+        <div class="c-panel-title" style="margin-bottom: var(--space-2);">Step 7 · Incident Report</div>
         <div class="c-panel-body">
           <div class="c-label" style="text-transform: uppercase; letter-spacing: 0.14em; color: #ffb84d; font-size: var(--fs-2xs); margin-bottom: var(--space-1);">${emphasis.lead}</div>
           <div style="font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${emphasis.focus}</div>
