@@ -5788,7 +5788,12 @@ async function main() {
     // at zoomed out view" asks for.
     if (d.profile.icon === 'helicopter') {
       const _rotorUrl = helicopterRotorIcon(GREEN_COUNTER_HEX).toDataURL();
-      const SPIN_WITHIN_M = 1500;
+      // Raised from 1.5 km. The close-in view is the one worth seeing
+      // and it was switching off while the aircraft was still comfortably
+      // readable. At 6 km a 72px icon is still several pixels of blade,
+      // so the motion still registers; past that it is genuinely
+      // invisible and only costs a redraw per frame per helicopter.
+      const SPIN_WITHIN_M = 6000;
       d.rotorEntity = viewer.entities.add({
         position: _positionCb,
         billboard: {
@@ -5818,7 +5823,20 @@ async function main() {
             // monoNow so it freezes with the rest of the scene on pause.
             // A rotor still turning on a frozen map would be the only
             // moving thing on screen.
-            return near ? (monoNow() / 1000) * Math.PI * 1.1 : 0;
+            // ALWAYS carry the airframe's heading, spinning or not.
+            //
+            // The static case used to return a flat 0, which pinned the
+            // rotor to a fixed world angle while the airframe turned
+            // underneath it. The blades then had no relationship to the
+            // aircraft they sit on, which is what reads as the rotor
+            // being out of proportion or badly placed. The hub was
+            // always in the right spot; the blade pattern was not.
+            //
+            // Spin is added ON TOP of heading, so the rotor is in the
+            // airframe's frame of reference either way and the only
+            // difference between near and far is whether it turns.
+            const _h = -(d.heading || 0);
+            return near ? _h + (monoNow() / 1000) * Math.PI * 1.1 : _h;
           }, false),
         },
       });
