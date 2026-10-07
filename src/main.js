@@ -6757,66 +6757,63 @@ async function main() {
 
   // Keep road units off each other's bumpers.
   //
-  // Several cars dispatched seconds apart share one route and one cruise
-  // speed, so they advance in lockstep and arrive stacked on the same
-  // few metres of road. On the map that is one icon with a smear behind
-  // it, and it is wrong in the obvious way: real vehicles leave a gap.
+  // Cars converging on one incident run the same roads at the same
+  // cruise speed and end up nose to tail, which is wrong in the obvious
+  // way: real vehicles leave a gap.
   //
-  // Works like adaptive cruise control rather than like a queue. A unit
-  // measures the along-route distance to the nearest unit AHEAD of it on
-  // the same route, and if that gap is under the minimum it takes a
-  // shorter step, closing on the gap instead of the car. It never
-  // reverses and it never stops dead unless it is already too close.
+  // THIS RULE HAS NOW FAILED TO FIRE TWICE, both times because it keyed
+  // on units being formally related when they are not:
   //
-  // Along the ROUTE, not straight-line. Two cars on opposite sides of a
-  // bend can be fifteen metres apart in a straight line and two hundred
-  // apart on the road, and braking for that would be wrong.
+  //   first by comparing route arrays by identity, assuming members of
+  //   one dispatch share one. Every member fetches its own route, so the
+  //   check was never true.
   //
-  // Only applies to units sharing a route. A unit on its own route is
-  // never slowed by one somewhere else on the map.
-  // 35 m was the first guess and it still read as a convoy nose to
-  // tail. Two car lengths on a screen a few hundred metres wide is
-  // nothing. 70 m is about a four-second gap at urban response speed,
-  // which is both realistic and visibly separate.
+  //   then by groupId, which embeds a timestamp, as does the asset id it
+  //   is built from. Clicking Dispatch twice produces two unique groups,
+  //   so that was never true either.
+  //
+  // It depends on nothing now. Any road unit heading to the same event
+  // is traffic, related or not, which is also how it works on an actual
+  // road. "Ahead" is whoever is closer to the destination, and the gap
+  // is straight-line because two units converging on one point are near
+  // enough collinear for it; a bend costs a little accuracy and the
+  // alternative is a rule that does not run.
   const FOLLOW_GAP_M = 70;
 
-  function _routeDistanceM(d) {
-    // Metres travelled along this unit's own route.
-    if (!d.routeSegmentLengths) return 0;
-    let total = 0;
-    for (let i = 0; i < d.routeSegIdx && i < d.routeSegmentLengths.length; i++) {
-      total += d.routeSegmentLengths[i];
-    }
-    return total + (d.routeSegmentLengths[d.routeSegIdx] || 0) * (d.routeSegProgress || 0);
-  }
-
   function _gapLimitedStep(d, stepM) {
-    if (!d.profile?.useRoadRouting || !d.routePositions || !d.routeSegmentLengths) return stepM;
-    const mine = _routeDistanceM(d);
-    let nearestAhead = Infinity;
+    if (!d.profile?.useRoadRouting) return stepM;
+    const tLat = d.targetLat, tLon = d.targetLon;
+    if (tLat == null || tLon == null) return stepM;
+    const mineToTarget = haversineM(d.curLat, d.curLon, tLat, tLon);
+
+    let nearestAheadGap = Infinity;
     for (const other of _counterDispatches.values()) {
       if (other === d) continue;
+      if (other.eventId !== d.eventId) continue;
+      if (!other.profile?.useRoadRouting) continue;
       if (other.state !== 'en_route') continue;
-      // Same dispatch group.
+      if (other.curLat == null) continue;
+      // Ahead means closer to where we are both going, with a
+      // deterministic tiebreak when two units are level.
       //
-      // This compared routePositions by identity, on the assumption that
-      // units in one dispatch share the array. They do not: every member
-      // fetches its own route independently, so the check was never once
-      // true and the whole rule never ran. The cars kept converging and
-      // the only separation they had was the departure stagger, which a
-      // single slow corner undoes.
-      //
-      // groupId is the real "these are the same callout" key, and it is
-      // already stamped on every member.
-      if (!d.groupId || other.groupId !== d.groupId) continue;
-      const theirs = _routeDistanceM(other);
-      if (theirs <= mine) continue;              // behind, or alongside
-      nearestAhead = Math.min(nearestAhead, theirs - mine);
+      // The tiebreak is load-bearing, not tidiness. Units spawned in the
+      // same instant from the same station are exactly level, so neither
+      // is ahead, so neither brakes, and five cars drive the whole route
+      // stacked on one point. That is the failure this rule was written
+      // for, and without a tiebreak it survives every other fix. Id
+      // order is arbitrary but stable, which is all that is needed:
+      // somebody has to be in front.
+      const theirsToTarget = haversineM(other.curLat, other.curLon, tLat, tLon);
+      const level = Math.abs(theirsToTarget - mineToTarget) < 1;
+      const theyLead = level ? String(other.id) < String(d.id) : theirsToTarget < mineToTarget;
+      if (!theyLead) continue;
+      nearestAheadGap = Math.min(
+        nearestAheadGap, haversineM(d.curLat, d.curLon, other.curLat, other.curLon));
     }
-    if (!Number.isFinite(nearestAhead)) return stepM;
-    if (nearestAhead >= FOLLOW_GAP_M + stepM) return stepM;   // clear road
-    // Close the remaining slack only, never past the car in front.
-    return Math.max(0, Math.min(stepM, nearestAhead - FOLLOW_GAP_M));
+    if (!Number.isFinite(nearestAheadGap)) return stepM;
+    if (nearestAheadGap >= FOLLOW_GAP_M + stepM) return stepM;   // clear road
+    // Close the slack only, never past the unit in front, never reverse.
+    return Math.max(0, Math.min(stepM, nearestAheadGap - FOLLOW_GAP_M));
   }
 
     if (d.state === 'en_route') {
