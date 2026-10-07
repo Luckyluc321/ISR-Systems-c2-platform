@@ -5769,6 +5769,32 @@ async function main() {
   // it by accident and have it apply to every unit.
   const _NO_TUNING = Object.freeze({});
 
+  // ── How big a 3D model is allowed to draw ────────────────────────
+  //
+  // A Shahed is 3.5 m, an interceptor quad about 0.5 m, a Mi-24 21.5 m.
+  // They must not read as the same size on the map, because relative
+  // size is the first thing an operator judges a contact by.
+  //
+  // minimumPixelSize is the trap. It means "never smaller than N pixels
+  // AT ANY DISTANCE", so a flat value across airframes draws a hobby
+  // quadcopter and a 21 m helicopter identically once they are far
+  // enough away. The floors in this file were hand-picked numbers that
+  // happened to be about right against each other, with nothing holding
+  // them there.
+  //
+  // So the floor is derived instead: pixels per metre of real airframe.
+  // Anchored on the existing Shahed, 3.5 m at 24 px, because that one
+  // was tuned against the terrain and looked right.
+  const MODEL_PX_PER_M = 24 / 3.5;        // ≈ 6.9 px per metre
+  //
+  // And a cap, because a floor alone still inflates with distance: at
+  // 10 km a 148 px helicopter is drawn the size a 3 km object would be.
+  // Expressed as a MULTIPLE of life size rather than a pixel number, so
+  // it preserves relative scale exactly as the floor does. Everything
+  // may be exaggerated by up to the same factor and never more, so a
+  // Shahed stays a sixth of a helicopter at every range.
+  const MODEL_MAX_EXAGGERATION = 4;
+
 
 
   /**
@@ -5814,7 +5840,7 @@ async function main() {
     // you saw on any normal zoom was the billboard, which is why the
     // helicopter looked tiny and flat and had no turning blades: none of
     // that was the model, because the model was not being drawn.
-    const _HELI_MODEL_SWAP_M = (window.__isr_heli_tuning || {}).swapM ?? 12000;
+    const _HELI_MODEL_SWAP_M = (window.__isr_heli_tuning || {}).swapM ?? 6000;
     const _isQuadInterceptor = d.profile.airborne
       && (d.profile.icon === 'quadcopter' || d.profile.icon === 'counter-drone-interceptor');
     const _isHelicopter = d.profile.airborne && d.profile.icon === 'helicopter';
@@ -5867,28 +5893,20 @@ async function main() {
         //
         // Held at one angle past 6 km, where a blade is under a pixel and
         // the animation buys nothing but a redraw every frame.
-        image: d.profile.icon === 'helicopter'
-          ? new Cesium.CallbackProperty(() => {
-              let dist = Infinity;
-              try {
-                const p = Cesium.Cartesian3.fromDegrees(
-                  d.curLon, d.curLat,
-                  d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0
-                );
-                dist = Cesium.Cartesian3.distance(viewer.camera.positionWC, p);
-              } catch (_) { dist = Infinity; }
-              // Blades cycle only in the band where this billboard is
-              // the thing actually on screen: nearer than 6 km, where a
-              // blade is more than a pixel, but beyond _modelSwapM,
-              // where the 3D model has taken over and the billboard is
-              // culled. Without the lower bound this kept re-rendering
-              // frames and sampling terrain every frame for a billboard
-              // nobody could see, which the model swap introduced.
-              const cycling = dist < 6000 && dist >= _modelSwapM;
-              return cycling ? _HELI_FRAMES[Math.floor(monoNow() / 70) % _HELI_FRAMES.length]
-                             : _HELI_FRAMES[0];
-            }, false)
-          : iconUrl,
+        // Static, and that is now the right answer.
+        //
+        // This used to cycle 12 pre-rendered blade angles, because the
+        // billboard was all a helicopter had. It now has a 3D model with
+        // real turning rotors everywhere inside _HELI_MODEL_SWAP_M, and
+        // this billboard only draws BEYOND that, where a blade is a
+        // fraction of a pixel. So the cycling animated something nobody
+        // could see while taking a terrain sample every frame to decide
+        // whether to do it.
+        //
+        // Worse, after the swap distance moved out the band it tested
+        // for ("nearer than 6 km AND beyond the swap") became empty, so
+        // it did that work every frame to always return frame 0.
+        image: d.profile.icon === 'helicopter' ? _HELI_FRAMES[0] : iconUrl,
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
         // Airborne → absolute ellipsoid altitude (matches tracer math).
         // Ground → clamp.
@@ -5966,18 +5984,30 @@ async function main() {
         // a real Mi-24 at 17.30 m and 21.50 m. 1.121 puts the long axis
         // on the real number.
         scale: _hT().scale ?? 1.121,
-        // Floor, so it stays a readable shape at map ranges instead of
-        // shrinking to a dot.
+        // Floor, DERIVED from the airframe's real length rather than
+        // picked by eye. See MODEL_PX_PER_M: a Mi-24 is 21.5 m, so it
+        // floors proportionally larger than a 3.5 m Shahed, and the
+        // ratio between them on screen is the real ratio.
         //
-        // This is the number that decides how big the helicopter LOOKS,
-        // not `scale`. At any normal map range a real 21 m aircraft is a
-        // handful of pixels: a kilometre out it subtends under a degree.
-        // So scale governs how it reads when you are close to it and
-        // this governs everything else, which is most of the time.
-        // 64 was still a speck. Raise or lower it live with
-        // window.__isr_heli_tuning = { minimumPixelSize: N }.
-        minimumPixelSize: _hT().minimumPixelSize ?? 160,
-        maximumScale: 20000,
+        // A flat pixel floor is the trap here. minimumPixelSize means
+        // "never smaller than N pixels AT ANY DISTANCE", so a flat value
+        // draws a 0.5 m quadcopter and a 21 m helicopter at identical
+        // size once they are far enough away, which destroys the one
+        // thing an operator reads first. Deriving each floor from real
+        // metres keeps them honest against each other.
+        minimumPixelSize: _hT().minimumPixelSize ?? Math.round(21.5 * MODEL_PX_PER_M),
+        // And the cap that stops the floor running away.
+        //
+        // A floor alone still inflates at distance: at 10 km a 148 px
+        // helicopter is drawn the size a 3 km object would be, which is
+        // how a 260 px floor turned it into something taller than a
+        // skyscraper. maximumScale exists for exactly this and Cesium
+        // documents it as the upper limit on minimumPixelSize.
+        //
+        // Expressed as a MULTIPLE of life size, so it preserves relative
+        // scale the same way the floor does: everything may be
+        // exaggerated by up to the same factor, never more.
+        maximumScale: _hT().maximumScale ?? ((_hT().scale ?? 1.121) * MODEL_MAX_EXAGGERATION),
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, _HELI_MODEL_SWAP_M),
         shadows: Cesium.ShadowMode.DISABLED,
         // The file's own animation clip is NOT used, and cannot be.
