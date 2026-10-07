@@ -869,10 +869,25 @@ async function main() {
   //   window.__isr_quad_tuning.bankFactor = 3.0         // more bank on turns
   //   window.__isr_quad_tuning.forwardPitchDeg = 20     // more nose-down on cruise
   //
-  // Static geometry means propellers won't spin visually (this GLB
-  // merges body + rotors). Real drones at high shutter speed show
-  // frozen props anyway. Swap to a GLB with embedded prop animation
-  // clips OR separately-named rotor nodes to add spinning.
+  //   window.__isr_quad_tuning.rotorRps = 20            // faster propellers
+  //
+  // The propellers DO spin now, and the note that used to sit here
+  // saying they could not was wrong in an interesting way. It said this
+  // GLB "merges body + rotors" and that the fix was to find a model with
+  // animation clips or separately-named rotor nodes.
+  //
+  // It was merged by MATERIAL, not welded. Every blade was already its
+  // own connected component; it just shared a primitive with the
+  // airframe, and Cesium can only transform a NODE. So rather than hunt
+  // for another model, scripts/split_quad_rotors.py cut the eight blades
+  // out of this one into Rotor_1..Rotor_4. The recommendation to go find
+  // a GLB with separately-named rotor nodes was right; it just did not
+  // occur to anyone that we could make one.
+  //
+  // Worth remembering before writing off the next asset: most Sketchfab
+  // models are separable this way, so "no animation" is rarely the real
+  // constraint.
+
   // 2D icon bearing trim. Sub-degree alignment between the drone
   // symbol's drawn apex and the computed course. Negative = nose
   // counter-clockwise. Dial live on a straight leg, report the value.
@@ -912,6 +927,11 @@ async function main() {
     cruiseMs:         15,      // reference cruise speed for forward-pitch scaling
     bankClampDeg:     35,      // ±maximum bank angle (bumped from 30 for clearer visual on hard turns)
     pitchClampDeg:    30,
+    // Propeller speed, revolutions per second. Declared here rather than
+    // left to live only as a `?? 12` fallback at its three call sites, so
+    // a reader scanning this block learns the knob exists. Diagonal pairs
+    // turn opposite ways; this is the magnitude for all four.
+    rotorRps:         12,
   };
 
   // ── Bing Maps Aerial (asset 2) ──
