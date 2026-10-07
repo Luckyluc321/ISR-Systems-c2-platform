@@ -3595,24 +3595,36 @@ async function main() {
     ctx.fill();
     ctx.globalAlpha = 1;
 
-    // ── Main rotor, over the airframe, hub exactly on the mast ───
+    return c;
+  }
+
+  // Main rotor alone, hub at the exact centre of its canvas.
+  //
+  // Centre matters more than it looks: a billboard rotates about its
+  // image centre, so the hub must BE that centre or it orbits instead of
+  // spinning. The airframe image puts its mast at its own centre too, so
+  // the two line up at any angle.
+  function helicopterRotorIcon(hex) {
+    const S = 72, CX = 36, CY = 36;
+    const c = document.createElement('canvas');
+    c.width = S; c.height = S;
+    const ctx = c.getContext('2d');
+    ctx.lineCap = 'round';
+
     const BLADES = 5;
     const LEN = 32;
     ctx.strokeStyle = hex;
     ctx.lineWidth = 3.4;
     ctx.globalAlpha = 0.95;
     for (let i = 0; i < BLADES; i++) {
-      // Offset a tenth of a turn so no blade lies along the fuselage,
-      // where it would read as part of the body rather than above it.
-      const a = ((i / BLADES) + 0.1) * Math.PI * 2;
+      const a = (i / BLADES) * Math.PI * 2;
       ctx.beginPath();
       ctx.moveTo(CX, CY);
       ctx.lineTo(CX + Math.cos(a) * LEN, CY + Math.sin(a) * LEN);
       ctx.stroke();
     }
-    ctx.globalAlpha = 1;
 
-    // Hub, last, on the anchor.
+    ctx.globalAlpha = 1;
     ctx.fillStyle = hex;
     ctx.strokeStyle = 'rgba(255,255,255,0.85)';
     ctx.lineWidth = 1.2;
@@ -5703,6 +5715,17 @@ async function main() {
         scale: d.profile.billboardScale ?? 0.85,
         scaleByDistance: new Cesium.NearFarScalar(1000, 1.4, 500000, 0.7),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        // Point the airframe where it is going.
+        //
+        // This billboard carried no rotation at all, so every dispatch
+        // icon sat nose-up on screen no matter which way the unit was
+        // travelling. A helicopter flying south was drawn flying north,
+        // and the cockpit pointed at where it had come from.
+        //
+        // Negated because a bearing runs clockwise from north and
+        // Cesium's billboard rotation runs counter-clockwise. Same
+        // convention the F-35 and the friendly missile already use.
+        rotation: new Cesium.CallbackProperty(() => -(d.heading || 0), false),
         // Quadcopter interceptors hide their billboard under 500m so
         // the 3D GLB takes over. Other dispatch icons stay billboard.
         distanceDisplayCondition: _isQuadInterceptor
@@ -5746,6 +5769,60 @@ async function main() {
       }, false);
     }
     d.entity = viewer.entities.add(_entitySpec);
+
+    // Main rotor, its own billboard so it can turn without turning the
+    // aircraft with it.
+    //
+    // Both images put the MAST at their exact centre, and both
+    // billboards sit on the same position with the same vertical
+    // origin, so the rotor's hub lands on the airframe's mast and stays
+    // there under any rotation. The previous attempt drew the hub six
+    // pixels off centre, and since a billboard rotates about its image
+    // centre the hub swung in a small circle and came away from the
+    // mast.
+    //
+    // Turning only close in. Past a kilometre and a half the blades are
+    // about a pixel, the motion is invisible, and all it costs is a
+    // redraw every frame for every helicopter on the map. Beyond that
+    // the rotor holds a fixed angle, which is what "statically attached
+    // at zoomed out view" asks for.
+    if (d.profile.icon === 'helicopter') {
+      const _rotorUrl = helicopterRotorIcon(GREEN_COUNTER_HEX).toDataURL();
+      const SPIN_WITHIN_M = 1500;
+      d.rotorEntity = viewer.entities.add({
+        position: _positionCb,
+        billboard: {
+          image: _rotorUrl,
+          verticalOrigin: Cesium.VerticalOrigin.CENTER,
+          heightReference: d.profile.airborne
+            ? Cesium.HeightReference.NONE
+            : Cesium.HeightReference.CLAMP_TO_GROUND,
+          scale: d.profile.billboardScale ?? 0.85,
+          scaleByDistance: new Cesium.NearFarScalar(1000, 1.4, 500000, 0.7),
+          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          rotation: new Cesium.CallbackProperty(() => {
+            // Distance from the camera to this unit, cheaply.
+            let near = false;
+            try {
+              const p = Cesium.Cartesian3.fromDegrees(
+                d.curLon, d.curLat,
+                d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0
+              );
+              near = Cesium.Cartesian3.distance(viewer.camera.positionWC, p) < SPIN_WITHIN_M;
+            } catch (_) { near = false; }
+            // Slow on purpose. A real main rotor is several hundred rpm,
+            // which at sixty frames a second is a grey disc or a strobe
+            // that appears to turn backwards. This reads as motion
+            // rather than simulating it.
+            //
+            // monoNow so it freezes with the rest of the scene on pause.
+            // A rotor still turning on a frozen map would be the only
+            // moving thing on screen.
+            return near ? (monoNow() / 1000) * Math.PI * 1.1 : 0;
+          }, false),
+        },
+      });
+    }
 
 
     if (d.profile.trail) {
@@ -8119,6 +8196,7 @@ async function main() {
     }
     simAfter(() => {
       if (d.entity) { viewer.entities.remove(d.entity); d.entity = null; }
+      if (d.rotorEntity) { viewer.entities.remove(d.rotorEntity); d.rotorEntity = null; }
       if (d.trail) { viewer.entities.remove(d.trail); d.trail = null; }
       if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
       if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
