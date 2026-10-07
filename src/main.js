@@ -6425,7 +6425,8 @@ async function main() {
         d.lastFrameTs = now;
         if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
         if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
-        toast(`${d.assetName} low battery (${Math.round(d.batteryPct)}%). Returning to base.`, 'warn');
+        toast(`${d.assetName} low ${_monEngPowerSource(d.profile) || 'reserve'} `
+          + `(${Math.round(d.batteryPct)}%). Returning to base.`, 'warn');
       }
     }
 
@@ -6807,13 +6808,30 @@ async function main() {
       const level = Math.abs(theirsToTarget - mineToTarget) < 1;
       const theyLead = level ? String(other.id) < String(d.id) : theirsToTarget < mineToTarget;
       if (!theyLead) continue;
-      nearestAheadGap = Math.min(
-        nearestAheadGap, haversineM(d.curLat, d.curLon, other.curLat, other.curLon));
+      // Only the unit actually in front matters. Without a ceiling a
+      // car two kilometres up the road still counts as "nearest ahead",
+      // and the arithmetic below reads that as a gap to close.
+      const gap = haversineM(d.curLat, d.curLon, other.curLat, other.curLon);
+      if (gap > FOLLOW_GAP_M * 4) continue;
+      nearestAheadGap = Math.min(nearestAheadGap, gap);
     }
     if (!Number.isFinite(nearestAheadGap)) return stepM;
     if (nearestAheadGap >= FOLLOW_GAP_M + stepM) return stepM;   // clear road
-    // Close the slack only, never past the unit in front, never reverse.
-    return Math.max(0, Math.min(stepM, nearestAheadGap - FOLLOW_GAP_M));
+
+    // NEVER RETURN ZERO.
+    //
+    // The previous version did, and a unit that stops has no way to make
+    // the gap open again: it waits for the one in front, which may be
+    // waiting for the one in front of it. Two cars that both believe
+    // someone is ahead deadlock, and the whole convoy freezes at the
+    // station. That is exactly what shipped.
+    //
+    // A quarter speed floor makes the worst case "cars too close and
+    // crawling", which is a visual complaint, instead of "cars stopped",
+    // which is a broken product. A rule that regulates pace must never
+    // be able to remove pace entirely.
+    const slack = nearestAheadGap - FOLLOW_GAP_M;
+    return Math.max(stepM * 0.25, Math.min(stepM, slack));
   }
 
     if (d.state === 'en_route') {
@@ -22804,10 +22822,20 @@ async function main() {
   // default. Airborne platforms run batteries, radiating ground kit runs
   // a generator, mobile ground vehicles run fuel, static cells (cruise
   // speed 0, no radiation) have no runtime constraint and show nothing.
+  // What the unit actually runs on, for the endurance readout.
+  //
+  // This returned 'battery' for anything airborne, so a helicopter and a
+  // fighter both reported a battery percentage. Crewed aircraft burn
+  // fuel. Only the small unmanned types run on a battery, which is also
+  // why their endurance is quoted in tens of minutes rather than hours.
+  const _BATTERY_ICONS = new Set(['quadcopter', 'interceptor-drone', 'drone']);
+
   function _monEngPowerSource(profile) {
     if (!profile) return null;
-    if (profile.airborne) return 'battery';
     if (profile.radiationCone) return 'generator';
+    if (profile.airborne) {
+      return _BATTERY_ICONS.has(profile.icon) ? 'battery' : 'fuel';
+    }
     if (!profile.cruiseKmh) return null;
     return 'fuel';
   }
