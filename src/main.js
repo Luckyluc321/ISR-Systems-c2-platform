@@ -5809,7 +5809,17 @@ async function main() {
       // invisible and only costs a redraw per frame per helicopter.
       const SPIN_WITHIN_M = 6000;
       d.rotorEntity = viewer.entities.add({
-        position: _positionCb,
+        // Four metres ABOVE the airframe, genuinely, rather than nudged
+        // toward the camera with an eye offset. That offset did nothing
+        // here: depth testing is disabled on these billboards so they
+        // sort by distance from the camera, and both sat on one point.
+        // Raising the rotor makes it closer to an overhead camera, which
+        // is the only thing that actually decides the order. It is also
+        // true: a rotor is above the aircraft.
+        position: new Cesium.CallbackProperty(() => Cesium.Cartesian3.fromDegrees(
+          d.curLon, d.curLat,
+          (d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0) + 4
+        ), false),
         billboard: {
           image: _rotorUrl,
           verticalOrigin: Cesium.VerticalOrigin.CENTER,
@@ -5819,11 +5829,7 @@ async function main() {
           scale: d.profile.billboardScale ?? 0.85,
           scaleByDistance: new Cesium.NearFarScalar(1000, 1.4, 500000, 0.7),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          // Pull the rotor a metre toward the camera so it draws OVER
-          // the airframe. Two billboards on one position otherwise sort
-          // by distance, which is a tie here, and the blades ended up
-          // behind the fuselage. A rotor is above the aircraft.
-          eyeOffset: new Cesium.Cartesian3(0, 0, -1),
+
           rotation: new Cesium.CallbackProperty(() => {
             // Distance from the camera to this unit, cheaply.
             let near = false;
@@ -5867,7 +5873,13 @@ async function main() {
         polyline: {
           positions: new Cesium.CallbackProperty(() => d.trailPositions, false),
           width: 2,
-          material: Cesium.Color.fromCssColorString('#4dff9c').withAlpha(0.55),
+          // Dashed, matching the drone trails. A solid line reads as a
+          // drawn route; a dashed one reads as a track already flown,
+          // which is what this is.
+          material: new Cesium.PolylineDashMaterialProperty({
+            color: Cesium.Color.fromCssColorString('#4dff9c').withAlpha(0.55),
+            dashLength: 12,
+          }),
           // Airborne trails render at their actual altitude so they
           // stream from the interceptor's tail in 3D. Ground vehicles
           // still clamp so their trail lays on the road surface.
@@ -6813,7 +6825,11 @@ async function main() {
   //
   // Only applies to units sharing a route. A unit on its own route is
   // never slowed by one somewhere else on the map.
-  const FOLLOW_GAP_M = 35;
+  // 35 m was the first guess and it still read as a convoy nose to
+  // tail. Two car lengths on a screen a few hundred metres wide is
+  // nothing. 70 m is about a four-second gap at urban response speed,
+  // which is both realistic and visibly separate.
+  const FOLLOW_GAP_M = 70;
 
   function _routeDistanceM(d) {
     // Metres travelled along this unit's own route.
@@ -6832,9 +6848,18 @@ async function main() {
     for (const other of _counterDispatches.values()) {
       if (other === d) continue;
       if (other.state !== 'en_route') continue;
-      // Same physical route. Identity, not equality: units in one
-      // dispatch share the array instance.
-      if (other.routePositions !== d.routePositions) continue;
+      // Same dispatch group.
+      //
+      // This compared routePositions by identity, on the assumption that
+      // units in one dispatch share the array. They do not: every member
+      // fetches its own route independently, so the check was never once
+      // true and the whole rule never ran. The cars kept converging and
+      // the only separation they had was the departure stagger, which a
+      // single slow corner undoes.
+      //
+      // groupId is the real "these are the same callout" key, and it is
+      // already stamped on every member.
+      if (!d.groupId || other.groupId !== d.groupId) continue;
       const theirs = _routeDistanceM(other);
       if (theirs <= mine) continue;              // behind, or alongside
       nearestAhead = Math.min(nearestAhead, theirs - mine);
@@ -22473,12 +22498,28 @@ async function main() {
       if (_mcOwnUnits.length) {
         const rows = _mcOwnUnits.map((a) => {
           const name = a.name || a.label || 'Response unit';
+          // How many of this asset are already out, counted the same way
+          // the handler counts them: by the dispatch id prefix, because
+          // there is no dedicated field.
+          const _roleId = getActiveRole()?.id;
+          let _committed = 0;
+          if (_roleId && a.assetKey) {
+            for (const cd of _counterDispatches.values()) {
+              if (cd.eventId !== event.id) continue;
+              if (typeof cd.assetId !== 'string') continue;
+              if (!cd.assetId.startsWith(`${_roleId}-${a.assetKey}-`)) continue;
+              if (cd.state === 'complete' && cd.rtbCompleted) continue;
+              _committed += 1;
+            }
+          }
+          const _hasCount = typeof a.count === 'number' && a.count > 0;
+          const _spent = _hasCount && _committed >= a.count;
           // A default count is labelled as one. Five patrol cars is a
           // platform assumption so a scenario has something to count
           // down, not a figure anybody gave us, and an operator who
           // knows their own strength should see which it is.
-          const countStr = a.count && a.count > 1
-            ? `${a.count} available${a.countIsDefault ? ' (platform default)' : ''}`
+          const countStr = _hasCount
+            ? `${Math.max(0, a.count - _committed)} of ${a.count} available${a.countIsDefault ? ' (platform default)' : ''}`
             : 'Single unit';
           const deployStr = a.deployTime ? ` · ${a.deployTime}` : '';
           return `
@@ -22487,7 +22528,7 @@ async function main() {
                 <div style="font-size: var(--fs-sm); color: var(--text); font-weight: 500;">${name}</div>
                 <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-2xs); color: var(--text-dim);">${countStr}${deployStr}</div>
               </div>
-              <button class="pl-dispatch-btn" style="flex: none; padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.06); color: #4dff9c; border: 1px solid rgba(77, 255, 156, 0.35); border-left: 2px solid #4dff9c; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.20em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="receiver-dispatch" data-id="${event.id}" data-asset-key="${a.assetKey}">Dispatch</button>
+              <button class="pl-dispatch-btn" style="flex: none; padding: 8px 16px; font-size: var(--fs-2xs); background: ${_spent ? 'var(--chip-none-soft)' : 'rgba(77, 255, 156, 0.06)'}; color: ${_spent ? 'var(--chip-none)' : '#4dff9c'}; border: 1px solid ${_spent ? 'var(--chip-none-edge)' : 'rgba(77, 255, 156, 0.35)'}; border-left: 2px solid ${_spent ? 'var(--chip-none)' : '#4dff9c'}; border-radius: 2px; cursor: ${_spent ? 'not-allowed' : 'pointer'}; font-weight: 600; letter-spacing: 0.20em; text-transform: uppercase; font-family: var(--font-mono);" data-rcv="receiver-dispatch" data-id="${event.id}" data-asset-key="${a.assetKey}"${_spent ? ' disabled' : ''}>${_spent ? 'None left' : 'Dispatch'}</button>
             </div>`;
         }).join('');
         return `
@@ -26010,6 +26051,38 @@ async function main() {
         const role = getActiveRole();
         const assetKey = el.dataset.assetKey;
         if (!role?.id || !assetKey) { toast('Missing role or asset context.', 'err'); return; }
+
+        // You cannot send more units than the station has.
+        //
+        // This is the lane an agency's own inventory runs through, and it
+        // had no cap at all: thirteen patrol cars went out from a station
+        // holding five. The cap I added first went on the national-pool
+        // lane, which is a different button entirely.
+        //
+        // Committed counts anything not finished and home, because a car
+        // driving back is not available to send somewhere else. An asset
+        // with no declared count stays uncapped, since inventing a
+        // ceiling is the same error as inventing the count.
+        const _spec = assetsForReceiverRole(role.id);
+        const _asset = (_spec?.dispatchable || []).find(a => a.assetKey === assetKey);
+        if (_asset && typeof _asset.count === 'number' && _asset.count > 0) {
+          let committed = 0;
+          for (const cd of _counterDispatches.values()) {
+            if (cd.eventId !== eventId) continue;
+            // The dispatch id is minted as `${roleId}-${assetKey}-${ts}`,
+            // so the stable part is that prefix. There is no dedicated
+            // field for it; my first version invented one and would
+            // therefore have counted nothing and capped nothing.
+            if (typeof cd.assetId !== 'string') continue;
+            if (!cd.assetId.startsWith(`${role.id}-${assetKey}-`)) continue;
+            if (cd.state === 'complete' && cd.rtbCompleted) continue;
+            committed += 1;
+          }
+          if (committed >= _asset.count) {
+            toast(`${_asset.name}: all ${_asset.count} committed. Nothing left to send.`, 'warn');
+            return;
+          }
+        }
         // Also flip the receiver's escalation record to in-progress
         // so the operator sees status advancing on the escalation log.
         // If this receiver was cascaded to via a cross-agency request
