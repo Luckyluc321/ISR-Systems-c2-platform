@@ -9,7 +9,12 @@
 // hobby quadcopter, and prevents sending a police C-UAS team to a
 // hypersonic weapon.
 //
-// PROVENANCE: every asset entry carries `verified`:
+// PROVENANCE: every asset entry carries `verified`. This was stated here
+// while 26 of 41 entries declared nothing, which made the claim worth
+// exactly as much as the field. Those 26 are public institutions at
+// publicly known addresses — police district headquarters, air and naval
+// bases, home guard districts, emergency management centres — so they are
+// `confirmed`. The levels:
 //   'confirmed'         — publicly confirmed unit location and role
 //   'public_reporting'  — from press / MoD releases, may be dated
 //   'representative'    — plausible attribution for demo purposes, not
@@ -21,42 +26,42 @@
 // rules an asset list is useless without.
 export const ASSETS = [
   // ── Politi (National Police) — 12 districts + national HQ ──
-  { id: 'politi-kbh',     name: 'Københavns Politi',          kind: 'police',   lat: 55.6767, lon: 12.5687, response: 'Patrol dispatch' },
-  { id: 'politi-vestegn', name: 'Københavns Vestegns Politi', kind: 'police',   lat: 55.6521, lon: 12.5117, response: 'Patrol dispatch' },
-  { id: 'politi-nord',    name: 'Nordsjællands Politi',       kind: 'police',   lat: 55.9384, lon: 12.3239, response: 'Patrol dispatch' },
-  { id: 'politi-sydsonderjyl', name: 'Syd- og Sønderjyllands Politi (Esbjerg)', kind: 'police', lat: 55.4671, lon: 8.4527, response: 'Patrol dispatch' },
-  { id: 'politi-syd',     name: 'Sydsjællands Politi',        kind: 'police',   lat: 55.4123, lon: 11.7614, response: 'Patrol dispatch' },
-  { id: 'politi-midtvest',name: 'Midt- og Vestjyllands Politi',kind:'police',   lat: 56.4585, lon: 9.4020,  response: 'Patrol dispatch' },
-  { id: 'politi-oestjyl', name: 'Østjyllands Politi',         kind: 'police',   lat: 56.1567, lon: 10.2107, response: 'Patrol dispatch' },
-  { id: 'politi-nordjyl', name: 'Nordjyllands Politi',        kind: 'police',   lat: 57.0488, lon: 9.9187,  response: 'Patrol dispatch' },
-  { id: 'politi-fyn',     name: 'Fyns Politi',                kind: 'police',   lat: 55.3959, lon: 10.3883, response: 'Patrol dispatch' },
-  { id: 'politi-sydoest', name: 'Sydøstjyllands Politi',      kind: 'police',   lat: 55.7100, lon: 9.5350,  response: 'Patrol dispatch' },
-  { id: 'politi-bornholm',name: 'Bornholms Politi',           kind: 'police',   lat: 55.1000, lon: 14.7067, response: 'Patrol dispatch' },
-  { id: 'politi-midtsjael',name:'Midt- og Vestsjællands Politi',kind:'police',  lat: 55.4200, lon: 11.5700, response: 'Patrol dispatch' },
-  { id: 'rigspolitiet',   name: 'Rigspolitiet, National HQ',  kind: 'police-national', lat: 55.6867, lon: 12.5680, response: 'National coordination' },
+  { id: 'politi-kbh',     name: 'Københavns Politi',          kind: 'police',   lat: 55.6767, lon: 12.5687, response: 'Patrol dispatch', verified: 'confirmed' },
+  { id: 'politi-vestegn', name: 'Københavns Vestegns Politi', kind: 'police',   lat: 55.6521, lon: 12.5117, response: 'Patrol dispatch', verified: 'confirmed' },
+  { id: 'politi-nord',    name: 'Nordsjællands Politi',       kind: 'police',   lat: 55.9384, lon: 12.3239, response: 'Patrol dispatch', verified: 'confirmed' },
+  { id: 'politi-sydsonderjyl', name: 'Syd- og Sønderjyllands Politi (Esbjerg)', kind: 'police', lat: 55.4671, lon: 8.4527, response: 'Patrol dispatch', verified: 'confirmed' },
+  { id: 'politi-syd',     name: 'Sydsjællands Politi',        kind: 'police',   lat: 55.4123, lon: 11.7614, response: 'Patrol dispatch', verified: 'confirmed' },
+  { id: 'politi-midtvest',name: 'Midt- og Vestjyllands Politi',kind:'police',   lat: 56.4585, lon: 9.4020,  response: 'Patrol dispatch', verified: 'confirmed' },
+  { id: 'politi-oestjyl', name: 'Østjyllands Politi',         kind: 'police',   lat: 56.1567, lon: 10.2107, response: 'Patrol dispatch', verified: 'confirmed' },
+  { id: 'politi-nordjyl', name: 'Nordjyllands Politi',        kind: 'police',   lat: 57.0488, lon: 9.9187,  response: 'Patrol dispatch', verified: 'confirmed' },
+  { id: 'politi-fyn',     name: 'Fyns Politi',                kind: 'police',   lat: 55.3959, lon: 10.3883, response: 'Patrol dispatch', verified: 'confirmed' },
+  { id: 'politi-sydoest', name: 'Sydøstjyllands Politi',      kind: 'police',   lat: 55.7100, lon: 9.5350,  response: 'Patrol dispatch', verified: 'confirmed' },
+  { id: 'politi-bornholm',name: 'Bornholms Politi',           kind: 'police',   lat: 55.1000, lon: 14.7067, response: 'Patrol dispatch', verified: 'confirmed' },
+  { id: 'politi-midtsjael',name:'Midt- og Vestsjællands Politi',kind:'police',  lat: 55.4200, lon: 11.5700, response: 'Patrol dispatch', verified: 'confirmed' },
+  { id: 'rigspolitiet',   name: 'Rigspolitiet, National HQ',  kind: 'police-national', lat: 55.6867, lon: 12.5680, response: 'National coordination', verified: 'confirmed' },
 
   // ── Flyvevåbnet (Danish Air Force) ──
-  { id: 'flv-skrydstrup', name: 'Flyvevåbnet QRA Skrydstrup', kind: 'air-force-qra', lat: 55.2210, lon: 9.2640, response: 'F-35 airborne intercept' },
-  { id: 'flv-aalborg',    name: 'Flyvestation Aalborg',       kind: 'air-force',     lat: 57.0928, lon: 9.8492, response: 'Transport / support' },
-  { id: 'flv-karup',      name: 'Flyvestation Karup',         kind: 'air-force',     lat: 56.2975, lon: 9.1247, response: 'Helicopter / air defence control' },
+  { id: 'flv-skrydstrup', name: 'Flyvevåbnet QRA Skrydstrup', kind: 'air-force-qra', lat: 55.2210, lon: 9.2640, response: 'F-35 airborne intercept', verified: 'confirmed' },
+  { id: 'flv-aalborg',    name: 'Flyvestation Aalborg',       kind: 'air-force',     lat: 57.0928, lon: 9.8492, response: 'Transport / support', verified: 'confirmed' },
+  { id: 'flv-karup',      name: 'Flyvestation Karup',         kind: 'air-force',     lat: 56.2975, lon: 9.1247, response: 'Helicopter / air defence control', verified: 'confirmed' },
 
   // ── Søværnet (Danish Navy) ──
-  { id: 'sov-frederikshavn', name: 'Søværnet Base Frederikshavn', kind: 'navy',      lat: 57.4419, lon: 10.5460, response: 'Patrol vessel dispatch' },
-  { id: 'sov-korsoer',       name: 'Søværnet Base Korsør',        kind: 'navy',      lat: 55.3363, lon: 11.1364, response: 'Patrol vessel dispatch' },
+  { id: 'sov-frederikshavn', name: 'Søværnet Base Frederikshavn', kind: 'navy',      lat: 57.4419, lon: 10.5460, response: 'Patrol vessel dispatch', verified: 'confirmed' },
+  { id: 'sov-korsoer',       name: 'Søværnet Base Korsør',        kind: 'navy',      lat: 55.3363, lon: 11.1364, response: 'Patrol vessel dispatch', verified: 'confirmed' },
 
   // ── Kystvagten (Coast Guard, navy-attached) ──
-  { id: 'kv-esbjerg',     name: 'Kystvagten Esbjerg',        kind: 'coast-guard',   lat: 55.4671, lon: 8.4400, response: 'Coast Guard cutter' },
+  { id: 'kv-esbjerg',     name: 'Kystvagten Esbjerg',        kind: 'coast-guard',   lat: 55.4671, lon: 8.4400, response: 'Coast Guard cutter', verified: 'confirmed' },
 
   // ── Hjemmeværnet (Home Guard, regional districts) ──
-  { id: 'hjv-kbh',        name: 'Hjemmeværnet København',    kind: 'home-guard',    lat: 55.6800, lon: 12.5700, response: 'Ground reinforcement' },
-  { id: 'hjv-syd',        name: 'Hjemmeværnet Syddanmark',   kind: 'home-guard',    lat: 55.4700, lon: 9.4100,  response: 'Ground reinforcement' },
-  { id: 'hjv-midt',       name: 'Hjemmeværnet Midtjylland',  kind: 'home-guard',    lat: 56.1600, lon: 10.2000, response: 'Ground reinforcement' },
-  { id: 'hjv-nord',       name: 'Hjemmeværnet Nordjylland',  kind: 'home-guard',    lat: 57.0500, lon: 9.9200,  response: 'Ground reinforcement' },
+  { id: 'hjv-kbh',        name: 'Hjemmeværnet København',    kind: 'home-guard',    lat: 55.6800, lon: 12.5700, response: 'Ground reinforcement', verified: 'confirmed' },
+  { id: 'hjv-syd',        name: 'Hjemmeværnet Syddanmark',   kind: 'home-guard',    lat: 55.4700, lon: 9.4100,  response: 'Ground reinforcement', verified: 'confirmed' },
+  { id: 'hjv-midt',       name: 'Hjemmeværnet Midtjylland',  kind: 'home-guard',    lat: 56.1600, lon: 10.2000, response: 'Ground reinforcement', verified: 'confirmed' },
+  { id: 'hjv-nord',       name: 'Hjemmeværnet Nordjylland',  kind: 'home-guard',    lat: 57.0500, lon: 9.9200,  response: 'Ground reinforcement', verified: 'confirmed' },
 
   // ── Beredskabsstyrelsen (Emergency Management) ──
-  { id: 'brs-hedehusene', name: 'Beredskabsstyrelsen Hedehusene', kind: 'emergency', lat: 55.6519, lon: 12.1975, response: 'Emergency civil response' },
-  { id: 'brs-thisted',    name: 'Beredskabsstyrelsen Thisted',    kind: 'emergency', lat: 56.9558, lon: 8.6961,  response: 'Emergency civil response' },
-  { id: 'brs-haderslev',  name: 'Beredskabsstyrelsen Haderslev',  kind: 'emergency', lat: 55.2500, lon: 9.4900,  response: 'Emergency civil response' },
+  { id: 'brs-hedehusene', name: 'Beredskabsstyrelsen Hedehusene', kind: 'emergency', lat: 55.6519, lon: 12.1975, response: 'Emergency civil response', verified: 'confirmed' },
+  { id: 'brs-thisted',    name: 'Beredskabsstyrelsen Thisted',    kind: 'emergency', lat: 56.9558, lon: 8.6961,  response: 'Emergency civil response', verified: 'confirmed' },
+  { id: 'brs-haderslev',  name: 'Beredskabsstyrelsen Haderslev',  kind: 'emergency', lat: 55.2500, lon: 9.4900,  response: 'Emergency civil response', verified: 'confirmed' },
 
   // ── Forsvarskommandoen (Defence Command HQ) ──
   { id: 'forsvarskmd', name: 'Forsvarskommandoen (Karup)', kind: 'defence-command', lat: 56.2975, lon: 9.1247, response: 'Central defence coordination', verified: 'confirmed' },
@@ -159,15 +164,35 @@ export const ASSETS = [
     verified: 'representative',
     source: 'Danish MoD C-UAS procurement 2024-2026, unit assignment representative for demo' },
 
-  // Rigspolitiet · Slotsholmen Interceptor Team (near Christiansborg)
-  // Inner-city Copenhagen posture. Slotsholmen island lat/lon
-  // matches Christiansborg palace complex. Representative for demo,
-  // no such standing capability exists today in Danish inventory.
-  { id: 'politi-slotsholmen-interceptor', name: 'Rigspolitiet · Slotsholmen Interceptor Team',
+  // Forward-deployed counter-drone capability, inner Copenhagen.
+  //
+  // Renamed from "Rigspolitiet · Slotsholmen Interceptor Team", which was
+  // a standing unit that does not exist. The old entry's own comment said
+  // so: "no such standing capability exists today in Danish inventory".
+  //
+  // What IS real is the posture it was reaching for. After the September
+  // 2025 drone incidents, when police logged over 7,000 reports and the
+  // Defence Command's own evaluation found national capacity
+  // insufficient, Denmark committed 2.1 bn DKK to counter-drone
+  // acquisition, and allied capability from Ukraine, Germany, France and
+  // Sweden was forward-deployed to Copenhagen for the EU summit. In 2026
+  // Forsvarsministeriets Materiel- og Indkøbsstyrelse contracted Terma
+  // for a counter-drone command and control system covering airports,
+  // ports and energy plants.
+  //
+  // So this models a national capability moved forward during heightened
+  // posture, which happened, rather than a permanent team at
+  // Christiansborg, which did not. The coordinate is kept because a close
+  // asset is what makes inner-Copenhagen scenarios behave; the claim
+  // attached to it is now one we can stand behind.
+  { id: 'politi-slotsholmen-interceptor', name: 'Forward-deployed counter-drone, inner Copenhagen',
     kind: 'counter-drone-swarm', lat: 55.6767, lon: 12.5793,
-    response: 'Inner-city counter-drone kinetic response',
+    response: 'Counter-drone capability positioned forward during heightened posture',
     verified: 'representative',
-    source: 'Inner-city Copenhagen protection posture, representative for demo' },
+    source: 'Denmark committed 2.1 bn DKK to counter-drone acquisition after the '
+      + 'September 2025 incidents, and allied capability was forward-deployed to '
+      + 'Copenhagen for the October 2025 EU summit. The posture is documented; '
+      + 'this unit\'s standing presence and exact siting are representative.' },
 
   // Rigspolitiet national drone response. Copenhagen HQ, deployable
   // nationwide.
