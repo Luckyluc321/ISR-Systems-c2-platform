@@ -5812,6 +5812,39 @@ async function main() {
    * Modulo a full turn so the angle stays small no matter how long the
    * session runs, rather than growing until float precision coarsens it.
    */
+  // The quadcopter's four propellers, as node transformations.
+  //
+  // assault_drone_concept.glb had no animation and its rotors were written
+  // off as unspinnable because the mesh is "merged". It was merged by
+  // MATERIAL, not welded: each blade was already its own connected
+  // component sharing a primitive with the airframe. Cesium can only
+  // transform a NODE, so scripts/split_quad_rotors.py lifted the eight
+  // blades, two per corner, into four nodes named Rotor_1..Rotor_4,
+  // each re-centred on its own hub. Geometry verified identical before
+  // and after: 9399 distinct points in, 9399 out, none moved.
+  //
+  // Blades are thin in Z and lie in the XY plane, so they spin about Z.
+  //
+  // Diagonal pairs turn opposite ways, which is how a quadcopter actually
+  // flies: without opposed pairs the airframe would spin up its own yaw.
+  // Rotor_1 and Rotor_4 are one diagonal, Rotor_2 and Rotor_3 the other.
+  const _QUAD_ROTOR_NODES = ['Rotor_1', 'Rotor_2', 'Rotor_3', 'Rotor_4'];
+
+  function _quadRotorTransforms(rpsGetter) {
+    const out = {};
+    _QUAD_ROTOR_NODES.forEach((name, i) => {
+      // 1 and 4 one way, 2 and 3 the other.
+      const dir = (i === 0 || i === 3) ? 1 : -1;
+      out[name] = {
+        translation: Cesium.Cartesian3.ZERO,
+        scale: new Cesium.Cartesian3(1, 1, 1),
+        rotation: new Cesium.CallbackProperty(
+          () => _rotorSpin(Cesium.Cartesian3.UNIT_Z, dir * rpsGetter()), false),
+      };
+    });
+    return out;
+  }
+
   function _rotorSpin(axis, rps) {
     const angle = ((monoNow() / 1000) * rps * Math.PI * 2) % (Math.PI * 2);
     // A FRESH quaternion, deliberately, not a shared scratch. Cesium
@@ -5954,6 +5987,11 @@ async function main() {
         minimumPixelSize: _qT.minimumPixelSize ?? 20,
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, _INT_MODEL_SWAP_M),
         shadows: Cesium.ShadowMode.DISABLED,
+        // Propellers turn. Faster than the helicopter's because a small
+        // quad's blades genuinely do, and because at this model's swap
+        // distance of 250 m you are close enough to see them.
+        nodeTransformations: _quadRotorTransforms(
+          () => (window.__isr_quad_tuning || {}).rotorRps ?? 12),
       };
       // Dispatch orientation is simpler than swarm — we already track
       // d.heading (bearing rad) as it chases the target. Small nose-
@@ -14151,6 +14189,13 @@ async function main() {
         minimumPixelSize: isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20),
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
         shadows: Cesium.ShadowMode.DISABLED,
+        // A hostile quadcopter's blades turn too. Same model and same
+        // helper as our interceptors, deliberately: with the rotors split
+        // out of the airframe, anything still using the old static spec
+        // would sit next to a spinning one with frozen blades. A loitering
+        // munition is a different airframe and has no rotor nodes.
+        ...(isLoiterMun ? {} : { nodeTransformations: _quadRotorTransforms(
+          () => (window.__isr_quad_tuning || {}).rotorRps ?? 12) }),
       };
       _droneEntitySpec.orientation = new Cesium.CallbackProperty(
         () => (isLoiterMun ? _bankedOrientation() : _quadOrientation()),
@@ -14380,6 +14425,9 @@ async function main() {
             minimumPixelSize: isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20),
             distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
             shadows: Cesium.ShadowMode.DISABLED,
+            // Swarm members, same reasoning as the single-drone spec above.
+            ...(isLoiterMun ? {} : { nodeTransformations: _quadRotorTransforms(
+              () => (window.__isr_quad_tuning || {}).rotorRps ?? 12) }),
           };
           _swEntitySpec.orientation = new Cesium.CallbackProperty(
             () => (isLoiterMun ? _swBankedOrientation() : _swQuadOrientation()),
