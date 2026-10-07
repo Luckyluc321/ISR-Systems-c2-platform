@@ -26816,6 +26816,20 @@ async function main() {
       }
       else if (action === 'map-layer-locked') { toast('3D layer is disabled for this demo. See project map architecture for the sovereign rollout plan.', 'info'); }
       else if (action === 'map-layer') { /* 2D active — no-op */ }
+      else {
+        // The chain above had no terminal branch, so an action string with
+        // no handler produced a button that renders normally, styled, with
+        // a tooltip, and does nothing at all when clicked. No warning, no
+        // toast, no throw. It also invalidated the console render cache on
+        // the way past without scheduling a re-render.
+        //
+        // Indistinguishable from a working button to an operator, and
+        // indistinguishable from correct behaviour to anyone reading the
+        // code. The whole action vocabulary is string-keyed across four
+        // separate sets, so this is the failure mode a typo produces.
+        console.warn('[rcv] no handler for action:', action, el);
+        toast(`No handler wired for "${action}". This is a bug, not a permission.`, 'err');
+      }
     }));
   }
 
