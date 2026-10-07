@@ -22211,7 +22211,13 @@ async function main() {
       if (_mcOwnUnits.length) {
         const rows = _mcOwnUnits.map((a) => {
           const name = a.name || a.label || 'Response unit';
-          const countStr = a.count && a.count > 1 ? `${a.count} available` : 'Single unit';
+          // A default count is labelled as one. Five patrol cars is a
+          // platform assumption so a scenario has something to count
+          // down, not a figure anybody gave us, and an operator who
+          // knows their own strength should see which it is.
+          const countStr = a.count && a.count > 1
+            ? `${a.count} available${a.countIsDefault ? ' (platform default)' : ''}`
+            : 'Single unit';
           const deployStr = a.deployTime ? ` · ${a.deployTime}` : '';
           return `
             <div style="display: flex; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) 0; border-bottom: 1px solid var(--border);">

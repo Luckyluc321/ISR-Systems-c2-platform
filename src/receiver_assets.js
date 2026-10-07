@@ -57,6 +57,8 @@ export const RECEIVER_ASSETS = {
         assetKey: 'kbh-patrol-car',
         kind: 'receiver-patrol-car',
         name: 'Patrol car',
+        // No countIsDefault: 12 came from somewhere, unlike the baseline
+        // districts' 5.
         count: 12,
         icon: '🚔',
         useCases: [
@@ -155,10 +157,16 @@ export const RECEIVER_ASSETS = {
   // ordinary policing, not a capability claim. The absence was a fact
   // about our data and it was being presented as a fact about them.
   //
-  // DELIBERATELY NO COUNTS. Københavns Politi carries count: 12 because
-  // that came from somewhere; these do not, and a number invented to
-  // fill a field is the same mistake as the counter-drone jamming copy.
-  // A count can be added the day a district tells us one.
+  // COUNTS ARE A PLATFORM DEFAULT, AND SAY SO. Five patrol cars per
+  // district, carrying countIsDefault so the interface can mark it as an
+  // assumption rather than a measurement. Københavns Politi's 12 came
+  // from somewhere and carries no such flag.
+  //
+  // Five is not a claim about any district's strength. It exists so a
+  // scenario has something to count down, and it is wrong for every
+  // district in the country: some run far more, some fewer on a night
+  // shift. A district replaces it the moment it tells us a real number,
+  // and dropping the flag is how that is recorded.
   //
   // No specialist equipment either. Patrol and cordon are what every
   // district demonstrably has. Dog units, forensics and counter-drone
@@ -176,6 +184,8 @@ export const RECEIVER_ASSETS = {
         assetKey: 'vestegn-patrol-car',
         kind: 'receiver-patrol-car',
         name: 'Patrol car',
+        count: 5,
+        countIsDefault: true,
         icon: '🚔',
         useCases: [
           'First ground responder to an incident in the district',
@@ -231,6 +241,8 @@ export const RECEIVER_ASSETS = {
         assetKey: 'nordsj-patrol-car',
         kind: 'receiver-patrol-car',
         name: 'Patrol car',
+        count: 5,
+        countIsDefault: true,
         icon: '🚔',
         useCases: [
           'First ground responder to an incident in the district',
@@ -286,6 +298,8 @@ export const RECEIVER_ASSETS = {
         assetKey: 'midtvestsjaelland-patrol-car',
         kind: 'receiver-patrol-car',
         name: 'Patrol car',
+        count: 5,
+        countIsDefault: true,
         icon: '🚔',
         useCases: [
           'First ground responder to an incident in the district',
@@ -341,6 +355,8 @@ export const RECEIVER_ASSETS = {
         assetKey: 'sydsjaelland-patrol-car',
         kind: 'receiver-patrol-car',
         name: 'Patrol car',
+        count: 5,
+        countIsDefault: true,
         icon: '🚔',
         useCases: [
           'First ground responder to an incident in the district',
@@ -396,6 +412,8 @@ export const RECEIVER_ASSETS = {
         assetKey: 'fyn-patrol-car',
         kind: 'receiver-patrol-car',
         name: 'Patrol car',
+        count: 5,
+        countIsDefault: true,
         icon: '🚔',
         useCases: [
           'First ground responder to an incident in the district',
@@ -451,6 +469,8 @@ export const RECEIVER_ASSETS = {
         assetKey: 'sydsonderjyl-patrol-car',
         kind: 'receiver-patrol-car',
         name: 'Patrol car',
+        count: 5,
+        countIsDefault: true,
         icon: '🚔',
         useCases: [
           'First ground responder to an incident in the district',
@@ -506,6 +526,8 @@ export const RECEIVER_ASSETS = {
         assetKey: 'sydostjyl-patrol-car',
         kind: 'receiver-patrol-car',
         name: 'Patrol car',
+        count: 5,
+        countIsDefault: true,
         icon: '🚔',
         useCases: [
           'First ground responder to an incident in the district',
@@ -561,6 +583,8 @@ export const RECEIVER_ASSETS = {
         assetKey: 'midtvestjyl-patrol-car',
         kind: 'receiver-patrol-car',
         name: 'Patrol car',
+        count: 5,
+        countIsDefault: true,
         icon: '🚔',
         useCases: [
           'First ground responder to an incident in the district',
@@ -616,6 +640,8 @@ export const RECEIVER_ASSETS = {
         assetKey: 'ostjyl-patrol-car',
         kind: 'receiver-patrol-car',
         name: 'Patrol car',
+        count: 5,
+        countIsDefault: true,
         icon: '🚔',
         useCases: [
           'First ground responder to an incident in the district',
@@ -671,6 +697,8 @@ export const RECEIVER_ASSETS = {
         assetKey: 'nordjyl-patrol-car',
         kind: 'receiver-patrol-car',
         name: 'Patrol car',
+        count: 5,
+        countIsDefault: true,
         icon: '🚔',
         useCases: [
           'First ground responder to an incident in the district',
@@ -726,6 +754,8 @@ export const RECEIVER_ASSETS = {
         assetKey: 'bornholm-patrol-car',
         kind: 'receiver-patrol-car',
         name: 'Patrol car',
+        count: 5,
+        countIsDefault: true,
         icon: '🚔',
         useCases: [
           'First ground responder to an incident in the district',
