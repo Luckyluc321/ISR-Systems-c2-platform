@@ -257,7 +257,11 @@ html, body, #cesiumContainer {
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.18em;
-  color: var(--hostile);
+  /* currentColor, so the label follows the level set on .tb-threat.
+     This hardcoded --hostile separately from the box, which is why the
+     banner came out red text inside a green frame the moment the box
+     started changing with state. Two places owning one colour. */
+  color: currentColor;
   text-transform: uppercase;
   font-weight: 600;
 }
