@@ -3535,49 +3535,78 @@ async function main() {
   const GREEN_COUNTER_HEX = '#4dff9c';
 
   function helicopterIcon(hex) {
+    // Top-down helicopter, nose up. The billboard is rotated to heading,
+    // so "up" is the direction of travel.
+    //
+    // Rewritten because the previous one read as an octopus, and for a
+    // reason worth keeping: the rotor hub was drawn at (22,22) while the
+    // blades were centred at (28,24), so the four spokes came out
+    // different lengths. The fuselage ellipse then sat exactly on the
+    // hub, merging body and hub into one blob, and the tail was a thick
+    // filled quadrilateral ending in a filled ball, which is the long
+    // line with a dot on the end.
+    //
+    // Everything below is centred on (28,28) and sized off it, so the
+    // parts cannot drift apart again.
+    const S = 56, CX = 28, CY = 28;
     const c = document.createElement('canvas');
-    c.width = 56; c.height = 56;
+    c.width = S; c.height = S;
     const ctx = c.getContext('2d');
-
-    // Main rotor disc — 4-blade rotor, top-down view
-    ctx.strokeStyle = hex;
-    ctx.lineWidth = 2.5;
     ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(4, 22); ctx.lineTo(52, 22);
-    ctx.moveTo(22, 4); ctx.lineTo(22, 44);
-    ctx.stroke();
-    // Rotor hub
-    ctx.fillStyle = hex;
-    ctx.beginPath(); ctx.arc(22, 22, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.lineJoin = 'round';
 
-    // Fuselage (offset from rotor centre for clarity)
-    ctx.fillStyle = hex;
-    ctx.strokeStyle = '#fff';
-    ctx.lineWidth = 1.5;
-    ctx.beginPath();
-    ctx.ellipse(22, 22, 6, 10, 0, 0, Math.PI * 2);
-    ctx.fill(); ctx.stroke();
-
-    // Tail boom running down-right
-    ctx.beginPath();
-    ctx.moveTo(22, 30);
-    ctx.lineTo(24, 30);
-    ctx.lineTo(46, 46);
-    ctx.lineTo(44, 48);
-    ctx.closePath();
-    ctx.fill(); ctx.stroke();
-
-    // Tail rotor
-    ctx.beginPath();
-    ctx.arc(46, 46, 4, 0, Math.PI * 2);
-    ctx.fill(); ctx.stroke();
+    // Rotor disc. Faint, because it is swept area rather than structure,
+    // and drawing it solid is what made the old icon read as a creature.
+    ctx.globalAlpha = 0.35;
     ctx.strokeStyle = hex;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.arc(CX, CY, 23, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Two blades, crossed, through the true centre.
+    ctx.globalAlpha = 0.75;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(CX - 22, CY - 22); ctx.lineTo(CX + 22, CY + 22);
+    ctx.moveTo(CX + 22, CY - 22); ctx.lineTo(CX - 22, CY + 22);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    // Tail boom. A line, not a filled wedge.
+    ctx.strokeStyle = hex;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(CX, CY + 2);
+    ctx.lineTo(CX, CY + 20);
+    ctx.stroke();
+
+    // Tail rotor: a short bar across the boom. A circle here is what
+    // read as a ball on a string.
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(CX - 5, CY + 20); ctx.lineTo(CX + 5, CY + 20);
+    ctx.stroke();
+
+    // Fuselage last so it sits over the blades. Nose up, tapered.
+    ctx.fillStyle = hex;
+    ctx.strokeStyle = 'rgba(255,255,255,0.9)';
     ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.moveTo(42, 46); ctx.lineTo(50, 46);
-    ctx.moveTo(46, 42); ctx.lineTo(46, 50);
+    ctx.moveTo(CX, CY - 13);                       // nose
+    ctx.quadraticCurveTo(CX + 7, CY - 8, CX + 6, CY + 2);
+    ctx.quadraticCurveTo(CX + 5, CY + 8, CX, CY + 9);
+    ctx.quadraticCurveTo(CX - 5, CY + 8, CX - 6, CY + 2);
+    ctx.quadraticCurveTo(CX - 7, CY - 8, CX, CY - 13);
+    ctx.closePath();
+    ctx.fill();
     ctx.stroke();
+
+    // Rotor head, small, on the true centre.
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.beginPath();
+    ctx.arc(CX, CY - 2, 2, 0, Math.PI * 2);
+    ctx.fill();
 
     return c;
   }
