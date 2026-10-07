@@ -305,14 +305,28 @@ function _blockInvolvementSummary(role, event) {
   const populated = subsectionsForContributor(role, event);
   const populatedLabels = populated.map(a => ARCHETYPE_LABELS[a] || a);
 
+  // Catalog entries is omitted, not shown as zero.
+  //
+  // The 13 catalog sub-arrays are created on every event and backfilled
+  // on load, and nothing anywhere ever pushes into one. Every reference
+  // to them in the codebase is a read. So the counter could only ever
+  // display 0, for every agency, on every event, forever.
+  //
+  // A zero that cannot be anything else is worse than an absent field:
+  // it reads as "this agency filed nothing", which is a statement about
+  // them rather than about us. The field returns the day something
+  // writes a catalog entry, and the condition below is what brings it
+  // back automatically.
   const stats = [
     { label: 'Cascades in',      value: escReceived.length },
     { label: 'Cascades out',     value: escInitiated.length },
     { label: 'Responses sent',   value: escResponded.length },
     { label: 'Dispatches owned', value: dispatchesOwned.length },
     { label: 'Dispatches open',  value: dispatchesOpen.length },
-    { label: 'Catalog entries',  value: catalogAuthored },
   ];
+  if (catalogAuthored > 0) {
+    stats.push({ label: 'Catalog entries', value: catalogAuthored });
+  }
 
   return `
     <section class="chapter-block chapter-block-involvement">

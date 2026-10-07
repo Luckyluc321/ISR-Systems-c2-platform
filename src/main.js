@@ -22192,7 +22192,7 @@ async function main() {
       // Counter-drone options, unchanged.
       if (mineList.length) {
         return `
-        <div class="c-panel c-panel-collapsible c-panel-action">
+        <div class="c-panel c-panel-collapsible c-panel-action" data-panel="step2">
           <div class="c-panel-title" style="margin-bottom: var(--space-2);">${_stepPfx}${rec ? 'Select response option' : 'Your response options'}</div>
           <div class="c-panel-body">
           <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-3);">${mineList.length} option${mineList.length === 1 ? '' : 's'} available. Multiple can be dispatched concurrently. Recommended pick is the closest by ETA.</div>
@@ -22223,7 +22223,7 @@ async function main() {
             </div>`;
         }).join('');
         return `
-        <div class="c-panel c-panel-collapsible c-panel-action">
+        <div class="c-panel c-panel-collapsible c-panel-action" data-panel="step2">
           <div class="c-panel-title" style="margin-bottom: var(--space-2);">${_stepPfx}${rec ? 'Dispatch your units' : 'Your units'}</div>
           <div class="c-panel-body">
             <div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55; margin-bottom: var(--space-2);">Units under your own command, dispatched from your base. Other agencies below can be asked for anything you do not hold.</div>
@@ -22234,7 +22234,7 @@ async function main() {
 
       // Genuinely nothing to offer.
       return `
-        <div class="c-panel c-panel-collapsible c-panel-action">
+        <div class="c-panel c-panel-collapsible c-panel-action" data-panel="step2">
           <div class="c-panel-title" style="margin-bottom: var(--space-2);">${_stepPfx}Response options<span class="c-panel-chip c-panel-chip-none">no units</span></div>
           <div class="c-panel-body"><div class="c-label" style="text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim); line-height: 1.55;">You hold no units for this incident. Other agencies below can act.</div></div>
         </div>`;
@@ -23288,9 +23288,25 @@ async function main() {
     let viewerShown = false;
     const cardHtmls = ordered.map(role => {
       const isViewer = role.id === activeId;
-      const primaryLabel = ARCHETYPE_LABELS[role.archetype] || role.archetype || '';
+      // Headline what the agency DID on this event, not what it is.
+      //
+      // This read role.archetype, the standing taxonomy label for the
+      // organisation, which is independent of the event. So a police
+      // chapter was headlined KINETIC RESPONSE on a case where they
+      // dispatched nothing and only cascaded, while the row below it
+      // correctly said Coordination and command. Both were right and
+      // together they read as a system not paying attention.
+      //
+      // The populated set is what the role actually produced here: a
+      // sub-section renders only when its own data exists. Falls back to
+      // the standing label when a contributor populated nothing, which
+      // is the honest answer for an agency that was on the case and
+      // recorded nothing.
+      const _populated = subsectionsForContributor(role, event);
+      const _headlineArchetype = _populated[0] || role.archetype;
+      const primaryLabel = ARCHETYPE_LABELS[_headlineArchetype] || _headlineArchetype || '';
       const secondaryCount = Array.isArray(role.secondaryArchetypes) ? role.secondaryArchetypes.length : 0;
-      const populatedCount = subsectionsForContributor(role, event).length;
+      const populatedCount = _populated.length;
       // Phase 6 · pass the active viewer to composeChapter so cross-
       // tenant redaction rules apply. HIDDEN chapters returned as
       // empty string — filtered out below so the card drops entirely.
@@ -25236,12 +25252,27 @@ async function main() {
   // on every case, and expanded by default it competed with the numbered
   // response steps for attention.
   const _collapsedPanels = new Set(['Attribution assessment']);
+
+  // A stable identity for a collapsible panel.
+  //
+  // This used to be the title's text, which meant collapse state was
+  // keyed on copy. Several titles change with the state of the case:
+  // Step 2 reads "Select response option" once acknowledged and "Your
+  // response options" before, and the no-units variant now carries a
+  // chip whose text is concatenated into textContent. Every one of those
+  // changes silently stranded the old key and re-opened the panel, and
+  // adding a count to any chip would do it again.
+  //
+  // data-panel when the markup declares one, otherwise the title text so
+  // existing panels keep working unchanged. New panels should declare it.
+  function _panelKey(panel, titleEl) {
+    return panel?.dataset?.panel || titleEl.textContent.trim();
+  }
   function _applyCollapsedPanelState() {
     receiverView.querySelectorAll('.c-panel-collapsible').forEach(panel => {
       const titleEl = panel.querySelector(':scope > .c-panel-title');
       if (!titleEl) return;
-      const key = titleEl.textContent.trim();
-      panel.classList.toggle('is-collapsed', _collapsedPanels.has(key));
+      panel.classList.toggle('is-collapsed', _collapsedPanels.has(_panelKey(panel, titleEl)));
     });
   }
 
@@ -25254,7 +25285,7 @@ async function main() {
       titleEl.addEventListener('click', (ev) => {
         ev.stopPropagation();
         const panel = titleEl.parentElement;
-        const key = titleEl.textContent.trim();
+        const key = _panelKey(panel, titleEl);
         const nowCollapsed = !panel.classList.contains('is-collapsed');
         panel.classList.toggle('is-collapsed', nowCollapsed);
         if (nowCollapsed) _collapsedPanels.add(key); else _collapsedPanels.delete(key);
