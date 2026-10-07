@@ -36,16 +36,21 @@ the evidence stays checkable. What has since been decided and done:
 | Bug B, notes absent from the audit trail | fix | **done** |
 | Bug C, dead class and the chapter grid bug | fix | **done** |
 | D1, dispatch buttons with no assets behind them | a, then b per district | **a done** |
-| D2, counters that can only read zero | a | open |
-| D3, chapter headline archetype | a | open |
-| D4, identifier drift | a | in progress |
-| D5, role-blind site gate | a | open |
-| D6, action rail onto the archetype engine | a, sequenced after D4 | planned |
-| D7, four arrow idioms | a | sizes matched, idioms not yet merged |
-| D8, colour | a | dividers done, 8 per-step rules remain |
+| D2, counters that can only read zero | a | **done** |
+| D3, chapter headline archetype | a | **done** |
+| D4, identifier drift | a | **done** |
+| D5, role-blind site gate | a | **done** |
+| D6, action rail onto the archetype engine | a, sequenced after D4 | **done** |
+| D7, four arrow idioms | a | **behavioural half done**, idioms still four |
+| D8, colour | a | **done** |
 | Step 1 missing from the ladder | fix | **done** |
 | Pillar sectioning | divider-based | **done** |
 | Panels as cards, bodies recessed | raised after review | **done** |
+
+Every decision is acted on. One thing is deliberately unfinished: D7's
+four disclosure-arrow idioms are now the same SIZE but are still four
+separate mechanisms. Merging them is cosmetic refactoring with no
+behaviour attached, and it was not worth the risk alongside the rest.
 
 Found and fixed while acting on the above, not part of the original audit:
 
