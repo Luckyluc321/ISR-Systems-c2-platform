@@ -217,17 +217,41 @@ html, body, #cesiumContainer {
   font-size: 11px;
   color: var(--text-dim);
 }
+/* Threat banner. Driven by data-level, set by _renderThreatLevel from
+   what the active account can actually see.
+
+   This was hardcoded red with a pulsing dot and nothing ever changed it,
+   so the interface claimed a hostile track at all times including on an
+   empty map. An alarm that is always sounding is not an alarm.
+
+   Only `elevated` pulses. The pulse is the thing that pulls an eye
+   across a room and it should mean something is happening. */
 .tb-threat {
   display: flex; align-items: center; gap: 8px;
   padding: 5px 10px;
-  border: 1px solid var(--hostile);
+  border: 1px solid var(--ok);
+  background: rgba(77, 255, 156, 0.06);
+  color: var(--ok);
+  transition: border-color var(--motion) var(--ease), background var(--motion) var(--ease);
+}
+.tb-threat[data-level="guarded"] {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.tb-threat[data-level="elevated"] {
+  border-color: var(--hostile);
   background: rgba(255, 56, 56, 0.08);
+  color: var(--hostile);
+}
+.tb-threat[data-level="elevated"] .threat-dot {
+  box-shadow: 0 0 12px var(--hostile-glow);
+  animation: pulse 1.4s ease-in-out infinite;
 }
 .threat-dot {
   width: 8px; height: 8px; border-radius: 50%;
-  background: var(--hostile);
-  box-shadow: 0 0 12px var(--hostile-glow);
-  animation: pulse 1.4s ease-in-out infinite;
+  background: currentColor;
+  box-shadow: none;
 }
 .threat-txt {
   font-family: var(--font-mono);

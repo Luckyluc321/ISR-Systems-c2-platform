@@ -32,9 +32,13 @@
         <span class="tb-site-code" id="site-code-display">DK · 55.6180°N 012.6470°E</span>
       </div>
 
-      <div class="tb-threat">
+      <!-- Driven from live events by _renderThreatLevel in main.js. The
+           text below is only what shows before the first render; it used
+           to be the permanent value, hardcoded, with nothing anywhere
+           updating it. -->
+      <div class="tb-threat" id="tb-threat">
         <span class="threat-dot"></span>
-        <span class="threat-txt">Threat · Elevated</span>
+        <span class="threat-txt">Threat · Normal</span>
       </div>
 
       <div class="tb-clocks">

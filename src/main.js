@@ -17056,6 +17056,43 @@ async function main() {
   // scenario is the wrong trade. One comparison a second is not.
   onSimClockChange(() => renderSimPanel());
   let _simPauseLastLive = false;
+  // Threat level, from what this account can actually see.
+  //
+  // The banner was hardcoded in index.html as "Threat · Elevated" and
+  // nothing in the application ever touched it. So it read ELEVATED on a
+  // quiet map, on a closed case, on first load, permanently. A threat
+  // indicator that is always on is not an indicator; it is wallpaper,
+  // and the first time it mattered nobody would look at it.
+  //
+  // Scoped to the active account on purpose. visibleEvents() is already
+  // actor-filtered, so an operator sees their own sites and a receiver
+  // sees the cases they were brought into. A hostile drone over
+  // somewhere you have no visibility of is not your threat level.
+  //
+  // Three states, from what is actually open:
+  //   normal     nothing active
+  //   guarded    something active, nothing hostile
+  //   elevated   an active hostile track
+  function _renderThreatLevel() {
+    const el = document.getElementById('tb-threat');
+    if (!el) return;
+    let level = 'normal';
+    try {
+      const open = (visibleEvents() || []).filter(e => e.status === 'active');
+      if (open.length) {
+        level = open.some(e => e.classification === 'hostile') ? 'elevated' : 'guarded';
+      }
+    } catch (_) { level = 'normal'; }
+
+    const LABEL = { normal: 'Normal', guarded: 'Guarded', elevated: 'Elevated' };
+    if (el.dataset.level === level) return;     // no DOM churn on a quiet map
+    el.dataset.level = level;                   // colour and pulse live in CSS
+    const txt = el.querySelector('.threat-txt');
+    if (txt) txt.textContent = `Threat · ${LABEL[level]}`;
+  }
+  _renderThreatLevel();
+  setInterval(_renderThreatLevel, 1000);
+
   setInterval(() => {
     const live = anyTrackLive();
     if (live === _simPauseLastLive) return;
@@ -22206,14 +22243,27 @@ async function main() {
       const supportsMulti = profile?.supportsMultiDispatch;
       const allowRepeat = profile?.allowRepeatedDispatch;
       const canRepeat = supportsMulti || allowRepeat;   // for "Dispatch more" + counter
-      const maxUnits = profile?.maxUnitsPerDispatch || 5;
+      // The picker offers at most what is left, not what the profile
+      // allows per action. Those are different numbers and only one of
+      // them is about this agency.
+      const _remaining = _assetUnitsRemaining(event.id, a);
+      const _perAction = profile?.maxUnitsPerDispatch || 5;
+      const maxUnits = Number.isFinite(_remaining)
+        ? Math.max(0, Math.min(_perAction, _remaining))
+        : _perAction;
+      const _exhausted = maxUnits === 0;
       const activeUnitsForThisAsset = canRepeat
         ? Array.from(_counterDispatches.values()).filter(cd =>
             cd.eventId === event.id && cd.assetId === a.id && cd.state !== 'complete'
           ).length
         : 0;
-      const unitsCounter = activeUnitsForThisAsset > 0
-        ? `<div style="font-size: var(--fs-2xs); color: var(--text-dim); font-family: var(--font-mono); letter-spacing: 0.14em; margin-bottom: 6px; text-transform: uppercase;">${activeUnitsForThisAsset} unit${activeUnitsForThisAsset === 1 ? '' : 's'} active</div>`
+      const _counterText = Number.isFinite(_remaining) && typeof a.count === 'number'
+        ? `${activeUnitsForThisAsset} of ${a.count} committed`
+        : (activeUnitsForThisAsset > 0
+            ? `${activeUnitsForThisAsset} unit${activeUnitsForThisAsset === 1 ? '' : 's'} active`
+            : '');
+      const unitsCounter = _counterText
+        ? `<div style="font-size: var(--fs-2xs); color: ${_exhausted ? 'var(--chip-none)' : 'var(--text-dim)'}; font-family: var(--font-mono); letter-spacing: 0.14em; margin-bottom: 6px; text-transform: uppercase;">${_counterText}</div>`
         : '';
       const unitsPickerHtml = supportsMulti
         ? `<select data-units-for="${a.id}" style="padding: 6px 8px; background: rgba(0,0,0,0.30); border: 1px solid var(--border); border-radius: 2px; color: var(--text); font-family: var(--font-mono); font-size: var(--fs-2xs); letter-spacing: 0.14em; text-transform: uppercase; margin-right: 8px; cursor: pointer;">
@@ -22227,7 +22277,7 @@ async function main() {
              ${unitsCounter}
              <div style="display: flex; align-items: center;">
                ${unitsPickerHtml}
-               <button class="pl-dispatch-btn" style="padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.06); color: #4dff9c; border: 1px solid rgba(77, 255, 156, 0.35); border-left: 2px solid #4dff9c; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.20em; text-transform: uppercase; font-family: var(--font-mono); transition: background 120ms, border-color 120ms;" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}">${canRepeat && activeUnitsForThisAsset > 0 ? 'Dispatch more' : 'Dispatch'}</button>
+               <button class="pl-dispatch-btn" style="padding: 8px 16px; font-size: var(--fs-2xs); background: rgba(77, 255, 156, 0.06); color: #4dff9c; border: 1px solid rgba(77, 255, 156, 0.35); border-left: 2px solid #4dff9c; border-radius: 2px; cursor: pointer; font-weight: 600; letter-spacing: 0.20em; text-transform: uppercase; font-family: var(--font-mono); transition: background 120ms, border-color 120ms;" data-rcv="counter-dispatch" data-id="${event.id}" data-asset-id="${a.id}"${_exhausted ? ' disabled' : ''}>${_exhausted ? 'None left' : (canRepeat && activeUnitsForThisAsset > 0 ? 'Dispatch more' : 'Dispatch')}</button>
              </div>
            </div>`;
 
@@ -24804,6 +24854,34 @@ async function main() {
     };
   }
 
+  // How many of an asset are left to send.
+  //
+  // An inventory said five patrol cars and the console would dispatch
+  // fifty: the units picker offered 1-N from the dispatch PROFILE, which
+  // is a per-action maximum, and nothing anywhere compared that against
+  // the number the agency actually holds. A fleet that cannot run out is
+  // not an inventory, it is a label.
+  //
+  // Committed means anything not yet complete, including units driving
+  // home: a car on its way back to the station is not available to send
+  // somewhere else.
+  //
+  // No declared count means no cap. Several assets genuinely have no
+  // number attached, and inventing a ceiling for them would be the same
+  // error as inventing the count.
+  function _assetUnitsRemaining(eventId, asset) {
+    const total = asset?.count;
+    if (typeof total !== 'number' || total <= 0) return Infinity;
+    let committed = 0;
+    for (const d of _counterDispatches.values()) {
+      if (d.eventId !== eventId) continue;
+      if (d.assetId !== asset.id) continue;
+      if (d.state === 'complete' && d.rtbCompleted) continue;
+      committed += 1;
+    }
+    return Math.max(0, total - committed);
+  }
+
   // Build audit trail from event + escalation history.
   function _buildAuditJournal(event, rec) {
     const entries = [];
@@ -25624,7 +25702,19 @@ async function main() {
         if (!asset) { toast('Asset not found in response bundle', 'err'); return; }
         // Read units picker if present (multi-dispatch kinds only)
         const unitsSelect = document.querySelector(`[data-units-for="${assetId}"]`);
-        const units = unitsSelect ? Math.max(1, parseInt(unitsSelect.value, 10) || 1) : 1;
+        const requested = unitsSelect ? Math.max(1, parseInt(unitsSelect.value, 10) || 1) : 1;
+        // Enforced here as well as in the picker. The picker is a
+        // convenience; this is the rule. Without it the cap is a
+        // suggestion that any stale DOM or repeated click walks past.
+        const _remaining = _assetUnitsRemaining(id, asset);
+        if (_remaining <= 0) {
+          toast(`${asset.name}: all ${asset.count} committed. Nothing left to send.`, 'warn');
+          return;
+        }
+        const units = Math.min(requested, _remaining);
+        if (units < requested) {
+          toast(`${asset.name}: only ${units} of ${requested} available. Sending ${units}.`, 'warn');
+        }
         dispatchCounterResponse(id, asset, units > 1 ? { swarmSize: units } : {});
         // Feedback log: record the operator decision + snapshot the
         // agent recommendation live at the moment of action. Non-blocking.
