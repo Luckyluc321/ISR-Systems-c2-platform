@@ -4613,6 +4613,7 @@ async function main() {
   // demo profiles are tuned for readable pacing (~10 s per engagement).
   const CD_PROFILE = {
     'helicopter-intercept': {
+      enduranceMin: 150,        // crewed helicopter sortie, hours not minutes
       cruiseKmh: 250, arriveAtM: 500, engageSec: 8,
       onboardSensorRangeM: 800,   // EO/IR turret, longest onboard reach
       icon: 'helicopter', trail: true, airborne: true,
@@ -4644,6 +4645,7 @@ async function main() {
       labelPlural: 'Police counter-drone patrols',
     },
     'army-isr-drone': {
+      enduranceMin: 40,         // small battery quadcopter
       cruiseKmh: 60, arriveAtM: 300, engageSec: 6,
       onboardSensorRangeM: 600,   // ISR optics package
       icon: 'quadcopter', trail: true, airborne: true,
@@ -4651,6 +4653,7 @@ async function main() {
       label: 'ISR drone (visual verify)',
     },
     'sof-tactical': {
+      enduranceMin: 120,        // crewed rotary insertion
       cruiseKmh: 200, arriveAtM: 400, engageSec: 15,
       icon: 'sof', trail: true, airborne: true,
       label: 'SOF tactical response',
@@ -4661,6 +4664,7 @@ async function main() {
       label: 'Wildlife management',
     },
     'counter-drone-swarm': {
+      enduranceMin: 25,         // interceptor drone, short and fast
       cruiseKmh: 120, arriveAtM: 200, engageSec: 4,
       onboardSensorRangeM: 400,   // interceptor seeker head
       icon: 'counter-drone-interceptor', trail: true, airborne: true,
@@ -5612,7 +5616,16 @@ async function main() {
       // run ~30 min flight time. Ground vehicles have a longer effective
       // endurance (fuel not battery) — cap at 120 min for the demo.
       batteryPct: 100,
-      enduranceMin: profile.airborne ? 30 : 120,
+      // Per profile, falling back to the old two-value split.
+      //
+      // Everything airborne used to be 30 minutes, so a helicopter
+      // reported the endurance of a hobby drone and would have turned for
+      // home after half an hour of a job it can fly all afternoon.
+      //
+      // The figures on each profile are round and representative, not
+      // quoted from a flight manual. They are the right order of
+      // magnitude, which is what the readout is for.
+      enduranceMin: profile.enduranceMin ?? (profile.airborne ? 30 : 120),
       // Provenance — who owns the dispatch and, if it was dispatched
       // in response to a cross-agency request, who asked. Populated by
       // dispatchReceiverAsset and the receiver-dispatch handler. Read
@@ -5731,6 +5744,19 @@ async function main() {
     ), false);
     const _entitySpec = {
       position: _positionCb,
+      // Where the camera sits when this unit is tracked by double-click.
+      //
+      // Cesium's default for a tracked entity looks steeply down at it,
+      // which is why entering the view on a helicopter pointed at the
+      // ground instead of along the flight path. This sits behind and
+      // only slightly above, so the horizon is in frame and you see
+      // where the unit is going.
+      //
+      // The offset is in the unit's local east-north-up frame, which
+      // does not rotate with heading, so it is a fixed standoff rather
+      // than a true chase camera. Good enough to look forward; a real
+      // chase cam would have to drive the camera every frame.
+      viewFrom: new Cesium.Cartesian3(0, -420, 110),
       billboard: {
         // A helicopter cycles pre-rendered rotor angles, so the blades
         // turn while remaining part of the same picture as the airframe.
@@ -6756,6 +6782,27 @@ async function main() {
       }
     }
 
+  // Turn toward a heading at a bounded rate instead of snapping to it.
+  //
+  // Heading was assigned directly, so a 90 degree change happened in one
+  // frame: the icon simply faced a different way between two renders.
+  // Aircraft and vehicles do not do that, and on screen it reads as a
+  // glitch rather than a turn.
+  //
+  // Shortest way round, so a unit crossing north turns through 10
+  // degrees rather than 350.
+  const TURN_RATE_RAD_S = Math.PI / 3;        // 60 deg/s, so 90 deg takes 1.5 s
+
+  function _easeHeading(current, target, dtSec) {
+    if (typeof current !== 'number' || !Number.isFinite(current)) return target;
+    if (!Number.isFinite(target) || !(dtSec > 0)) return current;
+    const TAU = Math.PI * 2;
+    let delta = ((target - current + Math.PI) % TAU + TAU) % TAU - Math.PI;
+    const maxStep = TURN_RATE_RAD_S * dtSec;
+    if (Math.abs(delta) <= maxStep) return target;
+    return current + Math.sign(delta) * maxStep;
+  }
+
   // Keep road units off each other's bumpers.
   //
   // Cars converging on one incident run the same roads at the same
@@ -6922,7 +6969,7 @@ async function main() {
         d.curLon = step.lon;
         d.routeSegIdx = step.segIdx;
         d.routeSegProgress = step.segProgress;
-        d.heading = step.headingRad;
+        d.heading = _easeHeading(d.heading, step.headingRad, dtSec);
         if (step.isEnd) {
           d.state = 'engaging';
           d.arrivedTs = now;
@@ -6941,7 +6988,7 @@ async function main() {
       } else {
         // Straight-line fallback (used pre-route-fetch or on OSRM fail)
         const brng = _bearingRad(d.curLat, d.curLon, d.targetLat, d.targetLon);
-        d.heading = brng;
+        d.heading = _easeHeading(d.heading, brng, dtSec);
         const stepDegLat = (stepM * Math.cos(brng)) / 111000;
         const stepDegLon = (stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
         d.curLat += stepDegLat;
@@ -7044,7 +7091,7 @@ async function main() {
             d.curLat += (desiredLat - d.curLat) * frac;
             d.curLon += (desiredLon - d.curLon) * frac;
           }
-          d.heading = _bearingRad(d.curLat, d.curLon, enemyLat, enemyLon);
+          d.heading = _easeHeading(d.heading, _bearingRad(d.curLat, d.curLon, enemyLat, enemyLon), dtSec);
           if (d.profile.trail) {
             d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
             if (d.trailPositions.length > 500) d.trailPositions.shift();
@@ -7354,7 +7401,7 @@ async function main() {
       d.lastFrameTs = now;
       if (dtSec <= 0) return;
       const brng = _bearingRad(d.curLat, d.curLon, d.rtbTargetLat, d.rtbTargetLon);
-      d.heading = brng;
+      d.heading = _easeHeading(d.heading, brng, dtSec);
       const speedMps = (d.profile.cruiseKmh * 1000) / 3600;
       const stepM = speedMps * dtSec;
       d.curLat += (stepM * Math.cos(brng)) / 111000;
@@ -7385,7 +7432,7 @@ async function main() {
       d.lastFrameTs = now;
       if (dtSec <= 0) return;
       const brng = _bearingRad(d.curLat, d.curLon, d.originLat, d.originLon);
-      d.heading = brng;
+      d.heading = _easeHeading(d.heading, brng, dtSec);
       const speedMps = (d.profile.cruiseKmh * 1000) / 3600;
       const stepM = speedMps * dtSec;
       d.curLat += (stepM * Math.cos(brng)) / 111000;
