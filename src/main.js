@@ -5754,6 +5754,38 @@ async function main() {
     ), false);
     const _entitySpec = {
       position: _positionCb,
+      // Starting camera offset when this unit is tracked by double-click.
+      //
+      // Cesium's default looks steeply down at its subject, which is why
+      // the view opened pointing at the ground. This starts level enough
+      // to see the horizon.
+      //
+      // viewFrom and NOT a per-frame camera. I tried driving the camera
+      // every frame to get a true over-the-shoulder chase, and it took
+      // away the ability to orbit or zoom, because setting the camera on
+      // every render overwrites whatever the user just did. A view you
+      // cannot move is worse than a view that starts at the wrong
+      // bearing. Cesium's tracked entity keeps the orbit and zoom
+      // controls and this only decides where it opens.
+      //
+      // The offset is in the unit's local east-north-up frame, which
+      // does not rotate with heading, so it opens looking from the south.
+      // Drag to swing round behind it.
+      //
+      // 36 degrees above the unit, and that angle is chosen, not
+      // arbitrary. The icon is a billboard, and a billboard always turns
+      // to face the camera, so a top-down airframe drawing only reads as
+      // an airframe while the camera is looking down on it. I first
+      // opened this at 13 degrees, near level, and from there the
+      // helicopter reads as a flat cutout standing on its tail, which is
+      // the "facing downwards like it is 2d" complaint. High enough to
+      // read as a plan view, low enough to see where the unit is going.
+      //
+      // A view from ground level needs a 3D model, not an icon. That is
+      // how the quadcopter interceptor handles it, swapping to a GLB
+      // under 250m a few lines below, and there is no helicopter GLB in
+      // public/aircraft to swap to.
+      viewFrom: new Cesium.Cartesian3(0, -300, 220),
       billboard: {
         // A helicopter cycles pre-rendered rotor angles, so the blades
         // turn while remaining part of the same picture as the airframe.
@@ -15921,79 +15953,6 @@ async function main() {
     setActiveSite(null);
   }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
 
-  // ── Chase camera for a dispatched unit ───────────────────────────
-  //
-  // Cesium's trackedEntity looks steeply down at whatever it follows, so
-  // entering the view on a helicopter pointed at the ground. A viewFrom
-  // offset only half fixed it: that offset lives in the unit's local
-  // compass frame, which does not rotate with heading, so the camera sat
-  // at a fixed bearing and the aircraft flew across the view rather than
-  // away from it.
-  //
-  // So the camera is driven every frame, which is what the drone POV
-  // already does a few hundred lines below. Position is computed BEHIND
-  // the unit along its own heading, so the view stays over its shoulder
-  // through a turn, and the heading is the eased one, so the camera
-  // swings round as smoothly as the aircraft does.
-  const _chase = { active: false, dispatchId: null, removeTick: null, prior: null };
-
-  function _exitChase() {
-    if (!_chase.active) return;
-    if (_chase.removeTick) { _chase.removeTick(); _chase.removeTick = null; }
-    _chase.active = false;
-    _chase.dispatchId = null;
-    if (_chase.prior) {
-      viewer.camera.setView({ destination: _chase.prior.position,
-        orientation: { direction: _chase.prior.direction, up: _chase.prior.up } });
-      _chase.prior = null;
-    }
-    toast('Chase view off.', 'info');
-  }
-
-  function _enterChase(dispatchId) {
-    const d = _counterDispatches.get(dispatchId);
-    if (!d) return;
-    if (_chase.active) _exitChase();
-    viewer.trackedEntity = undefined;
-    _chase.prior = {
-      position: viewer.camera.position.clone(),
-      direction: viewer.camera.direction.clone(),
-      up: viewer.camera.up.clone(),
-    };
-    _chase.active = true;
-    _chase.dispatchId = dispatchId;
-
-    const BACK_M = d.profile?.airborne ? 260 : 90;
-    const UP_M   = d.profile?.airborne ? 70  : 25;
-
-    _chase.removeTick = viewer.scene.postRender.addEventListener(() => {
-      if (!_chase.active) return;
-      const u = _counterDispatches.get(_chase.dispatchId);
-      if (!u || u.curLat == null) { _exitChase(); return; }
-      const alt = u.profile?.airborne
-        ? _airborneAbsAlt(u.curLon, u.curLat, u.curAlt || 60) : 0;
-      const h = u.heading || 0;
-
-      // Step back along the unit's own heading. A bearing is clockwise
-      // from north, so north is +lat and east is +lon.
-      const backLat = -Math.cos(h) * BACK_M / 111000;
-      const backLon = -Math.sin(h) * BACK_M / (111000 * Math.cos(u.curLat * Math.PI / 180));
-
-      const eye = Cesium.Cartesian3.fromDegrees(
-        u.curLon + backLon, u.curLat + backLat, alt + UP_M);
-      // Aim slightly above the unit so the horizon is in frame rather
-      // than the ground immediately under it.
-      const look = Cesium.Cartesian3.fromDegrees(u.curLon, u.curLat, alt + UP_M * 0.45);
-      const dir = Cesium.Cartesian3.normalize(
-        Cesium.Cartesian3.subtract(look, eye, new Cesium.Cartesian3()), new Cesium.Cartesian3());
-      viewer.camera.setView({
-        destination: eye,
-        orientation: { direction: dir, up: Cesium.Cartesian3.normalize(eye, new Cesium.Cartesian3()) },
-      });
-    });
-    toast(`Chase view: ${d.assetName}. Double-click elsewhere to exit.`, 'info');
-  }
-
   // ── Double-click drone handler ──
   //
   // Real mode (default, operator-grade): let Cesium track the entity so
@@ -16020,14 +15979,6 @@ async function main() {
       _enterDronePOV(eventId, swIdx);
       return;
     }
-    // A dispatched unit gets the chase camera rather than Cesium's
-    // tracked-entity orbit, which looks down at its subject.
-    const _dispatchId = picked.id.properties?.dispatchId?.getValue?.();
-    if (_dispatchId && _counterDispatches.has(_dispatchId)) {
-      _enterChase(_dispatchId);
-      return;
-    }
-    if (_chase.active) { _exitChase(); return; }
     // Real mode + any other entity → Cesium default tracking behaviour.
     viewer.trackedEntity = picked.id;
   }, Cesium.ScreenSpaceEventType.LEFT_DOUBLE_CLICK);

@@ -104,6 +104,22 @@ This is the one place in the codebase that already models "the same object, re-i
 
 `_adapters` and the listener set in both `track_source.js` and `dispatch_telemetry.js` are module-level. Counters are per provider, which is enough to tell which feed is broken, but not per tenant. Fine for one feed. Revisit before per-tenant isolation lands.
 
+### Q10 · A dispatched helicopter has no 3D model, so it cannot be viewed from ground level
+
+**Owner:** Lucas · **Trigger:** a licensed helicopter GLB lands in `public/aircraft/` · **Raised:** 2026-10-07
+
+A dispatched unit is drawn as a Cesium **billboard**, and a billboard always turns to face the camera. The helicopter icon is a top-down drawing of an airframe, so it only reads as an airframe while the camera is looking down on it. Orbit to near ground level and it stands up like a cardboard cutout on its tail.
+
+This is not a rotation bug. The billboard's `rotation` is `-(d.heading)`, the same convention the F-35 and the friendly missile already use, and the nose points the right way at every heading.
+
+**What already exists.** The quadcopter interceptor solves exactly this, swapping the billboard for `assault_drone_concept.glb` under 250 m. `_isQuadInterceptor` in `src/main.js` gates the swap on `icon === 'quadcopter' || icon === 'counter-drone-interceptor'`. A helicopter matches neither, so it is billboard-only at every range.
+
+**What blocks it.** `public/aircraft/` holds two models, the Shahed and the assault drone. There is no helicopter. Adding one means pulling an external asset with a licence attached, which is a call for a human, not an agent.
+
+**The interim.** Double-click opens the tracked view at 36 degrees above the unit rather than Cesium's default steep look-down, high enough that the plan-view icon reads correctly and low enough to see where the unit is heading. Orbit and zoom stay live, so a ground-level view is still reachable, and at ground level the icon will still flatten out. That is the limit of an icon, not a defect to chase.
+
+**When the GLB arrives,** extend the swap predicate and add a `model` block alongside the existing one. Roughly ten lines. Pitch and roll are not needed, as a dispatched unit already tracks `d.heading`.
+
 ---
 
 ## Known-failing, not a defect
