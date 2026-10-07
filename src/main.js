@@ -5550,6 +5550,20 @@ async function main() {
       id: dispatchId,
       groupId,
       memberIndex,
+      // Units in one dispatch leave the station one after another, not
+      // abreast. Without this they share a route and a cruise speed, so
+      // they advance in perfect lockstep and arrive stacked on the same
+      // few metres of road, which is what prompted this.
+      //
+      // The following rule below cannot fix that on its own: cars that
+      // start at the same point have nobody ahead of them, so nobody
+      // ever brakes. Separation has to be created at departure and only
+      // then maintained. Verified by simulating it, which is how the
+      // first version was caught doing nothing at all.
+      //
+      // Ground units only. Aircraft do not queue on a road.
+      departAfterMs: (memberIndex || 0) * 4000,
+      dispatchedAtMono: wallNow(),
       memberCount,
       variantId,
       eventId: event.id,
@@ -5805,6 +5819,11 @@ async function main() {
           scale: d.profile.billboardScale ?? 0.85,
           scaleByDistance: new Cesium.NearFarScalar(1000, 1.4, 500000, 0.7),
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          // Pull the rotor a metre toward the camera so it draws OVER
+          // the airframe. Two billboards on one position otherwise sort
+          // by distance, which is a tie here, and the blades ended up
+          // behind the fuselage. A rotor is above the aircraft.
+          eyeOffset: new Cesium.Cartesian3(0, 0, -1),
           rotation: new Cesium.CallbackProperty(() => {
             // Distance from the camera to this unit, cheaply.
             let near = false;
@@ -6775,12 +6794,66 @@ async function main() {
       }
     }
 
+  // Keep road units off each other's bumpers.
+  //
+  // Several cars dispatched seconds apart share one route and one cruise
+  // speed, so they advance in lockstep and arrive stacked on the same
+  // few metres of road. On the map that is one icon with a smear behind
+  // it, and it is wrong in the obvious way: real vehicles leave a gap.
+  //
+  // Works like adaptive cruise control rather than like a queue. A unit
+  // measures the along-route distance to the nearest unit AHEAD of it on
+  // the same route, and if that gap is under the minimum it takes a
+  // shorter step, closing on the gap instead of the car. It never
+  // reverses and it never stops dead unless it is already too close.
+  //
+  // Along the ROUTE, not straight-line. Two cars on opposite sides of a
+  // bend can be fifteen metres apart in a straight line and two hundred
+  // apart on the road, and braking for that would be wrong.
+  //
+  // Only applies to units sharing a route. A unit on its own route is
+  // never slowed by one somewhere else on the map.
+  const FOLLOW_GAP_M = 35;
+
+  function _routeDistanceM(d) {
+    // Metres travelled along this unit's own route.
+    if (!d.routeSegmentLengths) return 0;
+    let total = 0;
+    for (let i = 0; i < d.routeSegIdx && i < d.routeSegmentLengths.length; i++) {
+      total += d.routeSegmentLengths[i];
+    }
+    return total + (d.routeSegmentLengths[d.routeSegIdx] || 0) * (d.routeSegProgress || 0);
+  }
+
+  function _gapLimitedStep(d, stepM) {
+    if (!d.profile?.useRoadRouting || !d.routePositions || !d.routeSegmentLengths) return stepM;
+    const mine = _routeDistanceM(d);
+    let nearestAhead = Infinity;
+    for (const other of _counterDispatches.values()) {
+      if (other === d) continue;
+      if (other.state !== 'en_route') continue;
+      // Same physical route. Identity, not equality: units in one
+      // dispatch share the array instance.
+      if (other.routePositions !== d.routePositions) continue;
+      const theirs = _routeDistanceM(other);
+      if (theirs <= mine) continue;              // behind, or alongside
+      nearestAhead = Math.min(nearestAhead, theirs - mine);
+    }
+    if (!Number.isFinite(nearestAhead)) return stepM;
+    if (nearestAhead >= FOLLOW_GAP_M + stepM) return stepM;   // clear road
+    // Close the remaining slack only, never past the car in front.
+    return Math.max(0, Math.min(stepM, nearestAhead - FOLLOW_GAP_M));
+  }
+
     if (d.state === 'en_route') {
       const dtSec = (now - d.lastFrameTs) / 1000;
       d.lastFrameTs = now;
       if (dtSec <= 0) return;
+      // Still waiting its turn to pull out of the station.
+      if (d.profile?.useRoadRouting && d.departAfterMs
+          && (now - (d.dispatchedAtMono ?? now)) < d.departAfterMs) return;
       const speedMps = (d.profile.cruiseKmh * 1000) / 3600;
-      const stepM = speedMps * dtSec;
+      const stepM = _gapLimitedStep(d, speedMps * dtSec);
 
       // Live pursuit for airborne interceptors in sim mode: update
       // target coord to the drone's CURRENT position each tick when
