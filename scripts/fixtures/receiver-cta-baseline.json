@@ -293,15 +293,11 @@
   ],
   "politi-nsk": [
    "ack:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "ack:case,request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
    "cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-promote:case,add-note:audit",
-   "record-scene-release:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "record-scene-release:case,request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
-   "request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
+   "record-scene-release:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
   ],
   "politi-aks": [
    "ack:case,receiver-dispatch:dispatch,receiver-dispatch:dispatch,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
@@ -2957,27 +2953,19 @@
   ],
   "rigspoliti-nkc": [
    "ack:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "ack:case,request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
    "cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-promote:case,add-note:audit",
-   "record-scene-release:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "record-scene-release:case,request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
-   "request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
+   "record-scene-release:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
   ],
   "rigspoliti-nc3": [
    "ack:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "ack:case,request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
    "cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-promote:case,add-note:audit",
-   "record-scene-release:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "record-scene-release:case,request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
-   "request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
+   "record-scene-release:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
   ],
   "rigspoliti-ncik": [
    "ack:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
@@ -2989,27 +2977,19 @@
   ],
   "rigspoliti-sirene": [
    "ack:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "ack:case,request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
    "cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-promote:case,add-note:audit",
-   "record-scene-release:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "record-scene-release:case,request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
-   "request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
+   "record-scene-release:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
   ],
   "rigspoliti-dvi": [
    "ack:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "ack:case,request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
    "cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-promote:case,add-note:audit",
-   "record-scene-release:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "record-scene-release:case,request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
-   "request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
+   "record-scene-release:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
   ],
   "rigspoliti-hundetjeneste": [
    "ack:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
@@ -3033,15 +3013,11 @@
   ],
   "rigspoliti-politiskolen": [
    "ack:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "ack:case,request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
    "cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-promote:case,add-note:audit",
-   "record-scene-release:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "record-scene-release:case,request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
-   "request-aks:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
+   "record-scene-release:case,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
   ],
   "pet-cta": [
    "ack:case,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",

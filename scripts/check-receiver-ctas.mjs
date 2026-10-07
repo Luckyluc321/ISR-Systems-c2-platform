@@ -62,6 +62,10 @@ const ROOT = join(HERE, '..');
 const SNAP = join(HERE, 'fixtures', 'receiver-cta-baseline.json');
 
 const { RECEIVERS } = await import(join(ROOT, 'src/roles.js'));
+// The app stamps archetypes onto the roles at boot. Without this the
+// gate sees unstamped roles and silently exercises different code.
+const { assignArchetypes } = await import(join(ROOT, 'src/archetypes.js'));
+assignArchetypes(RECEIVERS);
 const { availableCTAsForReceiver, PHYSICAL_DISPATCH_ACTIONS }
   = await import(join(ROOT, 'src/receiver_ctas.js'));
 const { RECEIVER_ASSETS } = await import(join(ROOT, 'src/receiver_assets.js'));

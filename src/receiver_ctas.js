@@ -28,6 +28,7 @@ import { assetsForReceiverRole } from './receiver_assets.js';
 import { sceneReleaseState } from './scene_lifecycle.js';
 import { releasedWreckageIds } from './events.js';
 import { contextForSite } from './site_context.js';
+import { capabilityActionsFor } from './receiver_capabilities.js';
 
 // Of the stub actions in main.js's STUB_DISPATCH_ACTIONS, these are the
 // ones that claim to put
@@ -37,6 +38,16 @@ import { contextForSite } from './site_context.js';
 // rest of the stub set is administrative — a NOTAM, an airspace
 // restriction, a shelter notification, an intel log — and needs no
 // vehicle, so it is offered regardless.
+// How an agency participates in a case at all: receive it, answer it,
+// hand it on, and leave a record. Never a capability claim, so never
+// filtered by the capability table.
+const UNIVERSAL_ACTIONS = new Set([
+  'ack', 'respond-open', 'respond-send', 'update-status', 'cascade-reject',
+  'cascade-politi', 'cascade-fe-pet', 'cascade-any',
+  'observer-add', 'observer-promote', 'add-note',
+  'receiver-dispatch', 'receiver-request', 'record-scene-release',
+]);
+
 export const PHYSICAL_DISPATCH_ACTIONS = new Set([
   'deploy-patrol', 'set-cordon',
   'brs-standby', 'brs-deploy',
@@ -513,8 +524,29 @@ export function availableCTAsForReceiver(roleId, event, ctx = {}) {
   // staff or log to the intel picture without owning a single vehicle,
   // so those stay. Requests to other agencies stay too: asking someone
   // else to send a unit does not require owning one.
+  let out = ctas;
   if (!_receiverAssetSpec) {
-    return ctas.filter(c => !PHYSICAL_DISPATCH_ACTIONS.has(c.action));
+    out = out.filter(c => !PHYSICAL_DISPATCH_ACTIONS.has(c.action));
   }
-  return ctas;
+
+  // Archetypes that have been migrated take their capability set from
+  // src/receiver_capabilities.js instead of from the ladder above.
+  //
+  // This half can only REMOVE. It keeps the universals, which are how an
+  // agency participates in a case at all, and keeps whatever the table
+  // permits; anything else the ladder produced is dropped. That makes
+  // the migration safe in the direction that matters, because the
+  // dangerous direction is a role GAINING a capability.
+  //
+  // The granting half, where the table permits something the ladder
+  // never produced, is not built yet and is not needed yet: liaison is
+  // the first archetype migrated and its table is empty by decision.
+  // It arrives with the first archetype that needs it, together with the
+  // catalogue of CTA shapes it would have to construct.
+  const _allowed = capabilityActionsFor(role);
+  if (_allowed) {
+    const keep = new Set(_allowed);
+    out = out.filter(c => UNIVERSAL_ACTIONS.has(c.action) || keep.has(c.action));
+  }
+  return out;
 }
