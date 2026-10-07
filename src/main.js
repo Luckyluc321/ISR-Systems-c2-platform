@@ -3598,29 +3598,33 @@ async function main() {
     return c;
   }
 
-  // Main rotor alone, hub at the exact centre of its canvas.
+  // The helicopter at one rotor angle, as a SINGLE image.
   //
-  // Centre matters more than it looks: a billboard rotates about its
-  // image centre, so the hub must BE that centre or it orbits instead of
-  // spinning. The airframe image puts its mast at its own centre too, so
-  // the two line up at any angle.
-  function helicopterRotorIcon(hex) {
-    const S = 72, CX = 36, CY = 36;
-    const c = document.createElement('canvas');
-    c.width = S; c.height = S;
+  // The rotor was briefly its own billboard so it could turn, and that
+  // is what caused every layering problem since. Two billboards on one
+  // point tie on depth, so the blades kept sorting behind the fuselage.
+  // An eye offset did nothing because depth testing is disabled on
+  // these. Lifting the rotor four metres fixed the order by moving the
+  // rotor off the aircraft, which was worse than the problem.
+  //
+  // One image. The blades are painted after the airframe, so they are
+  // over it by construction and cannot come away from the mast, because
+  // they are the same picture. Spin is a swap between pre-rendered
+  // angles, not a rotation of anything at runtime.
+  function helicopterFrame(hex, bladeAngle) {
+    const CX = 36, CY = 36;
+    const c = helicopterIcon(hex);          // airframe, mast at centre
     const ctx = c.getContext('2d');
     ctx.lineCap = 'round';
 
-    const BLADES = 5;
-    const LEN = 32;
     ctx.strokeStyle = hex;
     ctx.lineWidth = 3.4;
     ctx.globalAlpha = 0.95;
-    for (let i = 0; i < BLADES; i++) {
-      const a = (i / BLADES) * Math.PI * 2;
+    for (let i = 0; i < 5; i++) {
+      const a = bladeAngle + (i / 5) * Math.PI * 2;
       ctx.beginPath();
       ctx.moveTo(CX, CY);
-      ctx.lineTo(CX + Math.cos(a) * LEN, CY + Math.sin(a) * LEN);
+      ctx.lineTo(CX + Math.cos(a) * 32, CY + Math.sin(a) * 32);
       ctx.stroke();
     }
 
@@ -3635,6 +3639,15 @@ async function main() {
 
     return c;
   }
+
+  // Twelve angles across one blade pitch, built once. Swapping a cached
+  // data URL per frame costs nothing; redrawing a canvas would not.
+  const _HELI_FRAMES = (() => {
+    const n = 12;
+    const step = (Math.PI * 2) / 5 / n;
+    return Array.from({ length: n }, (_, i) =>
+      helicopterFrame(GREEN_COUNTER_HEX, i * step).toDataURL());
+  })();
 
   function jammerIcon(hex) {
     const c = document.createElement('canvas');
@@ -5719,7 +5732,26 @@ async function main() {
     const _entitySpec = {
       position: _positionCb,
       billboard: {
-        image: iconUrl,
+        // A helicopter cycles pre-rendered rotor angles, so the blades
+        // turn while remaining part of the same picture as the airframe.
+        // Every other kind keeps its single icon.
+        //
+        // Held at one angle past 6 km, where a blade is under a pixel and
+        // the animation buys nothing but a redraw every frame.
+        image: d.profile.icon === 'helicopter'
+          ? new Cesium.CallbackProperty(() => {
+              let near = false;
+              try {
+                const p = Cesium.Cartesian3.fromDegrees(
+                  d.curLon, d.curLat,
+                  d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0
+                );
+                near = Cesium.Cartesian3.distance(viewer.camera.positionWC, p) < 6000;
+              } catch (_) { near = false; }
+              return near ? _HELI_FRAMES[Math.floor(monoNow() / 70) % _HELI_FRAMES.length]
+                          : _HELI_FRAMES[0];
+            }, false)
+          : iconUrl,
         verticalOrigin: Cesium.VerticalOrigin.CENTER,
         // Airborne → absolute ellipsoid altitude (matches tracer math).
         // Ground → clamp.
@@ -5783,89 +5815,6 @@ async function main() {
       }, false);
     }
     d.entity = viewer.entities.add(_entitySpec);
-
-    // Main rotor, its own billboard so it can turn without turning the
-    // aircraft with it.
-    //
-    // Both images put the MAST at their exact centre, and both
-    // billboards sit on the same position with the same vertical
-    // origin, so the rotor's hub lands on the airframe's mast and stays
-    // there under any rotation. The previous attempt drew the hub six
-    // pixels off centre, and since a billboard rotates about its image
-    // centre the hub swung in a small circle and came away from the
-    // mast.
-    //
-    // Turning only close in. Past a kilometre and a half the blades are
-    // about a pixel, the motion is invisible, and all it costs is a
-    // redraw every frame for every helicopter on the map. Beyond that
-    // the rotor holds a fixed angle, which is what "statically attached
-    // at zoomed out view" asks for.
-    if (d.profile.icon === 'helicopter') {
-      const _rotorUrl = helicopterRotorIcon(GREEN_COUNTER_HEX).toDataURL();
-      // Raised from 1.5 km. The close-in view is the one worth seeing
-      // and it was switching off while the aircraft was still comfortably
-      // readable. At 6 km a 72px icon is still several pixels of blade,
-      // so the motion still registers; past that it is genuinely
-      // invisible and only costs a redraw per frame per helicopter.
-      const SPIN_WITHIN_M = 6000;
-      d.rotorEntity = viewer.entities.add({
-        // Four metres ABOVE the airframe, genuinely, rather than nudged
-        // toward the camera with an eye offset. That offset did nothing
-        // here: depth testing is disabled on these billboards so they
-        // sort by distance from the camera, and both sat on one point.
-        // Raising the rotor makes it closer to an overhead camera, which
-        // is the only thing that actually decides the order. It is also
-        // true: a rotor is above the aircraft.
-        position: new Cesium.CallbackProperty(() => Cesium.Cartesian3.fromDegrees(
-          d.curLon, d.curLat,
-          (d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0) + 4
-        ), false),
-        billboard: {
-          image: _rotorUrl,
-          verticalOrigin: Cesium.VerticalOrigin.CENTER,
-          heightReference: d.profile.airborne
-            ? Cesium.HeightReference.NONE
-            : Cesium.HeightReference.CLAMP_TO_GROUND,
-          scale: d.profile.billboardScale ?? 0.85,
-          scaleByDistance: new Cesium.NearFarScalar(1000, 1.4, 500000, 0.7),
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-
-          rotation: new Cesium.CallbackProperty(() => {
-            // Distance from the camera to this unit, cheaply.
-            let near = false;
-            try {
-              const p = Cesium.Cartesian3.fromDegrees(
-                d.curLon, d.curLat,
-                d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0
-              );
-              near = Cesium.Cartesian3.distance(viewer.camera.positionWC, p) < SPIN_WITHIN_M;
-            } catch (_) { near = false; }
-            // Slow on purpose. A real main rotor is several hundred rpm,
-            // which at sixty frames a second is a grey disc or a strobe
-            // that appears to turn backwards. This reads as motion
-            // rather than simulating it.
-            //
-            // monoNow so it freezes with the rest of the scene on pause.
-            // A rotor still turning on a frozen map would be the only
-            // moving thing on screen.
-            // ALWAYS carry the airframe's heading, spinning or not.
-            //
-            // The static case used to return a flat 0, which pinned the
-            // rotor to a fixed world angle while the airframe turned
-            // underneath it. The blades then had no relationship to the
-            // aircraft they sit on, which is what reads as the rotor
-            // being out of proportion or badly placed. The hub was
-            // always in the right spot; the blade pattern was not.
-            //
-            // Spin is added ON TOP of heading, so the rotor is in the
-            // airframe's frame of reference either way and the only
-            // difference between near and far is whether it turns.
-            const _h = -(d.heading || 0);
-            return near ? _h + (monoNow() / 1000) * Math.PI * 1.1 : _h;
-          }, false),
-        },
-      });
-    }
 
 
     if (d.profile.trail) {
@@ -8312,7 +8261,6 @@ async function main() {
     }
     simAfter(() => {
       if (d.entity) { viewer.entities.remove(d.entity); d.entity = null; }
-      if (d.rotorEntity) { viewer.entities.remove(d.rotorEntity); d.rotorEntity = null; }
       if (d.trail) { viewer.entities.remove(d.trail); d.trail = null; }
       if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
       if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
