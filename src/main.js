@@ -3534,98 +3534,90 @@ async function main() {
   // per Lucas's spec — no new symbols needed there.
   const GREEN_COUNTER_HEX = '#4dff9c';
 
-  // Helicopter, top-down, drawn in two parts.
+  // Helicopter, top-down, one image.
   //
-  // The body and the rotor are separate images on purpose: the rotor is
-  // its own billboard so it can turn without the fuselage turning with
-  // it. Keeping them in one canvas is what forces a choice between a
-  // static rotor and a spinning aircraft.
+  // Was briefly split into a body image and a rotor image so the rotor
+  // could turn. That failed for a reason worth recording: a billboard
+  // rotates about its IMAGE CENTRE, and the hub was drawn six pixels
+  // above it, so the hub swung in a small circle instead of spinning in
+  // place. The rotor appeared to come loose from the mast, which is both
+  // the detachment and the strange shape it made close up.
   //
-  // Shape follows the silhouette convention Lucas pointed at: a long
-  // solid fuselage running nose to tail, a thin boom, a small tail
-  // rotor, and thick blades laid OVER the body rather than radiating
-  // from beside it. The previous attempt put a short teardrop under a
-  // thin cross, which read as a creature with legs.
+  // Static, merged, and built around a single anchor: the mast is at the
+  // canvas centre and everything else is measured from it, so the blades
+  // cannot drift off the aircraft again.
   function helicopterIcon(hex) {
-    const S = 64, CX = 32;
+    const S = 72, CX = 36, CY = 36;   // CY is the mast, and the anchor
     const c = document.createElement('canvas');
     c.width = S; c.height = S;
     const ctx = c.getContext('2d');
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+
+    // ── Airframe, nose up ────────────────────────────────────────
     ctx.fillStyle = hex;
+
+    // Tail boom, narrowing toward the tail.
+    ctx.beginPath();
+    ctx.moveTo(CX - 2.6, CY + 10);
+    ctx.lineTo(CX + 2.6, CY + 10);
+    ctx.lineTo(CX + 1.8, CY + 28);
+    ctx.lineTo(CX - 1.8, CY + 28);
+    ctx.closePath();
+    ctx.fill();
+
+    // Tail rotor, a bar off the side of the boom end.
+    ctx.beginPath();
+    ctx.moveTo(CX - 1, CY + 24);
+    ctx.lineTo(CX + 8, CY + 22.5);
+    ctx.lineTo(CX + 8, CY + 25.5);
+    ctx.lineTo(CX - 1, CY + 27);
+    ctx.closePath();
+    ctx.fill();
+
+    // Fuselage: long, widest at the mast, tapering to nose and boom.
     ctx.strokeStyle = 'rgba(255,255,255,0.85)';
     ctx.lineWidth = 1;
-
-    // Tail boom, nose up so the tail runs down the canvas.
     ctx.beginPath();
-    ctx.moveTo(CX - 2.5, 38);
-    ctx.lineTo(CX + 2.5, 38);
-    ctx.lineTo(CX + 2, 55);
-    ctx.lineTo(CX - 2, 55);
-    ctx.closePath();
-    ctx.fill();
-
-    // Tail fin and rotor: a bar across the end of the boom.
-    ctx.beginPath();
-    ctx.moveTo(CX - 1.5, 52);
-    ctx.lineTo(CX + 7, 50);
-    ctx.lineTo(CX + 7, 53);
-    ctx.lineTo(CX - 1.5, 55);
-    ctx.closePath();
-    ctx.fill();
-
-    // Fuselage: long, widest just ahead of centre, tapering to the nose
-    // and into the boom.
-    ctx.beginPath();
-    ctx.moveTo(CX, 8);
-    ctx.bezierCurveTo(CX + 8, 12, CX + 9, 24, CX + 7, 34);
-    ctx.bezierCurveTo(CX + 5, 39, CX - 5, 39, CX - 7, 34);
-    ctx.bezierCurveTo(CX - 9, 24, CX - 8, 12, CX, 8);
+    ctx.moveTo(CX, CY - 22);
+    ctx.bezierCurveTo(CX + 7.5, CY - 17, CX + 8.5, CY - 2, CX + 6, CY + 9);
+    ctx.bezierCurveTo(CX + 4, CY + 13, CX - 4, CY + 13, CX - 6, CY + 9);
+    ctx.bezierCurveTo(CX - 8.5, CY - 2, CX - 7.5, CY - 17, CX, CY - 22);
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
 
-    // Cockpit, so the nose end is readable at a glance.
-    ctx.globalAlpha = 0.5;
+    // Cockpit glazing, so the nose end reads at a glance.
+    ctx.globalAlpha = 0.45;
     ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.ellipse(CX, 15, 4, 5, 0, 0, Math.PI * 2);
+    ctx.ellipse(CX, CY - 15, 4, 5.5, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = 1;
 
-    return c;
-  }
-
-  // Five thick blades and a hub, on their own transparent canvas so the
-  // billboard carrying it can be rotated independently of the airframe.
-  function helicopterRotorIcon(hex) {
-    const S = 64, CX = 32, CY = 26;   // hub sits over the fuselage mast
-    const c = document.createElement('canvas');
-    c.width = S; c.height = S;
-    const ctx = c.getContext('2d');
-    ctx.lineCap = 'round';
-
+    // ── Main rotor, over the airframe, hub exactly on the mast ───
     const BLADES = 5;
-    const LEN = 29;
+    const LEN = 32;
+    ctx.strokeStyle = hex;
+    ctx.lineWidth = 3.4;
+    ctx.globalAlpha = 0.95;
     for (let i = 0; i < BLADES; i++) {
-      const a = (i / BLADES) * Math.PI * 2;
-      ctx.strokeStyle = hex;
-      ctx.globalAlpha = 0.92;
-      ctx.lineWidth = 3.2;
+      // Offset a tenth of a turn so no blade lies along the fuselage,
+      // where it would read as part of the body rather than above it.
+      const a = ((i / BLADES) + 0.1) * Math.PI * 2;
       ctx.beginPath();
       ctx.moveTo(CX, CY);
       ctx.lineTo(CX + Math.cos(a) * LEN, CY + Math.sin(a) * LEN);
       ctx.stroke();
     }
-
-    // Hub.
     ctx.globalAlpha = 1;
+
+    // Hub, last, on the anchor.
     ctx.fillStyle = hex;
     ctx.strokeStyle = 'rgba(255,255,255,0.85)';
-    ctx.lineWidth = 1;
+    ctx.lineWidth = 1.2;
     ctx.beginPath();
-    ctx.arc(CX, CY, 3.5, 0, Math.PI * 2);
+    ctx.arc(CX, CY, 3.6, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
@@ -5755,45 +5747,6 @@ async function main() {
     }
     d.entity = viewer.entities.add(_entitySpec);
 
-    // Spinning rotor, as a second billboard over the airframe.
-    //
-    // Separate entity because a billboard's rotation turns the whole
-    // image: spin the one carrying the fuselage and the aircraft spins
-    // with it. Two images, one still and one turning, is the only way to
-    // do this without a 3D model.
-    //
-    // Deliberately slow. A real main rotor is several hundred rpm and at
-    // 60 frames per second that is a grey disc or, worse, a strobe that
-    // appears to turn backwards. This reads as motion rather than
-    // simulating it, which is what was asked for.
-    //
-    // monoNow(), so it freezes with the rest of the scene when the
-    // simulation is paused. A rotor still turning on a frozen map would
-    // be the only moving thing on screen.
-    //
-    // Only drawn close in. Past about two kilometres the blades are
-    // under a pixel and all the animation buys is a redraw every frame
-    // for every helicopter on the map.
-    if (d.profile.icon === 'helicopter') {
-      const _rotorUrl = helicopterRotorIcon(GREEN_COUNTER_HEX).toDataURL();
-      d.rotorEntity = viewer.entities.add({
-        position: _positionCb,
-        billboard: {
-          image: _rotorUrl,
-          verticalOrigin: Cesium.VerticalOrigin.CENTER,
-          heightReference: d.profile.airborne
-            ? Cesium.HeightReference.NONE
-            : Cesium.HeightReference.CLAMP_TO_GROUND,
-          scale: d.profile.billboardScale ?? 0.85,
-          scaleByDistance: new Cesium.NearFarScalar(1000, 1.4, 500000, 0.7),
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-          rotation: new Cesium.CallbackProperty(() => (
-            (monoNow() / 1000) * Math.PI * 1.2
-          ), false),
-          distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, 2200),
-        },
-      });
-    }
 
     if (d.profile.trail) {
       d.trail = viewer.entities.add({
@@ -8166,7 +8119,6 @@ async function main() {
     }
     simAfter(() => {
       if (d.entity) { viewer.entities.remove(d.entity); d.entity = null; }
-      if (d.rotorEntity) { viewer.entities.remove(d.rotorEntity); d.rotorEntity = null; }
       if (d.trail) { viewer.entities.remove(d.trail); d.trail = null; }
       if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
       if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
