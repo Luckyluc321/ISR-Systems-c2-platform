@@ -111,6 +111,33 @@ function _siteAllowsAction(event, action) {
   return caps.includes(action);
 }
 
+// Whether THIS agency can put units on the ground at THIS site.
+//
+// The capability check above asks only whether a patrol is plausible at
+// a site. It takes no role, so it answered the same for every agency on
+// earth, and Bornholms Politi was offered a patrol dispatch at
+// Copenhagen Airport: a different island, across water, 150 km away.
+//
+// Every site already declares who belongs to it and in what capacity.
+// Billund names Sydøstjyllands Politi as its primary response actor and
+// Rigspolitiet as an observer. An observer watches a case; it does not
+// drive to it. So physical dispatch requires being an ACTOR at the site.
+//
+// Scoped to physical actions deliberately. Cascading, replying,
+// observing and advising are how an agency participates from anywhere,
+// and a national regulator issuing an airspace restriction does not need
+// to be standing at the perimeter.
+//
+// Permissive when a site declares no receivers at all, matching the
+// capability check above: an undeclared site restricts nothing.
+function _siteAllowsRoleToDispatch(event, roleId, siteReceivers) {
+  if (!event?.siteId || !roleId) return true;
+  if (!Array.isArray(siteReceivers) || siteReceivers.length === 0) return true;
+  const entry = siteReceivers.find(r => r?.id === roleId);
+  if (!entry) return false;
+  return entry.mode === 'actor';
+}
+
 export function availableCTAsForReceiver(roleId, event, ctx = {}) {
   // dispatches defaults to empty rather than throwing. A caller that
   // omits it gets the same answer as a caller on an event with nothing
@@ -526,6 +553,19 @@ export function availableCTAsForReceiver(roleId, event, ctx = {}) {
   // else to send a unit does not require owning one.
   let out = ctas;
   if (!_receiverAssetSpec) {
+    out = out.filter(c => !PHYSICAL_DISPATCH_ACTIONS.has(c.action));
+  }
+
+  // An agency that is not an actor at this site does not dispatch to it.
+  //
+  // Scoped to the stub actions, NOT to receiver-dispatch, and that is a
+  // measured decision rather than an oversight. Extending it to the real
+  // asset lane changes 28 roles instead of 4 and strips every hospital,
+  // because hospitals are actors at no site at all: they are reached
+  // through medical consequence routing, not through a site's actor
+  // list. The actor test is the right gate for "can you send a unit
+  // here" and the wrong gate for "were you called in".
+  if (!_siteAllowsRoleToDispatch(event, roleId, ctx.siteReceivers)) {
     out = out.filter(c => !PHYSICAL_DISPATCH_ACTIONS.has(c.action));
   }
 

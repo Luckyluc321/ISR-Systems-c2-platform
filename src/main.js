@@ -24457,6 +24457,9 @@ async function main() {
     return availableCTAsForReceiver(roleId, event, {
       rec, isAcked, isActive,
       dispatches: Array.from(_counterDispatches.values()),
+      // Who the site declares as its responders, so the gate can tell an
+      // actor from an observer.
+      siteReceivers: SITES[event?.siteId]?.receivers,
     });
   }
 

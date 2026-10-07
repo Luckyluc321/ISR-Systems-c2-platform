@@ -69,6 +69,7 @@ assignArchetypes(RECEIVERS);
 const { availableCTAsForReceiver, PHYSICAL_DISPATCH_ACTIONS }
   = await import(join(ROOT, 'src/receiver_ctas.js'));
 const { RECEIVER_ASSETS } = await import(join(ROOT, 'src/receiver_assets.js'));
+const { SITES: SITE_REGISTRY } = await import(join(ROOT, 'src/sites_registry.js'));
 
 const WRITE = process.argv.includes('--write');
 const CATEGORIES = new Set(['dispatch', 'request', 'case', 'audit']);
@@ -129,7 +130,8 @@ function evFor(role, m) {
       classification: m.classification, threat: m.threat, platform: m.platform,
       escalations: rec ? [rec] : [], wreckages, participants,
     },
-    ctx: { rec, isAcked: m.isAcked, isActive: m.isActive, dispatches },
+    ctx: { rec, isAcked: m.isAcked, isActive: m.isActive, dispatches,
+           siteReceivers: SITE_REGISTRY[m.siteId]?.receivers },
   };
 }
 

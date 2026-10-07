@@ -316,23 +316,23 @@
   ],
   "brs-hedehusene": [
    "ack:case,receiver-dispatch:dispatch,brs-standby:dispatch,brs-deploy:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "ack:case,receiver-dispatch:dispatch,brs-standby:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
+   "ack:case,receiver-dispatch:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-promote:case,add-note:audit",
    "receiver-dispatch:dispatch,brs-standby:dispatch,brs-deploy:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
    "receiver-dispatch:dispatch,brs-standby:dispatch,brs-deploy:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "receiver-dispatch:dispatch,brs-standby:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
-   "receiver-dispatch:dispatch,brs-standby:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
+   "receiver-dispatch:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
+   "receiver-dispatch:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
   ],
   "brs-naestved": [
    "ack:case,receiver-dispatch:dispatch,brs-standby:dispatch,brs-deploy:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "ack:case,receiver-dispatch:dispatch,brs-standby:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
+   "ack:case,receiver-dispatch:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-promote:case,add-note:audit",
    "receiver-dispatch:dispatch,brs-standby:dispatch,brs-deploy:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
    "receiver-dispatch:dispatch,brs-standby:dispatch,brs-deploy:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "receiver-dispatch:dispatch,brs-standby:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
-   "receiver-dispatch:dispatch,brs-standby:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
+   "receiver-dispatch:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
+   "receiver-dispatch:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
   ],
   "brs-herning": [
    "ack:case,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
@@ -344,12 +344,15 @@
   "brs-haderslev": [
    "ack:case,receiver-dispatch:dispatch,brs-standby:dispatch,brs-deploy:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "ack:case,receiver-dispatch:dispatch,brs-standby:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
+   "ack:case,receiver-dispatch:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-promote:case,add-note:audit",
    "receiver-dispatch:dispatch,brs-standby:dispatch,brs-deploy:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
    "receiver-dispatch:dispatch,brs-standby:dispatch,brs-deploy:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "receiver-dispatch:dispatch,brs-standby:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
-   "receiver-dispatch:dispatch,brs-standby:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
+   "receiver-dispatch:dispatch,brs-standby:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
+   "receiver-dispatch:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
+   "receiver-dispatch:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
   ],
   "brs-allinge": [
    "ack:case,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
@@ -360,13 +363,13 @@
   ],
   "brs-thisted": [
    "ack:case,receiver-dispatch:dispatch,brs-standby:dispatch,brs-deploy:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "ack:case,receiver-dispatch:dispatch,brs-standby:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
+   "ack:case,receiver-dispatch:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
    "observer-promote:case,add-note:audit",
    "receiver-dispatch:dispatch,brs-standby:dispatch,brs-deploy:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
    "receiver-dispatch:dispatch,brs-standby:dispatch,brs-deploy:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
-   "receiver-dispatch:dispatch,brs-standby:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
-   "receiver-dispatch:dispatch,brs-standby:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
+   "receiver-dispatch:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,add-note:audit",
+   "receiver-dispatch:dispatch,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit"
   ],
   "brs-kemisk": [
    "ack:case,cascade-politi:request,cascade-fe-pet:request,cascade-any:request,observer-add:audit,respond-open:case,update-status:case,cascade-reject:case,add-note:audit",
