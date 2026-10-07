@@ -5766,7 +5766,19 @@ async function main() {
           return Cesium.Color.fromCssColorString('#4dd2ff').withAlpha(0.30 + 0.20 * phase);
         }, false)),
         outlineWidth: 1.4,
-        height: 0,
+        // CLAMP_TO_GROUND, not height: 0.
+        //
+        // height: 0 is sea level on the ellipsoid, not the ground. Every
+        // Danish site we cover sits above it — Copenhagen Airport by
+        // about five metres — so the ring floated below the surface. Head
+        // on that is invisible. Tilt the camera or zoom in and the
+        // vertical gap projects into horizontal drift, and the ring
+        // visibly detaches from the unit it belongs to.
+        //
+        // The sensor dots hit this and were fixed; the rings were not.
+        // Their comment above still reads "because the point rendered on
+        // top of everything at sea-level height".
+        heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
       },
     });
   }
@@ -11737,7 +11749,14 @@ async function main() {
           outline: true,
           outlineColor: ringColor,
           outlineWidth: isAircraft ? 2.5 : 2,
-          height: 0,
+          // Ground, not sea level. See the radiation ring above: an
+          // ellipse at height 0 sits below the terrain and slides away
+          // from its anchor as soon as the camera tilts.
+          //
+          // Aircraft rings are the one case where this is arguable, since
+          // the subject is airborne. They mark where it is ON THE GROUND
+          // for a reader scanning the apron, so they clamp too.
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
         },
         properties: { debrief: true },
       }));
