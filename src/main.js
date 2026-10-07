@@ -4613,7 +4613,14 @@ async function main() {
   // demo profiles are tuned for readable pacing (~10 s per engagement).
   const CD_PROFILE = {
     'helicopter-intercept': {
-      enduranceMin: 150,        // crewed helicopter sortie, hours not minutes
+      // 4h40m. Denmark's Helicopter Wing Karup flies 14 AW101 Merlin,
+      // whose published maximum endurance is 4 hours 50 minutes, and
+      // more with auxiliary tanks. My first figure was 150 minutes,
+      // which is roughly half, and Lucas caught it.
+      //
+      // Set slightly under the maximum because nobody plans a sortie to
+      // dry tanks, not because the airframe cannot do it.
+      enduranceMin: 280,
       cruiseKmh: 250, arriveAtM: 500, engageSec: 8,
       onboardSensorRangeM: 800,   // EO/IR turret, longest onboard reach
       icon: 'helicopter', trail: true, airborne: true,
@@ -4653,7 +4660,10 @@ async function main() {
       label: 'ISR drone (visual verify)',
     },
     'sof-tactical': {
-      enduranceMin: 120,        // crewed rotary insertion
+      // Crewed rotary insertion. Same order as the Merlin above, held
+      // lower because a special forces lift is a shorter task than a
+      // search and rescue orbit, not because the aircraft is smaller.
+      enduranceMin: 200,
       cruiseKmh: 200, arriveAtM: 400, engageSec: 15,
       icon: 'sof', trail: true, airborne: true,
       label: 'SOF tactical response',
