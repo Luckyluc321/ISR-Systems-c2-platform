@@ -19,6 +19,7 @@
 import { ARCHETYPE_LABELS } from './archetypes.js';
 import { subsectionsForContributor, renderAllSubsections } from './report_subsections.js';
 import { chapterVisibilityFor, VISIBILITY } from './visibility.js';
+import { roleOwnsDestination } from './agency_ownership.js';
 
 // ── Formatting helpers ──────────────────────────────────────────
 
@@ -57,7 +58,7 @@ export function roleWasInvolved(role, event) {
   if (Array.isArray(event.escalations)) {
     for (const r of event.escalations) {
       if (r.initiatedByRoleId === rid) return true;
-      if (r.destinationId === rid) return true;
+      if (roleOwnsDestination(rid, r.destinationId)) return true;
     }
   }
   if (Array.isArray(event.counterDispatches)) {
@@ -115,7 +116,7 @@ function _firstTouchTimestamp(role, event) {
   if (Array.isArray(event.escalations)) {
     for (const r of event.escalations) {
       if (r.initiatedByRoleId === rid) consider(r.initiatedAt);
-      if (r.destinationId === rid) consider(r.initiatedAt);
+      if (roleOwnsDestination(rid, r.destinationId)) consider(r.initiatedAt);
     }
   }
   if (Array.isArray(event.counterDispatches)) {
@@ -184,7 +185,14 @@ function _blockIdentifier(role) {
 
 function _blockSituationReceived(role, event) {
   const rid = role.id;
-  const inbound = (event.escalations || []).filter(r => r.destinationId === rid);
+// A destination id is not a role id. Comparing them directly is true
+// only for the 27 site-independent endpoints, so an agency whose only
+// involvement was receiving a site-scoped escalation read as never
+// having been on the case: absent from the contributor list, zero in
+// CASCADES IN, zero in RESPONSES SENT. roleOwnsDestination resolves the
+// endpoint to its owning agency first and keeps the id-equal case as a
+// shortcut.
+  const inbound = (event.escalations || []).filter(r => roleOwnsDestination(rid, r.destinationId));
   const outbound = (event.escalations || []).filter(r => r.initiatedByRoleId === rid);
   const dispatchesFired = (event.counterDispatches || []).filter(cd => cd.ownerRoleId === rid);
 
@@ -279,7 +287,7 @@ function _blockInvolvementSummary(role, event) {
   const dispatchesOwned = (event.counterDispatches || []).filter(cd => cd.ownerRoleId === rid);
   const dispatchesOpen = dispatchesOwned.filter(cd => cd.state && cd.state !== 'complete' && cd.state !== 'rtb-complete');
   const escInitiated = (event.escalations || []).filter(r => r.initiatedByRoleId === rid);
-  const escReceived = (event.escalations || []).filter(r => r.destinationId === rid);
+  const escReceived = (event.escalations || []).filter(r => roleOwnsDestination(rid, r.destinationId));
   const escResponded = escReceived.filter(r => r.response || (Array.isArray(r.responses) && r.responses.length));
 
   let catalogAuthored = 0;
@@ -345,7 +353,7 @@ function _blockTimelineSlice(role, event) {
           detail: `Initiated cascade to ${esc(r.destinationId || 'unknown')}`,
         });
       }
-      if (r.destinationId === rid) {
+      if (roleOwnsDestination(rid, r.destinationId)) {
         if (r.initiatedAt) rows.push({
           ts: r.initiatedAt,
           kind: 'cascade-in',

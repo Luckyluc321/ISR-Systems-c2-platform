@@ -21,6 +21,8 @@
 // object directly (not the id) so this module stays free of a
 // circular import to events.js. Returns a plain object attached by
 // the caller as event.postIncidentReport.
+import { ownerRoleIdForDestination } from './agency_ownership.js';
+
 export function buildPostIncidentReport(event, { getDestination = null } = {}) {
   if (!event) return null;
   const generatedAt = new Date().toISOString();
@@ -206,12 +208,12 @@ export function buildChainPostIncidentReport(events, chainSummary, { getDestinat
     };
     for (const r of (ev.escalations || [])) {
       noteRole(r.initiatedByRoleId);
-      // destinationId is a destination id, not a role id — resolver
-      // handles the destination → owner-role map if provided
-      if (r.destinationId && getDestination) {
-        const dest = getDestination(r.destinationId);
-        if (dest?.ownerRoleId) noteRole(dest.ownerRoleId);
-      }
+      // A destinationId is a destination id, not a role id. This used
+      // to resolve the destination and read dest.ownerRoleId, a field no
+      // destination has ever carried, so the compensation documented
+      // here never once executed and contributor presence was
+      // under-counted for every site-scoped escalation.
+      if (r.destinationId) noteRole(ownerRoleIdForDestination(r.destinationId));
     }
     for (const cd of (ev.counterDispatches || [])) {
       noteRole(cd.ownerRoleId);

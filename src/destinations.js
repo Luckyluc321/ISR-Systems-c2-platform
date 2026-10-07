@@ -1032,6 +1032,19 @@ export function groupByParent(destinations) {
     });
 }
 
+// Every destination, as a snapshot.
+//
+// A copy rather than the array itself, so a caller cannot mutate the
+// registry by accident. Note that DESTINATIONS is mutated IN PLACE when
+// a saved override loads (length = 0 then push), so array identity is
+// stable and a caller holding the live reference would not go stale —
+// the copy is about write protection, not about identity.
+//
+// It does mean a snapshot taken before an override or a runtime edit is
+// out of date afterwards. Subscribe to onDestinationsChange if you hold
+// one, as agency_ownership does.
+export function allDestinations() { return DESTINATIONS.slice(); }
+
 export function getDestination(id) {
   return DESTINATIONS.find(d => d.id === id);
 }

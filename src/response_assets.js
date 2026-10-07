@@ -15,7 +15,11 @@
 //   'representative'    — plausible attribution for demo purposes, not
 //                         claiming operational deployment
 
-const ASSETS = [
+// Exported so the id-namespace gate can import the real array rather
+// than regex this file. Nothing in the app should read ASSETS directly:
+// use the query functions below, which carry the ranking and filtering
+// rules an asset list is useless without.
+export const ASSETS = [
   // ── Politi (National Police) — 12 districts + national HQ ──
   { id: 'politi-kbh',     name: 'Københavns Politi',          kind: 'police',   lat: 55.6767, lon: 12.5687, response: 'Patrol dispatch' },
   { id: 'politi-vestegn', name: 'Københavns Vestegns Politi', kind: 'police',   lat: 55.6521, lon: 12.5117, response: 'Patrol dispatch' },

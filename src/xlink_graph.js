@@ -32,6 +32,8 @@
 // for the graph contract.
 // ═══════════════════════════════════════════════════════════════════
 
+import { roleOwnsDestination } from './agency_ownership.js';
+
 // ── Graph build ────────────────────────────────────────────────
 
 // Build the undirected graph over the given events. Returns:
@@ -283,17 +285,23 @@ function _summariseChain(chainId, memberEvents) {
   };
 }
 
-// Same authorship check as chapter_composer.roleWasInvolved but
-// duplicated here to keep xlink_graph independent from the
-// chapter composer (avoids a circular import + lets xlink_graph
-// live upstream of the composer in future refactors).
+// Same authorship check as chapter_composer.roleWasInvolved. Kept as a
+// separate function so xlink_graph stays independent of the composer,
+// but it has to AGREE with it. The comment this replaces promised the
+// numbers align with the incident report panel; once the composer began
+// joining through destination ownership and this did not,
+// rolePresenceInChain quietly started under-counting against the panel
+// it claims to match.
+//
+// agency_ownership sits over three leaf data modules and imports nothing
+// else, so this introduces no cycle. The file is otherwise pure.
 
 function _roleTouchedEvent(event, roleId) {
   if (!event || !roleId) return false;
   if (Array.isArray(event.escalations)) {
     for (const r of event.escalations) {
       if (r.initiatedByRoleId === roleId) return true;
-      if (r.destinationId === roleId) return true;
+      if (roleOwnsDestination(roleId, r.destinationId)) return true;
     }
   }
   if (Array.isArray(event.counterDispatches)) {

@@ -762,6 +762,7 @@ const STUB_DISPATCH_ACTIONS = new Set([
   'hjv-reinforce',
   'region-ambulance-standby', 'region-triage-prep',
 ]);
+import { ownerRoleIdForAsset } from './agency_ownership.js';
 import { AisShipRenderer, AirspaceRenderer, TrafficEventRenderer } from './sovereign_renderers.js';
 import { fetchDanishAirspaces } from './sovereign_services.js';
 import {
@@ -26038,45 +26039,34 @@ async function main() {
       }
       else if (action === 'other-agency-request') {
         // Send a request to the owning role of a specific asset.
-        // Strategy: the asset id in response_assets.js embeds the
-        // owning role's id as a prefix (e.g. flv-karup-helo-intercept
-        // owned by role flv-karup, sof-aalborg-jaeger owned by role
-        // sof-aalborg or similar). Progressive prefix match on the
-        // dash-separated tokens finds the longest matching role id.
-        // Fall back to a kind-based reverse lookup on
-        // ROLE_DISPATCH_SCOPE_LOOKUP if no prefix match resolves.
+        //
+        // Ownership is declared in src/agency_ownership.js. It used to be
+        // guessed here by walking the asset id's dash-separated tokens
+        // and taking the longest prefix that happened to be a role id,
+        // on the assumption that an asset id embeds its owner's. It does
+        // not. 28 of 41 resolved to something and 8 of those were wrong:
+        // every police district whose pool id differs from its role id
+        // collapsed to the national Politi parent, as did both
+        // Rigspolitiet interceptor teams. The other 13 fell through to a
+        // kind-based fallback that returned the first role whose dispatch
+        // scope contained the kind, so Bornholm's and Oksbøl's army
+        // assets requested Slagelse. All silent.
+        //
+        // The four Home Guard assets still resolve to hjv, as they did
+        // before. Hjemmeværnet is modelled as one role here, so that is
+        // correct rather than a collapse.
         const eventId = id || _selectedReceiverEventId || _workspaceEventId;
         const assetId = el.dataset.assetId;
         if (!eventId || !assetId) { toast('Missing event or asset context.', 'err'); return; }
         const ev = getEvent(eventId);
         if (!ev) { toast('Event not found.', 'err'); return; }
-        // Progressive prefix match: try flv-karup-helo-intercept, then
-        // flv-karup-helo, then flv-karup, then flv. First hit wins.
-        const tokens = assetId.split('-');
-        let targetRole = null;
-        for (let n = tokens.length; n >= 1; n--) {
-          const candidate = tokens.slice(0, n).join('-');
-          const match = RECEIVERS.find(r => r.id === candidate);
-          if (match) { targetRole = match; break; }
-        }
-        // Fallback: reverse-lookup by asset kind via ROLE_DISPATCH_SCOPE_LOOKUP.
-        // Find any role whose dispatch scope includes this asset's kind.
-        if (!targetRole) {
-          const bundle = ev.subject
-            ? responseBundleForSubject(ev.subject, ev.lastPosition?.lat || 0, ev.lastPosition?.lon || 0)
-            : responseBundle(ev.lastPosition?.lat || 0, ev.lastPosition?.lon || 0);
-          const assetInBundle = [...(bundle.tactical || []), ...(bundle.ground || []), ...(bundle.consequence || [])]
-            .find(a => a.id === assetId);
-          const assetKind = assetInBundle?.kind;
-          if (assetKind) {
-            for (const [roleId, scope] of Object.entries(_ROLE_DISPATCH_SCOPE_LOOKUP)) {
-              if (scope.has(assetKind)) {
-                const candidateRole = RECEIVERS.find(r => r.id === roleId);
-                if (candidateRole) { targetRole = candidateRole; break; }
-              }
-            }
-          }
-        }
+        const _ownerId = ownerRoleIdForAsset(assetId);
+        // ACCOUNTS, not RECEIVERS. Two assets are owned by an operator
+        // rather than a receiver — the wildlife team belongs to the
+        // airport itself — and searching only receivers returned
+        // undefined for them, which surfaced as "could not resolve
+        // owning profile" on an asset whose owner is recorded correctly.
+        const targetRole = _ownerId ? ACCOUNTS.find(r => r.id === _ownerId) : null;
         if (!targetRole) {
           toast(`Could not resolve owning profile for ${assetId}.`, 'err');
           return;
