@@ -169,41 +169,58 @@ export const ASSETS = [
     verified: 'representative',
     source: 'Inner-city Copenhagen protection posture, representative for demo' },
 
-  // Rigspolitiet National C-UAS Response Team. Copenhagen HQ.
-  // Deployable nationwide, patrol-mounted + fixed jammers.
-  { id: 'politi-national-cuas', name: 'Rigspolitiet · National C-UAS Response Team',
+  // Rigspolitiet national drone response. Copenhagen HQ, deployable
+  // nationwide.
+  //
+  // NO EQUIPMENT IS CLAIMED HERE, and that is deliberate. This entry used
+  // to describe a "specialised patrol vehicle with heavy RF-jamming
+  // array". Danish police do have the statutory authority to neutralise a
+  // drone, including disrupting radio communications, under
+  // retsplejeloven § 791 c, and lov om radiofrekvenser exempts them from
+  // licensing for exactly that. What is NOT public is the equipment, the
+  // team structure, or whether any of it is vehicle-mounted. We invented
+  // the hardware.
+  //
+  // It is also the wrong thing for this platform to say. ISR detects and
+  // informs; the authority decides and acts. Specifying a responder's
+  // counter-measures puts us on the wrong side of that line even when the
+  // guess is flattering.
+  //
+  // So the units are distinguished by SCALE and JURISDICTION, which are
+  // real and observable, rather than by kit we cannot see.
+  { id: 'politi-national-cuas', name: 'Rigspolitiet · National drone response',
     kind: 'police-c-uas', lat: 55.6867, lon: 12.5680,
-    response: 'Patrol-mounted C-UAS jamming + drone kit',
+    response: 'National-level police drone response',
     verified: 'representative',
-    source: 'Danish Police C-UAS capability publicly acknowledged; team structure representative',
-    // Team-specific overrides so the two Politi options don't show
-    // identical copy in the Mission Console. Only C-UAS-specialised
-    // units are equipped for this response, not standard patrols.
+    source: 'Police authority to neutralise drones is statutory (retsplejeloven § 791 c, '
+      + 'politiloven). Unit structure and equipment are not public and are representative.',
     includesOverride: [
-      'Specialised patrol vehicle with heavy RF-jamming array (national kit)',
-      'Cruises to intercept point at ~90 km/h with sirens',
-      'Deploys own drone kit for visual verify',
-      'Coordinates with Air Force + FE if platform is peer-military',
-      'Arrest team on scene if operator located',
+      'National response unit, deployable to any district',
+      'Drives to the scene under blue light',
+      'Own drone for visual confirmation',
+      'Coordinates with Forsvaret where the platform may be military',
+      'Arrest team on scene if the operator is located',
     ],
-    deployedForOverride: 'National-level threats requiring specialised C-UAS package. Cross-jurisdictional incursions, VIP protection, state-level intelligence-linked cases. First-choice unit when the local district lacks C-UAS specialisation.',
-    tradeoffsOverride: 'Larger footprint than local patrol. National mobilisation adds coordination overhead. Held for cases the local district cannot handle alone.',
+    deployedForOverride: 'National-level incidents: cross-jurisdictional incursions, protection of persons, cases with a state-level intelligence dimension. First call when the local district asks for national support.',
+    tradeoffsOverride: 'Slower to arrive than the local district and carries national mobilisation overhead. Held for cases a district cannot handle alone.',
   },
 
   // Copenhagen Politi C-UAS team. Metro Copenhagen coverage.
-  { id: 'politi-kbh-cuas', name: 'Københavns Politi · C-UAS patrol team',
+  { id: 'politi-kbh-cuas', name: 'Københavns Politi · District drone response',
     kind: 'police-c-uas', lat: 55.6767, lon: 12.5687,
-    response: 'Metro Copenhagen C-UAS + drone team',
+    response: 'District-level police drone response, Copenhagen',
     verified: 'representative',
     source: 'Major-city police C-UAS team is standard practice, specific team not public',
+    // Same rule as the national unit above: scale and jurisdiction, not
+    // equipment. This said "handheld RF jam plus small drone kit".
     includesOverride: [
-      'Local C-UAS-equipped patrol vehicle (compact kit)',
-      'Fast urban response inside Copenhagen district boundaries',
-      'Handheld RF jam plus small drone kit',
-      'Direct handoff to local investigation unit for arrest',
+      'District patrol unit, Copenhagen only',
+      'Fast urban response inside the district boundary',
+      'Own drone for visual confirmation',
+      'Direct handoff to the local investigation unit for arrest',
     ],
-    deployedForOverride: 'District-level airport perimeter incidents and small drone incursions inside Copenhagen. First response for CPH airport perimeter events, Christiansborg district events, and central-Copenhagen protection sweeps.',
-    tradeoffsOverride: 'Not equipped for peer-military threats. Scope limited to Copenhagen district. Standard patrols WITHOUT C-UAS training are not part of this response option.',
+    deployedForOverride: 'District-level incidents inside Copenhagen: airport perimeter events, Christiansborg district events, central-Copenhagen sweeps.',
+    tradeoffsOverride: 'District scope only, and it escalates to the national unit rather than handling a cross-jurisdictional or military-grade platform itself.',
   },
 
   // ══════════════════════════════════════════════════════════════
@@ -428,8 +445,12 @@ export const RESPONSE_OPTION_DETAILS = {
       'EH-101 Merlin or AS550 Fennec airborne from Karup',
       'Airborne within ~12 minutes',
       'Orbits threat for observation + shadowing',
-      'Optional door-mounted C-UAS jam assist',
-      'Real-time relay to ground C-UAS team',
+      // Was "optional door-mounted C-UAS jam assist". Same invention as
+      // the police block above: the airframes are confirmed, the kit
+      // bolted onto them was ours. A helicopter's value here is that it
+      // sees and follows, which needs no claim.
+      'Holds the aircraft in view while it moves',
+      'Real-time relay to the ground unit',
     ],
     deployedFor: 'Slow to medium-speed aerial threats. Especially valuable at rural sites where ground C-UAS mobilisation exceeds 30 minutes. Serves as airborne C2 for coordinated multi-asset response.',
     tradeoffs: 'Commits 1 airframe + 4 crew for ~90 min. Not appropriate for cruise missile intercept (closure rate too high).',
@@ -457,21 +478,40 @@ export const RESPONSE_OPTION_DETAILS = {
       { id: 'contact_lost', label: 'Contact lost', description: 'Threat exited coverage before engagement outcome could be assessed.' },
     ],
   },
+  // This block is what renders for any police unit without its own
+  // override, so it is the copy most readers actually see.
+  //
+  // IT CLAIMS NO EQUIPMENT, deliberately. It used to describe a "patrol
+  // vehicle with mounted C-UAS gear" carrying "on-site RF jam and small
+  // drone kit". Danish police do hold the statutory authority to
+  // neutralise a drone, including disrupting its radio link, under
+  // retsplejeloven § 791 c, with an explicit licensing exemption in lov
+  // om radiofrekvenser. The authority is real. The hardware was ours.
+  //
+  // It is also not ours to specify. ISR detects and informs; the
+  // authority decides and acts. Describing a responder's counter-measures
+  // crosses that line, and a customer who does operate this equipment
+  // will know immediately that we guessed.
+  //
+  // What stays is what any reader can verify: a unit from the district,
+  // how it travels, that it can confirm visually, and that it can arrest.
+  // Capability differences between units come from their own inventory in
+  // receiver_assets.js, not from adjectives here.
   'police-c-uas': {
-    displayName: 'Police Counter-Drone Patrol',
+    displayName: 'Police Drone Response',
     includes: [
-      'Patrol vehicle with mounted C-UAS gear from district HQ',
-      'Drives to intercept point at ~80 km/h',
-      'On-site RF jam and small drone kit',
-      'Arrest capability if operator located',
+      'Police unit dispatched from the district',
+      'Drives to the scene under blue light',
+      'Own drone for visual confirmation',
+      'Can detain the operator if located',
     ],
-    deployedFor: 'Small drone incursions, unauthorised hobby aircraft, jurisdictional response inside police district. Standard first response for airport perimeter incidents.',
-    tradeoffs: 'Slower than airborne assets. Effective mainly against single or small groups, not coordinated swarms.',
+    deployedFor: 'Drone incursions inside a police district, including unauthorised hobby aircraft. Standard first response for an airport perimeter incident.',
+    tradeoffs: 'Slower to arrive than anything airborne, and scoped to one district. Suited to a single aircraft or a small group rather than a coordinated swarm.',
     outcomes: [
-      { id: 'operator_detained', label: 'Operator located and detained', description: 'Ground-based operator apprehended; drone recovered and secured as evidence.' },
-      { id: 'link_disrupted', label: 'Command link disrupted', description: 'RF jam successful; threat lost control before operator could be located.' },
-      { id: 'operator_fled', label: 'Operator fled jurisdiction', description: 'Ground team arrived; operator no longer at launch site.' },
-      { id: 'no_track', label: 'No track located', description: 'Threat exited before patrol arrival; case referred to intelligence.' },
+      { id: 'operator_detained', label: 'Operator located and detained', description: 'Operator apprehended on the ground. Aircraft recovered and secured as evidence.' },
+      { id: 'link_disrupted', label: 'Command link disrupted', description: 'Reported by the responding agency: the aircraft lost control before the operator was located. The means are the agency\'s to record, not ours to assume.' },
+      { id: 'operator_fled', label: 'Operator fled jurisdiction', description: 'Unit arrived. Operator no longer at the launch site.' },
+      { id: 'no_track', label: 'No track located', description: 'Aircraft departed before the unit arrived. Case referred to intelligence.' },
     ],
   },
   'army-isr-drone': {
