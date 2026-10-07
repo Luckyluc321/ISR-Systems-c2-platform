@@ -5769,6 +5769,43 @@ async function main() {
   // it by accident and have it apply to every unit.
   const _NO_TUNING = Object.freeze({});
 
+
+  // The airframe's own axes in Cesium model space, measured from
+  // mi-24_hind.glb rather than assumed from a convention. Front wheel at
+  // glTF Z +4.52 and tail rotor at Z -6.54 put the nose on glTF +Z, and
+  // Cesium's Y-up to Z-up conversion maps that to -Y. Up is +Z, so the
+  // right wing is nose cross up = -X.
+  const _HELI_NOSE = new Cesium.Cartesian3(0, -1, 0);
+  const _HELI_RIGHT = new Cesium.Cartesian3(-1, 0, 0);
+  const _tiltScratchA = new Cesium.Quaternion();
+  const _tiltScratchB = new Cesium.Quaternion();
+  const _tiltScratchC = new Cesium.Quaternion();
+
+  /**
+   * A rotor node's spin this frame, about its own disc axis. Cesium
+   * composes this onto the node's rest pose, so it is the turn alone.
+   *
+   * Driven off monoNow(), so the blades stop with the simulation and do
+   * not jump on resume. Cesium's own animation system cannot drive them
+   * here: it advances model animations off viewer.clock.currentTime, and
+   * this app pins that clock with shouldAnimate = false so the sun holds
+   * position for the lighting. That is why the file's own rotor clip
+   * never played, and turning the clock on to fix it would start the sun
+   * moving, which is day-mode behaviour and off limits.
+   *
+   * Modulo a full turn so the angle stays small no matter how long the
+   * session runs, rather than growing until float precision coarsens it.
+   */
+  function _rotorSpin(axis, rps) {
+    const angle = ((monoNow() / 1000) * rps * Math.PI * 2) % (Math.PI * 2);
+    // A FRESH quaternion, deliberately, not a shared scratch. Cesium
+    // reads every node transformation into one bag and only then applies
+    // them, so two rotors returning the same scratch object would both
+    // end up holding whichever value was evaluated last, and one of them
+    // would spin about the other's axis.
+    return Cesium.Quaternion.fromAxisAngle(axis, angle, new Cesium.Quaternion());
+  }
+
   function _createCounterDispatchEntities(d) {
     const iconCanvas = _counterDispatchIcon(d.profile.icon);
     if (!iconCanvas) return;
@@ -5778,11 +5815,16 @@ async function main() {
     // quad entities). Only these two icons qualify — 'sof' and
     // 'fighter' style interceptors have their own airframe class.
     const _INT_MODEL_SWAP_M = 250;
-    // A helicopter is about 20 m across where an interceptor quad is
-    // about 1 m, so its model is worth drawing from twenty times further
-    // out. Tunable because the right number is a judgement about when the
-    // model stops being worth its frame cost, not a fact.
-    const _HELI_MODEL_SWAP_M = (window.__isr_heli_tuning || {}).swapM ?? 1500;
+    // Where the helicopter stops being a model and becomes a map symbol.
+    //
+    // This was 1500 m and that was far too close. The model is 4.5 MB and
+    // 4237 triangles, which is nothing, and the flat billboard is the
+    // thing that reads badly, so there is no reason to fall back to it
+    // until the aircraft is genuinely a speck. At 1500 m the first thing
+    // you saw on any normal zoom was the billboard, which is why the
+    // helicopter looked tiny and flat and had no turning blades: none of
+    // that was the model, because the model was not being drawn.
+    const _HELI_MODEL_SWAP_M = (window.__isr_heli_tuning || {}).swapM ?? 12000;
     const _isQuadInterceptor = d.profile.airborne
       && (d.profile.icon === 'quadcopter' || d.profile.icon === 'counter-drone-interceptor');
     const _isHelicopter = d.profile.airborne && d.profile.icon === 'helicopter';
@@ -5928,29 +5970,69 @@ async function main() {
       const _hT = () => window.__isr_heli_tuning || _NO_TUNING;
       _entitySpec.model = {
         uri: '/aircraft/mi-24_hind.glb',
-        // Roughly life-size at 1. The file carries its own 0.839 root
-        // scale and measures about 23 m nose to tail, against a real
-        // 21.5 m, so it is artist-accurate rather than survey-accurate.
-        scale: _hT().scale ?? 1,
-        // Keeps it visible as a shape rather than a speck while the
-        // billboard is still suppressed.
-        minimumPixelSize: _hT().minimumPixelSize ?? 48,
+        // Life size. Walking the node tree and transforming every mesh
+        // bounding box through the full matrix chain, the model draws
+        // 18.19 m across the rotor disc by 19.18 m nose to tail, against
+        // a real Mi-24 at 17.30 m and 21.50 m. 1.121 puts the long axis
+        // on the real number.
+        scale: _hT().scale ?? 1.121,
+        // Floor, so it stays a readable shape at map ranges instead of
+        // shrinking to a dot. Above this distance physics would make it
+        // sub-pixel, and a map symbol you cannot see is not a symbol.
+        minimumPixelSize: _hT().minimumPixelSize ?? 64,
         maximumScale: 20000,
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, _HELI_MODEL_SWAP_M),
         shadows: Cesium.ShadowMode.DISABLED,
-        // The rotors turn because the file animates them: Top_Rotor and
-        // Tail_Rotor each carry a rotation channel, 159 keyframes over
-        // 6.4 s. This is the first dispatch model that animates itself,
-        // so nothing here drives the blades by hand.
+        // The file's own animation clip is NOT used, and cannot be.
         //
-        // Known cosmetic artifact: the file ships ONE clip, named
-        // 'Wheels and Rotor', and the undercarriage channels sit in it
-        // alongside the rotor ones. The entity model API plays a clip
-        // whole or not at all, so the gear retracts and extends on the
-        // same 6.4 s loop. Stripping the wheel channels from the GLB is
-        // the fix and it is a change to the asset, so it is not done
-        // here unasked.
-        runAnimations: true,
+        // Cesium advances model animations off viewer.clock.currentTime,
+        // and this app pins that clock and sets shouldAnimate = false so
+        // the sun holds position for the lighting. So the clip never
+        // advanced and the blades never moved. Turning the clock on
+        // would start the sun moving, which is day-mode behaviour and
+        // off limits.
+        //
+        // So the two rotors are driven directly instead, below, off the
+        // simulation clock. That also fixes the artifact the clip had:
+        // its single 'Wheels and Rotor' clip animated the undercarriage
+        // alongside the blades, and a clip plays whole or not at all, so
+        // the gear would have cycled up and down forever. Driving the
+        // two nodes by hand touches the blades and nothing else.
+        runAnimations: false,
+        // SPIN ONLY, with an identity translation and scale.
+        //
+        // Cesium composes a node transformation onto the node's own
+        // matrix rather than replacing it:
+        //
+        //   modelNode.matrix = originalMatrix * transformationMatrix
+        //
+        // (ModelVisualizer, CesiumUnminified index.js, the getNode loop.)
+        // So the rest pose is already applied and anything supplied here
+        // is applied ON TOP, in the node's own local frame. Passing the
+        // node's real translation would therefore offset each rotor
+        // twice and fly the blades off the airframe, and passing its
+        // rest rotation would double the mast tilt. Both looked like the
+        // obviously careful thing to do and both are wrong.
+        //
+        // Identity translation and scale, and a pure spin, gives exactly
+        // "rest pose, then turn the disc in its own plane".
+        nodeTransformations: {
+          Top_Rotor: {
+            translation: Cesium.Cartesian3.ZERO,
+            scale: new Cesium.Cartesian3(1, 1, 1),
+            // Local Y is the thin axis of the disc: the mesh spans 23.65
+            // in X and 22.90 in Z against 2.42 in Y, so Y is the mast.
+            rotation: new Cesium.CallbackProperty(
+              () => _rotorSpin(Cesium.Cartesian3.UNIT_Y, _hT().rotorRps ?? 3), false),
+          },
+          Tail_Rotor: {
+            translation: Cesium.Cartesian3.ZERO,
+            scale: new Cesium.Cartesian3(1, 1, 1),
+            // Local X here: 0.57 thin against 5.02 and 5.20.
+            rotation: new Cesium.CallbackProperty(
+              () => _rotorSpin(Cesium.Cartesian3.UNIT_X, _hT().tailRotorRps ?? 9), false),
+          },
+        },
       };
 
       // Nose down in cruise, and bank into the turn.
@@ -5994,7 +6076,24 @@ async function main() {
         _prevH = d.heading;
         _prevT = nowS;
 
-        const heading = (d.heading || 0) + (((T.headingOffsetDeg || 0) * Math.PI) / 180);
+        // HEADING ONLY through Cesium's HeadingPitchRoll, with the tilt
+        // applied separately below. That split is the whole point.
+        //
+        // Cesium's pitch and roll assume the nose lies along the model's
+        // +X. This model's nose lies along -Y, measured from the file:
+        // the tail rotor mesh sits at Z -6.54 and the front wheel at
+        // Z +4.52, so the nose is +Z in glTF, which Cesium's Y-up to
+        // Z-up conversion turns into -Y. Feeding tilt to Cesium's pitch
+        // and roll therefore rotated the aircraft about the wrong axes,
+        // which is what "flying sideways" was.
+        //
+        // 180 for the same reason. At heading 0 a nose on -Y points due
+        // SOUTH, so the aircraft flew tail first down its own track.
+        const heading = (d.heading || 0)
+          + (((T.headingOffsetDeg ?? 180) * Math.PI) / 180);
+        const headingQ = Cesium.Transforms.headingPitchRollQuaternion(
+          cart, new Cesium.HeadingPitchRoll(heading, 0, 0));
+
         // Flat, not cruise-scaled. The interceptor above scales its
         // pitch by Math.min(1, cruiseMs / 15), and I copied that shape
         // before checking the only profile that reaches here:
@@ -6004,21 +6103,25 @@ async function main() {
         // of a few degrees in forward flight, and it is a transport
         // helicopter rather than an attack dive, so it stays small.
         const fwd = ((T.forwardPitchDeg ?? 7) * Math.PI) / 180;
-        let pitch = -fwd + (((T.pitchOffsetDeg || 0) * Math.PI) / 180);
-        let roll = _bank + (((T.rollOffsetDeg || 0) * Math.PI) / 180);
+        const pitch = fwd - (((T.pitchOffsetDeg || 0) * Math.PI) / 180);
+        const roll = _bank + (((T.rollOffsetDeg || 0) * Math.PI) / 180);
 
-        // Insurance, and an honest one. Cesium's heading/pitch/roll
-        // assumes the nose lies along +X; a glTF model's nose lands on
-        // +Y. Whether that leaves pitch and roll swapped for THIS file
-        // depends on a root matrix and a Body transform I could not
-        // settle analytically, having got it wrong three times trying.
-        // If the nose tips sideways and the bank tips it forward, set
-        // window.__isr_heli_tuning = { swapPitchRoll: true } and it is
-        // corrected without a rebuild.
-        if (T.swapPitchRoll) { const t = pitch; pitch = roll; roll = t; }
-
-        return Cesium.Transforms.headingPitchRollQuaternion(
-          cart, new Cesium.HeadingPitchRoll(heading, pitch, roll));
+        // Tilt about the model's OWN axes, which are known exactly
+        // rather than assumed:
+        //
+        //   nose       -Y   (_HELI_NOSE)
+        //   right wing -X   (_HELI_RIGHT, = nose cross up, up being +Z)
+        //
+        // Signs follow from the right-hand rule on those two, and both
+        // are pinned by the behaviour test:
+        //   positive about the nose  -> right wing drops -> right bank
+        //   positive about the wing  -> nose rises, so nose-down is the
+        //                               positive `pitch` term negated
+        //                               into the rotation below.
+        const bankQ = Cesium.Quaternion.fromAxisAngle(_HELI_NOSE, roll, _tiltScratchA);
+        const pitchQ = Cesium.Quaternion.fromAxisAngle(_HELI_RIGHT, -pitch, _tiltScratchB);
+        const tilt = Cesium.Quaternion.multiply(bankQ, pitchQ, _tiltScratchC);
+        return Cesium.Quaternion.multiply(headingQ, tilt, new Cesium.Quaternion());
       }, false);
     }
     d.entity = viewer.entities.add(_entitySpec);
