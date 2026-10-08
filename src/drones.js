@@ -939,6 +939,10 @@ export const TEMPLATES = {
   // place, which is why the date is written down.
   billund_geran2_north: {
     siteId: 'billund',
+    // Spawns ~4 km south of BLL-N01, outside every ring. Undetected
+    // and invisible until it crosses into coverage, detected on
+    // entry, closed on exit by the ordinary single-site chain.
+    coverageGated: true,
     classification: 'hostile',
     threat: 'high',
     platform: 'loitering-munition',
@@ -987,6 +991,10 @@ export const TEMPLATES = {
   // August 2026. There was no figure to stand behind.
   billund_geran4_north: {
     siteId: 'billund',
+    // Spawns ~4 km south of BLL-N01, outside every ring. Undetected
+    // and invisible until it crosses into coverage, detected on
+    // entry, closed on exit by the ordinary single-site chain.
+    coverageGated: true,
     classification: 'hostile',
     threat: 'high',
     platform: 'loitering-munition',
@@ -1033,6 +1041,10 @@ export const TEMPLATES = {
   // slower than the figures suggest.
   billund_geran5_north: {
     siteId: 'billund',
+    // Spawns ~4 km south of BLL-N01, outside every ring. Undetected
+    // and invisible until it crosses into coverage, detected on
+    // entry, closed on exit by the ordinary single-site chain.
+    coverageGated: true,
     classification: 'hostile',
     threat: 'high',
     platform: 'loitering-munition',

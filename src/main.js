@@ -6387,6 +6387,9 @@ async function main() {
       let _prevH = null;
       let _prevT = null;
       let _bank = 0;
+      let _prevAlt = null;
+      let _prevAltTs = null;
+      let _climbPitch = 0;
       _entitySpec.orientation = new Cesium.CallbackProperty(() => {
         const cart = _positionCb.getValue?.(Cesium.JulianDate.now());
         if (!cart) return undefined;
@@ -6451,7 +6454,36 @@ async function main() {
         // Negative pitch is nose down and positive roll drops the right
         // wing, both pinned by the same test rather than assumed.
         const fwd = ((T.forwardPitchDeg ?? 7) * Math.PI) / 180;
-        const pitch = -fwd + (((T.pitchOffsetDeg || 0) * Math.PI) / 180);
+
+        // Attitude follows the CLIMB, not the other way round.
+        //
+        // A helicopter does not climb by pointing its nose up. It climbs
+        // on collective, more lift off the rotor disc, and the fuselage
+        // holds its attitude and rises. What actually changes in a
+        // climbing transit is that it carries LESS nose-down than in
+        // level cruise, because it is trading forward speed for climb.
+        // Descending, it carries more.
+        //
+        // So the nose-down is eased off in proportion to vertical rate
+        // rather than a pitch-up being added. At the full 8 m/s it goes
+        // roughly level; at full descent it tucks a few degrees further
+        // down. Measured here by diffing curAlt between frames, the same
+        // way the bank is measured, so the tick is untouched.
+        let climbEase = 0;
+        if (_prevAlt != null && _prevAltTs != null) {
+          const dt = nowS - _prevAltTs;
+          if (dt > 0 && dt < 1) {
+            const rate = ((d.curAlt || 0) - _prevAlt) / dt;   // m/s, signed
+            const full = d.profile?.climbRateMs || 8;
+            _climbPitch += (Math.max(-1, Math.min(1, rate / full)) - _climbPitch)
+              * Math.min(1, dt * 2);
+          }
+        }
+        _prevAlt = d.curAlt;
+        _prevAltTs = nowS;
+        climbEase = _climbPitch;
+
+        const pitch = -fwd * (1 - climbEase) + (((T.pitchOffsetDeg || 0) * Math.PI) / 180);
         const roll = _bank + (((T.rollOffsetDeg || 0) * Math.PI) / 180);
         return Cesium.Transforms.headingPitchRollQuaternion(
           cart, new Cesium.HeadingPitchRoll(heading, pitch, roll));
@@ -15321,7 +15353,7 @@ async function main() {
       // "still detected" state that the operator can't see the source of.
       const VIS_BUFFER_M = 0;
       let inAnyCoverage = null;
-      if (event.multiSiteTrack || event.templateKey === 'cruise_missile_to_amalienborg') {
+      if (event.coverageGatedTrack || event.templateKey === 'cruise_missile_to_amalienborg') {
         inAnyCoverage = false;
         let bestSid = null;
         let bestDist = Infinity;
@@ -16759,15 +16791,34 @@ async function main() {
       // unknown → identified transition without real NN in the loop.
       dynamicClassification: !!template.dynamicClassification,
       mockConfidenceRamp: !!template.mockConfidenceRamp,
-      // multiSiteTrack: object is invisible outside sensor coverage, visible
-      // only when inside a sensor ring. Set by template.multiSite OR the
-      // legacy cruise missile key. Any multi-site scenario (swarm, missile)
-      // should declare template.multiSite = true.
+      // multiSiteTrack: this track belongs to MORE THAN ONE site, so the
+      // per-site lifecycle in _handlePerSiteLifecycle owns its entries,
+      // exits and closure. The single-site auto-close chain is suppressed
+      // for it, because that chain would close the group event the first
+      // time the object left any one site.
+      //
+      // This flag is ONLY about who owns the lifecycle. It used to also
+      // mean "coverage-gated", and the two came apart the moment a track
+      // needed one without the other: a single-site transit that spawns
+      // outside the ring. Conflated, declaring the transit multi-site to
+      // get the coverage gate silently handed its closure to a per-site
+      // path that never ran, and dropping the flag to get closure back
+      // silently handed it detection-at-spawn. Hence two flags.
       multiSiteTrack: !!template.multiSite || templateKey === 'cruise_missile_to_amalienborg',
-      // For multi-site tracks: hold detection state until the tick loop
-      // confirms the object has entered a sensor's coverage. Single-site
-      // events fire immediately (spawned inside their site's coverage).
-      detected: (!!template.multiSite || templateKey === 'cruise_missile_to_amalienborg') ? false : true,
+      // coverageGatedTrack: the object is INVISIBLE AND UNDETECTED outside
+      // every sensor radius, and becomes detected on first coverage entry.
+      // This is the universal sensor rule; sensors observe, they do not
+      // know. multiSite implies it, so every existing template is
+      // unchanged, and a single-site template can now ask for it alone via
+      // template.coverageGated.
+      //
+      // A template that spawns outside coverage MUST set one of the two.
+      // Without either, `detected` starts true and the operator gets a
+      // detection event for an object no sensor can hear.
+      coverageGatedTrack: !!template.multiSite || !!template.coverageGated
+        || templateKey === 'cruise_missile_to_amalienborg',
+      detected: (!!template.multiSite || !!template.coverageGated
+        || templateKey === 'cruise_missile_to_amalienborg') ? false : true,
       // Peak cardinality of the incident. A 5-drone swarm is ONE event
       // (one lifecycle) but its history record must not read as a
       // single-drone incident — precedent_index buckets this into
@@ -20749,7 +20800,7 @@ async function main() {
     // Both states render as sections instead of the live-telemetry
     // block. The panel below (lastPosition telemetry) is skipped when
     // either fires so the operator isn't looking at stale fields.
-    const preIngress = e.multiSiteTrack && !e.detected && isActive;
+    const preIngress = e.coverageGatedTrack && !e.detected && isActive;
     const temporaryLoss = isActive
       && e.temporaryLoss
       && e.temporaryLoss.classification === 'hiding';
