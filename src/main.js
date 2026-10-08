@@ -6829,6 +6829,156 @@ async function main() {
   window.__isr_dispatchFix = _consoleFix;
   window.__isr_dispatchTelemetry = _dispatchTelemetryStats;
 
+  // ── Dev tool: a REAL drone inbound at a dispatched unit ──────────
+  //
+  // __isr_gunTest drives a synthetic marker, which proves the traverse
+  // maths but is not an engagement. This spawns an actual threat on the
+  // real event pipeline, flying in from the site toward whatever
+  // helicopter is airborne, and keeps the unit's target pointed at its
+  // live position so the gun tracks the thing you can see.
+  //
+  //   window.__isr_inbound()                       // slow quad, 25 s lead-in
+  //   window.__isr_inbound({ speedKmh: 120, delaySec: 40 })
+  //   window.__isr_inbound.stop()
+  //
+  // Simulation-only. It registers a template at runtime, which is the
+  // same mechanism the scenario packs already use.
+  let _inboundState = null;
+
+  function _inboundStop() {
+    if (!_inboundState) return;
+    const { unit, priorLat, priorLon } = _inboundState;
+    if (unit) { unit.targetLat = priorLat; unit.targetLon = priorLon; }
+    _inboundState = null;
+  }
+
+  window.__isr_inbound = (opts = {}) => {
+    _inboundStop();
+    if (anyTrackLive()) {
+      console.warn('[inbound] a track is already live — close it first');
+      toast('Inbound: close the live track first', 'warn');
+      return;
+    }
+    const unit = [..._counterDispatches.values()]
+      .find((d) => d.profile?.icon === 'helicopter' && d.curLat != null);
+    if (!unit) {
+      console.warn('[inbound] no helicopter airborne — dispatch one first');
+      toast('Inbound: dispatch a helicopter first', 'warn');
+      return;
+    }
+    const siteId = opts.siteId ?? 'billund';
+    const site = SITES[siteId];
+    if (!site) { console.warn('[inbound] no such site', siteId); return; }
+
+    // Start over the site and fly at the helicopter. Offset the start so
+    // it approaches from a flank rather than head-on: a target closing
+    // straight down the nose barely moves the gun, and watching the
+    // traverse is the whole point.
+    const speedKmh = opts.speedKmh ?? 70;          // slow, as asked
+    // It must pass BESIDE the helicopter, not through it. A track that
+    // flies over the exact position has its relative bearing flip 180
+    // degrees in one step at the midpoint, so the gun snaps instead of
+    // sweeping and the whole point is lost. A miss distance makes the
+    // bearing change continuously.
+    const missM = opts.missM ?? 450;
+    const legKm = opts.legKm ?? 0.9;               // each side of closest approach
+
+    // Run the track along the site-to-helicopter line, so it genuinely
+    // comes in from the airport, and slide it sideways by the miss.
+    const inbound = _bearingRad(site.lat, site.lon, unit.curLat, unit.curLon);
+    const mPerDegLon = 111000 * Math.cos(unit.curLat * Math.PI / 180);
+    const closestLat = unit.curLat + (Math.cos(inbound + Math.PI / 2) * missM) / 111000;
+    const closestLon = unit.curLon + (Math.sin(inbound + Math.PI / 2) * missM) / mPerDegLon;
+    const halfM = legKm * 1000;
+    const startLat = closestLat - (Math.cos(inbound) * halfM) / 111000;
+    const startLon = closestLon - (Math.sin(inbound) * halfM) / mPerDegLon;
+    const endLat = closestLat + (Math.cos(inbound) * halfM) / 111000;
+    const endLon = closestLon + (Math.sin(inbound) * halfM) / mPerDegLon;
+    const durationSec = Math.round((halfM * 2) / ((speedKmh * 1000) / 3600));
+    const headingDeg = ((((inbound * 180) / Math.PI) % 360) + 360) % 360;
+    const STEPS = 16;
+    const waypoints = [];
+    for (let i = 0; i <= STEPS; i++) {
+      const f = i / STEPS;
+      waypoints.push({
+        lat: startLat + (endLat - startLat) * f,
+        lon: startLon + (endLon - startLon) * f,
+        alt: Math.round(unit.curAlt || 60),
+        heading: Math.round(headingDeg),
+        tSec: Math.round(durationSec * f),
+      });
+    }
+
+    const key = 'dev_inbound_target';
+    TEMPLATES[key] = {
+      siteId,
+      classification: 'hostile',
+      threat: 'high',
+      platform: opts.platform ?? 'quadcopter',
+      droneType: opts.droneType ?? 'Unidentified quadcopter (simulated inbound)',
+      confidence: 0.82,
+      confidenceTrend: 'Simulated inbound for gun-traverse testing',
+      contributingSensors: (site.sensors || []).slice(0, 3)
+        .map((sn, i) => ({ id: sn.id, confidence: 0.86 - i * 0.07 })),
+      evidence: {
+        rfCarrier: '2.412 GHz', rfBandwidth: '20 MHz OFDM',
+        rfMatch: 'OcuSync 84%', modality: 'RF + acoustic',
+        evidenceSize: '18.4 MB',
+        note: 'DEV TOOL. Injected by window.__isr_inbound to fly a real '
+          + 'track past a dispatched helicopter so the door gun has '
+          + 'something to traverse onto. Not a scenario.',
+      },
+      waypoints,
+      durationSec,
+    };
+
+    const delaySec = opts.delaySec ?? 25;
+    toast(`Inbound armed: ${speedKmh} km/h from ${site.name || siteId}, `
+      + `launching in ${delaySec}s`, 'ok');
+    console.log(`[inbound] ${durationSec}s transit at ${speedKmh} km/h, `
+      + `passing the helicopter at the midpoint. Launches in ${delaySec}s.`);
+
+    let announced = -1;
+    const countdown = () => {
+      const left = Math.ceil(delaySec - (monoNow() - armedAt) / 1000);
+      if (left > 0) {
+        if (left !== announced && (left <= 5 || left % 10 === 0)) {
+          announced = left;
+          toast(`Inbound launches in ${left}s`, 'info');
+        }
+        requestAnimationFrame(countdown);
+        return;
+      }
+      window.__spawnDrone(key);
+      const eventId = _inboundFindEvent(key);
+      _inboundState = { unit, eventId, priorLat: unit.targetLat, priorLon: unit.targetLon };
+      const follow = () => {
+        if (!_inboundState) return;
+        const ev = eventId ? getEvent(eventId) : null;
+        const pos = ev?.lastPosition || ev?.lastKnownPosition;
+        if (pos && pos.lat != null) {
+          unit.targetLat = pos.lat;
+          unit.targetLon = pos.lon;
+        }
+        if (ev && ev.status !== 'active') { _inboundStop(); return; }
+        requestAnimationFrame(follow);
+      };
+      follow();
+    };
+    const armedAt = monoNow();
+    countdown();
+  };
+  window.__isr_inbound.stop = _inboundStop;
+
+  /** Newest event spawned from a template key, or null. */
+  function _inboundFindEvent(key) {
+    const all = filteredEvents({ filter: 'all' }) || [];
+    for (let i = all.length - 1; i >= 0; i--) {
+      if (all[i]?.templateKey === key) return all[i].id;
+    }
+    return null;
+  }
+
   // ── Dev tool: fly a target past the door gun ────────────────────
   //
   // The gun traverses onto whatever the unit is engaging, and in an
