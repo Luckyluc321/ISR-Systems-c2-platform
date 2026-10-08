@@ -803,7 +803,6 @@ import { buildCordon, assignPatrols, clearCordonCache } from './perimeter.js';
 import { loadSiteLights, loadNationalLights, bucketByRadiance, LIGHT_STYLES, LIGHT_CLASSES } from './night_infrastructure_lights.js';
 import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from './runway_lighting.js';
 import { beamPassAimPoint, beamPassIntercept, pickTrackSide, BEAM_PASS_STANDOFF_M } from './intercept.js';
-import { onboardSensorHold } from './onboard_sensor.js';
 import { isSimulatedTrack, trailMaxPoints, shouldAppendTrailPoint, shouldShowTrail,
   shouldAppendBreadcrumb, shouldShowBreadcrumb, BREADCRUMB_POINTS_MAX } from './trail_policy.js';
 
@@ -15703,29 +15702,9 @@ async function main() {
         // every frame and the operator sees the drone floating in front
         // of their camera. Same _povActive gate the swarm branch uses.
         const povSuppressed = !!state._singleDronePovRef?._povActive;
-        // Our own aircraft's turret counts as a sensor.
-        //
-        // This test used to implement exactly two: the ground mesh and
-        // a friendly missile's seeker. So an MH-60R could hold this
-        // contact on its EO/IR at 800 m, lay the door gun onto it, and
-        // the operator sitting in that aircraft's own view saw nothing,
-        // because Billund's rings do not reach 40 km up the Jutland
-        // spine. The gun swung at an empty sky. Not a stricter reading
-        // of sensors-observe-only, just an incomplete list of sensors.
-        //
-        // An onboard hold also outranks closedAt, because the aircraft
-        // genuinely sees it: the site's event is closed and reported,
-        // and the thing is still there in front of the gun. RENDERING
-        // ONLY — detection state and the event lifecycle are untouched
-        // and still keyed on the ground mesh.
-        const _onboardHeld = onboardSensorHold({
-          dispatches: _counterDispatches.values(),
-          eventId: event.id, lat: p.lat, lon: p.lon,
-        }) != null;
-        const shouldShow = (leadDown || povSuppressed) ? false
-          : ((state.closedAt && !_onboardHeld)
-            ? false
-            : (leadInCov || beingChased || _onboardHeld));
+        const shouldShow = (leadDown || povSuppressed) ? false : (state.closedAt
+          ? false
+          : (leadInCov || beingChased));
         state.billboard.show = shouldShow;
         state.shadow.show = shouldShow && !povSuppressed;
         // Also hide the lead's trail polyline once the lead is dead —
