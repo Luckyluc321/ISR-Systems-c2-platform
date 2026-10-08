@@ -5998,16 +5998,30 @@ async function main() {
    * gives phi 0 and the gun does not move, dead ahead gives 90 and it
    * points at the nose, starboard gives 180.
    *
-   * CLAMPED, because that 180 would swing the barrel and the gunner
-   * straight through the cabin and out the far side. A door gun covers
-   * its own side plus some of the front and rear quarters, so traverse
-   * stops at 75 degrees either way and he holds at the stop, which is
-   * what actually happens when a target crosses behind the aircraft.
+   * CLAMPED, and the limit comes from THIS DOOR rather than from
+   * doctrine. It was 75 degrees, which is a plausible-sounding number
+   * for a pintle and is wrong here: the opening spans Y -370..-250, so
+   * 60 units either side of the pivot, and the barrel crosses the skin
+   * 40 units outboard of it. Swinging phi puts the barrel off centre by
+   * 40*tan(phi) at that crossing:
+   *
+   *     phi 30   ->  23 units    inside the frame
+   *     phi 45   ->  40          inside
+   *     phi 50   ->  48          at the edge
+   *     phi 75   -> 149          straight through the fuselage
+   *
+   * At 75 it was two and a half times outside the opening, which is why
+   * it appeared to be firing through the cabin at the pilots. 50 is the
+   * hard geometric limit; 45 leaves margin for the receiver and the
+   * gunner's shoulders, both of which are wider than the barrel.
+   *
+   * Beyond the arc he holds at the stop, which is what actually happens
+   * when a target crosses outside a door gun's field of fire.
    *
    * Eased off the simulation clock, so it tracks rather than snaps and
    * stops when the scenario is paused.
    */
-  const _GUN_TRAVERSE_LIMIT = (75 * Math.PI) / 180;
+  const _GUN_TRAVERSE_LIMIT = (45 * Math.PI) / 180;
 
   function _gunTargetOf(d) {
     if (d.assignedTargetCoord) return d.assignedTargetCoord;
@@ -6855,7 +6869,12 @@ async function main() {
     }
     const radiusM = opts.radiusM ?? 500;
     const durationSec = opts.durationSec ?? 60;
-    const sweepRad = ((opts.sweepDeg ?? 300) * Math.PI) / 180;
+    // 160 rather than 300. The arc the gun can actually cover is 90
+    // degrees wide, so a 300-degree sweep spends most of its time
+    // parked against a stop and reads as "the gun is broken". 160
+    // enters outside the arc, crosses the whole of it, and leaves
+    // outside, so you see both stops AND the full tracking range.
+    const sweepRad = ((opts.sweepDeg ?? 160) * Math.PI) / 180;
     // Start on the gun's own side so the first thing you see is it
     // already bearing, then sweep forward across the arc and past the
     // stop, which shows the clamp holding as well as the tracking.
