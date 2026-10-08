@@ -2941,6 +2941,23 @@ async function main() {
   viewer.clock.shouldAnimate = false;   // freeze the moment; flip to true if we want live sun movement
 
   // ── Camera + scene styling ──
+  //
+  // DECLARED HERE, immediately before its first use, and not down with
+  // the other model constants where it started. It is read on this line
+  // during main()'s body, and a `const` further down the same body is
+  // hoisted but NOT initialised until its own line runs, so it threw
+  // "Cannot access 'MIN_ZOOM_M' before initialization" and took the
+  // whole app with it.
+  //
+  // Note this is a different failure from the TURN_RATE_RAD_S one
+  // earlier, and the check that caught that one does NOT catch this.
+  // Grepping dist/ for a surviving identifier proves it RESOLVED; it
+  // says nothing about whether it is initialised by the time it is
+  // read. TURN_RATE_RAD_S was safe to declare late only because its
+  // reader is a render callback that runs long after main() finishes.
+  // This one is read inline. The build was green either way; the dev
+  // server console is what named it.
+  const MIN_ZOOM_M = 2;
   const controller = viewer.scene.screenSpaceCameraController;
   // How close the camera may get to what it is looking at.
   //
@@ -5861,9 +5878,6 @@ async function main() {
   // the helicopter's 6 km because the jet is larger and travels much
   // further from the viewer.
   const F35_MODEL_SWAP_M = 15000;
-
-  // Closest the camera may approach. See the note where it is applied.
-  const MIN_ZOOM_M = 2;
 
   /**
    * World-space forward vector for a billboard that must point at a bearing.
