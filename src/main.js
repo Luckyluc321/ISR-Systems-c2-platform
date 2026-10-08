@@ -5815,6 +5815,35 @@ async function main() {
   // Shahed stays a sixth of a helicopter at every range.
   const MODEL_MAX_EXAGGERATION = 4;
 
+  // Shahed life size, and it was not before.
+  //
+  // The scale was 1.3, which drew the airframe at 1.27 m. A Shahed-136
+  // or -238 is 3.5 m long. So it rendered at about a THIRD of size, and
+  // on the map a 3.5 m loitering munition sat barely larger than a 1 m
+  // interceptor quad when it should be three and a half times bigger.
+  // Relative size is the first thing an operator reads off a contact,
+  // which is the whole reason the pixel floors are derived from real
+  // metres a few lines up, and this quietly undid it for the one
+  // airframe most likely to matter.
+  //
+  // 3.5 / 0.978, the model's longest axis measured over its real
+  // vertices rather than its bounding boxes. The longest axis IS the
+  // fuselage: the mesh is 0.978 by 0.676, a ratio of 1.45, against a
+  // real 3.5 by 2.5, a ratio of 1.40. Length wins on every published
+  // figure for both variants, so there is no risk of having scaled the
+  // wingspan by mistake.
+  //
+  // Figures are open-source estimates from wreckage analysis, not a
+  // manufacturer datasheet, and the -238's span is published at 3 m
+  // against the -136's 2.5 m. The length, which is what this scales, is
+  // 3.5 m for both.
+  const SHAHED_SCALE = 3.579;
+
+  // Where the F-35 stops being a model and becomes a symbol. Larger than
+  // the helicopter's 6 km because the jet is larger and travels much
+  // further from the viewer.
+  const F35_MODEL_SWAP_M = 15000;
+
 
 
   /**
@@ -9275,7 +9304,46 @@ async function main() {
         heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
         rotation: new Cesium.CallbackProperty(() => -_f35.heading, false),
+        // Symbol beyond the model swap only, so the two are never drawn
+        // at the same place. Same split as the helicopter and the quad.
+        distanceDisplayCondition:
+          new Cesium.DistanceDisplayCondition(F35_MODEL_SWAP_M, Number.POSITIVE_INFINITY),
       },
+      model: {
+        uri: '/aircraft/f-35a_lightning_ii.glb',
+        // Life size. The model measures 28.849 long over its real
+        // vertices, against a published 15.70 m, so 0.544.
+        //
+        // Measured on LENGTH, deliberately. By total width this model
+        // looks wrong, 28.85 by 25.31, a ratio of 1.14 where a real
+        // F-35A is 1.47. It is not wrong: four small objects sit at
+        // X +-11.1 to +-12.7, outboard of the 20.13-wide airframe, and
+        // they are wingtip stores. Bare airframe is 28.85 by 20.13, a
+        // ratio of 1.43 against the real 1.47. At this scale the
+        // airframe spans 10.96 m against a real 10.70 m, and the
+        // missiles stand proud of that, which is what they do.
+        scale: 0.544,
+        // 15.70 m x MODEL_PX_PER_M, so it floors in proportion to every
+        // other airframe rather than to a number picked by eye.
+        minimumPixelSize: Math.round(15.70 * MODEL_PX_PER_M),
+        maximumScale: 0.544 * MODEL_MAX_EXAGGERATION,
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, F35_MODEL_SWAP_M),
+        shadows: Cesium.ShadowMode.DISABLED,
+        // The file carries one 20-channel clip on its armature nodes,
+        // gear and control surfaces. It is NOT run: Cesium advances model
+        // animations off viewer.clock, which this app pins so the sun
+        // holds still for the lighting, so the clip would never advance
+        // anyway. Left off explicitly rather than appearing to work.
+        runAnimations: false,
+      },
+      orientation: new Cesium.CallbackProperty(() => {
+        const cart = Cesium.Cartesian3.fromDegrees(_f35.curLon, _f35.curLat, 0);
+        // -90 for the same reason as the helicopter: Cesium's heading 0
+        // puts a glTF nose on EAST in an east-north-up frame, so a
+        // compass bearing needs a quarter turn back to north.
+        const hpr = new Cesium.HeadingPitchRoll((_f35.heading || 0) - Math.PI / 2, 0, 0);
+        return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
+      }, false),
     });
   }
 
@@ -14205,7 +14273,7 @@ async function main() {
         // Shahed uses 1:1 world scale for the ~3m wingspan. The
         // assault-drone GLB reads small at 1:1 — quad tuning object
         // exposes the scale factor.
-        scale: isLoiterMun ? 1.3 : (_qT.scale ?? 0.5),
+        scale: isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5),
         minimumPixelSize: isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20),
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
         shadows: Cesium.ShadowMode.DISABLED,
@@ -14441,7 +14509,7 @@ async function main() {
           const _qT = window.__isr_quad_tuning || {};
           _swEntitySpec.model = {
             uri: _modelUri,
-            scale: isLoiterMun ? 1.3 : (_qT.scale ?? 0.5),
+            scale: isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5),
             minimumPixelSize: isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20),
             distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
             shadows: Cesium.ShadowMode.DISABLED,
