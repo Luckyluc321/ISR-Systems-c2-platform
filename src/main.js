@@ -4678,6 +4678,11 @@ async function main() {
       cruiseKmh: 250, arriveAtM: 500, engageSec: 8,
       onboardSensorRangeM: 800,   // EO/IR turret, longest onboard reach
       icon: 'helicopter', trail: true, airborne: true,
+      // Rounds leave from the left cabin door, where the gunner is
+      // modelled, not from the middle of the airframe. Metres to the
+      // left of the track. No other profile sets this, so no other
+      // unit's fire moves.
+      muzzleSideOffsetM: 5,
       label: 'Helicopter intercept',
     },
     'army-c-uas': {
@@ -6187,6 +6192,32 @@ async function main() {
             scale: new Cesium.Cartesian3(1, 1, 1),
             rotation: new Cesium.CallbackProperty(
               () => _rotorSpin(Cesium.Cartesian3.UNIT_X, _hT().tailRotorRps ?? 18), false),
+          },
+          // Door gunner. Built rather than sourced, by
+          // scripts/add_door_gunner.py, so there is no licence question
+          // on it. 168 triangles of boxes: seated crew leaning into a
+          // pintle-mounted 12.7 mm, which is the armament Danish MH-60Rs
+          // are reported with. See src/armament.js.
+          //
+          // The translation here is a NUDGE, not the position. Cesium
+          // composes a node transformation onto the node's own matrix,
+          // so this adds to the [-140, -90, 150] baked into the file. I
+          // placed that by measuring the fuselage rather than by looking
+          // at it, so it may want moving:
+          //
+          //   window.__isr_heli_tuning = { gunnerOffset: [0, -20, 10] }
+          //
+          // in model units, roughly 111 to the metre. +X outboard,
+          // -Y toward the nose, +Z up.
+          Door_Gunner: {
+            translation: new Cesium.CallbackProperty(() => {
+              const o = _hT().gunnerOffset;
+              return Array.isArray(o)
+                ? new Cesium.Cartesian3(o[0] || 0, o[1] || 0, o[2] || 0)
+                : Cesium.Cartesian3.ZERO;
+            }, false),
+            scale: new Cesium.Cartesian3(1, 1, 1),
+            rotation: Cesium.Quaternion.IDENTITY,
           },
         },
       };
@@ -7950,6 +7981,33 @@ async function main() {
     }
   }
 
+  /**
+   * Where a unit's rounds actually leave from.
+   *
+   * Most units fire from their own point, which is fine for a patrol car
+   * or an interceptor drone the size of the muzzle flash. A helicopter is
+   * 20 m across with the gun in a side door, so firing from its centre
+   * reads as the fuselage itself shooting.
+   *
+   * Only offsets units that have a modelled gun position. Everything
+   * else returns its own coordinates unchanged, so nothing that looked
+   * right before moves.
+   */
+  function _muzzleOffsetFor(d) {
+    const side = d.profile?.muzzleSideOffsetM;
+    if (!side) return { lat: d.curLat, lon: d.curLon };
+    const h = d.heading || 0;
+    // Left of the track. Heading's unit vector is (sin, cos) in
+    // (east, north); rotating it 90 degrees anticlockwise gives
+    // (-cos, sin).
+    const dEast = -Math.cos(h) * side;
+    const dNorth = Math.sin(h) * side;
+    return {
+      lat: d.curLat + dNorth / 111000,
+      lon: d.curLon + dEast / (111000 * Math.cos(d.curLat * Math.PI / 180)),
+    };
+  }
+
   // Machine-gun burst — 4 rapid tracer rounds over ~280ms + muzzle
   // flash at interceptor + impact flash at target. Fires at the
   // assigned specific drone, not the swarm centroid. Realistic
@@ -8009,7 +8067,20 @@ async function main() {
     const flashAlt = d.profile.airborne
       ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60)
       : 8;
-    _spawnFlashEntity(d.curLon, d.curLat, 300, '#ffdb4d', 7, 18, flashAlt);
+    // Fire from the GUN, not from the middle of the aircraft.
+    //
+    // The flash used to spawn at d.curLon/d.curLat, which is the
+    // airframe's own point, so a helicopter appeared to shoot out of its
+    // own belly. A door gun sits out on the left side of the cabin, and
+    // now that there is a gunner modelled in that doorway the mismatch
+    // is obvious.
+    //
+    // Offset is perpendicular to the heading, to the LEFT, matching the
+    // side the gunner is modelled on. Left of a bearing is bearing minus
+    // 90 degrees, so its unit vector is (-cos, sin) against the
+    // heading's (sin, cos).
+    const muzzle = _muzzleOffsetFor(d);
+    _spawnFlashEntity(muzzle.lon, muzzle.lat, 300, '#ffdb4d', 7, 18, flashAlt);
   }
 
   // Single tracer round — small-arms fire visual.
