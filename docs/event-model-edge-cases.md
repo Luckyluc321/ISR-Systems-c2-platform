@@ -128,6 +128,66 @@ Records live in the local IndexedDB. Two machines, two histories. The storage se
 
 ---
 
+### 17. Detection raised for a track outside every sensor ring — FIXED 2026-10-08
+
+The sensors-observe-only rule was enforced by one flag that also meant
+something else, so there were tracks it could not be asked for.
+
+`template.multiSite` carried two unrelated meanings:
+
+| Concern | What it does | Read at |
+|---|---|---|
+| Coverage gating | undetected and invisible outside every ring, detected on first entry | the multi-site coverage block in main.js |
+| Lifecycle ownership | suppress the single-site auto-close chain, because `_handlePerSiteLifecycle` owns entries and exits | four `!event.multiSiteTrack` conditions |
+
+A single-site transit that spawns outside coverage needs the first and
+not the second, and could get neither cleanly. Setting `multiSite` bought
+the coverage gate and handed closure to a per-site path that does not run
+for a single-site track, so the event never closed. Clearing it restored
+closure and silently bought detection-at-spawn, because the single-site
+branch assumes a template spawns inside its own coverage:
+
+```js
+// Single-site events fire immediately (spawned inside their site's coverage).
+detected: (!!template.multiSite || ...) ? false : true,
+```
+
+Now two fields. `multiSiteTrack` is lifecycle ownership only.
+`coverageGatedTrack` carries the sensor rule and is set by `multiSite` OR
+the new `template.coverageGated`. `multiSite` still implies it, so every
+pre-existing template evaluates identically and only a template that
+declares `coverageGated` changes behaviour. The four close-chain
+conditions still read `multiSiteTrack`.
+
+**Invariant for any new template:** if its first waypoint is outside every
+sensor ring of its own site, it MUST declare `multiSite` or
+`coverageGated`. Without either, the operator gets a detection event for
+an object no sensor can hear.
+
+### 18. Pre-existing templates that spawn outside coverage ungated — GAP-OPEN
+
+An audit of all 20 templates with waypoints, comparing each first
+waypoint against every sensor position and `coverage_radius_m` in its own
+site manifest, found seven that spawn outside all rings while declaring
+neither flag. They therefore raise a detection event before first
+contact, the same defect as case 17:
+
+| Template | Site | First waypoint outside nearest ring |
+|---|---|---|
+| `cph_missile_inbound_sw` | cph | 8.75 km |
+| `esbjerg_missile_hostile` | esbjerg | 2.40 km |
+| `esbjerg_fixedwing_hostile` | esbjerg | 1.61 km |
+| `cph_missile_hostile` | cph | 1.58 km |
+| `billund_missile_hostile` | billund | 1.17 km |
+| `cph_jet_friendly` | cph | 1.03 km |
+| `billund_fixedwing_hostile` | billund | 0.06 km |
+
+Not touched. These are long-standing scenarios whose timing, dispatch and
+narrative were tuned against the behaviour they have now, and gating them
+shifts first contact later for all of them. The one-line fix per template
+is `coverageGated: true`, but it is a deliberate per-scenario call, not a
+sweep.
+
 ## Recommended fix order
 
 1. **Case 13** (tenant filter in retrieval) — correctness + tenancy principle, smallest fix, do first
