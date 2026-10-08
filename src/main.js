@@ -802,6 +802,7 @@ import { fetchDrivingRoute, computeSegmentLengths, advanceAlongPolyline } from '
 import { buildCordon, assignPatrols, clearCordonCache } from './perimeter.js';
 import { loadSiteLights, loadNationalLights, bucketByRadiance, LIGHT_STYLES, LIGHT_CLASSES } from './night_infrastructure_lights.js';
 import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from './runway_lighting.js';
+import { beamPassAimPoint, beamPassIntercept, BEAM_PASS_STANDOFF_M } from './intercept.js';
 import { isSimulatedTrack, trailMaxPoints, shouldAppendTrailPoint, shouldShowTrail,
   shouldAppendBreadcrumb, shouldShowBreadcrumb, BREADCRUMB_POINTS_MAX } from './trail_policy.js';
 
@@ -4699,6 +4700,24 @@ async function main() {
       // dry tanks, not because the airframe cannot do it.
       enduranceMin: 280,
       cruiseKmh: 250, arriveAtM: 500, engageSec: 8,
+      // Fly a BEAM PASS, not a stern chase.
+      //
+      // The dispatch logic otherwise re-aims at the threat's current
+      // position every tick. Against a Geran-2 that closes at 18 m/s,
+      // so a 2 km gap takes nearly two minutes and only ever closes
+      // from behind, which is the one bearing a door gun can never
+      // engage: it fires to port inside a 45 degree traverse.
+      //
+      // With this set the aircraft solves for a point abeam the
+      // threat's track and arrives before it, so the threat crosses
+      // the gunner's arc at a steady standoff. Opt-in, so no other
+      // dispatch kind changes.
+      //
+      // trackSide +1 puts the aircraft RIGHT of the threat's track,
+      // which presents the threat off its port beam. See _muzzleOffsetFor,
+      // which offsets the muzzle to the left of the track.
+      beamPassStandoffM: BEAM_PASS_STANDOFF_M,
+      beamPassTrackSide: 1,
       // Declared HERE as well as in _SIM_INTERCEPTOR_PHYSICS because two
       // separate climb routines read two different sources: one takes
       // profile.climbRateMs with a fallback of 6, the other takes the
@@ -7528,9 +7547,45 @@ async function main() {
     // airframe is down.
     } else if (event?.lastPosition && !targetLost && !d.assignedWreckageId
                && !d.sceneWreckageId && !leavesSceneUnassisted(d.profile)) {
-      d.targetLat = event.lastPosition.lat;
-      d.targetLon = event.lastPosition.lon;
-      if (typeof event.lastPosition.alt === 'number') d.targetAlt = event.lastPosition.alt;
+      // Beam-pass aircraft solve for where the threat WILL be and go
+      // there. Everything else keeps pure pursuit, unchanged.
+      let _aimed = false;
+      if (d.profile.beamPassStandoffM && d.state === 'en_route'
+          && typeof event.lastPosition.heading === 'number'
+          && event.lastPosition.speed > 0) {
+        // Close on the threat at full speed, but aim a standoff to its
+        // right so the run-in ends ABEAM rather than astern. Not the
+        // simultaneous-arrival solve: that aims tens of km ahead and
+        // makes the meeting later, not sooner.
+        const ap = beamPassAimPoint({
+          targetLat: event.lastPosition.lat, targetLon: event.lastPosition.lon,
+          targetHeadingDeg: event.lastPosition.heading,
+          standoffM: d.profile.beamPassStandoffM,
+          trackSide: d.profile.beamPassTrackSide ?? 1,
+        });
+        d.targetLat = ap.lat;
+        d.targetLon = ap.lon;
+        if (typeof event.lastPosition.alt === 'number') d.targetAlt = event.lastPosition.alt;
+        // Whether this airframe can catch this threat at all. Reported,
+        // not acted on: a Geran-5 at 525 km/h outruns an MH-60R and the
+        // honest result is a tail chase it is losing.
+        const ip = beamPassIntercept({
+          chaserLat: d.curLat, chaserLon: d.curLon,
+          chaserSpeedMs: (d.profile.cruiseKmh || 0) / 3.6,
+          targetLat: event.lastPosition.lat, targetLon: event.lastPosition.lon,
+          targetHeadingDeg: event.lastPosition.heading,
+          targetSpeedMs: event.lastPosition.speed,
+          standoffM: d.profile.beamPassStandoffM,
+          trackSide: d.profile.beamPassTrackSide ?? 1,
+        });
+        d._interceptEtaS = ip ? ip.timeToInterceptS : null;
+        _aimed = true;
+      }
+      if (!_aimed) {
+        d.targetLat = event.lastPosition.lat;
+        d.targetLon = event.lastPosition.lon;
+        if (typeof event.lastPosition.alt === 'number') d.targetAlt = event.lastPosition.alt;
+      }
     }
 
     // Altitude interpolation for airborne interceptors — climb or
