@@ -927,11 +927,16 @@ export const TEMPLATES = {
   // no terminalImpact, because this is a transit, not a strike on a
   // site.
   //
-  // Two speeds on ONE route, the same pattern CPH already uses for its
-  // Geran family. Geran-2 is the piston article at 185 km/h, and 87
-  // minutes of it. Geran-3 is the jet variant and covers the same
-  // ground in 27, which is the one to reach for unless the real
-  // timeline is the point.
+  // Speeds are SOURCED, not chosen. The family splits sharply: piston
+  // Gerans sit near 180 km/h and jet Gerans at 320 and above, a step of
+  // roughly 3x rather than a gradient, which is what makes one route at
+  // several speeds worth having.
+  //
+  // All jet-variant performance originates from Ukrainian Defence
+  // Intelligence and is not independently verified. The Geran-4 engine
+  // is the exception, confirmed by trade press from a captured
+  // airframe. Retrieved October 2026, and that portal revises pages in
+  // place, which is why the date is written down.
   billund_geran2_north: {
     siteId: 'billund',
     classification: 'hostile',
@@ -970,13 +975,23 @@ export const TEMPLATES = {
     durationSec: 5210,
   },
 
-  // Same route, jet variant, roughly three times the speed.
-  billund_geran3_north: {
+  // Purpose-built Russian jet airframe. NOT a Shahed derivative and it
+  // carries no Shahed number, so it is not given one: it was designed
+  // around its engine after the Geran-2 airframe proved too weak for jet
+  // G loads. It is the only Geran with an official cruise figure cleanly
+  // separated from maximum speed, which is why it is modelled at cruise
+  // rather than at a headline number.
+  //
+  // Geran-3 was here and has been dropped. Its published speeds span 330
+  // to 600 km/h across sources, its own official page carries no
+  // specification table at all, and production is reported halted as of
+  // August 2026. There was no figure to stand behind.
+  billund_geran4_north: {
     siteId: 'billund',
     classification: 'hostile',
     threat: 'high',
     platform: 'loitering-munition',
-    droneType: 'Geran-3 (jet loitering munition)',
+    droneType: 'Geran-4 (jet loitering munition)',
     confidence: 0.71,
     confidenceTrend: 'Turbojet acoustic signature, no piston harmonics',
     multiSite: true,
@@ -987,24 +1002,75 @@ export const TEMPLATES = {
     ],
     evidence: {
       rfCarrier: '1616 MHz Iridium', rfBandwidth: 'narrowband burst',
-      rfMatch: 'Geran-3 modem signature 76%', modality: 'acoustic + RF',
+      rfMatch: 'Geran family modem signature 76%', modality: 'acoustic + RF',
       evidenceSize: '24.1 MB',
-      note: 'Same track as billund_geran2_north at jet speed.',
+      note: 'Jet loitering munition. Cruise 320 km/h, maximum 450 to 500, '
+        + '3.6 m long, 3.05 m span, 90 kg warhead. Chinese Telefly TF-TJ2000A '
+        + 'turbojet, confirmed by trade press from a captured airframe. '
+        + 'Performance figures: Ukrainian Defence Intelligence, Oct 2026.',
     },
     waypoints: [
       { lat: 55.7000, lon: 9.1300, alt: 600, heading: 356, tSec: 0 },
-      { lat: 55.8200, lon: 9.1150, alt: 750, heading: 357, tSec: 80 },
-      { lat: 56.0000, lon: 9.1000, alt: 900, heading: 358, tSec: 200 },
-      { lat: 56.2000, lon: 9.0900, alt: 900, heading: 0, tSec: 334 },
-      { lat: 56.4200, lon: 9.0900, alt: 900, heading: 4, tSec: 481 },
-      { lat: 56.6500, lon: 9.1200, alt: 900, heading: 10, tSec: 635 },
-      { lat: 56.9000, lon: 9.2000, alt: 900, heading: 18, tSec: 804 },
-      { lat: 57.1500, lon: 9.3500, alt: 850, heading: 28, tSec: 979 },
-      { lat: 57.4000, lon: 9.6000, alt: 800, heading: 36, tSec: 1169 },
-      { lat: 57.6200, lon: 9.9000, alt: 750, heading: 71, tSec: 1351 },
-      { lat: 57.7400, lon: 10.5800, alt: 700, heading: 71, tSec: 1606 },
+      { lat: 55.8200, lon: 9.1150, alt: 750, heading: 357, tSec: 150 },
+      { lat: 56.0000, lon: 9.1000, alt: 900, heading: 358, tSec: 376 },
+      { lat: 56.2000, lon: 9.0900, alt: 900, heading: 0, tSec: 626 },
+      { lat: 56.4200, lon: 9.0900, alt: 900, heading: 4, tSec: 901 },
+      { lat: 56.6500, lon: 9.1200, alt: 900, heading: 10, tSec: 1190 },
+      { lat: 56.9000, lon: 9.2000, alt: 900, heading: 18, tSec: 1507 },
+      { lat: 57.1500, lon: 9.3500, alt: 850, heading: 28, tSec: 1836 },
+      { lat: 57.4000, lon: 9.6000, alt: 800, heading: 36, tSec: 2192 },
+      { lat: 57.6200, lon: 9.9000, alt: 750, heading: 71, tSec: 2533 },
+      { lat: 57.7400, lon: 10.5800, alt: 700, heading: 71, tSec: 3012 },
     ],
-    durationSec: 1606,
+    durationSec: 3012,
+  },
+
+  // Fastest documented of the family, and a different shape again: it
+  // drops the delta wing for a cruise-missile layout, cylindrical body
+  // and straight wings at 6.5 m. Also no Shahed equivalent.
+  //
+  // Modelled at 525 km/h, the middle of the official 450 to 600 cruise
+  // band. Worth knowing that a Geran-5 was engaged over Chernihiv at a
+  // measured 425, below the published band, so real engagements can run
+  // slower than the figures suggest.
+  billund_geran5_north: {
+    siteId: 'billund',
+    classification: 'hostile',
+    threat: 'high',
+    platform: 'loitering-munition',
+    droneType: 'Geran-5 (jet cruise-missile layout)',
+    confidence: 0.69,
+    confidenceTrend: 'High-subsonic turbojet, no delta-wing acoustic return',
+    multiSite: true,
+    contributingSensors: [
+      { id: 'BLL-N01', confidence: 0.72 },
+      { id: 'BLL-N02', confidence: 0.66 },
+      { id: 'BLL-N07', confidence: 0.58 },
+    ],
+    evidence: {
+      rfCarrier: '1616 MHz Iridium', rfBandwidth: 'narrowband burst',
+      rfMatch: 'Geran family modem signature 71%', modality: 'acoustic + RF',
+      evidenceSize: '22.6 MB',
+      note: 'Jet, cruise-missile layout. Cruise 450 to 600 km/h, 6.5 m long with a '
+        + '3.2 m span, 90 kg warhead, Telefly TF-TJ2000A turbojet, catapult '
+        + 'launched. Interception rates against jet Gerans are reported far lower '
+        + 'than against piston ones. Figures: Ukrainian Defence Intelligence, '
+        + 'Oct 2026.',
+    },
+    waypoints: [
+      { lat: 55.7000, lon: 9.1300, alt: 600, heading: 356, tSec: 0 },
+      { lat: 55.8200, lon: 9.1150, alt: 750, heading: 357, tSec: 92 },
+      { lat: 56.0000, lon: 9.1000, alt: 900, heading: 358, tSec: 229 },
+      { lat: 56.2000, lon: 9.0900, alt: 900, heading: 0, tSec: 382 },
+      { lat: 56.4200, lon: 9.0900, alt: 900, heading: 4, tSec: 549 },
+      { lat: 56.6500, lon: 9.1200, alt: 900, heading: 10, tSec: 725 },
+      { lat: 56.9000, lon: 9.2000, alt: 900, heading: 18, tSec: 919 },
+      { lat: 57.1500, lon: 9.3500, alt: 850, heading: 28, tSec: 1119 },
+      { lat: 57.4000, lon: 9.6000, alt: 800, heading: 36, tSec: 1336 },
+      { lat: 57.6200, lon: 9.9000, alt: 750, heading: 71, tSec: 1544 },
+      { lat: 57.7400, lon: 10.5800, alt: 700, heading: 71, tSec: 1836 },
+    ],
+    durationSec: 1836,
   },
 
   billund_lego_recon: {

@@ -17963,7 +17963,8 @@ async function main() {
       { key: 'billund_missile_hostile', label: 'Cruise missile from S, critical', cls: 'critical' },
       { key: 'billund_lego_recon', label: 'LEGO adjacency recon (transits BLL → LEGO HQ)', cls: 'recon' },
       { key: 'billund_geran2_north', label: 'Geran-2 transit N (BLL → past Karup → Skagen)', cls: 'critical' },
-      { key: 'billund_geran3_north', label: 'Geran-3 jet, same route at 3x speed', cls: 'critical' },
+      { key: 'billund_geran4_north', label: 'Geran-4 jet, same route at 320 km/h', cls: 'critical' },
+      { key: 'billund_geran5_north', label: 'Geran-5 jet, same route at 525 km/h (fastest)', cls: 'critical' },
     ],
   };
   // Auto-generate for every energy-typed site (3 threats each). Filters
@@ -18137,8 +18138,9 @@ async function main() {
   // Threat/path annotation for the composer. Keys not listed fall
   // back automatically. pathLabel doubles as the path identity.
   const _SIM_COMPOSER_META = {
-    billund_geran2_north:      { threat: 'Geran-2 (piston)',      pathLabel: 'N transit, BLL → Karup → Skagen' },
-    billund_geran3_north:      { threat: 'Geran-3 (jet)',         pathLabel: 'N transit, BLL → Karup → Skagen' },
+    billund_geran2_north:      { threat: 'Geran-2 (piston, 185 km/h)', pathLabel: 'N transit, BLL → Karup → Skagen' },
+    billund_geran4_north:      { threat: 'Geran-4 (jet, 320 km/h)',    pathLabel: 'N transit, BLL → Karup → Skagen' },
+    billund_geran5_north:      { threat: 'Geran-5 (jet, 525 km/h)',    pathLabel: 'N transit, BLL → Karup → Skagen' },
     cph_shahed_amalienborg:    { threat: 'Shahed-136 / Geran-2',   pathLabel: 'Øresund → CPH → Amalienborg' },
     cph_geran3_amalienborg:    { threat: 'Geran-3 (jet)',          pathLabel: 'Øresund → CPH → Amalienborg' },
     cph_shahed238_amalienborg: { threat: 'Shahed-238 (jet)',       pathLabel: 'Øresund → CPH → Amalienborg' },
