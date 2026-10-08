@@ -91,27 +91,28 @@ launches from. The Geran transit's track at that latitude sat at longitude
 2000 m sensor envelope, so it never saw the thing go past, let alone shot at it.
 
 The two waypoints straddling Karup's latitude were moved east so the track
-passes 800 m from the airfield: inside the GAU-21's 1100 m effective range with
-margin, and well inside the 2000 m sensor envelope so the contact is acquired
-with time to lay the gun on.
+passes 400 m from the airfield: well inside the 2000 m sensor envelope so the
+contact is acquired with time to lay the gun on, and close enough that the pass
+reads as a pass rather than a distant transit. 800 m was the first attempt and
+still looked too far out from the cockpit.
 
 | | Karup closest approach | Sees it | Gun bears |
 |---|---|---|---|
 | Before | 2.14 km | no | no |
-| After | 0.80 km | yes | yes |
+| After | 0.40 km | yes | yes |
 
 Headings were recomputed from the new geometry and `tSec` from cumulative
 distance at each airframe's real speed, so the shift did not silently change how
 fast anything flies. The route stays 268 km; the flights stay 87, 50 and 31
 minutes for the Geran-2, -4 and -5.
 
-Window at the 800 m standoff:
+Window at the 400 m standoff:
 
 | | Seen through the pass | Gun bears | `engageSec` |
 |---|---|---|---|
-| Geran-2, 185 km/h | 71 s | 29 s | 8 |
-| Geran-4, 320 km/h | 41 s | 17 s | 8 |
-| Geran-5, 525 km/h | 25 s | 10 s | 8 |
+| Geran-2, 185 km/h | 76 s | 40 s | 8 |
+| Geran-4, 320 km/h | 44 s | 23 s | 8 |
+| Geran-5, 525 km/h | 27 s | 14 s | 8 |
 
 All three leave time to pivot and fire before it has passed, the Geran-5 only
 just.
@@ -176,6 +177,36 @@ Downed by the third burst, about 5 s into an 8 s window. 40% explodes in the
 air, 60% loses power and descends on its own momentum to a wreck downrange.
 If it should sometimes survive a pass, the lever is `engageSec`, not the kill
 model.
+
+## Pivoting like a helicopter
+
+Bank was derived from **nose heading** change. That is correct for an
+aeroplane, where the only way to change direction is to bank, so heading and
+flight path are the same thing. A helicopter decouples them: it pedal-turns
+with the disc level, and it crabs.
+
+The firing pass IS a crab — hold the course, yaw the nose 90° so the gunner
+can bear. Driving bank off nose heading rolled the aircraft 18° through a pass
+that should be dead level, and the 90° yaw is the largest heading change in the
+whole engagement, so it produced the worst possible roll at the worst moment.
+
+`src/rotorcraft_attitude.js` derives bank from **course over ground**, measured
+from successive positions. Turn the flight path and it banks into the turn;
+swing the nose alone and the disc stays level.
+
+| | Bank |
+|---|---|
+| Pedal turn, nose yaws 90°, course held | **0.0°** |
+| Hard turn, course swinging at the full 60°/s | 17.2° of an 18° max |
+| Hover, no movement | level — course is unmeasurable and reported as null |
+
+Course comes from position rather than from any heading field on purpose:
+position is the one thing that cannot disagree with what the operator sees on
+the map. The null at a standstill matters too — numerical noise in a hover
+would otherwise bank the aircraft at random.
+
+Yaw rate is unchanged at `TURN_RATE_RAD_S`, 60°/s, which is a realistic pintle-
+era rotorcraft figure and means a 90° pass turn takes 1.5 s.
 
 ## Not verified
 

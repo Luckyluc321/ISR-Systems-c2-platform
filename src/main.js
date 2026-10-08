@@ -804,6 +804,7 @@ import { loadSiteLights, loadNationalLights, bucketByRadiance, LIGHT_STYLES, LIG
 import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from './runway_lighting.js';
 import { beamPassAimPoint, beamPassIntercept, pickTrackSide, BEAM_PASS_STANDOFF_M } from './intercept.js';
 import { firingPassHeadingRad } from './firing_pass.js';
+import { courseFromDelta, bankForCourseChange } from './rotorcraft_attitude.js';
 import { isSimulatedTrack, trailMaxPoints, shouldAppendTrailPoint, shouldShowTrail,
   shouldAppendBreadcrumb, shouldShowBreadcrumb, BREADCRUMB_POINTS_MAX } from './trail_policy.js';
 
@@ -6439,7 +6440,8 @@ async function main() {
       // the aircraft holds its bank instead of snapping level. Held in
       // closure locals rather than stamped on `d` so no new clock-bearing
       // field appears on the dispatch record.
-      let _prevH = null;
+      let _prevLL = null;        // last position, for course over ground
+      let _prevCourse = null;    // last measured flight-path direction
       let _prevT = null;
       let _bank = 0;
       let _prevAlt = null;
@@ -6453,22 +6455,37 @@ async function main() {
         const nowS = monoNow() / 1000;
         const maxBank = ((T.maxBankDeg ?? 18) * Math.PI) / 180;
 
-        if (_prevH != null && _prevT != null) {
-          const dt = nowS - _prevT;
-          // dt <= 0 is a frozen clock. dt >= 1 is a tab that was in the
-          // background, where the heading delta spans seconds and the
-          // implied turn rate is meaningless. Neither should bank it.
-          if (dt > 0 && dt < 1) {
-            const dh = ((d.heading - _prevH + Math.PI) % TAU + TAU) % TAU - Math.PI;
-            // Signed rate as a fraction of the maximum the unit can turn,
-            // so a hard turn banks fully and a gentle one barely tips.
-            const frac = Math.max(-1, Math.min(1, (dh / dt) / TURN_RATE_RAD_S));
-            // Eased, so the roll leads into the turn and settles out of
-            // it rather than appearing on the frame the heading moves.
-            _bank += (frac * maxBank - _bank) * Math.min(1, dt * 3);
+        // Bank off the FLIGHT PATH, not the nose.
+        //
+        // A helicopter decouples the two. It pedal-turns with the disc
+        // level, and it crabs — which is precisely what the door-gun
+        // firing pass is: hold the course, yaw the nose 90 degrees so
+        // the gunner can bear. Banking off nose heading rolled it 18
+        // degrees through a pass that should be dead level.
+        //
+        // Course is measured from successive positions, because position
+        // is the one thing that cannot disagree with what the operator
+        // sees on the map. See rotorcraft_attitude.js.
+        const _cg = Cesium.Cartographic.fromCartesian(cart);
+        const _lat = Cesium.Math.toDegrees(_cg.latitude);
+        const _lon = Cesium.Math.toDegrees(_cg.longitude);
+        if (_prevLL && _prevT != null) {
+          const course = courseFromDelta({
+            fromLat: _prevLL.lat, fromLon: _prevLL.lon, toLat: _lat, toLon: _lon,
+          });
+          if (course != null) {
+            _bank = bankForCourseChange({
+              prevBank: _bank,
+              prevCourseRad: _prevCourse,
+              courseRad: course,
+              dt: nowS - _prevT,
+              maxBankRad: maxBank,
+              turnRateRadS: TURN_RATE_RAD_S,
+            });
+            _prevCourse = course;
           }
         }
-        _prevH = d.heading;
+        _prevLL = { lat: _lat, lon: _lon };
         _prevT = nowS;
 
         // Plain heading, pitch and roll, which is all this ever needed.
