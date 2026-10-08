@@ -80,6 +80,45 @@ threat — an MH-60R cannot catch a Geran-5 at 525 km/h, and the result should b
 a tail chase it is visibly losing, not a vector to a point it reaches late.
 `_interceptEtaS` carries that figure; nothing acts on it yet.
 
+## The Karup pass, and why it was 2 km
+
+The aim logic above was never the reason the helicopter could not engage. The
+scenario geometry was.
+
+Flyvestation Karup is at 56.2975, 9.1247 and is where `helicopter-intercept`
+launches from. The Geran transit's track at that latitude sat at longitude
+9.0900, which is **2.14 km west of the airfield** — outside the aircraft's own
+2000 m sensor envelope, so it never saw the thing go past, let alone shot at it.
+
+The two waypoints straddling Karup's latitude were moved east so the track
+passes 800 m from the airfield: inside the GAU-21's 1100 m effective range with
+margin, and well inside the 2000 m sensor envelope so the contact is acquired
+with time to lay the gun on.
+
+| | Karup closest approach | Sees it | Gun bears |
+|---|---|---|---|
+| Before | 2.14 km | no | no |
+| After | 0.80 km | yes | yes |
+
+Headings were recomputed from the new geometry and `tSec` from cumulative
+distance at each airframe's real speed, so the shift did not silently change how
+fast anything flies. The route stays 268 km; the flights stay 87, 50 and 31
+minutes for the Geran-2, -4 and -5.
+
+Window at the 800 m standoff:
+
+| | Seen through the pass | Gun bears | `engageSec` |
+|---|---|---|---|
+| Geran-2, 185 km/h | 71 s | 29 s | 8 |
+| Geran-4, 320 km/h | 41 s | 17 s | 8 |
+| Geran-5, 525 km/h | 25 s | 10 s | 8 |
+
+All three leave time to pivot and fire before it has passed, the Geran-5 only
+just.
+
+The Billund end is untouched: the track still spends the same 0.8 min inside
+Billund's rings, so the detection report and its closure are unchanged.
+
 ## Not verified
 
 The offline harness maintains the 700 m standoff as designed, but it omits the
