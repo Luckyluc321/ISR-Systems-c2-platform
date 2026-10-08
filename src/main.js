@@ -6815,6 +6815,97 @@ async function main() {
   window.__isr_dispatchFix = _consoleFix;
   window.__isr_dispatchTelemetry = _dispatchTelemetryStats;
 
+  // ── Dev tool: fly a target past the door gun ────────────────────
+  //
+  // The gun traverses onto whatever the unit is engaging, and in an
+  // ordinary scenario nothing comes close enough to a dispatched
+  // helicopter to show it. This puts a target on an ARC around the
+  // aircraft so the relative bearing sweeps continuously, which is the
+  // only motion that exercises a traverse.
+  //
+  //   window.__isr_gunTest()                       // 60 s, 500 m, sweeps 300 deg
+  //   window.__isr_gunTest({ radiusM: 300, durationSec: 90 })
+  //   window.__isr_gunTest.stop()
+  //
+  // Simulation-only, and it says so on the marker. It writes
+  // targetLat/targetLon on the dispatch, which is the same field a real
+  // engagement writes, so it exercises the real path rather than a
+  // parallel one.
+  let _gunTestState = null;
+
+  function _gunTestStop() {
+    if (!_gunTestState) return;
+    viewer.entities.remove(_gunTestState.entity);
+    if (_gunTestState.unit) {
+      _gunTestState.unit.targetLat = _gunTestState.priorLat;
+      _gunTestState.unit.targetLon = _gunTestState.priorLon;
+    }
+    _gunTestState = null;
+    toast('Gun test ended', 'ok');
+  }
+
+  window.__isr_gunTest = (opts = {}) => {
+    _gunTestStop();
+    const unit = [..._counterDispatches.values()]
+      .find((d) => d.profile?.icon === 'helicopter' && d.curLat != null);
+    if (!unit) {
+      console.warn('[gunTest] no helicopter airborne — dispatch one first');
+      toast('Gun test: dispatch a helicopter first', 'warn');
+      return;
+    }
+    const radiusM = opts.radiusM ?? 500;
+    const durationSec = opts.durationSec ?? 60;
+    const sweepRad = ((opts.sweepDeg ?? 300) * Math.PI) / 180;
+    // Start on the gun's own side so the first thing you see is it
+    // already bearing, then sweep forward across the arc and past the
+    // stop, which shows the clamp holding as well as the tracking.
+    const start = (unit.heading || 0) - Math.PI / 2 - sweepRad / 2;
+    const t0 = monoNow();
+    const centreLat = unit.curLat;
+    const centreLon = unit.curLon;
+    const at = () => {
+      const f = Math.min(1, (monoNow() - t0) / (durationSec * 1000));
+      const b = start + sweepRad * f;
+      return {
+        lat: centreLat + (Math.cos(b) * radiusM) / 111000,
+        lon: centreLon + (Math.sin(b) * radiusM)
+          / (111000 * Math.cos(centreLat * Math.PI / 180)),
+        done: f >= 1,
+      };
+    };
+    const entity = viewer.entities.add({
+      position: new Cesium.CallbackProperty(() => {
+        const p = at();
+        return Cesium.Cartesian3.fromDegrees(
+          p.lon, p.lat, _airborneAbsAlt(p.lon, p.lat, unit.curAlt || 60));
+      }, false),
+      point: { pixelSize: 14, color: Cesium.Color.fromCssColorString('#ff5c5c'),
+        outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      label: { text: 'GUN TEST TARGET · SIM', font: '10px "IBM Plex Mono", monospace',
+        fillColor: Cesium.Color.fromCssColorString('#ff5c5c'),
+        outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(16, 0),
+        horizontalOrigin: Cesium.HorizontalOrigin.LEFT,
+        disableDepthTestDistance: Number.POSITIVE_INFINITY },
+    });
+    _gunTestState = { entity, unit, priorLat: unit.targetLat, priorLon: unit.targetLon };
+    const tick = () => {
+      if (!_gunTestState) return;
+      const p = at();
+      unit.targetLat = p.lat;
+      unit.targetLon = p.lon;
+      if (p.done) { _gunTestStop(); return; }
+      requestAnimationFrame(tick);
+    };
+    tick();
+    toast(`Gun test: target sweeping ${opts.sweepDeg ?? 300}\u00b0 at ${radiusM} m over ${durationSec}s`, 'ok');
+    console.log('[gunTest] watch the door gun traverse. Stop early with '
+      + 'window.__isr_gunTest.stop()');
+  };
+  window.__isr_gunTest.stop = _gunTestStop;
+
   function _startCounterDispatchLoop() {
     if (_cdRafId) return;
     const tick = () => {
