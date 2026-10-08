@@ -802,6 +802,7 @@ import { fetchDrivingRoute, computeSegmentLengths, advanceAlongPolyline } from '
 import { buildCordon, assignPatrols, clearCordonCache } from './perimeter.js';
 import { loadSiteLights, loadNationalLights, bucketByRadiance, LIGHT_STYLES, LIGHT_CLASSES } from './night_infrastructure_lights.js';
 import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from './runway_lighting.js';
+import { trailAppendEvery, trailMaxPoints, shouldShowTrail } from './trail_policy.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -15615,8 +15616,17 @@ async function main() {
         // renders inside/across the camera view. Projected trajectory
         // (yellow dashed line extending forward from the drone) is
         // hidden by the POV entry/exit hooks — see _enterDronePOV.
-        if ((leadDown || povSuppressed) && state.trail) state.trail.show = false;
-        else if (!leadDown && state.trail && !povSuppressed) state.trail.show = true;
+        // SIM draws the trend line outside coverage so the track can be
+        // found; LIVE stops it at the edge, because past that edge no
+        // sensor reported a position and the line would be asserting
+        // one. leadDown and POV outrank both.
+        if (state.trail) {
+          state.trail.show = shouldShowTrail({
+            isSim: _isSimMode(),
+            inCoverage: leadInCov,
+            suppressed: leadDown || povSuppressed,
+          });
+        }
         // Purge lead from aggregate sets ONCE on death so surviving
         // wingmen's transitions can flip aggregates to empty and
         // fire OUT OF RANGE / EXIT normally.
@@ -15751,9 +15761,20 @@ async function main() {
         _trailAppendCounter++;
         // Skip trail growth once the lead is dead — no ghost trendline
         // continuing along the drone's remaining waypoints.
-        if (!leadDown && _trailAppendCounter % 3 === 0) {
+        //
+        // Cadence and length come from trail_policy, because LIVE and
+        // SIM want different things from this line. LIVE keeps a short
+        // tail, 9 s of it. SIM appends a tenth as often and keeps far
+        // more, which buys ~50 min of route for the same order of
+        // memory, so a track that is invisible for most of a long
+        // transit still leaves something a chase aircraft can fly
+        // toward. Previously both used LIVE's numbers, which made the
+        // line about 460 m long behind a Geran-2 on a 268 km route.
+        const _simNow = _isSimMode();
+        if (!leadDown && _trailAppendCounter % trailAppendEvery(_simNow) === 0) {
           state.trailPositions.push(Cesium.Cartesian3.fromDegrees(p.lon, p.lat, _safeTrailAlt(p.alt)));
-          if (state.trailPositions.length > 180) state.trailPositions.shift();
+          const _cap = trailMaxPoints(_simNow);
+          while (state.trailPositions.length > _cap) state.trailPositions.shift();
         }
 
         // Perimeter crossing detection — fall back to outer siteBoundary if
