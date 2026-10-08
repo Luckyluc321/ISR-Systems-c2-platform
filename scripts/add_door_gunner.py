@@ -134,12 +134,22 @@ def build_gunner(side_sign):
     # real mesh. Pass --crew-mesh once there is a CC-BY or CC0 seated
     # figure to merge, and this is where it goes.
 
-    # ── 12.7 mm door gun on a pintle ──
-    box(p, (s * 6, -24, 40), (10, 44, 11))           # receiver
-    box(p, (s * 6, -62, 41), (6, 46, 6))             # barrel, forward
-    box(p, (s * 6, -6, 22), (7, 8, 38))              # pintle post
-    box(p, (s * 6, 2, 44), (5, 16, 9))               # spade grips
-    box(p, (s * 16, -18, 32), (11, 18, 16))          # ammunition can
+    # ── 12.7 mm on a FLOOR-MOUNTED post ──
+    #
+    # Bigger than the first pass and standing on the cabin floor rather
+    # than floating at window height, which is how a door gun on an H-60
+    # is actually rigged: a post bolted to the floor, a pintle head on
+    # top, the weapon cradled at about chest height for a kneeling
+    # gunner. Z is measured from the floor, so the caller passes the
+    # floor height and the post grows up from it.
+    box(p, (s * 2, -6, 3), (28, 28, 7))              # floor plate
+    box(p, (s * 2, -6, 32), (10, 10, 58))            # post
+    box(p, (s * 2, -6, 63), (15, 17, 15))            # pintle head
+    box(p, (s * 6, -28, 69), (14, 64, 16))           # receiver
+    box(p, (s * 6, -78, 71), (8, 58, 8))             # barrel
+    box(p, (s * 6, -112, 71), (11, 15, 11))          # muzzle device
+    box(p, (s * 6, 12, 71), (7, 24, 14))             # spade grips
+    box(p, (s * 21, -16, 58), (17, 28, 23))          # ammunition can
     return p
 
 
