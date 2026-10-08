@@ -50,6 +50,36 @@ Companion: docs/testing/historical-pattern-test-plan.md covers the hands-on test
 
 Drone dips in and out of coverage repeatedly. One event = one full lifecycle (entry → track → loss → re-entry → exit); re-acquisition inside the detection window continues the SAME event (`src/events.js:1-3`, `_fireReacquisition` in main.js). Coverage gaps hide the object on the map (sensors-observe-only rule) but never split the event. History gets exactly one record per flight. Test 5 in the test plan.
 
+#### How long the grace lasts, and why it branches
+
+`_classifyDetectionLoss` decides this the first tick coverage drops, off the
+last confirmed position. The platform only knows what its sensors saw, so the
+question is not "where is it" but "had it already left".
+
+| Last confirmed position | Classification | Grace |
+|---|---|---|
+| Outside the site perimeter | `fled` | `_LOSS_GRACE_FLOOR_MS` (12 s) |
+| Inside, within `temporary_loss_buffer_m` of the edge, projected path exits | `fled` | 12 s |
+| Inside, not leaving | `hiding` | `900 / speed`, clamped 15 to 60 s |
+| No perimeter or no last-known position on record | `fled` | 12 s |
+
+Speed-scaled rather than fixed, so a slow loiterer gets the full minute and a
+fast mover 15 s. `temporary_loss_buffer_m` is per-site configuration,
+defaulting to 200 m.
+
+Closing the instant a detection drops would register a hundred linked events
+per site for one flight, which is what the grace prevents. Re-acquisition
+inside the window continues the same event (case 1), and the separate
+unobserved-event sweeper skips anything owning a live track, so it reaps
+orphaned shadow events only and cannot pre-empt a `hiding` grace.
+
+`graceMs` is read back off `event.temporaryLoss` in two places, the close
+comparison and the countdown panel, which must agree or the panel counts down
+to a time the event does not close at. Both fall back to
+`_LOSS_GRACE_FLOOR_MS`. The fallback is unreachable today, since the single
+writer always sets `graceMs`, but it is kept rather than removed: a missing
+value would make the close comparison false forever and strand the event LIVE.
+
 ### 2. Short contact lost forever — HANDLED
 
 10-second contact, never re-acquired: event auto-closes as fled. No minimum duration, no notability gate on registration — even identify-only tier events register. The fragment becomes intelligence for the next incident. Test 6.

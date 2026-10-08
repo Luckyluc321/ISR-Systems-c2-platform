@@ -611,12 +611,33 @@ function _tenantScopedLinkedIds(linkedIds, currentSiteId, activeRole) {
 // stay inside the site without being re-acquired." Real ops
 // customers tune per-site via site_context.temporary_loss_buffer_m
 // once real data is in.
+// Floor for the detection-loss grace window, in milliseconds.
+//
+// A track that drops out while already outside the perimeter, or
+// heading out of it, waits this long before the event closes. Short,
+// because it has demonstrably left and holding the event open longer
+// just delays the report.
+//
+// It is ALSO the fallback wherever graceMs is read back off
+// event.temporaryLoss. Those reads cannot miss today, since the single
+// writer always sets it from the classifier below and every branch
+// returns at least this value. The fallback stays anyway: a missing
+// graceMs would make the close comparison false forever and strand the
+// event LIVE, which is the phantom-live failure the unobserved-event
+// sweeper exists to catch. A conservative default beats that.
+//
+// One constant rather than a literal per site, because the countdown
+// panel and the tick MUST agree. They had drifted to 12 s and 30 s,
+// which would have shown 18 seconds remaining on an already-closed
+// event had the fallback ever fired.
+const _LOSS_GRACE_FLOOR_MS = 12000;
+
 function _classifyDetectionLoss(event) {
   const site = SITES[event.siteId];
   const boundary = site?.siteBoundary;
   const lk = event.lastKnownPosition || event.lastPosition;
   if (!boundary?.length || !lk?.lat || !lk?.lon) {
-    return { classification: 'fled', graceMs: 12000, reason: 'no boundary or last-known position on record' };
+    return { classification: 'fled', graceMs: _LOSS_GRACE_FLOOR_MS, reason: 'no boundary or last-known position on record' };
   }
   const speed = Math.max(1, lk.speed || 0);
   const graceSeconds = Math.max(15, Math.min(60, 900 / speed));
@@ -627,7 +648,7 @@ function _classifyDetectionLoss(event) {
   if (!insidePerimeter) {
     return {
       classification: 'fled',
-      graceMs: 12000,
+      graceMs: _LOSS_GRACE_FLOOR_MS,
       reason: 'last confirmed position is outside site perimeter',
       insidePerimeter: false,
     };
@@ -649,7 +670,7 @@ function _classifyDetectionLoss(event) {
   if (distanceM < bufferM && !projectedInside) {
     return {
       classification: 'fled',
-      graceMs: 12000,
+      graceMs: _LOSS_GRACE_FLOOR_MS,
       reason: `last confirmed position ${distanceM} m from perimeter and projected path exits site`,
       insidePerimeter: true,
       distanceM,
@@ -15525,7 +15546,7 @@ async function main() {
                 },
               });
             }
-            const activeGraceMs = event.temporaryLoss?.graceMs || 12000;
+            const activeGraceMs = event.temporaryLoss?.graceMs || _LOSS_GRACE_FLOOR_MS;
             if (monoNow() - state._outOfAllCoverageSinceMs >= activeGraceMs) {
               state.closedAt = monoNow();
               const exitPoint = event.lastKnownPosition
@@ -22600,7 +22621,7 @@ async function main() {
       }
       const st = droneState.get(evId);
       const startedMs = st?._outOfAllCoverageSinceMs;
-      const graceMs = ev.temporaryLoss.graceMs || 30000;
+      const graceMs = ev.temporaryLoss.graceMs || _LOSS_GRACE_FLOOR_MS;
       if (!startedMs) {
         node.textContent = `Closing in ${Math.round(graceMs / 1000)} seconds`;
         return;
