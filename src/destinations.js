@@ -176,7 +176,7 @@ const DESTINATIONS = [
     name: 'Flyvevåbnet Kontrolgruppen og Luftforsvarsgruppen',
     contactMethods: ['api', 'phone'], availabilityStatus: 'on-shift' },
   { id: 'cph-t4-qra', siteId: 'cph', tier: 4, type: 'agency',
-    name: 'Flyvevåbnet Quick Reaction Alert, Skrydstrup (F-16 / F-35)',
+    name: 'Flyvevåbnet Quick Reaction Alert, Skrydstrup (F-35)',
     contactMethods: ['api'], availabilityStatus: 'on-shift' },
   { id: 'cph-t4-forsvar', siteId: 'cph', tier: 4, type: 'agency',
     name: 'Forsvarskommandoen',
@@ -248,7 +248,7 @@ const DESTINATIONS = [
     name: 'Kystvagten (Coast Guard)',
     contactMethods: ['api', 'phone'], availabilityStatus: 'on-shift' },
   { id: 'esb-t4-qra', siteId: 'esbjerg', tier: 4, type: 'agency',
-    name: 'Flyvevåbnet Quick Reaction Alert, Skrydstrup (F-16 / F-35)',
+    name: 'Flyvevåbnet Quick Reaction Alert, Skrydstrup (F-35)',
     contactMethods: ['api'], availabilityStatus: 'on-shift' },
   { id: 'esb-t4-airforce', siteId: 'esbjerg', tier: 4, type: 'agency',
     name: 'Flyvevåbnet Kontrolgruppen og Luftforsvarsgruppen',
@@ -305,7 +305,7 @@ const DESTINATIONS = [
 
   // Tier 4, military response (grid infra: no QRA priority, ground reinforcement + national coordination)
   { id: 'hvg-t4-qra', siteId: 'energinet_hovegaard', tier: 4, type: 'agency',
-    name: 'Flyvevåbnet Quick Reaction Alert, Skrydstrup (F-16 / F-35)',
+    name: 'Flyvevåbnet Quick Reaction Alert, Skrydstrup (F-35)',
     contactMethods: ['api'], availabilityStatus: 'on-shift' },
   { id: 'hvg-t4-forsvar', siteId: 'energinet_hovegaard', tier: 4, type: 'agency',
     name: 'Forsvarskommandoen',
@@ -360,7 +360,7 @@ const DESTINATIONS = [
 
   // Tier 4, military response (grid infra: no QRA priority, ground reinforcement + national coordination)
   { id: 'bjk-t4-qra', siteId: 'energinet_bjaeverskov', tier: 4, type: 'agency',
-    name: 'Flyvevåbnet Quick Reaction Alert, Skrydstrup (F-16 / F-35)',
+    name: 'Flyvevåbnet Quick Reaction Alert, Skrydstrup (F-35)',
     contactMethods: ['api'], availabilityStatus: 'on-shift' },
   { id: 'bjk-t4-forsvar', siteId: 'energinet_bjaeverskov', tier: 4, type: 'agency',
     name: 'Forsvarskommandoen',
@@ -410,7 +410,7 @@ const DESTINATIONS = [
 
   // Tier 4, military response (grid infra: no QRA priority, ground reinforcement + national coordination)
   { id: 'ldg-t4-qra', siteId: 'energinet_landerupgaard', tier: 4, type: 'agency',
-    name: 'Flyvevåbnet Quick Reaction Alert, Skrydstrup (F-16 / F-35)',
+    name: 'Flyvevåbnet Quick Reaction Alert, Skrydstrup (F-35)',
     contactMethods: ['api'], availabilityStatus: 'on-shift' },
   { id: 'ldg-t4-forsvar', siteId: 'energinet_landerupgaard', tier: 4, type: 'agency',
     name: 'Forsvarskommandoen',
@@ -460,7 +460,7 @@ const DESTINATIONS = [
 
   // Tier 4, military response (grid infra: no QRA priority, ground reinforcement + national coordination)
   { id: 'kas-t4-qra', siteId: 'energinet_kassoe', tier: 4, type: 'agency',
-    name: 'Flyvevåbnet Quick Reaction Alert, Skrydstrup (F-16 / F-35)',
+    name: 'Flyvevåbnet Quick Reaction Alert, Skrydstrup (F-35)',
     contactMethods: ['api'], availabilityStatus: 'on-shift' },
   { id: 'kas-t4-forsvar', siteId: 'energinet_kassoe', tier: 4, type: 'agency',
     name: 'Forsvarskommandoen',
@@ -510,7 +510,7 @@ const DESTINATIONS = [
 
   // Tier 4, military response (grid infra: no QRA priority, ground reinforcement + national coordination)
   { id: 'frv-t4-qra', siteId: 'energinet_ferslev', tier: 4, type: 'agency',
-    name: 'Flyvevåbnet Quick Reaction Alert, Skrydstrup (F-16 / F-35)',
+    name: 'Flyvevåbnet Quick Reaction Alert, Skrydstrup (F-35)',
     contactMethods: ['api'], availabilityStatus: 'on-shift' },
   { id: 'frv-t4-forsvar', siteId: 'energinet_ferslev', tier: 4, type: 'agency',
     name: 'Forsvarskommandoen',
@@ -1008,7 +1008,7 @@ export function destinationShortLabel(dest) {
   for (const p of prefixes) {
     if (label.startsWith(p)) label = label.slice(p.length);
   }
-  // Strip trailing "(F-16 / F-35)" or similar parenthetical location hints
+  // Strip trailing "(F-35)" or similar parenthetical type hints
   return label.trim();
 }
 
