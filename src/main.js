@@ -5848,7 +5848,21 @@ async function main() {
   // it preserves relative scale exactly as the floor does. Everything
   // may be exaggerated by up to the same factor and never more, so a
   // Shahed stays a sixth of a helicopter at every range.
-  const MODEL_MAX_EXAGGERATION = 4;
+  //
+  // 12, raised from 4, because at 4 the cap bound so early that the
+  // pixel floor never got a chance and a Seahawk drew at TWELVE pixels
+  // from 6 km. The floor says it should be 135. Measured:
+  //
+  //            6000 m   3000 m   1500 m    600 m
+  //     cap 4     12p      25p      49p     123p
+  //     cap 12    37p      74p     135p     135p
+  //
+  // Raising it cannot distort relative size, which is the point of
+  // expressing it as a multiple: at both values the helicopter draws
+  // 5.65x the Shahed on screen against 5.65x in reality. It only moves
+  // where the cap stops governing and the proportional floor takes
+  // over, which at 12 is about 1.5 km instead of 600 m.
+  const MODEL_MAX_EXAGGERATION = 12;
 
   // Shahed life size, and it was not before.
   //
@@ -14055,11 +14069,30 @@ async function main() {
     // get the assault-drone GLB with a forward-pitch orientation rig
     // (they nose down when accelerating forward, unlike delta-wings).
     const isQuadcopter = platform === 'quadcopter' || platform === 'quad';
-    const MODEL_SWAP_M = 250;
+    // Hostile rotorcraft. The Mi-24 Hind model earns its place HERE,
+    // which is the only place it was ever correct.
+    //
+    // It spent a day as our own dispatched helicopter, which was wrong:
+    // Denmark flies Merlins, Seahawks and Fennecs, never a Hind. As a
+    // CONTACT it is exactly right. It is a Russian attack helicopter,
+    // threat_taxonomy already carries it as mi-24-hind with origin RU
+    // and threatProfile high, and an operator seeing that silhouette on
+    // the map is reading something true.
+    //
+    // Matched on the taxonomy id and on the generic helicopter
+    // platforms, so any military rotorcraft contact gets a rotorcraft
+    // shape rather than falling through to a billboard. A civilian
+    // helicopter would want its own model and does not have one, so it
+    // is deliberately not matched here.
+    const isHostileHeli = platform === 'mi-24-hind'
+      || platform === 'helicopter-military'
+      || platform === 'helicopter';
+    const MODEL_SWAP_M = isHostileHeli ? 6000 : 250;
     const _modelUri = isLoiterMun
       ? '/aircraft/shahed_238_drone.glb'
-      : (isQuadcopter ? '/aircraft/assault_drone_concept.glb' : null);
-    const _shouldSwapModel = isLoiterMun || isQuadcopter;
+      : (isQuadcopter ? '/aircraft/assault_drone_concept.glb'
+        : (isHostileHeli ? '/aircraft/mi-24_hind.glb' : null));
+    const _shouldSwapModel = isLoiterMun || isQuadcopter || isHostileHeli;
 
     // Flight rig — closure-captured per entity so each Shahed has
     // independent orientation smoothing. Reads live from
@@ -14301,10 +14334,31 @@ async function main() {
         // Shahed uses 1:1 world scale for the ~3m wingspan. The
         // assault-drone GLB reads small at 1:1 — quad tuning object
         // exposes the scale factor.
-        scale: isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5),
-        minimumPixelSize: isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20),
+        // Mi-24: 21.5 m over all, model longest axis 19.18, so 1.121.
+        // Floor derived from real metres like everything else.
+        scale: isHostileHeli ? 1.121 : (isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5)),
+        minimumPixelSize: isHostileHeli ? Math.round(21.5 * MODEL_PX_PER_M)
+          : (isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20)),
+        maximumScale: isHostileHeli ? 1.121 * MODEL_MAX_EXAGGERATION : undefined,
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
         shadows: Cesium.ShadowMode.DISABLED,
+        // Its rotors turn, by the same hand-driven route as ours. The
+        // node names come from the file itself, which already had them,
+        // which is why this one never needed splitting.
+        ...(isHostileHeli ? { runAnimations: false, nodeTransformations: {
+          Top_Rotor: {
+            translation: Cesium.Cartesian3.ZERO,
+            scale: new Cesium.Cartesian3(1, 1, 1),
+            rotation: new Cesium.CallbackProperty(
+              () => _rotorSpin(Cesium.Cartesian3.UNIT_Y, 4), false),
+          },
+          Tail_Rotor: {
+            translation: Cesium.Cartesian3.ZERO,
+            scale: new Cesium.Cartesian3(1, 1, 1),
+            rotation: new Cesium.CallbackProperty(
+              () => _rotorSpin(Cesium.Cartesian3.UNIT_X, 16), false),
+          },
+        } } : {}),
         // A hostile quadcopter's blades turn too. Same model and same
         // helper as our interceptors, deliberately: with the rotors split
         // out of the airframe, anything still using the old static spec
