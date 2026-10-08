@@ -121,23 +121,25 @@ def build_gunner(side_sign):
     s = side_sign          # flips the whole rig for the other door
     LEAN = 0.26            # leaning into the weapon
 
-    # ── crew ──
-    box(p, (0, -4, 58), (26, 24, 26), LEAN)          # head
-    box(p, (0, -6, 70), (30, 30, 10))                # helmet
-    box(p, (0, 0, 28), (34, 24, 46), LEAN)           # torso
-    box(p, (s * 17, -10, 34), (10, 38, 11), 0.55)    # outboard arm, onto the grip
-    box(p, (-s * 15, -8, 34), (10, 34, 11), 0.45)    # inboard arm
-    box(p, (s * 9, -26, 4), (13, 40, 14))            # thigh
-    box(p, (-s * 9, -26, 4), (13, 40, 14))           # thigh
-    box(p, (s * 9, -44, -16), (12, 12, 34))          # shin
-    box(p, (-s * 9, -44, -16), (12, 12, 34))         # shin
+    # ── crew: deliberately NOT built ──
+    #
+    # There was a box-built gunner here and it looked like a robot, which
+    # on a military aircraft is worse than an empty doorway. Boxes make a
+    # convincing machine gun, because a machine gun IS boxes and
+    # cylinders. They do not make a convincing human, and adding more of
+    # them does not fix that: the problem is the primitive, not the
+    # count.
+    #
+    # So the weapon stays, generated, and the crew figure waits for a
+    # real mesh. Pass --crew-mesh once there is a CC-BY or CC0 seated
+    # figure to merge, and this is where it goes.
 
     # ── 12.7 mm door gun on a pintle ──
-    box(p, (s * 20, -34, 40), (12, 46, 12))          # receiver
-    box(p, (s * 20, -74, 42), (7, 54, 7))            # barrel, forward
-    box(p, (s * 20, -12, 24), (8, 10, 40))           # pintle post
-    box(p, (s * 20, -6, 46), (6, 20, 6))             # spade grips
-    box(p, (s * 31, -30, 34), (14, 22, 20))          # ammunition can
+    box(p, (s * 6, -24, 40), (10, 44, 11))           # receiver
+    box(p, (s * 6, -62, 41), (6, 46, 6))             # barrel, forward
+    box(p, (s * 6, -6, 22), (7, 8, 38))              # pintle post
+    box(p, (s * 6, 2, 44), (5, 16, 9))               # spade grips
+    box(p, (s * 16, -18, 32), (11, 18, 16))          # ammunition can
     return p
 
 
@@ -195,7 +197,7 @@ def main():
     # Untextured dark material. No TEXCOORD on this primitive, which is
     # valid glTF as long as the material samples no texture.
     gltf.setdefault("materials", []).append({
-        "name": "DoorGunner",
+        "name": "DoorGun",
         # Deliberately LIGHTER than the airframe. The first attempt used
         # [0.17, 0.18, 0.16], which is almost exactly the Seahawk's own
         # dark olive: the gunner rendered correctly and was completely
