@@ -178,6 +178,84 @@ air, 60% loses power and descends on its own momentum to a wreck downrange.
 If it should sometimes survive a pass, the lever is `engageSec`, not the kill
 model.
 
+## The gun run is an orbit, not a crab
+
+My first two attempts at the pivot were both wrong, and the second was wrong
+in a way that mattered: it yawed the aircraft 90 degrees and held it there at
+cruise. That is a crab, and a helicopter cannot do it. Sideways flight runs out
+of tail rotor authority and fuselage directional stability somewhere around
+30 to 35 knots. Holding 90 degrees of yaw at 250 km/h is not a manoeuvre, it is
+a loss of control.
+
+A real door-gun engagement is **flown as a left-hand orbit**. The aircraft
+circles the target, nose on the tangent, banked into the turn, port door facing
+the centre the whole way round. The gunner holds the target continuously and
+the airframe never flies sideways at all.
+
+### The physics sets the speed, not the other way round
+
+A coordinated turn ties bank, speed and radius together:
+
+```
+tan(bank) = v² / (g · r)
+```
+
+So a radius is not free. A 400 m orbit at cruise would need **51 degrees** of
+bank. Hold the bank at something a crew would fly and the radius fixes the
+speed instead:
+
+```
+v = √(g · r · tan(bank))
+```
+
+| Speed | Radius at 18° bank | Yaw rate | Full circle |
+|---|---|---|---|
+| 250 km/h | 1513 m | 2.6°/s | 137 s |
+| 140 km/h | 474 m | 4.7°/s | 77 s |
+| 100 km/h | 242 m | 6.6°/s | 55 s |
+
+Holding the 400 m radius instead gives **129 km/h at 5.1°/s**. So 90 degrees of
+turn takes **17.6 s**, not one movement, and the aircraft has to slow down to
+set up the shot — which is what a gun run looks like.
+
+### The run, measured
+
+```
+1. run-in decelerates over the last 1.2 km (three radii)
+     1200 m out   250 km/h
+      600 m out   189 km/h
+        0 m out   129 km/h
+
+2. orbit at 400 m, 129 km/h, 5.1 deg/s
+     90 deg of turn   17.6 s
+     full circle      70 s
+     bank held        18.0 deg
+     target bearing   -90 deg throughout  (arc is -135 to -45)
+
+3. the gunner holds it for the whole 70 s circle, firing in 8 s windows
+```
+
+### Bank had to be fixed for this to work
+
+The bank model scaled the maximum bank by the turn rate as a fraction of the
+airframe's maximum. That is not physics. The orbit turns at 5.1°/s, which is 8
+per cent of a 60°/s maximum, so it would have banked the aircraft **1.5 degrees
+for a turn that genuinely needs 18**. Flown fast and gently it would have
+over-banked instead.
+
+`bankForCoordinatedTurn` now uses `tan(bank) = v·ω/g` directly, clamped to the
+airframe limit, with speed measured from the same position deltas as the course:
+
+| | Bank |
+|---|---|
+| 400 m gun-run orbit, 129 km/h, 5.1°/s | **18.0°** — matches theory exactly |
+| Gentle transit turn, 250 km/h, 1°/s | 7.0° |
+| Pedal turn, course held | 0.0° |
+| Hover, no speed | 0.0° |
+
+The clamp is also the honest signal that a turn is being asked for which cannot
+be flown.
+
 ## When the turn happens
 
 The pass heading is applied from the moment the gunner has the contact, not

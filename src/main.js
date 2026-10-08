@@ -804,7 +804,8 @@ import { loadSiteLights, loadNationalLights, bucketByRadiance, LIGHT_STYLES, LIG
 import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from './runway_lighting.js';
 import { beamPassAimPoint, beamPassIntercept, pickTrackSide, BEAM_PASS_STANDOFF_M } from './intercept.js';
 import { firingPassHeadingRad } from './firing_pass.js';
-import { courseFromDelta, bankForCourseChange } from './rotorcraft_attitude.js';
+import { courseAndSpeedFromDelta, bankForCoordinatedTurn } from './rotorcraft_attitude.js';
+import { advanceOrbit, bearingFromTarget, orbitSpeedMs, GUN_RUN_BANK_RAD } from './gun_run.js';
 import { isSimulatedTrack, trailMaxPoints, shouldAppendTrailPoint, shouldShowTrail,
   shouldAppendBreadcrumb, shouldShowBreadcrumb, BREADCRUMB_POINTS_MAX } from './trail_policy.js';
 
@@ -4739,6 +4740,12 @@ async function main() {
       // of armament entirely. The traverse looked right, which is why
       // this hid for so long.
       firesTracer: true,
+      // Radius of the gun-run orbit. With GUN_RUN_BANK_RAD this fixes
+      // the speed at 129 km/h and the rate at 5.1 deg/s, so the
+      // aircraft slows onto the circle and comes round in 70 s. It
+      // matches the 400 m the Geran transit passes Karup at, so the
+      // run-in ends on the circle instead of having to close further.
+      gunRunRadiusM: 400,
       // How far out the gun will lay on a contact.
       //
       // 800 had no basis. Neither does any other single number, and
@@ -6470,19 +6477,20 @@ async function main() {
         const _lat = Cesium.Math.toDegrees(_cg.latitude);
         const _lon = Cesium.Math.toDegrees(_cg.longitude);
         if (_prevLL && _prevT != null) {
-          const course = courseFromDelta({
-            fromLat: _prevLL.lat, fromLon: _prevLL.lon, toLat: _lat, toLon: _lon,
+          const dtC = nowS - _prevT;
+          const cs = courseAndSpeedFromDelta({
+            fromLat: _prevLL.lat, fromLon: _prevLL.lon, toLat: _lat, toLon: _lon, dt: dtC,
           });
-          if (course != null) {
-            _bank = bankForCourseChange({
+          if (cs) {
+            _bank = bankForCoordinatedTurn({
               prevBank: _bank,
               prevCourseRad: _prevCourse,
-              courseRad: course,
-              dt: nowS - _prevT,
+              courseRad: cs.courseRad,
+              speedMs: cs.speedMs,
+              dt: dtC,
               maxBankRad: maxBank,
-              turnRateRadS: TURN_RATE_RAD_S,
             });
-            _prevCourse = course;
+            _prevCourse = cs.courseRad;
           }
         }
         _prevLL = { lat: _lat, lon: _lon };
@@ -8021,29 +8029,36 @@ async function main() {
       } else {
         // Straight-line fallback (used pre-route-fetch or on OSRM fail)
         const brng = _bearingRad(d.curLat, d.curLon, d.targetLat, d.targetLon);
-        // Turn to set up the shot on the RUN-IN, not at the instant of
-        // engagement.
+        // Nose on the flight path. No crab.
         //
-        // The nose otherwise follows the flight path for the whole
-        // approach and only swings when the state flips to 'engaging',
-        // which is the last second of a pass that takes a minute. A
-        // real crew turns as soon as the gunner has the contact, and
-        // holds that attitude through the run.
+        // An earlier attempt yawed 90 degrees here and held it at
+        // cruise, which a helicopter cannot do: sideways flight runs out
+        // of tail rotor authority around 30-35 knots. The gun run is
+        // flown as an orbit instead, in the engaging branch below, where
+        // the nose stays on the tangent and never leaves the flight
+        // path.
+        d.heading = _easeHeading(d.heading, brng, dtSec);
+
+        // DECELERATE ONTO THE ORBIT.
         //
-        // The POSITION still steps along brng, toward the pass point.
-        // Flying one way while pointing another is the crab, and it is
-        // the whole reason a helicopter can make this shot at all.
-        // Bank is derived from course rather than nose heading, so this
-        // yaw correctly leaves the disc level. See rotorcraft_attitude.
-        const _gunTgt = d.profile.muzzleSideOffsetM ? _gunTargetOf(d) : null;
-        const _hdgWant = _gunTgt
-          ? firingPassHeadingRad({
-              bearingToTargetRad: _bearingRad(d.curLat, d.curLon, _gunTgt.lat, _gunTgt.lon),
-            })
-          : brng;
-        d.heading = _easeHeading(d.heading, _hdgWant, dtSec);
-        const stepDegLat = (stepM * Math.cos(brng)) / 111000;
-        const stepDegLon = (stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
+        // The orbit's speed is fixed by its radius and bank, 129 km/h at
+        // 400 m and 18 degrees, and arriving at 250 and snapping to 129
+        // is not a thing an aircraft does. Taper over the last three
+        // radii so it settles onto gun-run speed as it reaches the
+        // circle.
+        let _stepM = stepM;
+        if (d.profile.gunRunRadiusM) {
+          const vOrb = orbitSpeedMs(d.profile.gunRunRadiusM, GUN_RUN_BANK_RAD);
+          const taperFrom = d.profile.gunRunRadiusM * 3;
+          const toGo = haversineM(d.curLat, d.curLon, d.targetLat, d.targetLon);
+          if (toGo < taperFrom) {
+            const f = Math.max(0, Math.min(1, toGo / taperFrom));
+            const vNow = vOrb + (speedMps - vOrb) * f;
+            _stepM = Math.min(stepM, vNow * dtSec);
+          }
+        }
+        const stepDegLat = (_stepM * Math.cos(brng)) / 111000;
+        const stepDegLon = (_stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
         d.curLat += stepDegLat;
         d.curLon += stepDegLon;
         if (d.profile.trail) {
@@ -8127,6 +8142,48 @@ async function main() {
             }
           }
 
+          // GUN RUN: fly a left-hand orbit around the contact.
+          //
+          // The aircraft circles it, nose on the tangent, banked into
+          // the turn, port door facing the centre the whole way round.
+          // The gunner holds the target continuously and the airframe
+          // never flies sideways, which is what an earlier crab got
+          // wrong: a helicopter runs out of tail rotor authority in
+          // sideways flight somewhere around 30-35 knots.
+          //
+          // Radius and bank fix the speed, tan(bank) = v^2/(g*r), so
+          // 400 m at 18 degrees is 129 km/h coming round at 5.1 deg/s.
+          // 90 degrees of turn takes about 18 seconds, not one movement.
+          // The run-in above decelerates onto that speed.
+          //
+          // theta is seeded from where the aircraft actually is, so
+          // entering the orbit never teleports it, and the heading is
+          // eased onto the tangent rather than snapped, which reads as
+          // rolling into the turn.
+          const _orbiting = !!d.profile.gunRunRadiusM;
+          if (_orbiting) {
+            if (d._orbitTheta == null) {
+              d._orbitTheta = bearingFromTarget({
+                targetLat: enemyLat, targetLon: enemyLon,
+                lat: d.curLat, lon: d.curLon,
+              });
+            }
+            const orb = advanceOrbit({
+              targetLat: enemyLat, targetLon: enemyLon,
+              theta: d._orbitTheta,
+              radiusM: d.profile.gunRunRadiusM,
+              dt: dtSecEng,
+            });
+            d._orbitTheta = orb.theta;
+            d.curLat = orb.lat;
+            d.curLon = orb.lon;
+            d.heading = _easeHeading(d.heading, orb.headingRad, dtSec);
+            if (d.profile.trail) {
+              d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
+              if (d.trailPositions.length > 500) d.trailPositions.shift();
+            }
+          }
+
           const offsetM = d.profile.engageOffsetM || 100;
           const bearing = ((d.memberIndex || 0) * (Math.PI * 2 / 3));
           const desiredLat = enemyLat + (offsetM * Math.cos(bearing)) / 111000;
@@ -8136,6 +8193,7 @@ async function main() {
           // faster than en-route but still moves visibly instead of
           // teleporting.
           const maxStepM = ((d.profile.cruiseKmh * 1000) / 3600) * 1.6 * dtSecEng;
+          if (!_orbiting) {
           if (distToDesiredM <= maxStepM || distToDesiredM < 8) {
             d.curLat = desiredLat;
             d.curLon = desiredLon;
@@ -8161,6 +8219,7 @@ async function main() {
           if (d.profile.trail) {
             d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
             if (d.trailPositions.length > 500) d.trailPositions.shift();
+          }
           }
         }
       }
