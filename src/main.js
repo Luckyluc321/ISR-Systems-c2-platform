@@ -6159,7 +6159,7 @@ async function main() {
       // per helicopter for nothing.
       const _hT = () => window.__isr_heli_tuning || _NO_TUNING;
       _entitySpec.model = {
-        uri: '/aircraft/mh-60r_seahawk.glb',
+        uri: '/aircraft/mh-60r_seahawk_crewed.glb',
         // Life size. Measured 2196.34 over its longest axis, against a
         // published 19.76 m over all for the H-60, so 0.009. At that
         // scale the rotor spans 15.20 m against a real 16.36, which is
@@ -6193,45 +6193,13 @@ async function main() {
             rotation: new Cesium.CallbackProperty(
               () => _rotorSpin(Cesium.Cartesian3.UNIT_X, _hT().tailRotorRps ?? 18), false),
           },
-          // Door gunner. Built rather than sourced, by
-          // scripts/add_door_gunner.py, so there is no licence question
-          // on it. 168 triangles of boxes: seated crew leaning into a
-          // pintle-mounted 12.7 mm, which is the armament Danish MH-60Rs
-          // are reported with. See src/armament.js.
-          //
-          // The translation here is a NUDGE, not the position. Cesium
-          // composes a node transformation onto the node's own matrix,
-          // so this adds to the [-140, -90, 150] baked into the file. I
-          // placed that by measuring the fuselage rather than by looking
-          // at it, so it may want moving:
-          //
-          //   window.__isr_heli_tuning = { gunnerOffset: [0, -20, 10] }
-          //
-          // in model units, roughly 111 to the metre. +X outboard,
-          // -Y toward the nose, +Z up.
-          Door_Gunner: {
-            translation: new Cesium.CallbackProperty(() => {
-              const o = _hT().gunnerOffset;
-              return Array.isArray(o)
-                ? new Cesium.Cartesian3(o[0] || 0, o[1] || 0, o[2] || 0)
-                : Cesium.Cartesian3.ZERO;
-            }, false),
-            scale: new Cesium.Cartesian3(1, 1, 1),
-            rotation: Cesium.Quaternion.IDENTITY,
-          },
-          // Two aircrew in the cockpit, same build, visible through the
-          // windscreen. Nudged the same way if they sit wrong:
-          //   window.__isr_heli_tuning = { crewOffset: [0, 20, -10] }
-          Cockpit_Crew: {
-            translation: new Cesium.CallbackProperty(() => {
-              const o = _hT().crewOffset;
-              return Array.isArray(o)
-                ? new Cesium.Cartesian3(o[0] || 0, o[1] || 0, o[2] || 0)
-                : Cesium.Cartesian3.ZERO;
-            }, false),
-            scale: new Cesium.Cartesian3(1, 1, 1),
-            rotation: Cesium.Quaternion.IDENTITY,
-          },
+          // The crew nodes carried identity nodeTransformations here
+          // only to expose a live position nudge. Removed: they composed
+          // to identity so they moved nothing, and every entry in this
+          // bag is another thing that can go wrong in a feature that has
+          // already failed to appear twice. Their position is baked into
+          // the file by scripts/add_door_gunner.py and changing it is one
+          // command.
         },
       };
 

@@ -204,7 +204,7 @@ def main():
         # A flight suit and helmet are a different shade from an airframe
         # anyway, so this is both more visible and more truthful.
         "pbrMetallicRoughness": {
-            "baseColorFactor": [0.46, 0.47, 0.40, 1.0],
+            "baseColorFactor": [0.66, 0.60, 0.47, 1.0],
             "metallicFactor": 0.05, "roughnessFactor": 0.9,
         },
         "doubleSided": True,
