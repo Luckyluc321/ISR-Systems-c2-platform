@@ -46,7 +46,10 @@ MH-60R Seahawks with Eskadrille 723 at Helicopter Wing Karup.
 - **Author:** abdlilah ben — https://sketchfab.com/m152027350
 - **Licence:** CC-BY-4.0 — http://creativecommons.org/licenses/by/4.0/
 - **Source:** https://sketchfab.com/3d-models/modern-army-soldier-with-24-pro-animations-37566d930fa7404f87847b7fca8dca97
-- **Used for:** the Seahawk's door gunner
+- **Used for:** the Seahawk's door gunner. ONLY the door gunner: the same
+  figure was briefly used for cockpit pilots and that was wrong, because a
+  crouching pose cannot read as a seated pilot. The source has no seated
+  clip, so cockpit crew wait for a figure that does.
 - **Modified:** his `crouch idle` pose baked into static geometry by
   `scripts/bake_posed_figure.py`, then merged into the Seahawk by
   `scripts/merge_static_glb.py`. The skin, its 50 joints and all 23

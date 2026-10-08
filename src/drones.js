@@ -945,7 +945,6 @@ export const TEMPLATES = {
     droneType: 'Shahed-136 / Geran-2 (loitering munition)',
     confidence: 0.74,
     confidenceTrend: 'Acoustic piston signature + RF, climbing 0.52 to 0.74',
-    multiSite: true,
     contributingSensors: [
       { id: 'BLL-N01', confidence: 0.77 },
       { id: 'BLL-N02', confidence: 0.71 },
@@ -994,7 +993,6 @@ export const TEMPLATES = {
     droneType: 'Geran-4 (jet loitering munition)',
     confidence: 0.71,
     confidenceTrend: 'Turbojet acoustic signature, no piston harmonics',
-    multiSite: true,
     contributingSensors: [
       { id: 'BLL-N01', confidence: 0.74 },
       { id: 'BLL-N02', confidence: 0.68 },
@@ -1041,7 +1039,6 @@ export const TEMPLATES = {
     droneType: 'Geran-5 (jet cruise-missile layout)',
     confidence: 0.69,
     confidenceTrend: 'High-subsonic turbojet, no delta-wing acoustic return',
-    multiSite: true,
     contributingSensors: [
       { id: 'BLL-N01', confidence: 0.72 },
       { id: 'BLL-N02', confidence: 0.66 },
