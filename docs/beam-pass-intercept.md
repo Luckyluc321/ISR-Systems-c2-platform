@@ -178,6 +178,32 @@ air, 60% loses power and descends on its own momentum to a wreck downrange.
 If it should sometimes survive a pass, the lever is `engageSec`, not the kill
 model.
 
+## When the turn happens
+
+The pass heading is applied from the moment the gunner has the contact, not
+when the dispatch state flips to `engaging`.
+
+That distinction was the whole bug on the second attempt. `engaging` begins
+when the aircraft is within `arriveAtM` of its pass point, which is the last
+second of a run that takes a minute, so the nose followed the flight path for
+the entire approach and then snapped at the end. A real crew turns as soon as
+the contact is acquired and holds that attitude through the run.
+
+The gate is `_gunTargetOf`, which is the gunner's own 2000 m envelope. Inside
+it the nose holds at `bearing + 90°`; outside it the nose follows the flight
+path as before. The POSITION always steps along the run-in bearing, so the
+aircraft flies one way and points another — the crab, and the only reason a
+side gun can make this shot.
+
+| Target bearing | Nose held at | Gun bears |
+|---|---|---|
+| 0° | 90° | yes |
+| 45° | 135° | yes |
+| 180° | −90° | yes |
+
+Because bank is derived from course and not from nose heading, this 90° yaw
+correctly leaves the disc level instead of rolling it 18°.
+
 ## Pivoting like a helicopter
 
 Bank was derived from **nose heading** change. That is correct for an

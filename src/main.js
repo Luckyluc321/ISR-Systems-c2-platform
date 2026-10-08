@@ -8021,7 +8021,27 @@ async function main() {
       } else {
         // Straight-line fallback (used pre-route-fetch or on OSRM fail)
         const brng = _bearingRad(d.curLat, d.curLon, d.targetLat, d.targetLon);
-        d.heading = _easeHeading(d.heading, brng, dtSec);
+        // Turn to set up the shot on the RUN-IN, not at the instant of
+        // engagement.
+        //
+        // The nose otherwise follows the flight path for the whole
+        // approach and only swings when the state flips to 'engaging',
+        // which is the last second of a pass that takes a minute. A
+        // real crew turns as soon as the gunner has the contact, and
+        // holds that attitude through the run.
+        //
+        // The POSITION still steps along brng, toward the pass point.
+        // Flying one way while pointing another is the crab, and it is
+        // the whole reason a helicopter can make this shot at all.
+        // Bank is derived from course rather than nose heading, so this
+        // yaw correctly leaves the disc level. See rotorcraft_attitude.
+        const _gunTgt = d.profile.muzzleSideOffsetM ? _gunTargetOf(d) : null;
+        const _hdgWant = _gunTgt
+          ? firingPassHeadingRad({
+              bearingToTargetRad: _bearingRad(d.curLat, d.curLon, _gunTgt.lat, _gunTgt.lon),
+            })
+          : brng;
+        d.heading = _easeHeading(d.heading, _hdgWant, dtSec);
         const stepDegLat = (stepM * Math.cos(brng)) / 111000;
         const stepDegLon = (stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
         d.curLat += stepDegLat;
