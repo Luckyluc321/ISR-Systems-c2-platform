@@ -98,3 +98,33 @@ export function shouldShowTrail({ isSimTrack, inCoverage, suppressed }) {
   if (suppressed) return false;
   return !!inCoverage || !!isSimTrack;
 }
+
+// ── Unobserved breadcrumb ──────────────────────────────────────────
+// The red dashed line that marks where a track went while NO sensor
+// could see it. The swarm members have had this all along as
+// `sw.projLine`; the single-drone path did not, so a track that left
+// coverage simply vanished off the map.
+//
+// Distance-sampled for the same reason the trail is: the swarm appends
+// one point per tick and caps at 300, which is 5 s of flight at 60 fps.
+// That is fine for a short run out to sea and useless across an
+// 87 minute transit.
+
+/** Add a breadcrumb point? `movedM` is null when there is none yet. */
+export function shouldAppendBreadcrumb(movedM) {
+  return movedM == null || movedM >= TRAIL_SIM_SPACING_M;
+}
+
+export const BREADCRUMB_POINTS_MAX = TRAIL_POINTS_SIM;
+
+/**
+ * Whether the breadcrumb draws.
+ *
+ * Needs two points to be a line at all. Suppressed for a real sensor
+ * feed: out of coverage nothing observed the track, so nothing is
+ * drawn. That is the whole difference between the two environments.
+ */
+export function shouldShowBreadcrumb({ isSimTrack, pointCount, suppressed }) {
+  if (suppressed || !isSimTrack) return false;
+  return pointCount >= 2;
+}

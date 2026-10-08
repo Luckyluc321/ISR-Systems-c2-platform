@@ -802,7 +802,8 @@ import { fetchDrivingRoute, computeSegmentLengths, advanceAlongPolyline } from '
 import { buildCordon, assignPatrols, clearCordonCache } from './perimeter.js';
 import { loadSiteLights, loadNationalLights, bucketByRadiance, LIGHT_STYLES, LIGHT_CLASSES } from './night_infrastructure_lights.js';
 import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from './runway_lighting.js';
-import { isSimulatedTrack, trailMaxPoints, shouldAppendTrailPoint, shouldShowTrail } from './trail_policy.js';
+import { isSimulatedTrack, trailMaxPoints, shouldAppendTrailPoint, shouldShowTrail,
+  shouldAppendBreadcrumb, shouldShowBreadcrumb, BREADCRUMB_POINTS_MAX } from './trail_policy.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -14541,6 +14542,30 @@ async function main() {
       },
     });
 
+    // UNOBSERVED BREADCRUMB — red dashed, visible ONLY while the track
+    // is outside every sensor radius. The exact mechanism the CPH swarm
+    // members already use (`sw.projLine`), which the single-drone path
+    // never had: there, a track that left coverage simply vanished, and
+    // on a long transit there was nothing left on the map to follow.
+    //
+    // Same colour, width and dash as the swarm's so the two read as one
+    // language. Positions are distance-sampled, because the swarm's
+    // every-tick append caps out at 5 s of flight and this has to cover
+    // an 87 minute transit.
+    const projPositions = [];
+    const projLine = viewer.entities.add({
+      id: `drone-proj-${event.id}`,
+      polyline: {
+        positions: new Cesium.CallbackProperty(() => projPositions, false),
+        width: 1.5,
+        material: new Cesium.PolylineDashMaterialProperty({
+          color: Cesium.Color.fromCssColorString('#ff3d3d').withAlpha(0.55),
+          dashLength: 12,
+        }),
+      },
+      show: false,
+    });
+
     const shadow = viewer.entities.add({
       id: `drone-shadow-${event.id}`,
       polyline: {
@@ -15236,6 +15261,7 @@ async function main() {
       leadSwarmMember,   // formation[0] wrapper, same shape as swarmBillboards entries
       spawnMs: monoNow(),   // shared timing reference for swarm interpolation
       trailPositions, shadowPositions,
+      projLine, projPositions,
       stateHolder,      // { headingRad } — updated in tick, read by billboard rotation callback
       entryDropped: false, entryMarker: null,
       exitDropped: false, exitMarker: null, wasInCoverage: false,
@@ -15299,6 +15325,7 @@ async function main() {
     if (!state) return;
     viewer.entities.remove(state.billboard);
     viewer.entities.remove(state.trail);
+    if (state.projLine) viewer.entities.remove(state.projLine);
     viewer.entities.remove(state.shadow);
     if (state.swarmBillboards) {
       for (const sw of state.swarmBillboards) {
@@ -15620,6 +15647,11 @@ async function main() {
         // found; LIVE stops it at the edge, because past that edge no
         // sensor reported a position and the line would be asserting
         // one. leadDown and POV outrank both.
+        // Two lines, exactly as the swarm members have:
+        //   trail     the CONFIRMED path. Only while a sensor sees it.
+        //   projLine  the UNOBSERVED breadcrumb. Only while none does.
+        // One or the other, never both, so the map always says which of
+        // the two it is showing.
         if (state.trail) {
           state.trail.show = shouldShowTrail({
             isSimTrack: isSimulatedTrack(p),
@@ -15773,7 +15805,7 @@ async function main() {
         const _simTrack = isSimulatedTrack(p);
         const _movedM = state._lastTrailLat == null ? null
           : haversineM(p.lat, p.lon, state._lastTrailLat, state._lastTrailLon);
-        if (!leadDown && shouldAppendTrailPoint({
+        if (!leadDown && leadInCov && shouldAppendTrailPoint({
           isSimTrack: _simTrack, frameCounter: _trailAppendCounter, movedM: _movedM,
         })) {
           state.trailPositions.push(Cesium.Cartesian3.fromDegrees(p.lon, p.lat, _safeTrailAlt(p.alt)));
@@ -15781,6 +15813,34 @@ async function main() {
           state._lastTrailLon = p.lon;
           const _cap = trailMaxPoints(_simTrack);
           while (state.trailPositions.length > _cap) state.trailPositions.shift();
+        }
+
+        // Breadcrumb, mirroring the swarm's projLine branch.
+        if (state.projLine) {
+          const _bcMoved = state._lastBcLat == null ? null
+            : haversineM(p.lat, p.lon, state._lastBcLat, state._lastBcLon);
+          if (leadInCov) {
+            // Observed again. Wipe the breadcrumb so the NEXT gap starts
+            // fresh — otherwise the line draws a straight segment from
+            // the previous gap's last point across the map to the new
+            // one. Same reason the swarm wipes projPositions on re-entry.
+            if (state.projPositions.length) state.projPositions.length = 0;
+            state._lastBcLat = null;
+            state._lastBcLon = null;
+            state.projLine.show = false;
+          } else {
+            if (!leadDown && shouldAppendBreadcrumb(_bcMoved)) {
+              state.projPositions.push(Cesium.Cartesian3.fromDegrees(p.lon, p.lat, _safeTrailAlt(p.alt)));
+              state._lastBcLat = p.lat;
+              state._lastBcLon = p.lon;
+              while (state.projPositions.length > BREADCRUMB_POINTS_MAX) state.projPositions.shift();
+            }
+            state.projLine.show = shouldShowBreadcrumb({
+              isSimTrack: _simTrack,
+              pointCount: state.projPositions.length,
+              suppressed: leadDown || povSuppressed,
+            });
+          }
         }
 
         // Perimeter crossing detection — fall back to outer siteBoundary if

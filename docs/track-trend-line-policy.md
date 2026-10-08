@@ -52,6 +52,37 @@ Measured by replaying the real `billund_geran2_north` waypoints through the modu
 | Template track | 2219 | 0 | 267.7 of 267.7 km (100%) |
 | Real feed | 180 | 104 020 | 0.5 km (0.2%) |
 
+## Two lines, one language
+
+The single-drone path now carries the same pair the CPH swarm members
+always had. One or the other draws, never both, so the map always states
+which of the two it is showing.
+
+| Entity | Means | Drawn | Style |
+|---|---|---|---|
+| `trail` | confirmed path, a sensor saw this | only **inside** coverage | `#ff3838`, width 2.5, dash 8 |
+| `projLine` | unobserved breadcrumb, where it went while nothing watched | only **outside** coverage, and only for a template track | `#ff3d3d` at 0.55 alpha, width 1.5, dash 12 |
+
+`projLine` is wiped on re-entry to coverage, so the next gap starts fresh.
+Without that the line draws a straight segment from the previous gap's
+last point across the map to the new one. The swarm wipes `projPositions`
+for the same reason.
+
+Before this, the single-drone path had no breadcrumb at all: a track that
+left coverage simply vanished, and on a long transit there was nothing
+left to follow. The swarm's own breadcrumb appends once per tick and caps
+at 300 points, which is 5 s at 60 frames per second — fine for a short
+run out to sea, useless across an 87 minute transit, so the single-drone
+breadcrumb is distance-sampled instead.
+
+Measured by replaying `billund_geran2_north` against all 130 sensors with
+the real cylinder test, horizontal radius and altitude ceiling both:
+
+| | In coverage | Out of coverage | Breadcrumb |
+|---|---|---|---|
+| Template track | 0.8 min | 86.1 min | 2173 pts, 262.2 km, drawn 86.0 min |
+| Real feed | 0.8 min | 86.1 min | drawn 0.0 min |
+
 ## Visibility
 
 ```mermaid
