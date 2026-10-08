@@ -41,6 +41,19 @@ one; it was in the tree only because it was the first animated
 helicopter to hand. The H-60 is the right airframe: Denmark operates 9
 MH-60R Seahawks with Eskadrille 723 at Helicopter Wing Karup.
 
+### Modern Army Soldier — merged into `public/aircraft/mh-60r_seahawk_crewed.glb`
+
+- **Author:** abdlilah ben — https://sketchfab.com/m152027350
+- **Licence:** CC-BY-4.0 — http://creativecommons.org/licenses/by/4.0/
+- **Source:** https://sketchfab.com/3d-models/modern-army-soldier-with-24-pro-animations-37566d930fa7404f87847b7fca8dca97
+- **Used for:** the Seahawk's door gunner
+- **Modified:** his `crouch idle` pose baked into static geometry by
+  `scripts/bake_posed_figure.py`, then merged into the Seahawk by
+  `scripts/merge_static_glb.py`. The skin, its 50 joints and all 23
+  animation clips are discarded: we want one pose, held, and carrying a
+  skeleton would mean reconciling joint indices between two files and
+  paying skinning cost every frame for something that never moves.
+
 ### Shahed 238 Drone — `public/aircraft/shahed_238_drone.glb`
 
 - **Author:** Rudy — https://sketchfab.com/Rudy27
