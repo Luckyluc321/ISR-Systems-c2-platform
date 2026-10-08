@@ -6023,12 +6023,37 @@ async function main() {
    */
   const _GUN_TRAVERSE_LIMIT = (45 * Math.PI) / 180;
 
+  /**
+   * What the door gun has acquired, or null when it has nothing.
+   *
+   * ACQUIRES ON THE AIRCRAFT'S OWN SENSOR, not on a coordinate handed
+   * down from the dispatch. The profile already declares the reach that
+   * matters, onboardSensorRangeM, 800 m for this airframe's EO/IR
+   * turret, and the same number already governs whether a pursuit holds
+   * when the site mesh loses the target. A gunner lays on what the
+   * aircraft can see, so the gun uses the same figure.
+   *
+   * Beyond that range it returns null and the station sits at rest
+   * pointing out of the door, which is correct: the crew are not
+   * tracking something nobody aboard can detect. The gun coming onto a
+   * bearing is therefore a real signal that the aircraft has the
+   * contact, rather than decoration.
+   *
+   * Position comes from _liveTargetPositionFor, the same resolver the
+   * tracer rounds use, so the gun and the rounds agree. It reads the
+   * target's TRUE position, not its rendered one: a contact outside the
+   * site sensor mesh is hidden on the map but the aircraft's own turret
+   * still holds it, and the operator sees the gun swing even though the
+   * symbol is dark.
+   */
   function _gunTargetOf(d) {
-    if (d.assignedTargetCoord) return d.assignedTargetCoord;
-    if (d.targetLat != null && d.targetLon != null) {
-      return { lat: d.targetLat, lon: d.targetLon };
-    }
-    return null;
+    const range = d.profile?.onboardSensorRangeM;
+    if (!range || d.curLat == null) return null;
+    const live = _liveTargetPositionFor(d);
+    const p = live || (d.assignedTargetCoord
+      || (d.targetLat != null ? { lat: d.targetLat, lon: d.targetLon } : null));
+    if (!p || p.lat == null) return null;
+    return haversineM(d.curLat, d.curLon, p.lat, p.lon) <= range ? p : null;
   }
 
   function _gunStationAim(d) {
@@ -6852,7 +6877,7 @@ async function main() {
     _inboundState = null;
   }
 
-  window.__isr_inbound = (opts = {}) => {
+  function _launchInboundPass(opts = {}) {
     _inboundStop();
     if (anyTrackLive()) {
       console.warn('[inbound] a track is already live — close it first');
@@ -6967,7 +6992,15 @@ async function main() {
     };
     const armedAt = monoNow();
     countdown();
-  };
+  }
+
+  /** Is there a helicopter up that a pass would make sense against? */
+  function _heliAirborneForPass() {
+    return [..._counterDispatches.values()]
+      .find((d) => d.profile?.icon === 'helicopter' && d.curLat != null) || null;
+  }
+
+  window.__isr_inbound = _launchInboundPass;
   window.__isr_inbound.stop = _inboundStop;
 
   /** Newest event spawned from a template key, or null. */
@@ -17997,6 +18030,7 @@ async function main() {
         </select>
       </div>
       <button class="cp-btn wide sim-btn sim-launch" data-comp-launch ${selEntry ? '' : 'disabled'}>Launch simulation</button>
+      ${_simHeliPassMarkup()}
       ${simPauseMarkup(simIsPaused(), anyTrackLive())}`;
     simPauseWire(simPanel, () => { simToggle(); });
     const thSel = simPanel.querySelector('#sim-comp-threat');
@@ -18016,6 +18050,31 @@ async function main() {
       flyTo(site);
       simAfter(() => window.__spawnDrone(selEntry.key), 1500);
     });
+    const passBtn = simPanel.querySelector('[data-heli-pass]');
+    if (passBtn) passBtn.addEventListener('click', () => {
+      _launchInboundPass({ delaySec: 15 });
+      renderSimPanel();
+    });
+  }
+
+  // A one-click inbound pass at a dispatched helicopter.
+  //
+  // This started life as a console call, which is the wrong place for
+  // something you actually want to use: it sits next to Launch
+  // simulation because it IS one, just aimed at a unit rather than a
+  // site. It is always shown rather than appearing and vanishing, with
+  // the reason it cannot run written on it, so there is never a question
+  // of whether the feature exists.
+  function _simHeliPassMarkup() {
+    const unit = _heliAirborneForPass();
+    const live = anyTrackLive();
+    const why = !unit ? 'Dispatch a helicopter first'
+      : live ? 'Close the live track first' : null;
+    return `
+      <button class="cp-btn wide sim-btn" data-heli-pass ${why ? 'disabled' : ''}
+        title="${why || 'Flies a slow drone past the airborne helicopter so the door gun traverses onto it'}">
+        ${why ? `Door-gun pass · ${why}` : 'Door-gun pass at helicopter'}
+      </button>`;
   }
 
   // ── Keeping the pause button honest ──────────────────────────────
