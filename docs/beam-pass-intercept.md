@@ -26,7 +26,7 @@ to one side of it. The aircraft keeps its full closing speed and arrives
 | Constant | Value | Why |
 |---|---|---|
 | `BEAM_PASS_STANDOFF_M` | 700 m | inside the GAU-21's 1100 m effective range with margin, and well inside the 2000 m onboard sensor envelope so the contact is seen and the gun has time to lay on |
-| `beamPassTrackSide` | +1 | the threat's right, which presents it off a port-gun chaser's firing side |
+| track side | chosen per tick | `pickTrackSide` evaluates both and keeps the one presenting the threat nearest the gun's bearing |
 
 At 700 m the threat stays inside the 1100 m gun envelope for the chord
 `2·√(1100² − 700²)`, which is 33 s at Geran-2 speed against an `engageSec` of 8.
@@ -40,6 +40,30 @@ standoff 1000 m  ->  18 s
 `trackSide` is named for the geometry, not for the gun, because the sign
 inverts between the two frames and that is exactly what nobody gets right
 twice.
+
+## Which side, and why it cannot be fixed on the profile
+
+The side of the track to sit on is not a property of the aircraft. It depends on
+the direction the chaser runs in from.
+
+This helicopter launches from Karup or Skrydstrup. Against a northbound Geran it
+therefore closes **head-on**, not from astern. Sitting on the threat's right is
+correct for a co-directional chase and puts the threat on the **starboard** side
+in a head-on pass, which a port gun can never bear. A fixed side is right half
+the time, and the half it is wrong the aircraft arrives inside gun range and
+still cannot fire.
+
+`pickTrackSide` evaluates both sides each tick: it builds the aim point, takes
+the heading the chaser will be on running in to it, and measures the threat's
+relative bearing from there. It keeps the side closest to the port beam.
+
+| Launch point, vs a northbound threat | Chosen side |
+|---|---|
+| Karup, north of it — head-on | −1, the threat's left |
+| Billund, south of it — stern chase | +1, the threat's right |
+| Skrydstrup, south-west | +1, the threat's right |
+
+The sign flips exactly where the geometry says it should.
 
 ## Why not solve for a simultaneous arrival
 

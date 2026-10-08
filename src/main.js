@@ -802,7 +802,7 @@ import { fetchDrivingRoute, computeSegmentLengths, advanceAlongPolyline } from '
 import { buildCordon, assignPatrols, clearCordonCache } from './perimeter.js';
 import { loadSiteLights, loadNationalLights, bucketByRadiance, LIGHT_STYLES, LIGHT_CLASSES } from './night_infrastructure_lights.js';
 import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from './runway_lighting.js';
-import { beamPassAimPoint, beamPassIntercept, BEAM_PASS_STANDOFF_M } from './intercept.js';
+import { beamPassAimPoint, beamPassIntercept, pickTrackSide, BEAM_PASS_STANDOFF_M } from './intercept.js';
 import { isSimulatedTrack, trailMaxPoints, shouldAppendTrailPoint, shouldShowTrail,
   shouldAppendBreadcrumb, shouldShowBreadcrumb, BREADCRUMB_POINTS_MAX } from './trail_policy.js';
 
@@ -4713,11 +4713,13 @@ async function main() {
       // the gunner's arc at a steady standoff. Opt-in, so no other
       // dispatch kind changes.
       //
-      // trackSide +1 puts the aircraft RIGHT of the threat's track,
-      // which presents the threat off its port beam. See _muzzleOffsetFor,
-      // which offsets the muzzle to the left of the track.
+      // Which side of the track it sits on is decided per tick by
+      // pickTrackSide from the approach geometry, NOT fixed here: this
+      // aircraft launches from Karup or Skrydstrup, so against a
+      // northbound threat it closes head-on, and the side that presents
+      // the threat to a port gun head-on is the opposite of the one
+      // that works in a stern chase.
       beamPassStandoffM: BEAM_PASS_STANDOFF_M,
-      beamPassTrackSide: 1,
       // Declared HERE as well as in _SIM_INTERCEPTOR_PHYSICS because two
       // separate climb routines read two different sources: one takes
       // profile.climbRateMs with a fallback of 6, the other takes the
@@ -7553,15 +7555,29 @@ async function main() {
       if (d.profile.beamPassStandoffM && d.state === 'en_route'
           && typeof event.lastPosition.heading === 'number'
           && event.lastPosition.speed > 0) {
-        // Close on the threat at full speed, but aim a standoff to its
-        // right so the run-in ends ABEAM rather than astern. Not the
+        // Close on the threat at full speed, but aim a standoff to one
+        // side so the run-in ends ABEAM rather than astern. Not the
         // simultaneous-arrival solve: that aims tens of km ahead and
         // makes the meeting later, not sooner.
+        //
+        // WHICH side is chosen per tick from the approach geometry, not
+        // fixed on the profile. This aircraft launches from Karup or
+        // Skrydstrup, so against a northbound threat it closes head-on,
+        // and the side that presents the threat to a port gun in a
+        // head-on pass is the opposite of the one that works in a stern
+        // chase. A fixed side is right half the time, and the half it
+        // is wrong the aircraft arrives in range and still cannot fire.
+        const _side = pickTrackSide({
+          chaserLat: d.curLat, chaserLon: d.curLon,
+          targetLat: event.lastPosition.lat, targetLon: event.lastPosition.lon,
+          targetHeadingDeg: event.lastPosition.heading,
+          standoffM: d.profile.beamPassStandoffM,
+        });
         const ap = beamPassAimPoint({
           targetLat: event.lastPosition.lat, targetLon: event.lastPosition.lon,
           targetHeadingDeg: event.lastPosition.heading,
           standoffM: d.profile.beamPassStandoffM,
-          trackSide: d.profile.beamPassTrackSide ?? 1,
+          trackSide: _side,
         });
         d.targetLat = ap.lat;
         d.targetLon = ap.lon;
@@ -7576,9 +7592,10 @@ async function main() {
           targetHeadingDeg: event.lastPosition.heading,
           targetSpeedMs: event.lastPosition.speed,
           standoffM: d.profile.beamPassStandoffM,
-          trackSide: d.profile.beamPassTrackSide ?? 1,
+          trackSide: _side,
         });
         d._interceptEtaS = ip ? ip.timeToInterceptS : null;
+        d._beamPassSide = _side;
         _aimed = true;
       }
       if (!_aimed) {

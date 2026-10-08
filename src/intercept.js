@@ -188,3 +188,58 @@ export function beamPassAimPoint({
     standoffM,
   };
 }
+
+// ── Choosing the side ─────────────────────────────────────────────
+// Which side of the track to sit on is NOT a property of the aircraft,
+// which is the mistake a fixed trackSide encodes. It depends on the
+// direction the chaser runs in from.
+//
+// The helicopter launches from Karup or Skrydstrup, so against a
+// northbound Geran it closes HEAD-ON, not from astern. Sitting on the
+// threat's right is correct for a co-directional chase and puts the
+// threat on the STARBOARD side in a head-on pass, which a port gun can
+// never bear. A fixed side is right half the time and the half it is
+// wrong, the aircraft arrives in range and still cannot fire.
+//
+// So evaluate both and keep the one that puts the threat nearest the
+// gun's bearing, using the chaser's actual inbound heading.
+
+/** Relative bearing of the port beam, in degrees. Negative is left. */
+export const PORT_BEAM_DEG = -90;
+
+/**
+ * Pick the track side that presents the threat closest to the gun's
+ * bearing, given where the chaser is coming from.
+ *
+ * Returns +1 (threat's right) or -1 (threat's left).
+ */
+export function pickTrackSide({
+  chaserLat, chaserLon,
+  targetLat, targetLon, targetHeadingDeg,
+  standoffM = BEAM_PASS_STANDOFF_M,
+  gunRelativeBearingDeg = PORT_BEAM_DEG,
+}) {
+  const mLon = mPerDegLon(targetLat);
+  let best = 1;
+  let bestErr = Infinity;
+  for (const side of [1, -1]) {
+    const aim = beamPassAimPoint({
+      targetLat, targetLon, targetHeadingDeg, standoffM, trackSide: side,
+    });
+    // Heading the chaser will be on as it runs in to that aim point.
+    const ix = (aim.lon - chaserLon) * mLon;
+    const iy = (aim.lat - chaserLat) * M_PER_DEG_LAT;
+    if (ix === 0 && iy === 0) continue;
+    const inbound = (Math.atan2(ix, iy) * 180) / Math.PI;
+    // Bearing from the aim point to the threat: straight back across
+    // the standoff, which is the beam the gun has to cover.
+    const bx = (targetLon - aim.lon) * mLon;
+    const by = (targetLat - aim.lat) * M_PER_DEG_LAT;
+    const toTarget = (Math.atan2(bx, by) * 180) / Math.PI;
+    // Signed relative bearing, -180..180. Negative is to port.
+    const rel = ((toTarget - inbound + 540) % 360) - 180;
+    const err = Math.abs(rel - gunRelativeBearingDeg);
+    if (err < bestErr) { bestErr = err; best = side; }
+  }
+  return best;
+}
