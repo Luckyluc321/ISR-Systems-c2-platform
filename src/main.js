@@ -5844,6 +5844,40 @@ async function main() {
   // further from the viewer.
   const F35_MODEL_SWAP_M = 15000;
 
+  /**
+   * World-space forward vector for a billboard that must point at a bearing.
+   *
+   * A Cesium billboard's `rotation` is in SCREEN space and knows nothing
+   * about north, so `rotation: -bearing` aims the icon correctly only
+   * while the camera happens to be north-up. Orbit the camera and every
+   * symbol swings with you: a helicopter flying east gets drawn flying
+   * south. Zoomed in you would not notice, because the 3D model carries
+   * the real orientation, but zoomed out the billboard IS the symbol.
+   *
+   * `alignedAxis` is the fix and it is already how the threat drones do
+   * it. It takes a WORLD vector and aligns the image's up with that
+   * vector projected to screen, so it is correct from any camera
+   * heading AND any tilt. Compensating `rotation` by camera.heading
+   * would have handled the orbit but not the tilt.
+   *
+   * Forward = north*cos(bearing) + east*sin(bearing), in the east-north-up
+   * frame at the entity's own position, because "north" is a different
+   * direction in ECEF depending on where on the globe you are.
+   */
+  const _bearingAxisScratch = new Cesium.Cartesian3();
+  function _bearingAxis(cart, bearingRad) {
+    if (!cart) return Cesium.Cartesian3.UNIT_Y;
+    const m = Cesium.Transforms.eastNorthUpToFixedFrame(cart);
+    const east  = new Cesium.Cartesian3(m[0], m[1], m[2]);
+    const north = new Cesium.Cartesian3(m[4], m[5], m[6]);
+    const b = bearingRad || 0;
+    const fwd = Cesium.Cartesian3.multiplyByScalar(north, Math.cos(b), _bearingAxisScratch);
+    Cesium.Cartesian3.add(
+      fwd, Cesium.Cartesian3.multiplyByScalar(east, Math.sin(b), new Cesium.Cartesian3()), fwd);
+    return Cesium.Cartesian3.normalize(fwd, new Cesium.Cartesian3());
+  }
+
+
 
 
   /**
@@ -6013,7 +6047,9 @@ async function main() {
         // Negated because a bearing runs clockwise from north and
         // Cesium's billboard rotation runs counter-clockwise. Same
         // convention the F-35 and the friendly missile already use.
-        rotation: new Cesium.CallbackProperty(() => -(d.heading || 0), false),
+        rotation: 0,
+        alignedAxis: new Cesium.CallbackProperty(
+          () => _bearingAxis(_positionCb.getValue?.(Cesium.JulianDate.now()), d.heading), false),
         // Anything with a 3D model hides its billboard once the model
         // takes over, so the two are never drawn at the same place.
         // Everything else stays billboard at every range.
@@ -9303,7 +9339,9 @@ async function main() {
         width: 32, height: 32,
         heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        rotation: new Cesium.CallbackProperty(() => -_f35.heading, false),
+        rotation: 0,
+        alignedAxis: new Cesium.CallbackProperty(() => _bearingAxis(
+          Cesium.Cartesian3.fromDegrees(_f35.curLon, _f35.curLat, 0), _f35.heading), false),
         // Symbol beyond the model swap only, so the two are never drawn
         // at the same place. Same split as the helicopter and the quad.
         distanceDisplayCondition:
@@ -9552,7 +9590,10 @@ async function main() {
         width: 28, height: 28,
         heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        rotation: new Cesium.CallbackProperty(() => -_friendlyMissile.heading, false),
+        rotation: 0,
+        alignedAxis: new Cesium.CallbackProperty(() => _bearingAxis(
+          Cesium.Cartesian3.fromDegrees(_friendlyMissile.curLon, _friendlyMissile.curLat, 0),
+          _friendlyMissile.heading), false),
       },
       label: {
         // NATO brevity call sequence:
