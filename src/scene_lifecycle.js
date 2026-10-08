@@ -313,6 +313,12 @@ export function expiredGhostEventIds(droneStates, opts = {}) {
   for (const [eventId, state] of droneStates || []) {
     if (!state || typeof state.closedAt !== 'number') continue;
     if (state._entitiesRemoved) continue;
+    // Still airborne in the simulation. A template may keep its object
+    // flying after its event has closed (continueAfterClose), and
+    // tearing the entities down on the ghost timer would delete the
+    // breadcrumb mid-route. The flag clears when the trajectory
+    // completes, and the ghost timer then applies as normal.
+    if (state._simTrackFlying) continue;
     if (now - state.closedAt <= ghostMs) continue;
     out.push(eventId);
   }

@@ -15647,6 +15647,11 @@ async function main() {
         // found; LIVE stops it at the edge, because past that edge no
         // sensor reported a position and the line would be asserting
         // one. leadDown and POV outrank both.
+        // True while the object is still moving in the simulation, even
+        // after its event has closed. Read by the ghost sweep so the
+        // breadcrumb is not deleted mid-route. See continueAfterClose.
+        state._simTrackFlying = !p.completed;
+
         // Two lines, exactly as the swarm members have:
         //   trail     the CONFIRMED path. Only while a sensor sees it.
         //   projLine  the UNOBSERVED breadcrumb. Only while none does.

@@ -83,6 +83,50 @@ the real cylinder test, horizontal radius and altitude ceiling both:
 | Template track | 0.8 min | 86.1 min | 2173 pts, 262.2 km, drawn 86.0 min |
 | Real feed | 0.8 min | 86.1 min | drawn 0.0 min |
 
+## The simulation outliving the event
+
+A breadcrumb entity alone was not enough, and this was the actual reason
+nothing appeared past Billund.
+
+`markTrackClosed` sets `live.closed = true`, and the position feed in
+`drones.js` opens with `if (live.closed) continue`. So the object stopped
+moving the moment its event closed, about 12 s after it left coverage.
+The breadcrumb froze at roughly 600 m and the ghost sweep deleted it 15 s
+later. The CPH swarm never hit this because `multiSite` suppresses the
+out-of-coverage close, so `markTrackClosed` only fires at trajectory
+completion.
+
+Billund's event must close on exit — that rule is not negotiable. So the
+two lifecycles are now separate:
+
+```mermaid
+flowchart LR
+    A[enters coverage] --> B[detection report opens]
+    B --> C[exits coverage]
+    C --> D[event closes, report issued]
+    D --> E[object keeps flying<br/>breadcrumb keeps drawing]
+    E --> F[trajectory ends over the sea]
+    F --> G[ghost timer, entities removed]
+```
+
+Two additions, both opt-in so no existing scenario changes:
+
+- `template.continueAfterClose` keeps the position feed running after the
+  event closes. The feed still stops on its own, because past
+  `durationSec` the interpolator returns `visible: false`.
+- `state._simTrackFlying`, maintained from the tick, makes the ghost
+  sweep in `scene_lifecycle.js` skip a track that is still airborne, so
+  the entities are not deleted mid-route. It clears on trajectory
+  completion and the ghost timer then applies as normal.
+
+Measured end to end against the real sensors and the real
+`expiredGhostEventIds`:
+
+| | Feed stops | Breadcrumb at end |
+|---|---|---|
+| Without the flag | 12 s after close | 6 pts, **0.6 km** |
+| With the flag | runs to the end | 2173 pts, **262.2 km** |
+
 ## Visibility
 
 ```mermaid

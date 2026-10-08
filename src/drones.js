@@ -939,6 +939,10 @@ export const TEMPLATES = {
   // place, which is why the date is written down.
   billund_geran2_north: {
     siteId: 'billund',
+    // Billund's event closes on exit, as the rule requires. The
+    // object keeps flying to Skagen with its unobserved
+    // breadcrumb, the way the CPH swarm runs out over the sea.
+    continueAfterClose: true,
     // Spawns ~4 km south of BLL-N01, outside every ring. Undetected
     // and invisible until it crosses into coverage, detected on
     // entry, closed on exit by the ordinary single-site chain.
@@ -991,6 +995,10 @@ export const TEMPLATES = {
   // August 2026. There was no figure to stand behind.
   billund_geran4_north: {
     siteId: 'billund',
+    // Billund's event closes on exit, as the rule requires. The
+    // object keeps flying to Skagen with its unobserved
+    // breadcrumb, the way the CPH swarm runs out over the sea.
+    continueAfterClose: true,
     // Spawns ~4 km south of BLL-N01, outside every ring. Undetected
     // and invisible until it crosses into coverage, detected on
     // entry, closed on exit by the ordinary single-site chain.
@@ -1041,6 +1049,10 @@ export const TEMPLATES = {
   // slower than the figures suggest.
   billund_geran5_north: {
     siteId: 'billund',
+    // Billund's event closes on exit, as the rule requires. The
+    // object keeps flying to Skagen with its unobserved
+    // breadcrumb, the way the CPH swarm runs out over the sea.
+    continueAfterClose: true,
     // Spawns ~4 km south of BLL-N01, outside every ring. Undetected
     // and invisible until it crosses into coverage, detected on
     // entry, closed on exit by the ordinary single-site chain.
@@ -1582,7 +1594,17 @@ function speedAt(waypoints, tSec) {
 function _tick() {
   const updates = [];
   for (const [eventId, live] of _liveTracks) {
-    if (live.closed) continue;
+    // A closed event normally stops its position feed here. Some
+    // scenarios need the SIMULATION to outlive the EVENT: the threat
+    // overflies a site, the site's event closes on exit and issues its
+    // report exactly as the rule requires, and the object carries on
+    // across the country until its trajectory ends. Without this the
+    // Geran froze 12 s past Billund with 85 of its 87 minutes unflown.
+    //
+    // Opt-in per template, so no existing scenario changes. The feed
+    // still stops on its own: past durationSec interpolate() returns
+    // visible:false and nothing further is drawn.
+    if (live.closed && !live.template.continueAfterClose) continue;
     const elapsed = (monoNow() - live.startTime) / 1000;
     const p = interpolate(live.template.waypoints, elapsed);
     updates.push({
