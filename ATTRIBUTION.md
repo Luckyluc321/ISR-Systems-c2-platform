@@ -21,22 +21,25 @@ PY
 
 ## 3D models
 
-All three are used as map symbols in the Live Map, rendered at close range
+All four are used as map symbols in the Live Map, rendered at close range
 where the billboard icon would read as a flat sticker.
 
-### Mi-24 Hind — `public/aircraft/mi-24_hind.glb`
+### MH-60R Seahawk — `public/aircraft/mh-60r_seahawk.glb`
 
-- **Author:** Duane's Mind — https://sketchfab.com/duanesmind
+- **Author:** Muhamad Mirza Arrafi — https://sketchfab.com/nazidefenseforceofficial
 - **Licence:** CC-BY-4.0 — http://creativecommons.org/licenses/by/4.0/
-- **Source:** https://sketchfab.com/3d-models/mi-24-hind-004d68143e1a4df88e136dbc0a05f181
+- **Source:** Sketchfab, "SH-60B Seahawk Helicopter"
 - **Used for:** the `helicopter-intercept` dispatch unit
+- **Modified:** rotors cut into `Main_Rotor` and `Tail_Rotor` nodes by
+  `scripts/split_heli_rotors.py`, and textures resampled to 1024 by
+  `scripts/shrink_glb_textures.py`. Geometry verified unchanged: 34,462
+  distinct drawn points before and after, none lost, none gained.
 
-> **This airframe is knowingly wrong and is placeholder.** An Mi-24 Hind is a
-> Russian gunship. Denmark operates 14 AW101 Merlin, 9 MH-60R Seahawk and 8
-> Fennec, all from Helicopter Wing Karup, and none of them is this. It is in
-> the tree because it was the first animated helicopter available and it
-> proved the model pipeline works. Replace before this is shown to a customer.
-> See `docs/open-questions.md`.
+This **replaced an Mi-24 Hind** that had been standing in since
+2026-10-07. The Hind is a Russian gunship and Denmark has never flown
+one; it was in the tree only because it was the first animated
+helicopter to hand. The H-60 is the right airframe: Denmark operates 9
+MH-60R Seahawks with Eskadrille 723 at Helicopter Wing Karup.
 
 ### Shahed 238 Drone — `public/aircraft/shahed_238_drone.glb`
 
@@ -44,6 +47,8 @@ where the billboard icon would read as a flat sticker.
 - **Licence:** CC-BY-4.0 — http://creativecommons.org/licenses/by/4.0/
 - **Source:** https://sketchfab.com/3d-models/shahed-238-drone-10b7f80a149247748d8912bd0f59d517
 - **Used for:** loitering-munition threat tracks
+- **Modified:** simplified with meshoptimizer from 1,956,897 to 64,548
+  triangles, 74.8 MB to 2.6 MB. Bounding box drift 0.049%.
 
 ### Assault Drone Concept — `public/aircraft/assault_drone_concept.glb`
 
@@ -51,6 +56,18 @@ where the billboard icon would read as a flat sticker.
 - **Licence:** Sketchfab Standard — https://sketchfab.com/licenses
 - **Source:** https://sketchfab.com/3d-models/assault-drone-concept-c3a6f9b644b54de4b02c4599aac632eb
 - **Used for:** quadcopter interceptors and quadcopter threat tracks
+- **Modified:** eight propeller blades cut into `Rotor_1`..`Rotor_4` by
+  `scripts/split_quad_rotors.py`. Geometry verified unchanged.
+
+### F-35A Lightning II — `public/aircraft/f-35a_lightning_ii.glb`
+
+- **Author:** shangus930 — https://sketchfab.com/shangus930
+- **Licence:** CC-BY-4.0 — http://creativecommons.org/licenses/by/4.0/
+- **Source:** https://sketchfab.com/3d-models/f-35a-lightning-ii-a06d6113cfb44a0aa7b8f17106aca9c4
+- **Used for:** the Flyvevåbnet QRA jet, which launches from Skrydstrup
+- **Modified:** textures resampled 4096 to 1024 by
+  `scripts/shrink_glb_textures.py`, 127.7 MB to 19.5 MB. All 104 nodes,
+  19 meshes and 20 animation channels verified identical.
 
 ## The rule, for anything added later
 

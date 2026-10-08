@@ -104,21 +104,39 @@ This is the one place in the codebase that already models "the same object, re-i
 
 `_adapters` and the listener set in both `track_source.js` and `dispatch_telemetry.js` are module-level. Counters are per provider, which is enough to tell which feed is broken, but not per tenant. Fine for one feed. Revisit before per-tenant isolation lands.
 
-### Q10 · A dispatched helicopter has no 3D model, so it cannot be viewed from ground level
+### Q10 · RESOLVED 2026-10-08 — helicopter has a model, and the right airframe
 
-**Owner:** Lucas · **Trigger:** a licensed helicopter GLB lands in `public/aircraft/` · **Raised:** 2026-10-07
+Opened 2026-10-07 because a dispatched helicopter was a flat billboard
+with no 3D model available, and closed the same week for a reason worth
+recording.
 
-A dispatched unit is drawn as a Cesium **billboard**, and a billboard always turns to face the camera. The helicopter icon is a top-down drawing of an airframe, so it only reads as an airframe while the camera is looking down on it. Orbit to near ground level and it stands up like a cardboard cutout on its tail.
+The first fix used an **Mi-24 Hind**, which is a Russian gunship Denmark
+has never flown. It was knowingly wrong and flagged as placeholder.
 
-This is not a rotation bug. The billboard's `rotation` is `-(d.heading)`, the same convention the F-35 and the friendly missile already use, and the nose points the right way at every heading.
+It is now an **MH-60R Seahawk**, which is the real Danish type: 9
+airframes, Eskadrille 723, Helicopter Wing Karup. Rotors turn, both of
+them, driven off the simulation clock.
 
-**What already exists.** The quadcopter interceptor solves exactly this, swapping the billboard for `assault_drone_concept.glb` under 250 m. `_isQuadInterceptor` in `src/main.js` gates the swap on `icon === 'quadcopter' || icon === 'counter-drone-interceptor'`. A helicopter matches neither, so it is billboard-only at every range.
+**The lesson, because it cost two days of hunting.** This same Seahawk
+file was examined on 2026-10-07 and rejected: no animation clip, and 21
+meshes chunked by material at a flat 3333 triangles each, which by
+bounding box looks like one welded lump. That conclusion was wrong.
+Bounding boxes are the wrong test. Union-find over shared vertex
+positions found 582 connected components, including 4 main-rotor blades
+at 763 triangles each and 4 tail-rotor blades at 246, every one already
+a separate island of geometry.
 
-**What blocks it.** `public/aircraft/` holds two models, the Shahed and the assault drone. There is no helicopter. Adding one means pulling an external asset with a licence attached, which is a call for a human, not an agent.
+So "no animation" is rarely the real constraint, and neither is
+"merged". Most Sketchfab models separate cleanly. The tools are
+`scripts/split_heli_rotors.py` and `scripts/split_quad_rotors.py`, and
+both refuse to run rather than cut geometry they cannot positively
+identify — which they did, twice, and were right to.
 
-**The interim.** Double-click opens the tracked view at 36 degrees above the unit rather than Cesium's default steep look-down, high enough that the plan-view icon reads correctly and low enough to see where the unit is heading. Orbit and zoom stay live, so a ground-level view is still reachable, and at ground level the icon will still flatten out. That is the limit of an icon, not a defect to chase.
-
-**When the GLB arrives,** extend the swap predicate and add a `model` block alongside the existing one. Roughly ten lines. Pitch and roll are not needed, as a dispatched unit already tracks `d.heading`.
+One trap worth keeping: four identical thin parts is NOT enough to call
+something a rotor. This file has three such groups and only two are
+rotors; the third is four rods at the corners of a rectangle. The
+discriminator is angle, blades of a real rotor sit 90 degrees apart
+around their hub.
 
 ---
 

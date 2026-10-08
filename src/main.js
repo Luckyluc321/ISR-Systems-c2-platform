@@ -2942,7 +2942,24 @@ async function main() {
 
   // ── Camera + scene styling ──
   const controller = viewer.scene.screenSpaceCameraController;
-  controller.minimumZoomDistance = 50;
+  // How close the camera may get to what it is looking at.
+  //
+  // This was 50 m, which is why a drone could never be inspected: at
+  // 50 m a 1.16 m quadcopter is 22 pixels, and that is not a sizing
+  // fault, it is simply how big a 1.16 m object is from 50 m away. The
+  // models are life size and verified; the camera was the limit.
+  //
+  // It also disagreed with itself. _resetCameraControllerToDefaults,
+  // which runs on leaving any POV view, restored 1.0 rather than 50, so
+  // the floor silently depended on whether you had opened a POV this
+  // session. 1.0 had therefore been the de facto value after any POV
+  // use for a long time with no trouble, which is most of the evidence
+  // that going closer than 50 is safe.
+  //
+  // One constant now, used in both places. 2 m puts a quadcopter at
+  // roughly 540 px and a Shahed off the top of the screen, which is
+  // what "zoom in and look at it" should mean.
+  controller.minimumZoomDistance = MIN_ZOOM_M;
   controller.maximumZoomDistance = 20_000_000;
   controller.inertiaSpin = 0.7;
   controller.inertiaTranslate = 0.7;
@@ -5791,7 +5808,8 @@ async function main() {
 
   // ── How big a 3D model is allowed to draw ────────────────────────
   //
-  // A Shahed is 3.5 m, an interceptor quad about 0.5 m, a Mi-24 21.5 m.
+  // A Shahed is 3.5 m, an interceptor quad about 1 m, an MH-60R 19.8 m,
+  // an F-35A 15.7 m.
   // They must not read as the same size on the map, because relative
   // size is the first thing an operator judges a contact by.
   //
@@ -5843,6 +5861,9 @@ async function main() {
   // the helicopter's 6 km because the jet is larger and travels much
   // further from the viewer.
   const F35_MODEL_SWAP_M = 15000;
+
+  // Closest the camera may approach. See the note where it is applied.
+  const MIN_ZOOM_M = 2;
 
   /**
    * World-space forward vector for a billboard that must point at a bearing.
@@ -6105,87 +6126,39 @@ async function main() {
       // per helicopter for nothing.
       const _hT = () => window.__isr_heli_tuning || _NO_TUNING;
       _entitySpec.model = {
-        uri: '/aircraft/mi-24_hind.glb',
-        // Life size. Walking the node tree and transforming every mesh
-        // bounding box through the full matrix chain, the model draws
-        // 18.19 m across the rotor disc by 19.18 m nose to tail, against
-        // a real Mi-24 at 17.30 m and 21.50 m. 1.121 puts the long axis
-        // on the real number.
-        scale: _hT().scale ?? 1.121,
-        // Floor, DERIVED from the airframe's real length rather than
-        // picked by eye. See MODEL_PX_PER_M: a Mi-24 is 21.5 m, so it
-        // floors proportionally larger than a 3.5 m Shahed, and the
-        // ratio between them on screen is the real ratio.
-        //
-        // A flat pixel floor is the trap here. minimumPixelSize means
-        // "never smaller than N pixels AT ANY DISTANCE", so a flat value
-        // draws a 0.5 m quadcopter and a 21 m helicopter at identical
-        // size once they are far enough away, which destroys the one
-        // thing an operator reads first. Deriving each floor from real
-        // metres keeps them honest against each other.
-        minimumPixelSize: _hT().minimumPixelSize ?? Math.round(21.5 * MODEL_PX_PER_M),
-        // And the cap that stops the floor running away.
-        //
-        // A floor alone still inflates at distance: at 10 km a 148 px
-        // helicopter is drawn the size a 3 km object would be, which is
-        // how a 260 px floor turned it into something taller than a
-        // skyscraper. maximumScale exists for exactly this and Cesium
-        // documents it as the upper limit on minimumPixelSize.
-        //
-        // Expressed as a MULTIPLE of life size, so it preserves relative
-        // scale the same way the floor does: everything may be
-        // exaggerated by up to the same factor, never more.
-        maximumScale: _hT().maximumScale ?? ((_hT().scale ?? 1.121) * MODEL_MAX_EXAGGERATION),
+        uri: '/aircraft/mh-60r_seahawk.glb',
+        // Life size. Measured 2196.34 over its longest axis, against a
+        // published 19.76 m over all for the H-60, so 0.009. At that
+        // scale the rotor spans 15.20 m against a real 16.36, which is
+        // the model being slightly tight across the disc rather than the
+        // scale being wrong; length is the axis that reads on a map.
+        scale: _hT().scale ?? 0.009,
+        // Derived from real metres, same rule as every other airframe.
+        minimumPixelSize: _hT().minimumPixelSize ?? Math.round(19.76 * MODEL_PX_PER_M),
+        maximumScale: _hT().maximumScale ?? ((_hT().scale ?? 0.009) * MODEL_MAX_EXAGGERATION),
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, _HELI_MODEL_SWAP_M),
         shadows: Cesium.ShadowMode.DISABLED,
-        // The file's own animation clip is NOT used, and cannot be.
-        //
-        // Cesium advances model animations off viewer.clock.currentTime,
-        // and this app pins that clock and sets shouldAnimate = false so
-        // the sun holds position for the lighting. So the clip never
-        // advanced and the blades never moved. Turning the clock on
-        // would start the sun moving, which is day-mode behaviour and
-        // off limits.
-        //
-        // So the two rotors are driven directly instead, below, off the
-        // simulation clock. That also fixes the artifact the clip had:
-        // its single 'Wheels and Rotor' clip animated the undercarriage
-        // alongside the blades, and a clip plays whole or not at all, so
-        // the gear would have cycled up and down forever. Driving the
-        // two nodes by hand touches the blades and nothing else.
+        // No clip in this file, and none needed. Both rotors are driven
+        // directly below, off the simulation clock, for the same reason
+        // the Mi-24's were before it: Cesium advances model animations off
+        // viewer.clock, which this app pins so the sun holds still.
         runAnimations: false,
-        // SPIN ONLY, with an identity translation and scale.
-        //
-        // Cesium composes a node transformation onto the node's own
-        // matrix rather than replacing it:
-        //
-        //   modelNode.matrix = originalMatrix * transformationMatrix
-        //
-        // (ModelVisualizer, CesiumUnminified index.js, the getNode loop.)
-        // So the rest pose is already applied and anything supplied here
-        // is applied ON TOP, in the node's own local frame. Passing the
-        // node's real translation would therefore offset each rotor
-        // twice and fly the blades off the airframe, and passing its
-        // rest rotation would double the mast tilt. Both looked like the
-        // obviously careful thing to do and both are wrong.
-        //
-        // Identity translation and scale, and a pure spin, gives exactly
-        // "rest pose, then turn the disc in its own plane".
         nodeTransformations: {
-          Top_Rotor: {
+          // Four blades per rotor, each rotor one node sitting at its own
+          // hub, cut out of the airframe by scripts/split_heli_rotors.py.
+          // Main disc lies in XY so it turns about Z; the tail disc lies
+          // in YZ so it turns about X. Both measured, not assumed.
+          Main_Rotor: {
             translation: Cesium.Cartesian3.ZERO,
             scale: new Cesium.Cartesian3(1, 1, 1),
-            // Local Y is the thin axis of the disc: the mesh spans 23.65
-            // in X and 22.90 in Z against 2.42 in Y, so Y is the mast.
             rotation: new Cesium.CallbackProperty(
-              () => _rotorSpin(Cesium.Cartesian3.UNIT_Y, _hT().rotorRps ?? 3), false),
+              () => _rotorSpin(Cesium.Cartesian3.UNIT_Z, _hT().rotorRps ?? 4.5), false),
           },
           Tail_Rotor: {
             translation: Cesium.Cartesian3.ZERO,
             scale: new Cesium.Cartesian3(1, 1, 1),
-            // Local X here: 0.57 thin against 5.02 and 5.20.
             rotation: new Cesium.CallbackProperty(
-              () => _rotorSpin(Cesium.Cartesian3.UNIT_X, _hT().tailRotorRps ?? 9), false),
+              () => _rotorSpin(Cesium.Cartesian3.UNIT_X, _hT().tailRotorRps ?? 18), false),
           },
         },
       };
@@ -16728,7 +16701,10 @@ async function main() {
   // rather than trying to save/restore (that path was flaky).
   function _resetCameraControllerToDefaults(ctrl) {
     ctrl.enableCollisionDetection = true;
-    ctrl.minimumZoomDistance = 1.0;
+    // Same constant the scene starts with. These were 1.0 and 50, so
+    // leaving a POV view changed how close you could get for the rest
+    // of the session.
+    ctrl.minimumZoomDistance = MIN_ZOOM_M;
     ctrl.rotateEventTypes = Cesium.CameraEventType.LEFT_DRAG;
     ctrl.translateEventTypes = Cesium.CameraEventType.LEFT_DRAG;
     ctrl.zoomEventTypes = [
