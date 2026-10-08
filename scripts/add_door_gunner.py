@@ -147,14 +147,40 @@ def build_gunner(side_sign):
     # was aimed at the back of the pilot's head. The receiver is long in
     # X for the same reason. s is the outboard direction for this side,
     # so the grips land inboard of the post where the gunner's hands are.
-    box(p, (s * 4, 0, 3), (30, 30, 7))               # floor plate
-    box(p, (s * 4, 0, 32), (11, 11, 58))             # post
-    box(p, (s * 4, 0, 63), (17, 16, 16))             # pintle head
-    box(p, (s * 26, 0, 69), (62, 15, 17))            # receiver, long in X
-    box(p, (s * 68, 0, 70), (56, 8, 8))              # barrel, outboard
-    box(p, (s * 100, 0, 70), (16, 11, 11))           # muzzle device
-    box(p, (s * -12, 0, 70), (22, 8, 15))            # spade grips, inboard
-    box(p, (s * 14, 24, 58), (26, 18, 24))           # ammunition can
+    # Vertical layout is set by the GUNNER, not by eye: his hands sit 98
+    # units above his feet in the crouch pose, so the grips sit there and
+    # the post is sized to reach. Previously the grips were at 70 and he
+    # was aiming over the top of the weapon at nothing.
+    GRIP_Z = 98
+
+    box(p, (s * 4, 0, 4), (34, 34, 8))                      # floor plate
+    box(p, (s * 4, 0, GRIP_Z / 2), (12, 12, GRIP_Z - 14))   # post
+    box(p, (s * 4, 0, GRIP_Z - 10), (19, 18, 17))           # pintle head
+    box(p, (s * -14, 0, GRIP_Z), (24, 9, 16))               # spade grips, inboard
+
+    # Receiver in TWO blocks with a gap between them. The gap is the feed
+    # and ejection opening, and leaving it empty is what makes it read as
+    # a weapon rather than a tube: a solid box has no openings anywhere.
+    box(p, (s * 14, 0, GRIP_Z + 1), (26, 16, 18))           # rear body
+    box(p, (s * 50, 0, GRIP_Z + 1), (30, 15, 16))           # front body
+    box(p, (s * 32, 0, GRIP_Z + 9), (14, 13, 4))            # top cover over the gap
+    box(p, (s * 32, -9, GRIP_Z - 4), (12, 4, 7))            # ejection chute, below the gap
+
+    box(p, (s * 82, 0, GRIP_Z + 2), (44, 9, 9))             # barrel
+    box(p, (s * 92, 0, GRIP_Z + 2), (14, 13, 13))           # flash hider
+    box(p, (s * 60, 0, GRIP_Z - 10), (10, 7, 14))           # bipod/front mount
+
+    # Ammunition can, and a belt sagging from it up into the feed gap.
+    # Five links on a curve rather than a straight line, because a belt
+    # hangs.
+    box(p, (s * 6, 30, GRIP_Z - 34), (30, 22, 30))          # ammunition can
+    import math as _m
+    for i in range(6):
+        f = i / 5.0
+        bx = s * (10 + f * 20)
+        by = 22 - f * 22
+        bz = (GRIP_Z - 20) + f * 20 - _m.sin(f * _m.pi) * 9   # sag
+        box(p, (bx, by, bz), (7, 6, 5))                      # belt link
     return p
 
 
