@@ -171,7 +171,27 @@ export const AIRCRAFT = {
     cruiseSpeed: '246 km/h',
     ceiling: '3 700 m',
     range: '834 km · 3.5 h endurance',
-    armament: 'AGM-114 Hellfire · Mk 54 torpedo · door mounted M240 / GAU-16 machine guns',
+    // DANISH configuration, which is not the American one.
+    //
+    // This said "AGM-114 Hellfire · Mk 54 torpedo · door mounted M240 /
+    // GAU-16" and all three parts were wrong for Denmark. The US MH-60R
+    // carries Hellfire; no Danish source names it or any air-to-surface
+    // missile on Danish aircraft, and forsvaret.dk's own fact box for
+    // the Danish MH-60R carries NO armament line at all. Its stated role
+    // is "Redning, observation og transport", not strike. The aircraft
+    // were delivered without weapon and sonobuoy systems, and torpedo
+    // integration was still at dummy-drop testing in May 2025 with the
+    // fleet at IOC and not FOC.
+    //
+    // The door guns are the only armament attributable to a Danish
+    // authority: DR's 2016 handover fact box, sourced to Forsvars-
+    // ministeriets Materiel- og Indkøbsstyrelse, gives 12.7 mm GAU-21
+    // and 7.62 mm MAG58M. Forsvarsindustri.dk gives the same two.
+    armament: '12,7 mm GAU-21 døradmonteret maskingevær · 7,62 mm MAG58M (rapporteret)',
+    armamentVerified: 'public_reporting',
+    armamentSource: 'DR 2016 handover fact box citing Forsvarsministeriets Materiel- og '
+      + 'Indkøbsstyrelse; forsvaret.dk MH-60R page lists no armament. Torpedo capability '
+      + 'in testing May 2025, not yet operational. Denmark does NOT fit Hellfire.',
     payload: 'Sensor suite + towed dipping sonar + sonobuoys',
     dimensions: '19.8 m length · 16.4 m rotor',
     bestFor: 'Ship deck operations · anti submarine · maritime SAR · fast rope insertion',
