@@ -1593,6 +1593,11 @@ function _tick() {
       lat: p.lat, lon: p.lon, alt: p.alt, heading: p.heading,
       speed: speedAt(live.template.waypoints, elapsed),
       visible: p.visible,
+      // Provenance rides on every position. Template tracks are 'sim';
+      // a real sensor feed sets 'live' and the coverage gates in
+      // trail_policy then apply. Explicit at the source so no consumer
+      // has to infer it. See docs/track-trend-line-policy.md.
+      telemetrySource: live.template.telemetrySource || 'sim',
       tSec: elapsed,
       completed: elapsed >= live.template.durationSec,
     });

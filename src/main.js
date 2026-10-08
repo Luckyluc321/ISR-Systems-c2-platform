@@ -802,7 +802,7 @@ import { fetchDrivingRoute, computeSegmentLengths, advanceAlongPolyline } from '
 import { buildCordon, assignPatrols, clearCordonCache } from './perimeter.js';
 import { loadSiteLights, loadNationalLights, bucketByRadiance, LIGHT_STYLES, LIGHT_CLASSES } from './night_infrastructure_lights.js';
 import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from './runway_lighting.js';
-import { trailAppendEvery, trailMaxPoints, shouldShowTrail } from './trail_policy.js';
+import { isSimulatedTrack, trailMaxPoints, shouldAppendTrailPoint, shouldShowTrail } from './trail_policy.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -15622,7 +15622,7 @@ async function main() {
         // one. leadDown and POV outrank both.
         if (state.trail) {
           state.trail.show = shouldShowTrail({
-            isSim: _isSimMode(),
+            isSimTrack: isSimulatedTrack(p),
             inCoverage: leadInCov,
             suppressed: leadDown || povSuppressed,
           });
@@ -15770,10 +15770,16 @@ async function main() {
         // transit still leaves something a chase aircraft can fly
         // toward. Previously both used LIVE's numbers, which made the
         // line about 460 m long behind a Geran-2 on a 268 km route.
-        const _simNow = _isSimMode();
-        if (!leadDown && _trailAppendCounter % trailAppendEvery(_simNow) === 0) {
+        const _simTrack = isSimulatedTrack(p);
+        const _movedM = state._lastTrailLat == null ? null
+          : haversineM(p.lat, p.lon, state._lastTrailLat, state._lastTrailLon);
+        if (!leadDown && shouldAppendTrailPoint({
+          isSimTrack: _simTrack, frameCounter: _trailAppendCounter, movedM: _movedM,
+        })) {
           state.trailPositions.push(Cesium.Cartesian3.fromDegrees(p.lon, p.lat, _safeTrailAlt(p.alt)));
-          const _cap = trailMaxPoints(_simNow);
+          state._lastTrailLat = p.lat;
+          state._lastTrailLon = p.lon;
+          const _cap = trailMaxPoints(_simTrack);
           while (state.trailPositions.length > _cap) state.trailPositions.shift();
         }
 
