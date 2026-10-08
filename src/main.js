@@ -17962,6 +17962,8 @@ async function main() {
       { key: 'billund_commercial_survey', label: 'SWARM · 3-drone pavement survey, authorised', cls: 'friendly' },
       { key: 'billund_missile_hostile', label: 'Cruise missile from S, critical', cls: 'critical' },
       { key: 'billund_lego_recon', label: 'LEGO adjacency recon (transits BLL → LEGO HQ)', cls: 'recon' },
+      { key: 'billund_geran2_north', label: 'Geran-2 transit N (BLL → past Karup → Skagen)', cls: 'critical' },
+      { key: 'billund_geran3_north', label: 'Geran-3 jet, same route at 3x speed', cls: 'critical' },
     ],
   };
   // Auto-generate for every energy-typed site (3 threats each). Filters
@@ -18030,7 +18032,6 @@ async function main() {
         </select>
       </div>
       <button class="cp-btn wide sim-btn sim-launch" data-comp-launch ${selEntry ? '' : 'disabled'}>Launch simulation</button>
-      ${_simHeliPassMarkup()}
       ${simPauseMarkup(simIsPaused(), anyTrackLive())}`;
     simPauseWire(simPanel, () => { simToggle(); });
     const thSel = simPanel.querySelector('#sim-comp-threat');
@@ -18050,32 +18051,8 @@ async function main() {
       flyTo(site);
       simAfter(() => window.__spawnDrone(selEntry.key), 1500);
     });
-    const passBtn = simPanel.querySelector('[data-heli-pass]');
-    if (passBtn) passBtn.addEventListener('click', () => {
-      _launchInboundPass({ delaySec: 15 });
-      renderSimPanel();
-    });
   }
 
-  // A one-click inbound pass at a dispatched helicopter.
-  //
-  // This started life as a console call, which is the wrong place for
-  // something you actually want to use: it sits next to Launch
-  // simulation because it IS one, just aimed at a unit rather than a
-  // site. It is always shown rather than appearing and vanishing, with
-  // the reason it cannot run written on it, so there is never a question
-  // of whether the feature exists.
-  function _simHeliPassMarkup() {
-    const unit = _heliAirborneForPass();
-    const live = anyTrackLive();
-    const why = !unit ? 'Dispatch a helicopter first'
-      : live ? 'Close the live track first' : null;
-    return `
-      <button class="cp-btn wide sim-btn" data-heli-pass ${why ? 'disabled' : ''}
-        title="${why || 'Flies a slow drone past the airborne helicopter so the door gun traverses onto it'}">
-        ${why ? `Door-gun pass · ${why}` : 'Door-gun pass at helicopter'}
-      </button>`;
-  }
 
   // ── Keeping the pause button honest ──────────────────────────────
   // Two things make the sim panel re-render: the clock changing, so the
@@ -18160,6 +18137,8 @@ async function main() {
   // Threat/path annotation for the composer. Keys not listed fall
   // back automatically. pathLabel doubles as the path identity.
   const _SIM_COMPOSER_META = {
+    billund_geran2_north:      { threat: 'Geran-2 (piston)',      pathLabel: 'N transit, BLL → Karup → Skagen' },
+    billund_geran3_north:      { threat: 'Geran-3 (jet)',         pathLabel: 'N transit, BLL → Karup → Skagen' },
     cph_shahed_amalienborg:    { threat: 'Shahed-136 / Geran-2',   pathLabel: 'Øresund → CPH → Amalienborg' },
     cph_geran3_amalienborg:    { threat: 'Geran-3 (jet)',          pathLabel: 'Øresund → CPH → Amalienborg' },
     cph_shahed238_amalienborg: { threat: 'Shahed-238 (jet)',       pathLabel: 'Øresund → CPH → Amalienborg' },

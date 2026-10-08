@@ -914,6 +914,99 @@ export const TEMPLATES = {
   // the platform's ability to classify "transit through" vs "targeting"
   // and to route the alert to LEGO corporate security (out-of-scope
   // for BLL but relevant for the cross-agency picture).
+  // ── Shahed up the spine of Jutland, Billund to Skagen ────────────
+  //
+  // Enters 5 km west of Billund and runs due north, passing 11 km off
+  // Flyvestation Karup, which is where the helicopter lives. So a
+  // dispatched Seahawk launches straight down the track at it and the
+  // two close head-on, which is the point: it is the only Billund route
+  // that puts a helicopter and a threat in the same piece of sky.
+  //
+  // It exits over Skagen. If nothing intercepts it, it simply leaves at
+  // the top of Jutland and the track ends there rather than detonating:
+  // no terminalImpact, because this is a transit, not a strike on a
+  // site.
+  //
+  // Two speeds on ONE route, the same pattern CPH already uses for its
+  // Geran family. Geran-2 is the piston article at 185 km/h, and 87
+  // minutes of it. Geran-3 is the jet variant and covers the same
+  // ground in 27, which is the one to reach for unless the real
+  // timeline is the point.
+  billund_geran2_north: {
+    siteId: 'billund',
+    classification: 'hostile',
+    threat: 'high',
+    platform: 'loitering-munition',
+    droneType: 'Shahed-136 / Geran-2 (loitering munition)',
+    confidence: 0.74,
+    confidenceTrend: 'Acoustic piston signature + RF, climbing 0.52 to 0.74',
+    multiSite: true,
+    contributingSensors: [
+      { id: 'BLL-N01', confidence: 0.77 },
+      { id: 'BLL-N02', confidence: 0.71 },
+      { id: 'BLL-N07', confidence: 0.64 },
+    ],
+    evidence: {
+      rfCarrier: '1616 MHz Iridium + 900 MHz cellular', rfBandwidth: 'narrowband burst',
+      rfMatch: 'Geran-2 control signature 81%', modality: 'acoustic + RF',
+      evidenceSize: '27.9 MB',
+      note: 'Transit north up the Jutland spine, west of Billund and past Karup. '
+        + 'Not a strike on the airport: it overflies and continues, which is why '
+        + 'the airport sees it briefly and the interceptor has to go and get it.',
+    },
+    waypoints: [
+      { lat: 55.7000, lon: 9.1300, alt: 600, heading: 356, tSec: 0 },
+      { lat: 55.8200, lon: 9.1150, alt: 750, heading: 357, tSec: 260 },
+      { lat: 56.0000, lon: 9.1000, alt: 900, heading: 358, tSec: 650 },
+      { lat: 56.2000, lon: 9.0900, alt: 900, heading: 0, tSec: 1083 },
+      { lat: 56.4200, lon: 9.0900, alt: 900, heading: 4, tSec: 1559 },
+      { lat: 56.6500, lon: 9.1200, alt: 900, heading: 10, tSec: 2058 },
+      { lat: 56.9000, lon: 9.2000, alt: 900, heading: 18, tSec: 2607 },
+      { lat: 57.1500, lon: 9.3500, alt: 850, heading: 28, tSec: 3176 },
+      { lat: 57.4000, lon: 9.6000, alt: 800, heading: 36, tSec: 3791 },
+      { lat: 57.6200, lon: 9.9000, alt: 750, heading: 71, tSec: 4381 },
+      { lat: 57.7400, lon: 10.5800, alt: 700, heading: 71, tSec: 5210 },
+    ],
+    durationSec: 5210,
+  },
+
+  // Same route, jet variant, roughly three times the speed.
+  billund_geran3_north: {
+    siteId: 'billund',
+    classification: 'hostile',
+    threat: 'high',
+    platform: 'loitering-munition',
+    droneType: 'Geran-3 (jet loitering munition)',
+    confidence: 0.71,
+    confidenceTrend: 'Turbojet acoustic signature, no piston harmonics',
+    multiSite: true,
+    contributingSensors: [
+      { id: 'BLL-N01', confidence: 0.74 },
+      { id: 'BLL-N02', confidence: 0.68 },
+      { id: 'BLL-N07', confidence: 0.61 },
+    ],
+    evidence: {
+      rfCarrier: '1616 MHz Iridium', rfBandwidth: 'narrowband burst',
+      rfMatch: 'Geran-3 modem signature 76%', modality: 'acoustic + RF',
+      evidenceSize: '24.1 MB',
+      note: 'Same track as billund_geran2_north at jet speed.',
+    },
+    waypoints: [
+      { lat: 55.7000, lon: 9.1300, alt: 600, heading: 356, tSec: 0 },
+      { lat: 55.8200, lon: 9.1150, alt: 750, heading: 357, tSec: 80 },
+      { lat: 56.0000, lon: 9.1000, alt: 900, heading: 358, tSec: 200 },
+      { lat: 56.2000, lon: 9.0900, alt: 900, heading: 0, tSec: 334 },
+      { lat: 56.4200, lon: 9.0900, alt: 900, heading: 4, tSec: 481 },
+      { lat: 56.6500, lon: 9.1200, alt: 900, heading: 10, tSec: 635 },
+      { lat: 56.9000, lon: 9.2000, alt: 900, heading: 18, tSec: 804 },
+      { lat: 57.1500, lon: 9.3500, alt: 850, heading: 28, tSec: 979 },
+      { lat: 57.4000, lon: 9.6000, alt: 800, heading: 36, tSec: 1169 },
+      { lat: 57.6200, lon: 9.9000, alt: 750, heading: 71, tSec: 1351 },
+      { lat: 57.7400, lon: 10.5800, alt: 700, heading: 71, tSec: 1606 },
+    ],
+    durationSec: 1606,
+  },
+
   billund_lego_recon: {
     siteId: 'billund',
     classification: 'unknown',
