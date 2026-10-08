@@ -169,7 +169,12 @@ export const AIRCRAFT = {
     crew: '3 to 4',
     maxSpeed: '267 km/h',
     cruiseSpeed: '246 km/h',
-    ceiling: '3 700 m',
+    // 3,438 m, not the 3,700 that was here: no source publishes 3,700.
+    // Neither the US Navy fact file nor Lockheed's own MH-60R sell sheet
+    // publishes ANY performance data for this aircraft, so every figure
+    // below is from secondary compilations and they disagree, in the
+    // ceiling's case between 3,438 and 5,800 m.
+    ceiling: '3 438 m (service, reported)',
     range: '834 km · 3.5 h endurance',
     // DANISH configuration, which is not the American one.
     //

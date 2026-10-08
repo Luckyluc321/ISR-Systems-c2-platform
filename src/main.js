@@ -4676,7 +4676,30 @@ async function main() {
       // dry tanks, not because the airframe cannot do it.
       enduranceMin: 280,
       cruiseKmh: 250, arriveAtM: 500, engageSec: 8,
-      onboardSensorRangeM: 800,   // EO/IR turret, longest onboard reach
+      // Declared HERE as well as in _SIM_INTERCEPTOR_PHYSICS because two
+      // separate climb routines read two different sources: one takes
+      // profile.climbRateMs with a fallback of 6, the other takes the
+      // physics table. With no value on the profile this aircraft
+      // climbed at 6 or 8 m/s depending on which path ran. Same number
+      // in both places now.
+      climbRateMs: 8,
+      // How far out the gun will lay on a contact.
+      //
+      // 800 had no basis. Neither does any other single number, and
+      // that is the honest finding: the MH-60R's turret is the
+      // AN/AAS-44C(V), not the MTS-A it is sometimes called, and NO
+      // detection or identification range is published for it by
+      // Lockheed, the US Navy or Raytheon. The only public performance
+      // statement about it is a negative one from the Pentagon's own
+      // test office.
+      //
+      // So this is the WEAPON envelope, not a sensor figure. FN and the
+      // Royal Australian Navy both publish roughly 2,000 m for the
+      // GAU-21, and that is a surface and defensive-fire figure; there
+      // is no published effective range against an aerial target. Treat
+      // it as representative, and do not quote 2,000 m as an air-to-air
+      // capability anywhere user-facing.
+      onboardSensorRangeM: 2000,
       icon: 'helicopter', trail: true, airborne: true,
       // Rounds leave from the left cabin door, where the gunner is
       // modelled, not from the middle of the airframe. Metres to the
@@ -4936,7 +4959,26 @@ async function main() {
   //     no ceiling (n/a)
   const _SIM_INTERCEPTOR_PHYSICS = {
     'counter-drone-swarm':  { serviceCeilingM: 3000, climbRateMs: 8 },
-    'helicopter-intercept': { serviceCeilingM: 5000, climbRateMs: 15 },
+    // MH-60R. Both figures corrected against sources; both were wrong.
+    //
+    // climbRateMs was 15 m/s, about 1.8x the real service rate. 8 m/s is
+    // the only MH-60R-specific figure in circulation and it matches
+    // Sikorsky's own confirmed UH-60M vertical rate of 7.9 m/s at 16,800
+    // lb. At a Seahawk's real mission weight it is worse still: the same
+    // manufacturer table gives 4.8 m/s at 18,000 lb, and an MH-60R on a
+    // surface-warfare fit is heavier than the heaviest row published.
+    //
+    // serviceCeilingM was 5000, and aircraft.js separately claimed 3700
+    // which no source supports. 3438 m is the conservative published
+    // figure. Note this is SERVICE ceiling, which is the right one for a
+    // unit in forward flight; hover ceiling out of ground effect is a
+    // much harder power condition and the wrong constraint for an
+    // intercept.
+    //
+    // Neither is a constraint at the altitudes seen here: a drone at 900
+    // m is well under any published ceiling. What bites is TIME. 900 m
+    // of climb is about 110 s at 8 m/s, before launch and transit.
+    'helicopter-intercept': { serviceCeilingM: 3438, climbRateMs: 8 },
     'police-c-uas':         { serviceCeilingM: 500,  climbRateMs: 4 },
     'army-isr-drone':       { serviceCeilingM: 3500, climbRateMs: 6 },
   };
