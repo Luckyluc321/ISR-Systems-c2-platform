@@ -142,14 +142,19 @@ def build_gunner(side_sign):
     # top, the weapon cradled at about chest height for a kneeling
     # gunner. Z is measured from the floor, so the caller passes the
     # floor height and the post grows up from it.
-    box(p, (s * 2, -6, 3), (28, 28, 7))              # floor plate
-    box(p, (s * 2, -6, 32), (10, 10, 58))            # post
-    box(p, (s * 2, -6, 63), (15, 17, 15))            # pintle head
-    box(p, (s * 6, -28, 69), (14, 64, 16))           # receiver
-    box(p, (s * 6, -78, 71), (8, 58, 8))             # barrel
-    box(p, (s * 6, -112, 71), (11, 15, 11))          # muzzle device
-    box(p, (s * 6, 12, 71), (7, 24, 14))             # spade grips
-    box(p, (s * 21, -16, 58), (17, 28, 23))          # ammunition can
+    # The barrel runs along X, which is OUT OF THE DOOR. It used to run
+    # along -Y, which is along the fuselage toward the nose, so the gun
+    # was aimed at the back of the pilot's head. The receiver is long in
+    # X for the same reason. s is the outboard direction for this side,
+    # so the grips land inboard of the post where the gunner's hands are.
+    box(p, (s * 4, 0, 3), (30, 30, 7))               # floor plate
+    box(p, (s * 4, 0, 32), (11, 11, 58))             # post
+    box(p, (s * 4, 0, 63), (17, 16, 16))             # pintle head
+    box(p, (s * 26, 0, 69), (62, 15, 17))            # receiver, long in X
+    box(p, (s * 68, 0, 70), (56, 8, 8))              # barrel, outboard
+    box(p, (s * 100, 0, 70), (16, 11, 11))           # muzzle device
+    box(p, (s * -12, 0, 70), (22, 8, 15))            # spade grips, inboard
+    box(p, (s * 14, 24, 58), (26, 18, 24))           # ammunition can
     return p
 
 
@@ -216,8 +221,8 @@ def main():
         # A flight suit and helmet are a different shade from an airframe
         # anyway, so this is both more visible and more truthful.
         "pbrMetallicRoughness": {
-            "baseColorFactor": [0.66, 0.60, 0.47, 1.0],
-            "metallicFactor": 0.05, "roughnessFactor": 0.9,
+            "baseColorFactor": [0.14, 0.17, 0.12, 1.0],
+            "metallicFactor": 0.25, "roughnessFactor": 0.75,
         },
         "doubleSided": True,
     })
