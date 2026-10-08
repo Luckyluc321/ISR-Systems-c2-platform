@@ -6219,6 +6219,19 @@ async function main() {
             scale: new Cesium.Cartesian3(1, 1, 1),
             rotation: Cesium.Quaternion.IDENTITY,
           },
+          // Two aircrew in the cockpit, same build, visible through the
+          // windscreen. Nudged the same way if they sit wrong:
+          //   window.__isr_heli_tuning = { crewOffset: [0, 20, -10] }
+          Cockpit_Crew: {
+            translation: new Cesium.CallbackProperty(() => {
+              const o = _hT().crewOffset;
+              return Array.isArray(o)
+                ? new Cesium.Cartesian3(o[0] || 0, o[1] || 0, o[2] || 0)
+                : Cesium.Cartesian3.ZERO;
+            }, false),
+            scale: new Cesium.Cartesian3(1, 1, 1),
+            rotation: Cesium.Quaternion.IDENTITY,
+          },
         },
       };
 

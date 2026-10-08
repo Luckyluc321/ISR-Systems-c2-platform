@@ -100,6 +100,21 @@ def box(parts, centre, size, tilt=0.0):
         parts["idx"].extend([base, base + 1, base + 2, base, base + 2, base + 3])
 
 
+def build_pilots():
+    """Two seated aircrew in the cockpit, facing forward (-Y is the nose)."""
+    p = {"pos": [], "nrm": [], "idx": []}
+    for sx in (-1, 1):
+        x = sx * 46
+        box(p, (x, 0, 50), (24, 22, 24), 0.12)       # head
+        box(p, (x, -2, 61), (28, 27, 9))             # helmet
+        box(p, (x, 4, 22), (32, 22, 42), 0.12)       # torso
+        box(p, (x + sx * 13, -14, 26), (9, 30, 10), 0.9)   # arm to the cyclic
+        box(p, (x - sx * 11, -12, 26), (9, 28, 10), 0.8)   # arm to the collective
+        box(p, (x, -22, 0), (24, 36, 13))            # thighs
+        box(p, (x, -38, -18), (22, 12, 30))          # shins
+    return p
+
+
 def build_gunner(side_sign):
     """Gunner + gun, built around the origin. +X is outboard on this side."""
     p = {"pos": [], "nrm": [], "idx": []}
@@ -134,6 +149,9 @@ def main():
     ap.add_argument("--x", type=float, default=None, help="outboard offset, model units")
     ap.add_argument("--y", type=float, default=-90.0, help="along the fuselage; -Y is nose")
     ap.add_argument("--z", type=float, default=150.0, help="height")
+    ap.add_argument("--pilots", action="store_true", help="also add two cockpit aircrew")
+    ap.add_argument("--pilot-y", type=float, default=-395.0)
+    ap.add_argument("--pilot-z", type=float, default=185.0)
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
@@ -178,9 +196,16 @@ def main():
     # valid glTF as long as the material samples no texture.
     gltf.setdefault("materials", []).append({
         "name": "DoorGunner",
+        # Deliberately LIGHTER than the airframe. The first attempt used
+        # [0.17, 0.18, 0.16], which is almost exactly the Seahawk's own
+        # dark olive: the gunner rendered correctly and was completely
+        # invisible, a dark figure on a dark aircraft in a shadowed
+        # doorway. Everything validated and nothing could be seen.
+        # A flight suit and helmet are a different shade from an airframe
+        # anyway, so this is both more visible and more truthful.
         "pbrMetallicRoughness": {
-            "baseColorFactor": [0.17, 0.18, 0.16, 1.0],
-            "metallicFactor": 0.15, "roughnessFactor": 0.85,
+            "baseColorFactor": [0.46, 0.47, 0.40, 1.0],
+            "metallicFactor": 0.05, "roughnessFactor": 0.9,
         },
         "doubleSided": True,
     })
@@ -202,6 +227,33 @@ def main():
     if parent is None:
         sys.exit("could not find the airframe node's parent")
     gltf["nodes"][parent].setdefault("children", []).append(new_node)
+
+    if args.pilots:
+        pp = build_pilots()
+        pn = len(pp["pos"])
+        plo = [min(v[k] for v in pp["pos"]) for k in range(3)]
+        phi = [max(v[k] for v in pp["pos"]) for k in range(3)]
+        praw = b"".join(struct.pack("<fff", *v) for v in pp["pos"])
+        nraw = b"".join(struct.pack("<fff", *v) for v in pp["nrm"])
+        iraw = b"".join(struct.pack("<I", i) for i in pp["idx"])
+        gltf["accessors"].append({"bufferView": put(praw), "componentType": 5126,
+                                  "count": pn, "type": "VEC3", "min": plo, "max": phi})
+        ap_ = len(gltf["accessors"]) - 1
+        gltf["accessors"].append({"bufferView": put(nraw), "componentType": 5126,
+                                  "count": pn, "type": "VEC3"})
+        an_ = len(gltf["accessors"]) - 1
+        gltf["accessors"].append({"bufferView": put(iraw), "componentType": 5125,
+                                  "count": len(pp["idx"]), "type": "SCALAR"})
+        ai_ = len(gltf["accessors"]) - 1
+        gltf["meshes"].append({"name": "Cockpit_Crew", "primitives": [
+            {"attributes": {"POSITION": ap_, "NORMAL": an_},
+             "indices": ai_, "material": mat}]})
+        gltf["nodes"].append({"name": "Cockpit_Crew",
+                              "mesh": len(gltf["meshes"]) - 1,
+                              "translation": [0.0, args.pilot_y, args.pilot_z]})
+        gltf["nodes"][parent].setdefault("children", []).append(len(gltf["nodes"]) - 1)
+        print(f"  cockpit crew: {len(pp['idx'])//3} triangles, 2 aircrew at "
+              f"(0, {args.pilot_y:.0f}, {args.pilot_z:.0f})")
 
     gltf["buffers"][0]["byteLength"] = len(binary)
     json_chunk = pad4(json.dumps(gltf, separators=(",", ":")).encode(), b" ")
