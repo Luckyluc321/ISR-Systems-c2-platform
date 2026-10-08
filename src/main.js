@@ -6879,11 +6879,16 @@ async function main() {
     // already bearing, then sweep forward across the arc and past the
     // stop, which shows the clamp holding as well as the tracking.
     const start = (unit.heading || 0) - Math.PI / 2 - sweepRad / 2;
-    const t0 = monoNow();
+    // Lead-in before anything moves, so the camera can be framed first.
+    // The marker is placed and visible immediately at the start of the
+    // arc; it simply holds there until the delay elapses. Watching a
+    // scenario you had to set up blind was the problem.
+    const delaySec = opts.delaySec ?? 25;
+    const t0 = monoNow() + delaySec * 1000;
     const centreLat = unit.curLat;
     const centreLon = unit.curLon;
     const at = () => {
-      const f = Math.min(1, (monoNow() - t0) / (durationSec * 1000));
+      const f = Math.min(1, Math.max(0, (monoNow() - t0) / (durationSec * 1000)));
       const b = start + sweepRad * f;
       return {
         lat: centreLat + (Math.cos(b) * radiusM) / 111000,
@@ -6910,18 +6915,27 @@ async function main() {
         disableDepthTestDistance: Number.POSITIVE_INFINITY },
     });
     _gunTestState = { entity, unit, priorLat: unit.targetLat, priorLon: unit.targetLon };
+    let announced = -1;
     const tick = () => {
       if (!_gunTestState) return;
       const p = at();
       unit.targetLat = p.lat;
       unit.targetLon = p.lon;
+      // Count the lead-in down out loud, so it is obvious the thing is
+      // armed and waiting rather than broken.
+      const left = Math.ceil((t0 - monoNow()) / 1000);
+      if (left > 0 && left !== announced && (left <= 5 || left % 10 === 0)) {
+        announced = left;
+        toast(`Gun test starts in ${left}s`, 'info');
+      }
       if (p.done) { _gunTestStop(); return; }
       requestAnimationFrame(tick);
     };
     tick();
-    toast(`Gun test: target sweeping ${opts.sweepDeg ?? 300}\u00b0 at ${radiusM} m over ${durationSec}s`, 'ok');
-    console.log('[gunTest] watch the door gun traverse. Stop early with '
-      + 'window.__isr_gunTest.stop()');
+    toast(`Gun test armed: ${delaySec}s to frame the shot, then a `
+      + `${opts.sweepDeg ?? 160}\u00b0 sweep at ${radiusM} m over ${durationSec}s`, 'ok');
+    console.log(`[gunTest] target is placed and holding. It starts moving in `
+      + `${delaySec}s. Stop with window.__isr_gunTest.stop()`);
   };
   window.__isr_gunTest.stop = _gunTestStop;
 
