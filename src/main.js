@@ -803,6 +803,7 @@ import { buildCordon, assignPatrols, clearCordonCache } from './perimeter.js';
 import { loadSiteLights, loadNationalLights, bucketByRadiance, LIGHT_STYLES, LIGHT_CLASSES } from './night_infrastructure_lights.js';
 import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from './runway_lighting.js';
 import { beamPassAimPoint, beamPassIntercept, pickTrackSide, BEAM_PASS_STANDOFF_M } from './intercept.js';
+import { firingPassHeadingRad } from './firing_pass.js';
 import { isSimulatedTrack, trailMaxPoints, shouldAppendTrailPoint, shouldShowTrail,
   shouldAppendBreadcrumb, shouldShowBreadcrumb, BREADCRUMB_POINTS_MAX } from './trail_policy.js';
 
@@ -4727,6 +4728,16 @@ async function main() {
       // climbed at 6 or 8 m/s depending on which path ran. Same number
       // in both places now.
       climbRateMs: 8,
+      // The gun is wired to fire.
+      //
+      // Without this nothing shoots, at any range. Every firing path is
+      // gated on firesTracer, and it was set on exactly one profile:
+      // counter-drone-swarm. So the gunner tracked a contact perfectly
+      // and the weapon behind him was never connected, because
+      // _gunStationAim runs off onboardSensorRangeM and is independent
+      // of armament entirely. The traverse looked right, which is why
+      // this hid for so long.
+      firesTracer: true,
       // How far out the gun will lay on a contact.
       //
       // 800 had no basis. Neither does any other single number, and
@@ -8096,7 +8107,20 @@ async function main() {
             d.curLat += (desiredLat - d.curLat) * frac;
             d.curLon += (desiredLon - d.curLon) * frac;
           }
-          d.heading = _easeHeading(d.heading, _bearingRad(d.curLat, d.curLon, enemyLat, enemyLon), dtSec);
+          // Point the GUN at the target, not the nose.
+          //
+          // _gunStationAim rests on the port beam and traverses 45 deg
+          // either side, so its arc is a relative bearing of -135..-45.
+          // Nose-on puts the target at 0, which is outside the near
+          // stop, so the gun swung as far as it could and held there.
+          // A door-gun pass is flown, not pointed: turn so the target
+          // sits in the middle of the arc and hold it through the burst.
+          // Nose-armed aircraft keep pointing, as before.
+          const _brgToEnemy = _bearingRad(d.curLat, d.curLon, enemyLat, enemyLon);
+          const _wantHdg = d.profile.muzzleSideOffsetM
+            ? firingPassHeadingRad({ bearingToTargetRad: _brgToEnemy })
+            : _brgToEnemy;
+          d.heading = _easeHeading(d.heading, _wantHdg, dtSec);
           if (d.profile.trail) {
             d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
             if (d.trailPositions.length > 500) d.trailPositions.shift();

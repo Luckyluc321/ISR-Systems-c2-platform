@@ -119,6 +119,64 @@ just.
 The Billund end is untouched: the track still spends the same 0.8 min inside
 Billund's rings, so the detection report and its closure are unchanged.
 
+## Firing: two bugs, one symptom
+
+The gunner visibly tracked the contact and nothing ever shot. Two
+independent causes, and the range was not one of them.
+
+**1. The aircraft was not armed.** Every firing path is gated on
+`profile.firesTracer`, and it was set on exactly one profile:
+`counter-drone-swarm`. The helicopter had it nowhere, so it never fired at
+any range. This hid because `_gunStationAim` runs off `onboardSensorRangeM`
+and is independent of armament entirely — the traverse looked perfect while
+the weapon behind it was never connected.
+
+**2. The nose was pointed at the target.** `_gunStationAim` rests the gun on
+the port beam and traverses 45° either side, so its arc is a relative bearing
+of −135° to −45°. During an engagement the tick steered the nose at the
+target, putting it at relative bearing **0**, which is 45° outside the near
+stop. The gun swung as far as it could and held there.
+
+`src/firing_pass.js` solves the heading that lands the target in the middle
+of the arc: `heading = bearing − gunRest`, which for a port rest is
+`bearing + 90°`. To put a contact due north on your left, face east. A door
+gun pass is flown, not pointed. Nose-armed aircraft keep pointing, unchanged.
+
+| Target bearing | Fly heading | Nose-on bears | Pass heading bears |
+|---|---|---|---|
+| 0° | 90° | no | yes |
+| 90° | 180° | no | yes |
+| 180° | −90° | no | yes |
+| 270° | 0° | no | yes |
+
+Nose-on never bears. That is not a tuning problem, it is geometry.
+
+**`engageRangeM` stays at 300 m.** The GAU-21's 1100 m is a ballistic
+area-target figure; hitting a 3.5 m airframe at 51 m/s from a moving
+helicopter on an unstabilised pintle is a different problem, and a few
+hundred metres is the honest number. Raising it would have been unrealistic,
+and it was never the blocker.
+
+### The chain, with the real constants
+
+```
+closes to              100 m   (engageOffsetM)
+firing gate            300 m   -> open
+gun bears on the pass  yes
+window                 8 s, a burst every 1.4 s = 5 bursts x 4 = 20 rounds
+```
+
+| Burst | Rounds | Explode | Disable | Survive |
+|---|---|---|---|---|
+| 1 | 4 | 0.141 | 0.211 | 0.648 |
+| 2 | 8 | 0.282 | 0.422 | 0.296 |
+| 3 | 12 | 0.400 | 0.600 | **0.000** |
+
+Downed by the third burst, about 5 s into an 8 s window. 40% explodes in the
+air, 60% loses power and descends on its own momentum to a wreck downrange.
+If it should sometimes survive a pass, the lever is `engageSec`, not the kill
+model.
+
 ## Not verified
 
 The offline harness maintains the 700 m standoff as designed, but it omits the
