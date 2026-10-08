@@ -140,6 +140,36 @@ flowchart TD
     D -->|live| H
 ```
 
+## Which sensors count
+
+The symbol's visibility test implemented exactly two sensors: the ground
+mesh, and a friendly missile's seeker. A dispatched aircraft's own turret
+was not one of them.
+
+So an MH-60R could hold a Geran on its EO/IR at 800 m, lay the door gun
+onto it, and the operator sitting in that aircraft's own first-person
+view saw nothing, because Billund's 1 km rings do not reach 40 km up the
+Jutland spine. The gun swung at an empty sky. The comment on
+`_gunTargetOf` already recorded that as a known oddity.
+
+That was not a stricter reading of sensors-observe-only. It was an
+incomplete list of sensors. A turret with a published range, on our own
+aircraft, holding a contact, is the platform observing something. Leaving
+it out did not make the map more truthful; it hid something we could in
+fact see.
+
+`src/onboard_sensor.js` adds it. A unit counts only when it is assigned
+to this event, airborne, in `en_route` or `engaging`, carries an
+`onboardSensorRangeM`, and has a known position of its own.
+
+An onboard hold also outranks `closedAt`: the site's event is closed and
+reported, and the object is still there in front of the gun.
+
+**Rendering only.** Detection state, the detection report and the event
+lifecycle are untouched and still keyed on the ground mesh via
+`coverageGatedTrack`. An onboard hold is not a detection event and must
+never open or close one.
+
 ## Invariants
 
 - The object's own icon is hidden outside coverage for **every** track, real or
