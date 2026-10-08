@@ -5982,6 +5982,84 @@ async function main() {
     return out;
   }
 
+  /**
+   * Door-gun traverse: swing the station to bear on what the unit is
+   * engaging, within an arc a real pintle could reach.
+   *
+   * Model space puts the nose on -Y, starboard on +X and up on +Z, and
+   * the gun rests pointing -X, out of the port door. Rotating by phi
+   * about +Z turns the rest direction (-1, 0) into (-cos phi, -sin phi).
+   * A target at relative bearing theta lies along (sin theta, -cos
+   * theta), so:
+   *
+   *     phi = atan2(cos theta, -sin theta)
+   *
+   * Checked on every cardinal before wiring: a target off the port beam
+   * gives phi 0 and the gun does not move, dead ahead gives 90 and it
+   * points at the nose, starboard gives 180.
+   *
+   * CLAMPED, because that 180 would swing the barrel and the gunner
+   * straight through the cabin and out the far side. A door gun covers
+   * its own side plus some of the front and rear quarters, so traverse
+   * stops at 75 degrees either way and he holds at the stop, which is
+   * what actually happens when a target crosses behind the aircraft.
+   *
+   * Eased off the simulation clock, so it tracks rather than snaps and
+   * stops when the scenario is paused.
+   */
+  const _GUN_TRAVERSE_LIMIT = (75 * Math.PI) / 180;
+
+  function _gunTargetOf(d) {
+    if (d.assignedTargetCoord) return d.assignedTargetCoord;
+    if (d.targetLat != null && d.targetLon != null) {
+      return { lat: d.targetLat, lon: d.targetLon };
+    }
+    return null;
+  }
+
+  function _gunStationAim(d) {
+    const T = window.__isr_heli_tuning || _NO_TUNING;
+    let want = 0;
+    const tgt = _gunTargetOf(d);
+    if (tgt && d.curLat != null) {
+      let theta = _bearingRad(d.curLat, d.curLon, tgt.lat, tgt.lon) - (d.heading || 0);
+      theta = ((theta + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2) - Math.PI;
+      // Clamp the RELATIVE BEARING, not the resulting angle.
+      //
+      // Clamping phi afterwards looks equivalent and is not: phi wraps,
+      // so a contact crossing the starboard beam makes it flip sign and
+      // the gun picks the far stop rather than holding at the near one.
+      // The arc is a property of where the target is, so that is what
+      // gets limited. Rest is the port beam at -90 degrees, and the
+      // traverse reaches `limit` either side of it.
+      const limit = T.gunTraverseLimitRad ?? _GUN_TRAVERSE_LIMIT;
+      const lo = -Math.PI / 2 - limit;
+      const hi = -Math.PI / 2 + limit;
+      if (theta > hi || theta < lo) {
+        // Outside the arc: hold at whichever stop is nearer, measured
+        // round the dead zone rather than across it.
+        const dHi = Math.abs(((theta - hi + Math.PI) % (Math.PI * 2)
+          + Math.PI * 2) % (Math.PI * 2) - Math.PI);
+        const dLo = Math.abs(((theta - lo + Math.PI) % (Math.PI * 2)
+          + Math.PI * 2) % (Math.PI * 2) - Math.PI);
+        theta = dHi <= dLo ? hi : lo;
+      }
+      want = Math.atan2(Math.cos(theta), -Math.sin(theta));
+    }
+    const now = monoNow() / 1000;
+    if (d._gunAim == null) { d._gunAim = want; d._gunAimTs = now; }
+    const dt = Math.max(0, Math.min(0.5, now - (d._gunAimTs || now)));
+    d._gunAimTs = now;
+    // 1.1 rather than 2.5. At 2.5 a target jumping from one stop to the
+    // other peaked at 375 deg/s, which is faster than a man can swing a
+    // 12.7 mm on a pintle. Real pintle traverse is roughly 60 to 180
+    // deg/s, so this settles the worst case in about 5 s at a peak near
+    // 165, and ordinary tracking is far gentler than that.
+    d._gunAim += (want - d._gunAim) * Math.min(1, dt * (T.gunTraverseRate ?? 1.1));
+    return Cesium.Quaternion.fromAxisAngle(
+      Cesium.Cartesian3.UNIT_Z, d._gunAim, new Cesium.Quaternion());
+  }
+
   function _rotorSpin(axis, rps) {
     const angle = ((monoNow() / 1000) * rps * Math.PI * 2) % (Math.PI * 2);
     // A FRESH quaternion, deliberately, not a shared scratch. Cesium
@@ -6192,6 +6270,16 @@ async function main() {
             scale: new Cesium.Cartesian3(1, 1, 1),
             rotation: new Cesium.CallbackProperty(
               () => _rotorSpin(Cesium.Cartesian3.UNIT_X, _hT().tailRotorRps ?? 18), false),
+          },
+          // The gun STATION: the gunner and his weapon under one node so
+          // they traverse as a unit. He swings with it; he does not watch
+          // it rotate out of his hands. The pivot is the pintle post, not
+          // the centroid of the pair, because that is the axis it turns
+          // about.
+          Gun_Station: {
+            translation: Cesium.Cartesian3.ZERO,
+            scale: new Cesium.Cartesian3(1, 1, 1),
+            rotation: new Cesium.CallbackProperty(() => _gunStationAim(d), false),
           },
           // The crew nodes carried identity nodeTransformations here
           // only to expose a live position nudge. Removed: they composed
