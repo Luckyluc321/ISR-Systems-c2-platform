@@ -32,9 +32,9 @@ dist-ssr
 *.sw?
 
 # Mesh pipeline working files — imagery and intermediate meshes are large
-scripts/mesh-pipeline/work/
+city-creation-framework/mesh-pipeline/work/
 
-scripts/mesh-pipeline/work/
+city-creation-framework/mesh-pipeline/work/
 
 # Python bytecode from the mesh pipeline scripts
 __pycache__/

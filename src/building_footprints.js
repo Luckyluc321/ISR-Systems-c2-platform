@@ -6,7 +6,7 @@
 // the right height, and nothing else. It reads as a placeholder
 // because it is one.
 //
-// scripts/mesh-pipeline builds the replacement from Danish national
+// city-creation-framework/mesh-pipeline builds the replacement from Danish national
 // oblique photography: a textured reconstruction of the real building,
 // with its real roof and real walls. This module is what puts one in
 // place of the other.
@@ -19,7 +19,7 @@
 // part of it anyone wants is the buildings.
 //
 // So the mesh is cut to building outlines. That can happen in the
-// geometry, which scripts/mesh-pipeline/clip_to_buildings.py does, or
+// geometry, which city-creation-framework/mesh-pipeline/clip_to_buildings.py does, or
 // at render time, which is what this does. Cesium's
 // ClippingPolygonCollection carries an `inverse` flag, and the two
 // settings are exactly the two halves of the swap:
@@ -115,7 +115,7 @@ export function activeFootprintAdapter() {
 }
 
 // The default source: outlines exported by
-// scripts/mesh-pipeline/export_footprints.py, covering exactly the
+// city-creation-framework/mesh-pipeline/export_footprints.py, covering exactly the
 // ground each site's mesh reconstructed.
 //
 // A site built by the DRAPE pipeline publishes `coverage` instead:
