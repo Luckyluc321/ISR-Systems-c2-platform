@@ -7169,6 +7169,51 @@ async function main() {
       .find((d) => d.profile?.icon === 'helicopter' && d.curLat != null) || null;
   }
 
+  // ── Why is the interceptor not engaging? ────────────────────────
+  // A dispatch not engaging has about eight possible causes and they
+  // are all invisible from outside: wrong state, lost target, a stale
+  // aim, out of acquisition range, out of weapon range, a gun that
+  // cannot bear, an exhausted engagement window. Guessing between them
+  // from a screenshot does not work, and I tried at length.
+  //
+  // Prints one line per live dispatch with every gate evaluated, so the
+  // blocking one names itself.
+  window.__isr_why = () => {
+    const rows = [];
+    for (const [, d] of _counterDispatches) {
+      const ev = getEvent(d.eventId);
+      const live = _liveTargetPositionFor(d);
+      const detectM = d.profile?.onboardDetectRangeM || d.profile?.onboardSensorRangeM;
+      const toLive = live ? Math.round(haversineM(d.curLat, d.curLon, live.lat, live.lon)) : null;
+      const toAim = d.targetLat != null
+        ? Math.round(haversineM(d.curLat, d.curLon, d.targetLat, d.targetLon)) : null;
+      const lk = ev?.lastKnownPosition;
+      const toLK = lk ? Math.round(haversineM(d.curLat, d.curLon, lk.lat, lk.lon)) : null;
+      const gunT = _gunTargetOf(d);
+      rows.push({
+        unit: d.assetName,
+        state: d.state,
+        eventStatus: ev?.status ?? 'NO EVENT',
+        'aim m': toAim,
+        'true target m': toLive,
+        'last known m': toLK,
+        'acquires at': detectM,
+        'HAS CONTACT': toLive != null && detectM ? (toLive <= detectM) : 'n/a',
+        'gun sees': !!gunT,
+        'fires within': d.profile?.engageRangeM || 300,
+        rounds: d._roundsFired || 0,
+        orbitR: d._orbitRadius ? Math.round(d._orbitRadius) : null,
+      });
+    }
+    if (!rows.length) { console.log('no live dispatches'); return; }
+    console.table(rows);
+    const ev = getEvent([..._counterDispatches.values()][0]?.eventId);
+    console.log('event:', ev?.id, '| status:', ev?.status,
+      '| detected:', ev?.detected, '| lastKnownPosition:', !!ev?.lastKnownPosition,
+      '| counterDispatches:', (ev?.counterDispatches || []).map(c => c.state).join(', ') || 'none');
+    return rows;
+  };
+
   window.__isr_inbound = _launchInboundPass;
   window.__isr_inbound.stop = _inboundStop;
 
