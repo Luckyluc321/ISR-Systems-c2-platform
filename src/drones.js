@@ -939,10 +939,6 @@ export const TEMPLATES = {
   // place, which is why the date is written down.
   billund_geran2_north: {
     siteId: 'billund',
-    // Billund's event closes on exit, as the rule requires. The
-    // object keeps flying to Skagen with its unobserved
-    // breadcrumb, the way the CPH swarm runs out over the sea.
-    continueAfterClose: true,
     // Spawns ~4 km south of BLL-N01, outside every ring. Undetected
     // and invisible until it crosses into coverage, detected on
     // entry, closed on exit by the ordinary single-site chain.
@@ -969,17 +965,17 @@ export const TEMPLATES = {
     waypoints: [
       { lat: 55.7000, lon: 9.1300, alt: 600, heading: 356, tSec: 0 },
       { lat: 55.8200, lon: 9.1150, alt: 750, heading: 357, tSec: 260 },
-      { lat: 56.0000, lon: 9.1000, alt: 900, heading: 3, tSec: 650 },
-      { lat: 56.2000, lon: 9.1182, alt: 900, heading: 0, tSec: 1084 },
-      { lat: 56.4200, lon: 9.1182, alt: 900, heading: 0, tSec: 1560 },
-      { lat: 56.6500, lon: 9.1200, alt: 900, heading: 10, tSec: 2057 },
-      { lat: 56.9000, lon: 9.2000, alt: 900, heading: 18, tSec: 2606 },
-      { lat: 57.1500, lon: 9.3500, alt: 850, heading: 28, tSec: 3175 },
-      { lat: 57.4000, lon: 9.6000, alt: 800, heading: 36, tSec: 3790 },
+      { lat: 56.0000, lon: 9.1000, alt: 900, heading: 358, tSec: 650 },
+      { lat: 56.2000, lon: 9.0900, alt: 900, heading: 0, tSec: 1083 },
+      { lat: 56.4200, lon: 9.0900, alt: 900, heading: 4, tSec: 1559 },
+      { lat: 56.6500, lon: 9.1200, alt: 900, heading: 10, tSec: 2058 },
+      { lat: 56.9000, lon: 9.2000, alt: 900, heading: 18, tSec: 2607 },
+      { lat: 57.1500, lon: 9.3500, alt: 850, heading: 28, tSec: 3176 },
+      { lat: 57.4000, lon: 9.6000, alt: 800, heading: 36, tSec: 3791 },
       { lat: 57.6200, lon: 9.9000, alt: 750, heading: 71, tSec: 4381 },
-      { lat: 57.7400, lon: 10.5800, alt: 700, heading: 71, tSec: 5209 },
+      { lat: 57.7400, lon: 10.5800, alt: 700, heading: 71, tSec: 5210 },
     ],
-    durationSec: 5209,
+    durationSec: 5210,
   },
 
   // Purpose-built Russian jet airframe. NOT a Shahed derivative and it
@@ -995,10 +991,6 @@ export const TEMPLATES = {
   // August 2026. There was no figure to stand behind.
   billund_geran4_north: {
     siteId: 'billund',
-    // Billund's event closes on exit, as the rule requires. The
-    // object keeps flying to Skagen with its unobserved
-    // breadcrumb, the way the CPH swarm runs out over the sea.
-    continueAfterClose: true,
     // Spawns ~4 km south of BLL-N01, outside every ring. Undetected
     // and invisible until it crosses into coverage, detected on
     // entry, closed on exit by the ordinary single-site chain.
@@ -1026,17 +1018,17 @@ export const TEMPLATES = {
     waypoints: [
       { lat: 55.7000, lon: 9.1300, alt: 600, heading: 356, tSec: 0 },
       { lat: 55.8200, lon: 9.1150, alt: 750, heading: 357, tSec: 150 },
-      { lat: 56.0000, lon: 9.1000, alt: 900, heading: 3, tSec: 376 },
-      { lat: 56.2000, lon: 9.1182, alt: 900, heading: 0, tSec: 626 },
-      { lat: 56.4200, lon: 9.1182, alt: 900, heading: 0, tSec: 902 },
-      { lat: 56.6500, lon: 9.1200, alt: 900, heading: 10, tSec: 1189 },
+      { lat: 56.0000, lon: 9.1000, alt: 900, heading: 358, tSec: 376 },
+      { lat: 56.2000, lon: 9.0900, alt: 900, heading: 0, tSec: 626 },
+      { lat: 56.4200, lon: 9.0900, alt: 900, heading: 4, tSec: 901 },
+      { lat: 56.6500, lon: 9.1200, alt: 900, heading: 10, tSec: 1190 },
       { lat: 56.9000, lon: 9.2000, alt: 900, heading: 18, tSec: 1507 },
       { lat: 57.1500, lon: 9.3500, alt: 850, heading: 28, tSec: 1836 },
-      { lat: 57.4000, lon: 9.6000, alt: 800, heading: 36, tSec: 2191 },
-      { lat: 57.6200, lon: 9.9000, alt: 750, heading: 71, tSec: 2532 },
-      { lat: 57.7400, lon: 10.5800, alt: 700, heading: 71, tSec: 3011 },
+      { lat: 57.4000, lon: 9.6000, alt: 800, heading: 36, tSec: 2192 },
+      { lat: 57.6200, lon: 9.9000, alt: 750, heading: 71, tSec: 2533 },
+      { lat: 57.7400, lon: 10.5800, alt: 700, heading: 71, tSec: 3012 },
     ],
-    durationSec: 3011,
+    durationSec: 3012,
   },
 
   // Fastest documented of the family, and a different shape again: it
@@ -1049,10 +1041,6 @@ export const TEMPLATES = {
   // slower than the figures suggest.
   billund_geran5_north: {
     siteId: 'billund',
-    // Billund's event closes on exit, as the rule requires. The
-    // object keeps flying to Skagen with its unobserved
-    // breadcrumb, the way the CPH swarm runs out over the sea.
-    continueAfterClose: true,
     // Spawns ~4 km south of BLL-N01, outside every ring. Undetected
     // and invisible until it crosses into coverage, detected on
     // entry, closed on exit by the ordinary single-site chain.
@@ -1081,11 +1069,11 @@ export const TEMPLATES = {
     waypoints: [
       { lat: 55.7000, lon: 9.1300, alt: 600, heading: 356, tSec: 0 },
       { lat: 55.8200, lon: 9.1150, alt: 750, heading: 357, tSec: 92 },
-      { lat: 56.0000, lon: 9.1000, alt: 900, heading: 3, tSec: 229 },
-      { lat: 56.2000, lon: 9.1182, alt: 900, heading: 0, tSec: 382 },
-      { lat: 56.4200, lon: 9.1182, alt: 900, heading: 0, tSec: 550 },
+      { lat: 56.0000, lon: 9.1000, alt: 900, heading: 358, tSec: 229 },
+      { lat: 56.2000, lon: 9.0900, alt: 900, heading: 0, tSec: 382 },
+      { lat: 56.4200, lon: 9.0900, alt: 900, heading: 4, tSec: 549 },
       { lat: 56.6500, lon: 9.1200, alt: 900, heading: 10, tSec: 725 },
-      { lat: 56.9000, lon: 9.2000, alt: 900, heading: 18, tSec: 918 },
+      { lat: 56.9000, lon: 9.2000, alt: 900, heading: 18, tSec: 919 },
       { lat: 57.1500, lon: 9.3500, alt: 850, heading: 28, tSec: 1119 },
       { lat: 57.4000, lon: 9.6000, alt: 800, heading: 36, tSec: 1336 },
       { lat: 57.6200, lon: 9.9000, alt: 750, heading: 71, tSec: 1544 },
@@ -1594,17 +1582,7 @@ function speedAt(waypoints, tSec) {
 function _tick() {
   const updates = [];
   for (const [eventId, live] of _liveTracks) {
-    // A closed event normally stops its position feed here. Some
-    // scenarios need the SIMULATION to outlive the EVENT: the threat
-    // overflies a site, the site's event closes on exit and issues its
-    // report exactly as the rule requires, and the object carries on
-    // across the country until its trajectory ends. Without this the
-    // Geran froze 12 s past Billund with 85 of its 87 minutes unflown.
-    //
-    // Opt-in per template, so no existing scenario changes. The feed
-    // still stops on its own: past durationSec interpolate() returns
-    // visible:false and nothing further is drawn.
-    if (live.closed && !live.template.continueAfterClose) continue;
+    if (live.closed) continue;
     const elapsed = (monoNow() - live.startTime) / 1000;
     const p = interpolate(live.template.waypoints, elapsed);
     updates.push({
@@ -1615,11 +1593,6 @@ function _tick() {
       lat: p.lat, lon: p.lon, alt: p.alt, heading: p.heading,
       speed: speedAt(live.template.waypoints, elapsed),
       visible: p.visible,
-      // Provenance rides on every position. Template tracks are 'sim';
-      // a real sensor feed sets 'live' and the coverage gates in
-      // trail_policy then apply. Explicit at the source so no consumer
-      // has to infer it. See docs/track-trend-line-policy.md.
-      telemetrySource: live.template.telemetrySource || 'sim',
       tSec: elapsed,
       completed: elapsed >= live.template.durationSec,
     });

@@ -802,8 +802,6 @@ import { fetchDrivingRoute, computeSegmentLengths, advanceAlongPolyline } from '
 import { buildCordon, assignPatrols, clearCordonCache } from './perimeter.js';
 import { loadSiteLights, loadNationalLights, bucketByRadiance, LIGHT_STYLES, LIGHT_CLASSES } from './night_infrastructure_lights.js';
 import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from './runway_lighting.js';
-import { courseAndSpeedFromDelta, bankForCoordinatedTurn } from './rotorcraft_attitude.js';
-import { advanceOrbit, bearingFromTarget, orbitSpeedMs, GUN_RUN_BANK_RAD } from './gun_run.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -1132,7 +1130,7 @@ async function main() {
   // one of them, so outside those six the map falls back to extruded OSM
   // footprints: correct heights, blank white surfaces. This is the real
   // thing for the sites Google never flew, built from Denmark's own
-  // oblique aerial photography through city-creation-framework/mesh-pipeline.
+  // oblique aerial photography through scripts/mesh-pipeline.
   //
   // HORIZONTAL POSITION IS EXACT and needs nothing. The skraafoto API
   // publishes each image's camera position and orientation, so the
@@ -1172,14 +1170,14 @@ async function main() {
   // Served from a separate origin rather than the app's public folder:
   // a tileset is hundreds of megabytes, Vite copies public/ into every
   // build, and in production these sit on object storage behind a CDN
-  // anyway. city-creation-framework/mesh-pipeline/serve_tiles.py serves them locally
+  // anyway. scripts/mesh-pipeline/serve_tiles.py serves them locally
   // with the CORS headers Cesium needs.
   const _meshHost = (() => {
     try { return import.meta.env?.VITE_SITE_MESH_URL || 'http://localhost:8778'; }
     catch (_) { return 'http://localhost:8778'; }
   })();
   // `buildingsOnly` means the geometry was already cut to building
-  // footprints by city-creation-framework/mesh-pipeline/clip_to_buildings.py, so there
+  // footprints by scripts/mesh-pipeline/clip_to_buildings.py, so there
   // is no runway, tarmac, field or tree in the file to hide.
   //
   // That is the difference between a mesh that MIGHT show terrain if
@@ -4698,11 +4696,7 @@ async function main() {
       // Set slightly under the maximum because nobody plans a sortie to
       // dry tanks, not because the airframe cannot do it.
       enduranceMin: 280,
-      // arriveAtM 200, not 500. The run-in aims at a point 250 m abeam,
-      // so a 500 m arrival tolerance declared the gun run started up to
-      // 750 m from the contact. Tight enough that arrival means on the
-      // circle.
-      cruiseKmh: 250, arriveAtM: 200, engageSec: 8,
+      cruiseKmh: 250, arriveAtM: 500, engageSec: 8,
       // Declared HERE as well as in _SIM_INTERCEPTOR_PHYSICS because two
       // separate climb routines read two different sources: one takes
       // profile.climbRateMs with a fallback of 6, the other takes the
@@ -4710,26 +4704,6 @@ async function main() {
       // climbed at 6 or 8 m/s depending on which path ran. Same number
       // in both places now.
       climbRateMs: 8,
-      // The gun is wired to fire.
-      //
-      // Without this nothing shoots, at any range. Every firing path is
-      // gated on firesTracer, and it was set on exactly one profile:
-      // counter-drone-swarm. So the gunner tracked a contact perfectly
-      // and the weapon behind him was never connected, because
-      // _gunStationAim runs off onboardSensorRangeM and is independent
-      // of armament entirely. The traverse looked right, which is why
-      // this hid for so long.
-      firesTracer: true,
-      // Radius of the gun-run orbit. With GUN_RUN_BANK_RAD this fixes
-      // the speed at 129 km/h and the rate at 5.1 deg/s, so the
-      // aircraft slows onto the circle and comes round in 70 s. It
-      // matches the 400 m the Geran transit passes Karup at, so the
-      // run-in ends on the circle instead of having to close further.
-      // 220 m, INSIDE the 300 m engageRangeM the gun actually fires at.
-      // It was 400, so the aircraft flew a perfect circle 100 m outside
-      // its own weapon and never fired a round. The three numbers —
-      // standoff, orbit radius, firing gate — now descend in that order.
-      gunRunRadiusM: 220,
       // How far out the gun will lay on a contact.
       //
       // 800 had no basis. Neither does any other single number, and
@@ -4747,35 +4721,6 @@ async function main() {
       // it as representative, and do not quote 2,000 m as an air-to-air
       // capability anywhere user-facing.
       onboardSensorRangeM: 2000,
-      // ACQUISITION range, which is a different number from the one
-      // above and must not be merged back into it.
-      //
-      // onboardSensorRangeM is the WEAPON envelope: how far out the gun
-      // will lay on a contact. This is how far the aircraft can DETECT
-      // and vector on one, and conflating them is why the aircraft kept
-      // flying past a Geran it should have seen from kilometres away.
-      //
-      // CONFIDENCE: representative. No published figure exists for
-      // either the Danish configuration or the sensor. Forsvaret and FMI
-      // publish none. The one number in circulation, an "instrumented
-      // range of 200 nautical miles" from a third-party equipment
-      // database, is the range the test instrumentation measures to and
-      // not a detection range against a target; quoting it as sensor
-      // reach would be the exact fabrication armament.js exists to
-      // prevent.
-      //
-      // 10 km is chosen as a deliberately conservative figure for a
-      // 3.5 m airframe. The aircraft carries an AN/APS-147 class
-      // multi-mode radar built for small-target detection and ISAR
-      // imaging, whose successor adds automatic PERISCOPE detection —
-      // a smaller, lower-contrast target than a Shahed — plus an
-      // MTS-FLIR turret. Open figures for comparable EO/IR turrets put
-      // vehicle detection at 15-30 km and positive identification at
-      // 8-15 km, and a warm airframe against cold sky is an easier
-      // infrared problem than a vehicle in ground clutter. So 10 km
-      // sits below what the hardware plausibly does, which is the right
-      // side to be wrong on for a claim we cannot source.
-      onboardDetectRangeM: 10000,
       icon: 'helicopter', trail: true, airborne: true,
       // Rounds leave from the left cabin door, where the gunner is
       // modelled, not from the middle of the airframe. Metres to the
@@ -6460,8 +6405,7 @@ async function main() {
       // the aircraft holds its bank instead of snapping level. Held in
       // closure locals rather than stamped on `d` so no new clock-bearing
       // field appears on the dispatch record.
-      let _prevLL = null;        // last position, for course over ground
-      let _prevCourse = null;    // last measured flight-path direction
+      let _prevH = null;
       let _prevT = null;
       let _bank = 0;
       let _prevAlt = null;
@@ -6475,38 +6419,22 @@ async function main() {
         const nowS = monoNow() / 1000;
         const maxBank = ((T.maxBankDeg ?? 18) * Math.PI) / 180;
 
-        // Bank off the FLIGHT PATH, not the nose.
-        //
-        // A helicopter decouples the two. It pedal-turns with the disc
-        // level, and it crabs — which is precisely what the door-gun
-        // firing pass is: hold the course, yaw the nose 90 degrees so
-        // the gunner can bear. Banking off nose heading rolled it 18
-        // degrees through a pass that should be dead level.
-        //
-        // Course is measured from successive positions, because position
-        // is the one thing that cannot disagree with what the operator
-        // sees on the map. See rotorcraft_attitude.js.
-        const _cg = Cesium.Cartographic.fromCartesian(cart);
-        const _lat = Cesium.Math.toDegrees(_cg.latitude);
-        const _lon = Cesium.Math.toDegrees(_cg.longitude);
-        if (_prevLL && _prevT != null) {
-          const dtC = nowS - _prevT;
-          const cs = courseAndSpeedFromDelta({
-            fromLat: _prevLL.lat, fromLon: _prevLL.lon, toLat: _lat, toLon: _lon, dt: dtC,
-          });
-          if (cs) {
-            _bank = bankForCoordinatedTurn({
-              prevBank: _bank,
-              prevCourseRad: _prevCourse,
-              courseRad: cs.courseRad,
-              speedMs: cs.speedMs,
-              dt: dtC,
-              maxBankRad: maxBank,
-            });
-            _prevCourse = cs.courseRad;
+        if (_prevH != null && _prevT != null) {
+          const dt = nowS - _prevT;
+          // dt <= 0 is a frozen clock. dt >= 1 is a tab that was in the
+          // background, where the heading delta spans seconds and the
+          // implied turn rate is meaningless. Neither should bank it.
+          if (dt > 0 && dt < 1) {
+            const dh = ((d.heading - _prevH + Math.PI) % TAU + TAU) % TAU - Math.PI;
+            // Signed rate as a fraction of the maximum the unit can turn,
+            // so a hard turn banks fully and a gentle one barely tips.
+            const frac = Math.max(-1, Math.min(1, (dh / dt) / TURN_RATE_RAD_S));
+            // Eased, so the roll leads into the turn and settles out of
+            // it rather than appearing on the frame the heading moves.
+            _bank += (frac * maxBank - _bank) * Math.min(1, dt * 3);
           }
         }
-        _prevLL = { lat: _lat, lon: _lon };
+        _prevH = d.heading;
         _prevT = nowS;
 
         // Plain heading, pitch and roll, which is all this ever needed.
@@ -7167,83 +7095,6 @@ async function main() {
       .find((d) => d.profile?.icon === 'helicopter' && d.curLat != null) || null;
   }
 
-  // ── Why is the interceptor not engaging? ────────────────────────
-  // A dispatch not engaging has about eight possible causes and they
-  // are all invisible from outside: wrong state, lost target, a stale
-  // aim, out of acquisition range, out of weapon range, a gun that
-  // cannot bear, an exhausted engagement window. Guessing between them
-  // from a screenshot does not work, and I tried at length.
-  //
-  // Prints one line per live dispatch with every gate evaluated, so the
-  // blocking one names itself.
-  window.__isr_why = () => {
-    const rows = [];
-    for (const [, d] of _counterDispatches) {
-      const ev = getEvent(d.eventId);
-      const live = _liveTargetPositionFor(d);
-      const detectM = d.profile?.onboardDetectRangeM || d.profile?.onboardSensorRangeM;
-      const toLive = live ? Math.round(haversineM(d.curLat, d.curLon, live.lat, live.lon)) : null;
-      const toAim = d.targetLat != null
-        ? Math.round(haversineM(d.curLat, d.curLon, d.targetLat, d.targetLon)) : null;
-      const lk = ev?.lastKnownPosition;
-      const toLK = lk ? Math.round(haversineM(d.curLat, d.curLon, lk.lat, lk.lon)) : null;
-      const gunT = _gunTargetOf(d);
-      rows.push({
-        unit: d.assetName,
-        state: d.state,
-        eventStatus: ev?.status ?? 'NO EVENT',
-        'aim m': toAim,
-        'true target m': toLive,
-        'last known m': toLK,
-        'acquires at': detectM,
-        'HAS CONTACT': toLive != null && detectM ? (toLive <= detectM) : 'n/a',
-        'gun sees': !!gunT,
-        'fires within': d.profile?.engageRangeM || 300,
-        rounds: d._roundsFired || 0,
-        orbitR: d._orbitRadius ? Math.round(d._orbitRadius) : null,
-        // IS IT ACTUALLY MOVING. The table showed a correct aim and a
-        // correct state while the gap barely closed, and there was no
-        // way to tell a flying aircraft from a parked one because
-        // nothing printed its own position. Distance from the station it
-        // launched from answers it in one number across two readings.
-        'flown from base m': (d.originLat != null && d.curLat != null)
-          ? Math.round(haversineM(d.curLat, d.curLon, d.originLat, d.originLon))
-          : null,
-        'cruise km/h': d.profile?.cruiseKmh ?? null,
-      });
-    }
-    if (rows.length) console.table(rows);
-
-    // BREADCRUMB STATE for every live track, which is a different
-    // question from why a dispatch is not engaging and needs its own
-    // answer. Each of these can independently blank the dotted line and
-    // none of them is visible from outside.
-    const tracks = [];
-    for (const [eid, st] of droneState) {
-      const ev = getEvent(eid);
-      tracks.push({
-        event: eid,
-        status: ev?.status ?? '-',
-        'projLine exists': !!st.projLine,
-        'projLine.show': st.projLine ? st.projLine.show : '-',
-        points: st.projPositions ? st.projPositions.length : '-',
-        'trail points': st.trailPositions ? st.trailPositions.length : '-',
-        'in coverage': typeof st._lastBreadcrumbInCov === 'boolean' ? st._lastBreadcrumbInCov : '?',
-        'still flying': st._simTrackFlying,
-        'closedAt': st.closedAt ? 'yes' : 'no',
-        'swarm members': st.swarmBillboards ? st.swarmBillboards.length : 0,
-      });
-    }
-    if (tracks.length) { console.log('TRACKS:'); console.table(tracks); }
-    else console.log('NO LIVE TRACKS in droneState — entities were torn down');
-    if (!rows.length) { console.log('no live dispatches'); return; }
-    const ev = getEvent([..._counterDispatches.values()][0]?.eventId);
-    console.log('event:', ev?.id, '| status:', ev?.status,
-      '| detected:', ev?.detected, '| lastKnownPosition:', !!ev?.lastKnownPosition,
-      '| counterDispatches:', (ev?.counterDispatches || []).map(c => c.state).join(', ') || 'none');
-    return rows;
-  };
-
   window.__isr_inbound = _launchInboundPass;
   window.__isr_inbound.stop = _inboundStop;
 
@@ -7587,7 +7438,7 @@ async function main() {
       const l = getEvent(id);
       return l && l.status === 'active';
     });
-      const targetLost = primaryClosed && !anyLinkedActive;
+    const targetLost = primaryClosed && !anyLinkedActive;
 
     // STALE ASSIGNED TARGET. If this interceptor's assigned enemy drone
     // was killed by a SIBLING interceptor while this one was still
@@ -8068,36 +7919,9 @@ async function main() {
       } else {
         // Straight-line fallback (used pre-route-fetch or on OSRM fail)
         const brng = _bearingRad(d.curLat, d.curLon, d.targetLat, d.targetLon);
-        // Nose on the flight path. No crab.
-        //
-        // An earlier attempt yawed 90 degrees here and held it at
-        // cruise, which a helicopter cannot do: sideways flight runs out
-        // of tail rotor authority around 30-35 knots. The gun run is
-        // flown as an orbit instead, in the engaging branch below, where
-        // the nose stays on the tangent and never leaves the flight
-        // path.
         d.heading = _easeHeading(d.heading, brng, dtSec);
-
-        // DECELERATE ONTO THE ORBIT.
-        //
-        // The orbit's speed is fixed by its radius and bank, 129 km/h at
-        // 400 m and 18 degrees, and arriving at 250 and snapping to 129
-        // is not a thing an aircraft does. Taper over the last three
-        // radii so it settles onto gun-run speed as it reaches the
-        // circle.
-        let _stepM = stepM;
-        if (d.profile.gunRunRadiusM) {
-          const vOrb = orbitSpeedMs(d.profile.gunRunRadiusM, GUN_RUN_BANK_RAD);
-          const taperFrom = d.profile.gunRunRadiusM * 3;
-          const toGo = haversineM(d.curLat, d.curLon, d.targetLat, d.targetLon);
-          if (toGo < taperFrom) {
-            const f = Math.max(0, Math.min(1, toGo / taperFrom));
-            const vNow = vOrb + (speedMps - vOrb) * f;
-            _stepM = Math.min(stepM, vNow * dtSec);
-          }
-        }
-        const stepDegLat = (_stepM * Math.cos(brng)) / 111000;
-        const stepDegLon = (_stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
+        const stepDegLat = (stepM * Math.cos(brng)) / 111000;
+        const stepDegLon = (stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
         d.curLat += stepDegLat;
         d.curLon += stepDegLon;
         if (d.profile.trail) {
@@ -8181,53 +8005,6 @@ async function main() {
             }
           }
 
-          // GUN RUN: fly a left-hand orbit around the contact.
-          //
-          // The aircraft circles it, nose on the tangent, banked into
-          // the turn, port door facing the centre the whole way round.
-          // The gunner holds the target continuously and the airframe
-          // never flies sideways, which is what an earlier crab got
-          // wrong: a helicopter runs out of tail rotor authority in
-          // sideways flight somewhere around 30-35 knots.
-          //
-          // Radius and bank fix the speed, tan(bank) = v^2/(g*r), so
-          // 400 m at 18 degrees is 129 km/h coming round at 5.1 deg/s.
-          // 90 degrees of turn takes about 18 seconds, not one movement.
-          // The run-in above decelerates onto that speed.
-          //
-          // theta is seeded from where the aircraft actually is, so
-          // entering the orbit never teleports it, and the heading is
-          // eased onto the tangent rather than snapped, which reads as
-          // rolling into the turn.
-          const _orbiting = !!d.profile.gunRunRadiusM;
-          if (_orbiting) {
-            if (d._orbitTheta == null) {
-              d._orbitTheta = bearingFromTarget({
-                targetLat: enemyLat, targetLon: enemyLon,
-                lat: d.curLat, lon: d.curLon,
-              });
-            }
-            const orb = advanceOrbit({
-              targetLat: enemyLat, targetLon: enemyLon,
-              theta: d._orbitTheta,
-              radiusM: d.profile.gunRunRadiusM,
-              dt: dtSecEng,
-              // Spiral in from wherever it actually is, rather than
-              // snapping onto the circle and teleporting.
-              currentRadiusM: d._orbitRadius
-                ?? haversineM(d.curLat, d.curLon, enemyLat, enemyLon),
-            });
-            d._orbitTheta = orb.theta;
-            d._orbitRadius = orb.radiusM;
-            d.curLat = orb.lat;
-            d.curLon = orb.lon;
-            d.heading = _easeHeading(d.heading, orb.headingRad, dtSec);
-            if (d.profile.trail) {
-              d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
-              if (d.trailPositions.length > 500) d.trailPositions.shift();
-            }
-          }
-
           const offsetM = d.profile.engageOffsetM || 100;
           const bearing = ((d.memberIndex || 0) * (Math.PI * 2 / 3));
           const desiredLat = enemyLat + (offsetM * Math.cos(bearing)) / 111000;
@@ -8237,7 +8014,6 @@ async function main() {
           // faster than en-route but still moves visibly instead of
           // teleporting.
           const maxStepM = ((d.profile.cruiseKmh * 1000) / 3600) * 1.6 * dtSecEng;
-          if (!_orbiting) {
           if (distToDesiredM <= maxStepM || distToDesiredM < 8) {
             d.curLat = desiredLat;
             d.curLon = desiredLon;
@@ -8246,11 +8022,10 @@ async function main() {
             d.curLat += (desiredLat - d.curLat) * frac;
             d.curLon += (desiredLon - d.curLon) * frac;
           }
-d.heading = _easeHeading(d.heading, _bearingRad(d.curLat, d.curLon, enemyLat, enemyLon), dtSec);
+          d.heading = _easeHeading(d.heading, _bearingRad(d.curLat, d.curLon, enemyLat, enemyLon), dtSec);
           if (d.profile.trail) {
             d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
             if (d.trailPositions.length > 500) d.trailPositions.shift();
-          }
           }
         }
       }
@@ -14765,30 +14540,6 @@ d.heading = _easeHeading(d.heading, _bearingRad(d.curLat, d.curLon, enemyLat, en
       },
     });
 
-    // UNOBSERVED BREADCRUMB — red dashed, visible ONLY while the track
-    // is outside every sensor radius. The exact mechanism the CPH swarm
-    // members already use (`sw.projLine`), which the single-drone path
-    // never had: there, a track that left coverage simply vanished, and
-    // on a long transit there was nothing left on the map to follow.
-    //
-    // Same colour, width and dash as the swarm's so the two read as one
-    // language. Positions are distance-sampled, because the swarm's
-    // every-tick append caps out at 5 s of flight and this has to cover
-    // an 87 minute transit.
-    const projPositions = [];
-    const projLine = viewer.entities.add({
-      id: `drone-proj-${event.id}`,
-      polyline: {
-        positions: new Cesium.CallbackProperty(() => projPositions, false),
-        width: 1.5,
-        material: new Cesium.PolylineDashMaterialProperty({
-          color: Cesium.Color.fromCssColorString('#ff3d3d').withAlpha(0.55),
-          dashLength: 12,
-        }),
-      },
-      show: false,
-    });
-
     const shadow = viewer.entities.add({
       id: `drone-shadow-${event.id}`,
       polyline: {
@@ -15484,7 +15235,6 @@ d.heading = _easeHeading(d.heading, _bearingRad(d.curLat, d.curLon, enemyLat, en
       leadSwarmMember,   // formation[0] wrapper, same shape as swarmBillboards entries
       spawnMs: monoNow(),   // shared timing reference for swarm interpolation
       trailPositions, shadowPositions,
-      projLine, projPositions,
       stateHolder,      // { headingRad } — updated in tick, read by billboard rotation callback
       entryDropped: false, entryMarker: null,
       exitDropped: false, exitMarker: null, wasInCoverage: false,
@@ -15548,7 +15298,6 @@ d.heading = _easeHeading(d.heading, _bearingRad(d.curLat, d.curLon, enemyLat, en
     if (!state) return;
     viewer.entities.remove(state.billboard);
     viewer.entities.remove(state.trail);
-    if (state.projLine) viewer.entities.remove(state.projLine);
     viewer.entities.remove(state.shadow);
     if (state.swarmBillboards) {
       for (const sw of state.swarmBillboards) {
@@ -15866,29 +15615,6 @@ d.heading = _easeHeading(d.heading, _bearingRad(d.curLat, d.curLon, enemyLat, en
         // renders inside/across the camera view. Projected trajectory
         // (yellow dashed line extending forward from the drone) is
         // hidden by the POV entry/exit hooks — see _enterDronePOV.
-        // SIM draws the trend line outside coverage so the track can be
-        // found; LIVE stops it at the edge, because past that edge no
-        // sensor reported a position and the line would be asserting
-        // one. leadDown and POV outrank both.
-        // True while the object is still moving in the simulation, even
-        // after its event has closed. Read by the ghost sweep so the
-        // breadcrumb is not deleted mid-route. See continueAfterClose.
-        state._simTrackFlying = !p.completed;
-        state._lastBreadcrumbInCov = leadInCov;
-        // Stamped, because the flag alone strands tracks forever.
-        //
-        // This line only runs when the feed emits a position. A template
-        // WITHOUT continueAfterClose stops its feed the moment its event
-        // closes, so the flag keeps whatever it last held — true, since
-        // the trajectory had not finished — and the ghost sweep then
-        // skips teardown for good. Entities and droneState would leak
-        // for every single-drone template that closes mid-flight, which
-        // is most of them.
-        //
-        // The stamp makes it self-expiring: a live feed refreshes it
-        // every frame, a stopped one goes stale in well under a second.
-        state._simTrackFlyingTs = monoNow();
-
         if ((leadDown || povSuppressed) && state.trail) state.trail.show = false;
         else if (!leadDown && state.trail && !povSuppressed) state.trail.show = true;
         // Purge lead from aggregate sets ONCE on death so surviving
