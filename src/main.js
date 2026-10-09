@@ -4702,7 +4702,11 @@ async function main() {
       // Set slightly under the maximum because nobody plans a sortie to
       // dry tanks, not because the airframe cannot do it.
       enduranceMin: 280,
-      cruiseKmh: 250, arriveAtM: 500, engageSec: 8,
+      // arriveAtM 200, not 500. The run-in aims at a point 250 m abeam,
+      // so a 500 m arrival tolerance declared the gun run started up to
+      // 750 m from the contact. Tight enough that arrival means on the
+      // circle.
+      cruiseKmh: 250, arriveAtM: 200, engageSec: 8,
       // Fly a BEAM PASS, not a stern chase.
       //
       // The dispatch logic otherwise re-aims at the threat's current
@@ -4745,7 +4749,11 @@ async function main() {
       // aircraft slows onto the circle and comes round in 70 s. It
       // matches the 400 m the Geran transit passes Karup at, so the
       // run-in ends on the circle instead of having to close further.
-      gunRunRadiusM: 400,
+      // 220 m, INSIDE the 300 m engageRangeM the gun actually fires at.
+      // It was 400, so the aircraft flew a perfect circle 100 m outside
+      // its own weapon and never fired a round. The three numbers —
+      // standoff, orbit radius, firing gate — now descend in that order.
+      gunRunRadiusM: 220,
       // How far out the gun will lay on a contact.
       //
       // 800 had no basis. Neither does any other single number, and
@@ -8173,8 +8181,13 @@ async function main() {
               theta: d._orbitTheta,
               radiusM: d.profile.gunRunRadiusM,
               dt: dtSecEng,
+              // Spiral in from wherever it actually is, rather than
+              // snapping onto the circle and teleporting.
+              currentRadiusM: d._orbitRadius
+                ?? haversineM(d.curLat, d.curLon, enemyLat, enemyLon),
             });
             d._orbitTheta = orb.theta;
+            d._orbitRadius = orb.radiusM;
             d.curLat = orb.lat;
             d.curLon = orb.lon;
             d.heading = _easeHeading(d.heading, orb.headingRad, dtSec);

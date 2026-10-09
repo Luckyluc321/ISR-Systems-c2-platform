@@ -51,11 +51,21 @@ const mPerDegLon = (lat) => 111_320 * Math.cos((lat * Math.PI) / 180);
 /**
  * Standoff for the pass, in metres.
  *
- * Inside the GAU-21's 1100 m effective range with margin, and well
- * inside the 2000 m onboard sensor envelope so the contact is seen and
- * the gun has time to lay on it before the target is abeam.
+ * This has to agree with two other numbers or the aircraft cannot
+ * shoot, and for a while it did not agree with either.
+ *
+ *   gunRunRadiusM   the orbit it settles into
+ *   engageRangeM    300 m, the range the gun actually fires at
+ *
+ * It was 700 while the orbit was 400 and the gun fired at 300, so the
+ * aircraft flew a circle 100 m OUTSIDE its own firing range, burned the
+ * whole engagement window without a round, and resolved as a miss.
+ *
+ * 250 m now, matching the orbit radius so the run-in ends on the circle
+ * rather than a quarter-kilometre outside it, and comfortably inside
+ * both the 300 m firing gate and the 2000 m sensor envelope.
  */
-export const BEAM_PASS_STANDOFF_M = 700;
+export const BEAM_PASS_STANDOFF_M = 250;
 
 /**
  * Solve the beam-pass intercept.

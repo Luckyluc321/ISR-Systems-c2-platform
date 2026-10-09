@@ -90,20 +90,39 @@ export function advanceOrbit({
   targetLat, targetLon, theta, radiusM, dt,
   bankRad = GUN_RUN_BANK_RAD,
   direction = ORBIT_LEFT,
+  currentRadiusM = null,
+  closureMs = 40,
 }) {
   const v = orbitSpeedMs(radiusM, bankRad);
   const omega = v / radiusM;
   const next = norm(theta + direction * omega * dt);
   const mLon = mPerDegLon(targetLat);
+  // SPIRAL IN, do not snap to the circle.
+  //
+  // Writing the position straight onto the orbit radius teleports the
+  // aircraft the instant the engagement starts: it can declare arrival
+  // a kilometre out and then appear 220 m from the target on the next
+  // frame. That is the same "2 km jump" the standoff chase was written
+  // to avoid, reintroduced by me.
+  //
+  // So the radius closes at a bounded rate and the aircraft spirals
+  // onto the circle, which is also how a gun run is actually flown.
+  const rNow = currentRadiusM == null
+    ? radiusM
+    : (currentRadiusM > radiusM
+        ? Math.max(radiusM, currentRadiusM - closureMs * dt)
+        : Math.min(radiusM, currentRadiusM + closureMs * dt));
   return {
     theta: next,
-    lat: targetLat + (radiusM * Math.cos(next)) / M_PER_DEG_LAT,
-    lon: targetLon + (radiusM * Math.sin(next)) / mLon,
+    radiusM: rNow,
+    lat: targetLat + (rNow * Math.cos(next)) / M_PER_DEG_LAT,
+    lon: targetLon + (rNow * Math.sin(next)) / mLon,
     // Tangent. Port gun looks at the centre, so the nose leads it by 90
     // degrees in the direction of travel.
     headingRad: norm(next + direction * (Math.PI / 2)),
     speedMs: v,
     omegaRadS: omega,
     bankRad,
+    onCircle: Math.abs(rNow - radiusM) < 1,
   };
 }

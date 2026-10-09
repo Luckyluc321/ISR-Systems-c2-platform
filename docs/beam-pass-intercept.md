@@ -312,6 +312,48 @@ would otherwise bank the aircraft at random.
 Yaw rate is unchanged at `TURN_RATE_RAD_S`, 60°/s, which is a realistic pintle-
 era rotorcraft figure and means a 90° pass turn takes 1.5 s.
 
+## The four ranges have to descend, and for a while they did not
+
+This is why the gun never fired even after the aircraft was armed.
+
+| | Was | Now |
+|---|---|---|
+| Run-in standoff (`BEAM_PASS_STANDOFF_M`) | 700 m | **250 m** |
+| Arrival tolerance (`arriveAtM`) | 500 m | **200 m** |
+| Orbit radius (`gunRunRadiusM`) | 400 m | **220 m** |
+| Firing gate (`engageRangeM`) | 300 m | 300 m, unchanged |
+
+The old set never agreed. The run-in aimed 700 m abeam, arrival was declared
+within 500 m of *that point* — so the gun run could begin 1200 m from the
+contact — and the aircraft then flew a perfect circle at 400 m, which is **100 m
+outside the 300 m range its own gun fires at**. It burned the whole eight-second
+window without a round and the engagement resolved as a miss, after which it
+stopped pursuing. From the cockpit that reads as the helicopter ignoring a
+target it can plainly see.
+
+They now descend in order, so arriving means being on a circle that is inside
+the weapon.
+
+At 220 m the orbit is 95 km/h, 6.9°/s, a full circle in 52 s.
+
+## Spiral in, do not snap
+
+Writing the position straight onto the orbit radius teleported the aircraft: it
+could declare arrival a kilometre out and appear 220 m from the target on the
+next frame. That is the same "2 km jump" the original standoff chase was written
+to avoid, reintroduced by me.
+
+`advanceOrbit` now takes `currentRadiusM` and closes at a bounded 40 m/s, so the
+aircraft spirals onto the circle, which is also how a gun run is actually flown:
+
+```
+t+ 0s   1199 m
+t+ 6s    957 m
+t+12s    717 m
+t+18s    479 m
+t+24s    239 m   on the circle, firing
+```
+
 ## Not verified
 
 The offline harness maintains the 700 m standoff as designed, but it omits the
