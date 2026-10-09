@@ -210,6 +210,14 @@ export const NOT_FIELDED = [
   { claim: 'Skyranger 30 in service',
     status: '16 turrets contracted Sep 2024. No source confirms delivery or '
       + 'operational status.' },
+  { claim: 'A published sensor range for the Danish MH-60R',
+    status: 'There is none. Neither Forsvaret nor FMI publishes a detection '
+      + 'range, and no manufacturer figure exists for the AN/APS-147 class '
+      + 'radar or the MTS-FLIR turret. The "200 nautical miles" in circulation '
+      + 'is an INSTRUMENTED range from a third-party equipment database — the '
+      + 'distance the test instrumentation measures to, not a detection range '
+      + 'against a target. The acquisition figure in CD_PROFILE is '
+      + 'deliberately conservative and labelled representative.' },
   { claim: 'Hellfire on Danish MH-60R',
     status: 'The US aircraft carries it. No Danish source names it. Official Danish '
       + 'role is rescue, observation and transport.' },

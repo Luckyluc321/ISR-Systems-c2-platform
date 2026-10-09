@@ -4749,6 +4749,35 @@ async function main() {
       // it as representative, and do not quote 2,000 m as an air-to-air
       // capability anywhere user-facing.
       onboardSensorRangeM: 2000,
+      // ACQUISITION range, which is a different number from the one
+      // above and must not be merged back into it.
+      //
+      // onboardSensorRangeM is the WEAPON envelope: how far out the gun
+      // will lay on a contact. This is how far the aircraft can DETECT
+      // and vector on one, and conflating them is why the aircraft kept
+      // flying past a Geran it should have seen from kilometres away.
+      //
+      // CONFIDENCE: representative. No published figure exists for
+      // either the Danish configuration or the sensor. Forsvaret and FMI
+      // publish none. The one number in circulation, an "instrumented
+      // range of 200 nautical miles" from a third-party equipment
+      // database, is the range the test instrumentation measures to and
+      // not a detection range against a target; quoting it as sensor
+      // reach would be the exact fabrication armament.js exists to
+      // prevent.
+      //
+      // 10 km is chosen as a deliberately conservative figure for a
+      // 3.5 m airframe. The aircraft carries an AN/APS-147 class
+      // multi-mode radar built for small-target detection and ISAR
+      // imaging, whose successor adds automatic PERISCOPE detection —
+      // a smaller, lower-contrast target than a Shahed — plus an
+      // MTS-FLIR turret. Open figures for comparable EO/IR turrets put
+      // vehicle detection at 15-30 km and positive identification at
+      // 8-15 km, and a warm airframe against cold sky is an easier
+      // infrared problem than a vehicle in ground clutter. So 10 km
+      // sits below what the hardware plausibly does, which is the right
+      // side to be wrong on for a claim we cannot source.
+      onboardDetectRangeM: 10000,
       icon: 'helicopter', trail: true, airborne: true,
       // Rounds leave from the left cabin door, where the gunner is
       // modelled, not from the middle of the airframe. Metres to the
@@ -7594,10 +7623,11 @@ async function main() {
       // point at which live position is legitimate, because now
       // something really is observing it.
       const _ordered = event.lastKnownPosition || event.lastPosition;
-      const _ownEyes = d.profile.onboardSensorRangeM ? _liveTargetPositionFor(d) : null;
+      const _detectM = d.profile.onboardDetectRangeM || d.profile.onboardSensorRangeM;
+      const _ownEyes = _detectM ? _liveTargetPositionFor(d) : null;
       const _held = _ownEyes && _ownEyes.lat != null
         && haversineM(d.curLat, d.curLon, _ownEyes.lat, _ownEyes.lon)
-             <= d.profile.onboardSensorRangeM;
+             <= _detectM;
       const _aim = _held ? _ownEyes : _ordered;
       if (_aim && _aim.lat != null) {
         d.targetLat = _aim.lat;
