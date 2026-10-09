@@ -12,7 +12,7 @@ you are debugging.
 **Set once, used throughout.** Replace `TOWN` and nothing else.
 
 ```bash
-cd scripts/mesh-pipeline
+cd city-creation-framework/mesh-pipeline
 TOWN=billund           # lowercase, no spaces; used in paths and --site
 ```
 

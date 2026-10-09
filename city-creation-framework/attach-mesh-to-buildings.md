@@ -7,7 +7,7 @@ building in the map is a white box from Cesium's OSM Buildings tileset:
 the right outline, roughly the right height, nothing else. At Billund,
 Esbjerg and every substation, that is what an operator sees.
 
-`scripts/mesh-pipeline/` builds the replacement from Danish national
+`city-creation-framework/mesh-pipeline/` builds the replacement from Danish national
 oblique photography, and `src/building_footprints.js` puts it in place
 of the boxes.
 
@@ -187,7 +187,7 @@ A site with no entry in `SITE_MESHES` is untouched, which is what keeps
 this away from the eight sites that already look right. Meshes are
 served from a separate origin rather than `public/`, because a tileset
 is hundreds of megabytes and Vite copies `public/` into every build.
-`scripts/mesh-pipeline/serve_tiles.py` serves them locally with the
+`city-creation-framework/mesh-pipeline/serve_tiles.py` serves them locally with the
 CORS headers Cesium needs; production is object storage behind a CDN,
 set by `VITE_SITE_MESH_URL`.
 
@@ -226,7 +226,7 @@ which block is flown in which year.
 
 ### The monthly check
 
-`scripts/mesh-pipeline/watch_height_model.py` polls the data rather than
+`city-creation-framework/mesh-pipeline/watch_height_model.py` polls the data rather than
 a calendar, because the calendar is not published. For each watched
 footprint it measures the p80 of the surface model inside the outline
 minus the median ground just outside, and compares that against a stored

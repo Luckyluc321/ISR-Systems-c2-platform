@@ -1136,7 +1136,7 @@ async function main() {
   // one of them, so outside those six the map falls back to extruded OSM
   // footprints: correct heights, blank white surfaces. This is the real
   // thing for the sites Google never flew, built from Denmark's own
-  // oblique aerial photography through scripts/mesh-pipeline.
+  // oblique aerial photography through city-creation-framework/mesh-pipeline.
   //
   // HORIZONTAL POSITION IS EXACT and needs nothing. The skraafoto API
   // publishes each image's camera position and orientation, so the
@@ -1176,14 +1176,14 @@ async function main() {
   // Served from a separate origin rather than the app's public folder:
   // a tileset is hundreds of megabytes, Vite copies public/ into every
   // build, and in production these sit on object storage behind a CDN
-  // anyway. scripts/mesh-pipeline/serve_tiles.py serves them locally
+  // anyway. city-creation-framework/mesh-pipeline/serve_tiles.py serves them locally
   // with the CORS headers Cesium needs.
   const _meshHost = (() => {
     try { return import.meta.env?.VITE_SITE_MESH_URL || 'http://localhost:8778'; }
     catch (_) { return 'http://localhost:8778'; }
   })();
   // `buildingsOnly` means the geometry was already cut to building
-  // footprints by scripts/mesh-pipeline/clip_to_buildings.py, so there
+  // footprints by city-creation-framework/mesh-pipeline/clip_to_buildings.py, so there
   // is no runway, tarmac, field or tree in the file to hide.
   //
   // That is the difference between a mesh that MIGHT show terrain if

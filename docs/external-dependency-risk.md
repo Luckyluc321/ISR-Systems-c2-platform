@@ -93,7 +93,7 @@ footprints. Not reached at runtime, so a customer never depends on it.
 
 It failed twice in one afternoon during the Billund work: once with a
 406 on curl's default user agent, once with a dispatcher timeout under
-load. Both are documented in `scripts/mesh-pipeline/PLAYBOOK.md`.
+load. Both are documented in `city-creation-framework/mesh-pipeline/PLAYBOOK.md`.
 Annoying, never customer-facing.
 
 ## 6. Everything else, by credential
