@@ -7557,7 +7557,20 @@ async function main() {
       const l = getEvent(id);
       return l && l.status === 'active';
     });
-    const targetLost = primaryClosed && !anyLinkedActive;
+    // A closed event does NOT mean the object is gone.
+    //
+    // A template may keep its object flying after its event closes
+    // (continueAfterClose), which is the Billund Geran: Billund's event
+    // closes on exit and reports, and the thing carries on to Skagen.
+    // Treating that as "target lost" stopped the aim and sent the
+    // aircraft home while the threat was still airborne in front of it.
+    //
+    // So an airborne unit that can still acquire on its OWN sensor is
+    // not lost. It is hunting.
+    const _stillFlyable = !!(d.profile?.airborne
+      && (d.profile.onboardDetectRangeM || d.profile.onboardSensorRangeM)
+      && droneState.get(d.eventId));
+    const targetLost = primaryClosed && !anyLinkedActive && !_stillFlyable;
 
     // STALE ASSIGNED TARGET. If this interceptor's assigned enemy drone
     // was killed by a SIBLING interceptor while this one was still
@@ -7667,7 +7680,33 @@ async function main() {
       // from "following a vector" to "I have it", and it is the only
       // point at which live position is legitimate, because now
       // something really is observing it.
-      const _ordered = event.lastKnownPosition || event.lastPosition;
+      // DEAD RECKON the order forward. Do not fly to a stale spot.
+      //
+      // lastKnownPosition is where a ground sensor last saw it, and
+      // flying to that point parks the aircraft over Billund while the
+      // threat is 50 km north. A real crew given "last seen here,
+      // heading 356 at 185 km/h" flies an INTERCEPT, not a pilgrimage
+      // to the coordinate.
+      //
+      // This is inference from observed kinematics, not omniscience:
+      // every input is a value a sensor actually reported, and the
+      // estimate degrades honestly the longer the track goes unseen.
+      // It is the same reasoning that makes egress estimation legitimate
+      // while a live position feed is not.
+      let _ordered = event.lastKnownPosition || event.lastPosition;
+      if (event.lastKnownPosition?.timestamp
+          && typeof event.lastKnownPosition.heading === 'number'
+          && event.lastKnownPosition.speed > 0) {
+        const lk = event.lastKnownPosition;
+        const ageS = Math.max(0, (Date.now() - Date.parse(lk.timestamp)) / 1000);
+        const runM = lk.speed * ageS;
+        const hdg = (lk.heading * Math.PI) / 180;
+        _ordered = {
+          lat: lk.lat + (runM * Math.cos(hdg)) / 111132,
+          lon: lk.lon + (runM * Math.sin(hdg)) / (111320 * Math.cos((lk.lat * Math.PI) / 180)),
+          alt: lk.alt,
+        };
+      }
       const _detectM = d.profile.onboardDetectRangeM || d.profile.onboardSensorRangeM;
       const _ownEyes = _detectM ? _liveTargetPositionFor(d) : null;
       const _held = _ownEyes && _ownEyes.lat != null
