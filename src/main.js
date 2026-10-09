@@ -5104,6 +5104,15 @@ async function main() {
       }],
       templateKey: null,
       multiSiteTrack: true,
+      // MUST travel with multiSiteTrack. The coverage check reads
+      // coverageGatedTrack, and it is otherwise set in exactly one
+      // place: the template event constructor. An event built
+      // directly here — a breakaway promotion, a per-site linked
+      // event — got undefined, so the coverage block never ran,
+      // inAnyCoverage stayed null, and OUT OF RANGE never fired for
+      // an escaping drone. Splitting one flag into two without
+      // finding every writer is how that happened.
+      coverageGatedTrack: true,
       detected: inCov,
       droneCount: 1,
       memberTracks: [{
@@ -11399,6 +11408,15 @@ async function main() {
       }],
       templateKey: null,
       multiSiteTrack: true,
+      // MUST travel with multiSiteTrack. The coverage check reads
+      // coverageGatedTrack, and it is otherwise set in exactly one
+      // place: the template event constructor. An event built
+      // directly here — a breakaway promotion, a per-site linked
+      // event — got undefined, so the coverage block never ran,
+      // inAnyCoverage stayed null, and OUT OF RANGE never fired for
+      // an escaping drone. Splitting one flag into two without
+      // finding every writer is how that happened.
+      coverageGatedTrack: true,
       detected: true,
       // Shadow event tracks the SAME physical group as the primary —
       // its history record carries the same peak cardinality.
