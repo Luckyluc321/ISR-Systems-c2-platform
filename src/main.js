@@ -7203,6 +7203,15 @@ async function main() {
         'fires within': d.profile?.engageRangeM || 300,
         rounds: d._roundsFired || 0,
         orbitR: d._orbitRadius ? Math.round(d._orbitRadius) : null,
+        // IS IT ACTUALLY MOVING. The table showed a correct aim and a
+        // correct state while the gap barely closed, and there was no
+        // way to tell a flying aircraft from a parked one because
+        // nothing printed its own position. Distance from the station it
+        // launched from answers it in one number across two readings.
+        'flown from base m': (d.originLat != null && d.curLat != null)
+          ? Math.round(haversineM(d.curLat, d.curLon, d.originLat, d.originLon))
+          : null,
+        'cruise km/h': d.profile?.cruiseKmh ?? null,
       });
     }
     if (!rows.length) { console.log('no live dispatches'); return; }
