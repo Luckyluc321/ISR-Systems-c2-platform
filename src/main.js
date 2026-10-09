@@ -7214,8 +7214,31 @@ async function main() {
         'cruise km/h': d.profile?.cruiseKmh ?? null,
       });
     }
+    if (rows.length) console.table(rows);
+
+    // BREADCRUMB STATE for every live track, which is a different
+    // question from why a dispatch is not engaging and needs its own
+    // answer. Each of these can independently blank the dotted line and
+    // none of them is visible from outside.
+    const tracks = [];
+    for (const [eid, st] of droneState) {
+      const ev = getEvent(eid);
+      tracks.push({
+        event: eid,
+        status: ev?.status ?? '-',
+        'projLine exists': !!st.projLine,
+        'projLine.show': st.projLine ? st.projLine.show : '-',
+        points: st.projPositions ? st.projPositions.length : '-',
+        'trail points': st.trailPositions ? st.trailPositions.length : '-',
+        'in coverage': typeof st._lastBreadcrumbInCov === 'boolean' ? st._lastBreadcrumbInCov : '?',
+        'still flying': st._simTrackFlying,
+        'closedAt': st.closedAt ? 'yes' : 'no',
+        'swarm members': st.swarmBillboards ? st.swarmBillboards.length : 0,
+      });
+    }
+    if (tracks.length) { console.log('TRACKS:'); console.table(tracks); }
+    else console.log('NO LIVE TRACKS in droneState — entities were torn down');
     if (!rows.length) { console.log('no live dispatches'); return; }
-    console.table(rows);
     const ev = getEvent([..._counterDispatches.values()][0]?.eventId);
     console.log('event:', ev?.id, '| status:', ev?.status,
       '| detected:', ev?.detected, '| lastKnownPosition:', !!ev?.lastKnownPosition,
@@ -15927,6 +15950,7 @@ d.heading = _easeHeading(d.heading, _bearingRad(d.curLat, d.curLon, enemyLat, en
         // after its event has closed. Read by the ghost sweep so the
         // breadcrumb is not deleted mid-route. See continueAfterClose.
         state._simTrackFlying = !p.completed;
+        state._lastBreadcrumbInCov = leadInCov;
         // Stamped, because the flag alone strands tracks forever.
         //
         // This line only runs when the feed emits a position. A template
