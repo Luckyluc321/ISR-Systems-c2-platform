@@ -7,7 +7,7 @@ building in the map is a white box from Cesium's OSM Buildings tileset:
 the right outline, roughly the right height, nothing else. At Billund,
 Esbjerg and every substation, that is what an operator sees.
 
-`city-creation-framework/mesh-pipeline/` builds the replacement from Danish national
+`scripts/mesh-pipeline/` builds the replacement from Danish national
 oblique photography, and `src/building_footprints.js` puts it in place
 of the boxes.
 
@@ -187,6 +187,6 @@ A site with no entry in `SITE_MESHES` is untouched, which is what keeps
 this away from the eight sites that already look right. Meshes are
 served from a separate origin rather than `public/`, because a tileset
 is hundreds of megabytes and Vite copies `public/` into every build.
-`city-creation-framework/mesh-pipeline/serve_tiles.py` serves them locally with the
+`scripts/mesh-pipeline/serve_tiles.py` serves them locally with the
 CORS headers Cesium needs; production is object storage behind a CDN,
 set by `VITE_SITE_MESH_URL`.

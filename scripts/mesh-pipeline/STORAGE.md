@@ -14,7 +14,7 @@ already hosts. Push the scripts; refetch the data.
 
 | | keep | why |
 | --- | --- | --- |
-| `city-creation-framework/mesh-pipeline/*.py` | **yes, in git** | the only thing that is not reproducible |
+| `scripts/mesh-pipeline/*.py` | **yes, in git** | the only thing that is not reproducible |
 | `src/data/building_footprints.json` | **yes, in git** | small, and the app reads it |
 | `work/<site>/tiles/` | yes, locally | the output. ~16 MB. Deploys to object storage |
 | `work/<site>/drape/` | yes, locally | atlas and OBJ, ~6 MB, rebuild takes minutes |
@@ -29,7 +29,7 @@ token in `.env.local`. Timings are from the Billund Airport run,
 5.1 km² and 232 buildings.
 
 ```bash
-cd city-creation-framework/mesh-pipeline
+cd scripts/mesh-pipeline
 
 # 1. Footprints. Overpass, no token needed. Seconds.
 #    Widen the bbox to whatever the site needs.
