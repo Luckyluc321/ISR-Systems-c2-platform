@@ -4,6 +4,55 @@
 `src/intercept.js`, consumed by the dispatch aim in `main.js`. Opt-in per
 dispatch profile, so only `helicopter-intercept` uses it today.
 
+## How an intercept actually runs
+
+A dispatch is sent to handle a **case**, not to fly a scripted path to a known
+point. Three stages, and the handover between the first two is the whole design.
+
+```mermaid
+flowchart TD
+    A["dispatched to the case"] --> B["vectored to lastKnownPosition<br/>the last position a GROUND SENSOR reported"]
+    B --> C{"own sensor holds it?<br/>within onboardSensorRangeM, 2000 m"}
+    C -->|no| B
+    C -->|yes| D["OVERRIDE the order<br/>prosecute what it can see"]
+    D --> E["arrive within arriveAtM, 200 m"]
+    E --> F["left-hand orbit at 220 m<br/>inside the 300 m firing gate"]
+```
+
+### The order comes from what was observed, not from the simulation
+
+`lastKnownPosition` is written **only on ticks where `inAnyCoverage` held**, and
+its own comment says "no fabricated live coords". That is the platform's honest
+knowledge and therefore the only legitimate vector it can give.
+
+This previously re-aimed at `event.lastPosition` every tick. That field updates
+from the simulation whether or not anything observed it, so the platform was
+feeding the aircraft an exact live position no sensor had reported — omniscient
+vectoring, and a breach of the same sensors-observe-only rule everything else
+obeys. Across the Billund Geran transit that is 86 of 87 minutes of invented
+guidance.
+
+### The aircraft's own sensor is what finds it
+
+Once the contact is inside `onboardSensorRangeM`, the aircraft overrides the
+order and prosecutes what it sees. That is the handover from *following a
+vector* to *I have it*, and it is the only point at which live position is
+legitimate, because now something really is observing it. `d._onboardHasContact`
+carries the state so the dispatch panel can say which one it is flying on.
+
+### No lateral offset on the run-in
+
+An earlier version aimed at a standoff point to one side of the track, with the
+side chosen from the approach geometry. Against a head-on closure that picked
+the **far** side: the aircraft sat 403 m east of the track and was sent to a
+point 249 m west of it, so it had to cross the threat's path to reach its own
+aim point. On screen that is an interceptor flying away from a contact it can
+plainly see.
+
+The offset was never needed. The gun run is an **orbit**, and the orbit produces
+the beam geometry by itself once the aircraft arrives. `intercept.js` and
+`firing_pass.js` existed only to compute that offset and are deleted.
+
 ## The problem
 
 The dispatch logic re-aims every tick at the threat's current position. Pure

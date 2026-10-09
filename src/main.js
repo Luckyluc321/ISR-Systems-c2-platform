@@ -802,8 +802,6 @@ import { fetchDrivingRoute, computeSegmentLengths, advanceAlongPolyline } from '
 import { buildCordon, assignPatrols, clearCordonCache } from './perimeter.js';
 import { loadSiteLights, loadNationalLights, bucketByRadiance, LIGHT_STYLES, LIGHT_CLASSES } from './night_infrastructure_lights.js';
 import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from './runway_lighting.js';
-import { beamPassAimPoint, beamPassIntercept, pickTrackSide, BEAM_PASS_STANDOFF_M } from './intercept.js';
-import { firingPassHeadingRad } from './firing_pass.js';
 import { courseAndSpeedFromDelta, bankForCoordinatedTurn } from './rotorcraft_attitude.js';
 import { advanceOrbit, bearingFromTarget, orbitSpeedMs, GUN_RUN_BANK_RAD } from './gun_run.js';
 import { isSimulatedTrack, trailMaxPoints, shouldAppendTrailPoint, shouldShowTrail,
@@ -4707,26 +4705,6 @@ async function main() {
       // 750 m from the contact. Tight enough that arrival means on the
       // circle.
       cruiseKmh: 250, arriveAtM: 200, engageSec: 8,
-      // Fly a BEAM PASS, not a stern chase.
-      //
-      // The dispatch logic otherwise re-aims at the threat's current
-      // position every tick. Against a Geran-2 that closes at 18 m/s,
-      // so a 2 km gap takes nearly two minutes and only ever closes
-      // from behind, which is the one bearing a door gun can never
-      // engage: it fires to port inside a 45 degree traverse.
-      //
-      // With this set the aircraft solves for a point abeam the
-      // threat's track and arrives before it, so the threat crosses
-      // the gunner's arc at a steady standoff. Opt-in, so no other
-      // dispatch kind changes.
-      //
-      // Which side of the track it sits on is decided per tick by
-      // pickTrackSide from the approach geometry, NOT fixed here: this
-      // aircraft launches from Karup or Skrydstrup, so against a
-      // northbound threat it closes head-on, and the side that presents
-      // the threat to a port gun head-on is the opposite of the one
-      // that works in a stern chase.
-      beamPassStandoffM: BEAM_PASS_STANDOFF_M,
       // Declared HERE as well as in _SIM_INTERCEPTOR_PHYSICS because two
       // separate climb routines read two different sources: one takes
       // profile.climbRateMs with a fallback of 6, the other takes the
@@ -7593,60 +7571,43 @@ async function main() {
     // airframe is down.
     } else if (event?.lastPosition && !targetLost && !d.assignedWreckageId
                && !d.sceneWreckageId && !leavesSceneUnassisted(d.profile)) {
-      // Beam-pass aircraft solve for where the threat WILL be and go
-      // there. Everything else keeps pure pursuit, unchanged.
-      let _aimed = false;
-      if (d.profile.beamPassStandoffM && d.state === 'en_route'
-          && typeof event.lastPosition.heading === 'number'
-          && event.lastPosition.speed > 0) {
-        // Close on the threat at full speed, but aim a standoff to one
-        // side so the run-in ends ABEAM rather than astern. Not the
-        // simultaneous-arrival solve: that aims tens of km ahead and
-        // makes the meeting later, not sooner.
-        //
-        // WHICH side is chosen per tick from the approach geometry, not
-        // fixed on the profile. This aircraft launches from Karup or
-        // Skrydstrup, so against a northbound threat it closes head-on,
-        // and the side that presents the threat to a port gun in a
-        // head-on pass is the opposite of the one that works in a stern
-        // chase. A fixed side is right half the time, and the half it
-        // is wrong the aircraft arrives in range and still cannot fire.
-        const _side = pickTrackSide({
-          chaserLat: d.curLat, chaserLon: d.curLon,
-          targetLat: event.lastPosition.lat, targetLon: event.lastPosition.lon,
-          targetHeadingDeg: event.lastPosition.heading,
-          standoffM: d.profile.beamPassStandoffM,
-        });
-        const ap = beamPassAimPoint({
-          targetLat: event.lastPosition.lat, targetLon: event.lastPosition.lon,
-          targetHeadingDeg: event.lastPosition.heading,
-          standoffM: d.profile.beamPassStandoffM,
-          trackSide: _side,
-        });
-        d.targetLat = ap.lat;
-        d.targetLon = ap.lon;
-        if (typeof event.lastPosition.alt === 'number') d.targetAlt = event.lastPosition.alt;
-        // Whether this airframe can catch this threat at all. Reported,
-        // not acted on: a Geran-5 at 525 km/h outruns an MH-60R and the
-        // honest result is a tail chase it is losing.
-        const ip = beamPassIntercept({
-          chaserLat: d.curLat, chaserLon: d.curLon,
-          chaserSpeedMs: (d.profile.cruiseKmh || 0) / 3.6,
-          targetLat: event.lastPosition.lat, targetLon: event.lastPosition.lon,
-          targetHeadingDeg: event.lastPosition.heading,
-          targetSpeedMs: event.lastPosition.speed,
-          standoffM: d.profile.beamPassStandoffM,
-          trackSide: _side,
-        });
-        d._interceptEtaS = ip ? ip.timeToInterceptS : null;
-        d._beamPassSide = _side;
-        _aimed = true;
+      // THE ORDER, THEN THE AIRCRAFT'S OWN EYES.
+      //
+      // A dispatch is sent to handle a CASE, not to fly a scripted path
+      // to a known point. So it is vectored to the last position a
+      // GROUND SENSOR actually reported, which is all the platform
+      // legitimately knows, and that is what lastKnownPosition is: it is
+      // written only on ticks where inAnyCoverage held, and its own
+      // comment says "no fabricated live coords".
+      //
+      // This used to re-aim at event.lastPosition every tick. That field
+      // updates from the simulation whether or not anything observed it,
+      // so the platform was feeding the aircraft an exact live position
+      // no sensor had reported — omniscient vectoring, and a breach of
+      // the same sensors-observe-only rule everything else obeys. Over
+      // the Billund Geran transit that is 86 of 87 minutes of invented
+      // guidance.
+      //
+      // Once the aircraft's OWN sensor holds the contact, it overrides
+      // the order and prosecutes what it can see. That is the handover
+      // from "following a vector" to "I have it", and it is the only
+      // point at which live position is legitimate, because now
+      // something really is observing it.
+      const _ordered = event.lastKnownPosition || event.lastPosition;
+      const _ownEyes = d.profile.onboardSensorRangeM ? _liveTargetPositionFor(d) : null;
+      const _held = _ownEyes && _ownEyes.lat != null
+        && haversineM(d.curLat, d.curLon, _ownEyes.lat, _ownEyes.lon)
+             <= d.profile.onboardSensorRangeM;
+      const _aim = _held ? _ownEyes : _ordered;
+      if (_aim && _aim.lat != null) {
+        d.targetLat = _aim.lat;
+        d.targetLon = _aim.lon;
+        if (typeof _aim.alt === 'number') d.targetAlt = _aim.alt;
       }
-      if (!_aimed) {
-        d.targetLat = event.lastPosition.lat;
-        d.targetLon = event.lastPosition.lon;
-        if (typeof event.lastPosition.alt === 'number') d.targetAlt = event.lastPosition.alt;
-      }
+      // Surfaced so the dispatch panel can say which one it is flying
+      // on. An operator watching an interceptor track a contact the map
+      // is not drawing should be told why.
+      d._onboardHasContact = !!_held;
     }
 
     // Altitude interpolation for airborne interceptors — climb or
@@ -8215,20 +8176,7 @@ async function main() {
             d.curLat += (desiredLat - d.curLat) * frac;
             d.curLon += (desiredLon - d.curLon) * frac;
           }
-          // Point the GUN at the target, not the nose.
-          //
-          // _gunStationAim rests on the port beam and traverses 45 deg
-          // either side, so its arc is a relative bearing of -135..-45.
-          // Nose-on puts the target at 0, which is outside the near
-          // stop, so the gun swung as far as it could and held there.
-          // A door-gun pass is flown, not pointed: turn so the target
-          // sits in the middle of the arc and hold it through the burst.
-          // Nose-armed aircraft keep pointing, as before.
-          const _brgToEnemy = _bearingRad(d.curLat, d.curLon, enemyLat, enemyLon);
-          const _wantHdg = d.profile.muzzleSideOffsetM
-            ? firingPassHeadingRad({ bearingToTargetRad: _brgToEnemy })
-            : _brgToEnemy;
-          d.heading = _easeHeading(d.heading, _wantHdg, dtSec);
+d.heading = _easeHeading(d.heading, _bearingRad(d.curLat, d.curLon, enemyLat, enemyLon), dtSec);
           if (d.profile.trail) {
             d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
             if (d.trailPositions.length > 500) d.trailPositions.shift();
