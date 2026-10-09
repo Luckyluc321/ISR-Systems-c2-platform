@@ -16785,15 +16785,40 @@ d.heading = _easeHeading(d.heading, _bearingRad(d.curLat, d.curLon, enemyLat, en
             // draws a straight segment from the previous cycle's last
             // out-of-cov point across the map to the new re-exit point.
             if (sw.projPositions && sw.projPositions.length) sw.projPositions.length = 0;
+            sw._lastBcLat = null;
+            sw._lastBcLon = null;
           } else if (sw._trackLost) {
             // Closed as lost contact. The member may still be moving in
             // the simulation, but nothing is observing it and nothing
             // should be drawn for it.
             sw.projLine.show = false;
           } else {
-            sw.projPositions.push(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, pos.alt));
-            if (sw.projPositions.length > 300) sw.projPositions.shift();
-            sw.projLine.show = sw.projPositions.length >= 2;
+            // Same breadcrumb policy as the single-drone path. One rule
+            // for every scenario: inside sensor range the threat symbol
+            // draws, outside it the dotted line does.
+            //
+            // This appended one point PER FRAME with a 300-point cap,
+            // which at 60 fps is five seconds of flight: 63 m behind a
+            // DJI quadcopter, 257 m behind a Shahed. A smudge at the
+            // icon rather than a trend line. Distance sampling at 120 m
+            // gives the same 480 km of route the single-drone path
+            // carries, for the same order of memory.
+            const _bcMoved = sw._lastBcLat == null ? null
+              : haversineM(pos.lat, pos.lon, sw._lastBcLat, sw._lastBcLon);
+            if (shouldAppendBreadcrumb(_bcMoved)) {
+              sw.projPositions.push(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, pos.alt));
+              sw._lastBcLat = pos.lat;
+              sw._lastBcLon = pos.lon;
+              while (sw.projPositions.length > BREADCRUMB_POINTS_MAX) sw.projPositions.shift();
+            }
+            // Provenance gate, which this path never had: a real sensor
+            // feed draws nothing outside coverage, because nothing
+            // observed it there. Simulation only.
+            sw.projLine.show = shouldShowBreadcrumb({
+              isSimTrack: isSimulatedTrack(p),
+              pointCount: sw.projPositions.length,
+              suppressed: false,
+            });
           }
           // Per-drone per-site transitions (polygon + cov). Uses THIS
           // drone's own current + previous position. Swarm-density
