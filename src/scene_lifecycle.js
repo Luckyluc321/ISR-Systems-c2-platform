@@ -307,6 +307,11 @@ export function clearedWreckageIds(wreckages, dispatches, everHeldIds) {
 //
 // droneStates is an iterable of [eventId, state] pairs, matching the
 // shape of the live droneState Map, so the caller can pass it directly.
+// How long a _simTrackFlying stamp stays trustworthy. The feed runs at
+// animation rate, so a live track refreshes it tens of times a second
+// and anything approaching a second old has stopped.
+const SIM_TRACK_FLYING_STALE_MS = 1000;
+
 export function expiredGhostEventIds(droneStates, opts = {}) {
   const { now = 0, ghostMs = 15000 } = opts;
   const out = [];
@@ -316,9 +321,20 @@ export function expiredGhostEventIds(droneStates, opts = {}) {
     // Still airborne in the simulation. A template may keep its object
     // flying after its event has closed (continueAfterClose), and
     // tearing the entities down on the ghost timer would delete the
-    // breadcrumb mid-route. The flag clears when the trajectory
-    // completes, and the ghost timer then applies as normal.
-    if (state._simTrackFlying) continue;
+    // breadcrumb mid-route.
+    //
+    // The flag MUST be checked against its stamp, not on its own. It is
+    // written from the position feed, and a template without
+    // continueAfterClose stops that feed when its event closes, leaving
+    // the flag stuck true forever. Trusting it alone leaked entities and
+    // droneState for every single-drone template that closes mid-flight.
+    //
+    // A live feed refreshes the stamp every frame, so anything older
+    // than this is a feed that has stopped and the ghost timer applies
+    // as normal.
+    if (state._simTrackFlying
+        && typeof state._simTrackFlyingTs === 'number'
+        && now - state._simTrackFlyingTs < SIM_TRACK_FLYING_STALE_MS) continue;
     if (now - state.closedAt <= ghostMs) continue;
     out.push(eventId);
   }

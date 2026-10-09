@@ -15843,6 +15843,19 @@ async function main() {
         // after its event has closed. Read by the ghost sweep so the
         // breadcrumb is not deleted mid-route. See continueAfterClose.
         state._simTrackFlying = !p.completed;
+        // Stamped, because the flag alone strands tracks forever.
+        //
+        // This line only runs when the feed emits a position. A template
+        // WITHOUT continueAfterClose stops its feed the moment its event
+        // closes, so the flag keeps whatever it last held — true, since
+        // the trajectory had not finished — and the ghost sweep then
+        // skips teardown for good. Entities and droneState would leak
+        // for every single-drone template that closes mid-flight, which
+        // is most of them.
+        //
+        // The stamp makes it self-expiring: a live feed refreshes it
+        // every frame, a stopped one goes stale in well under a second.
+        state._simTrackFlyingTs = monoNow();
 
         // Two lines, exactly as the swarm members have:
         //   trail     the CONFIRMED path. Only while a sensor sees it.
