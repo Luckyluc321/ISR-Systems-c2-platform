@@ -7587,20 +7587,7 @@ async function main() {
       const l = getEvent(id);
       return l && l.status === 'active';
     });
-    // A closed event does NOT mean the object is gone.
-    //
-    // A template may keep its object flying after its event closes
-    // (continueAfterClose), which is the Billund Geran: Billund's event
-    // closes on exit and reports, and the thing carries on to Skagen.
-    // Treating that as "target lost" stopped the aim and sent the
-    // aircraft home while the threat was still airborne in front of it.
-    //
-    // So an airborne unit that can still acquire on its OWN sensor is
-    // not lost. It is hunting.
-    const _stillFlyable = !!(d.profile?.airborne
-      && (d.profile.onboardDetectRangeM || d.profile.onboardSensorRangeM)
-      && droneState.get(d.eventId));
-    const targetLost = primaryClosed && !anyLinkedActive && !_stillFlyable;
+      const targetLost = primaryClosed && !anyLinkedActive;
 
     // STALE ASSIGNED TARGET. If this interceptor's assigned enemy drone
     // was killed by a SIBLING interceptor while this one was still
@@ -7688,70 +7675,9 @@ async function main() {
     // airframe is down.
     } else if (event?.lastPosition && !targetLost && !d.assignedWreckageId
                && !d.sceneWreckageId && !leavesSceneUnassisted(d.profile)) {
-      // THE ORDER, THEN THE AIRCRAFT'S OWN EYES.
-      //
-      // A dispatch is sent to handle a CASE, not to fly a scripted path
-      // to a known point. So it is vectored to the last position a
-      // GROUND SENSOR actually reported, which is all the platform
-      // legitimately knows, and that is what lastKnownPosition is: it is
-      // written only on ticks where inAnyCoverage held, and its own
-      // comment says "no fabricated live coords".
-      //
-      // This used to re-aim at event.lastPosition every tick. That field
-      // updates from the simulation whether or not anything observed it,
-      // so the platform was feeding the aircraft an exact live position
-      // no sensor had reported — omniscient vectoring, and a breach of
-      // the same sensors-observe-only rule everything else obeys. Over
-      // the Billund Geran transit that is 86 of 87 minutes of invented
-      // guidance.
-      //
-      // Once the aircraft's OWN sensor holds the contact, it overrides
-      // the order and prosecutes what it can see. That is the handover
-      // from "following a vector" to "I have it", and it is the only
-      // point at which live position is legitimate, because now
-      // something really is observing it.
-      // DEAD RECKON the order forward. Do not fly to a stale spot.
-      //
-      // lastKnownPosition is where a ground sensor last saw it, and
-      // flying to that point parks the aircraft over Billund while the
-      // threat is 50 km north. A real crew given "last seen here,
-      // heading 356 at 185 km/h" flies an INTERCEPT, not a pilgrimage
-      // to the coordinate.
-      //
-      // This is inference from observed kinematics, not omniscience:
-      // every input is a value a sensor actually reported, and the
-      // estimate degrades honestly the longer the track goes unseen.
-      // It is the same reasoning that makes egress estimation legitimate
-      // while a live position feed is not.
-      let _ordered = event.lastKnownPosition || event.lastPosition;
-      if (event.lastKnownPosition?.timestamp
-          && typeof event.lastKnownPosition.heading === 'number'
-          && event.lastKnownPosition.speed > 0) {
-        const lk = event.lastKnownPosition;
-        const ageS = Math.max(0, (Date.now() - Date.parse(lk.timestamp)) / 1000);
-        const runM = lk.speed * ageS;
-        const hdg = (lk.heading * Math.PI) / 180;
-        _ordered = {
-          lat: lk.lat + (runM * Math.cos(hdg)) / 111132,
-          lon: lk.lon + (runM * Math.sin(hdg)) / (111320 * Math.cos((lk.lat * Math.PI) / 180)),
-          alt: lk.alt,
-        };
-      }
-      const _detectM = d.profile.onboardDetectRangeM || d.profile.onboardSensorRangeM;
-      const _ownEyes = _detectM ? _liveTargetPositionFor(d) : null;
-      const _held = _ownEyes && _ownEyes.lat != null
-        && haversineM(d.curLat, d.curLon, _ownEyes.lat, _ownEyes.lon)
-             <= _detectM;
-      const _aim = _held ? _ownEyes : _ordered;
-      if (_aim && _aim.lat != null) {
-        d.targetLat = _aim.lat;
-        d.targetLon = _aim.lon;
-        if (typeof _aim.alt === 'number') d.targetAlt = _aim.alt;
-      }
-      // Surfaced so the dispatch panel can say which one it is flying
-      // on. An operator watching an interceptor track a contact the map
-      // is not drawing should be told why.
-      d._onboardHasContact = !!_held;
+      d.targetLat = event.lastPosition.lat;
+      d.targetLon = event.lastPosition.lon;
+      if (typeof event.lastPosition.alt === 'number') d.targetAlt = event.lastPosition.alt;
     }
 
     // Altitude interpolation for airborne interceptors — climb or
