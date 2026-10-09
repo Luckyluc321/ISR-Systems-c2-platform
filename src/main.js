@@ -804,8 +804,6 @@ import { loadSiteLights, loadNationalLights, bucketByRadiance, LIGHT_STYLES, LIG
 import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from './runway_lighting.js';
 import { courseAndSpeedFromDelta, bankForCoordinatedTurn } from './rotorcraft_attitude.js';
 import { advanceOrbit, bearingFromTarget, orbitSpeedMs, GUN_RUN_BANK_RAD } from './gun_run.js';
-import { isSimulatedTrack, trailMaxPoints, shouldAppendTrailPoint, shouldShowTrail,
-  shouldAppendBreadcrumb, shouldShowBreadcrumb, BREADCRUMB_POINTS_MAX } from './trail_policy.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -15965,18 +15963,8 @@ d.heading = _easeHeading(d.heading, _bearingRad(d.curLat, d.curLon, enemyLat, en
         // every frame, a stopped one goes stale in well under a second.
         state._simTrackFlyingTs = monoNow();
 
-        // Two lines, exactly as the swarm members have:
-        //   trail     the CONFIRMED path. Only while a sensor sees it.
-        //   projLine  the UNOBSERVED breadcrumb. Only while none does.
-        // One or the other, never both, so the map always says which of
-        // the two it is showing.
-        if (state.trail) {
-          state.trail.show = shouldShowTrail({
-            isSimTrack: isSimulatedTrack(p),
-            inCoverage: leadInCov,
-            suppressed: leadDown || povSuppressed,
-          });
-        }
+        if ((leadDown || povSuppressed) && state.trail) state.trail.show = false;
+        else if (!leadDown && state.trail && !povSuppressed) state.trail.show = true;
         // Purge lead from aggregate sets ONCE on death so surviving
         // wingmen's transitions can flip aggregates to empty and
         // fire OUT OF RANGE / EXIT normally.
@@ -16111,54 +16099,9 @@ d.heading = _easeHeading(d.heading, _bearingRad(d.curLat, d.curLon, enemyLat, en
         _trailAppendCounter++;
         // Skip trail growth once the lead is dead — no ghost trendline
         // continuing along the drone's remaining waypoints.
-        //
-        // Cadence and length come from trail_policy, because LIVE and
-        // SIM want different things from this line. LIVE keeps a short
-        // tail, 9 s of it. SIM appends a tenth as often and keeps far
-        // more, which buys ~50 min of route for the same order of
-        // memory, so a track that is invisible for most of a long
-        // transit still leaves something a chase aircraft can fly
-        // toward. Previously both used LIVE's numbers, which made the
-        // line about 460 m long behind a Geran-2 on a 268 km route.
-        const _simTrack = isSimulatedTrack(p);
-        const _movedM = state._lastTrailLat == null ? null
-          : haversineM(p.lat, p.lon, state._lastTrailLat, state._lastTrailLon);
-        if (!leadDown && leadInCov && shouldAppendTrailPoint({
-          isSimTrack: _simTrack, frameCounter: _trailAppendCounter, movedM: _movedM,
-        })) {
+        if (!leadDown && _trailAppendCounter % 3 === 0) {
           state.trailPositions.push(Cesium.Cartesian3.fromDegrees(p.lon, p.lat, _safeTrailAlt(p.alt)));
-          state._lastTrailLat = p.lat;
-          state._lastTrailLon = p.lon;
-          const _cap = trailMaxPoints(_simTrack);
-          while (state.trailPositions.length > _cap) state.trailPositions.shift();
-        }
-
-        // Breadcrumb, mirroring the swarm's projLine branch.
-        if (state.projLine) {
-          const _bcMoved = state._lastBcLat == null ? null
-            : haversineM(p.lat, p.lon, state._lastBcLat, state._lastBcLon);
-          if (leadInCov) {
-            // Observed again. Wipe the breadcrumb so the NEXT gap starts
-            // fresh — otherwise the line draws a straight segment from
-            // the previous gap's last point across the map to the new
-            // one. Same reason the swarm wipes projPositions on re-entry.
-            if (state.projPositions.length) state.projPositions.length = 0;
-            state._lastBcLat = null;
-            state._lastBcLon = null;
-            state.projLine.show = false;
-          } else {
-            if (!leadDown && shouldAppendBreadcrumb(_bcMoved)) {
-              state.projPositions.push(Cesium.Cartesian3.fromDegrees(p.lon, p.lat, _safeTrailAlt(p.alt)));
-              state._lastBcLat = p.lat;
-              state._lastBcLon = p.lon;
-              while (state.projPositions.length > BREADCRUMB_POINTS_MAX) state.projPositions.shift();
-            }
-            state.projLine.show = shouldShowBreadcrumb({
-              isSimTrack: _simTrack,
-              pointCount: state.projPositions.length,
-              suppressed: leadDown || povSuppressed,
-            });
-          }
+          if (state.trailPositions.length > 180) state.trailPositions.shift();
         }
 
         // Perimeter crossing detection — fall back to outer siteBoundary if
