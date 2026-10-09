@@ -7231,7 +7231,26 @@ async function main() {
     const tick = () => {
       const now = wallNow();
       for (const [, d] of _counterDispatches) {
-        _tickCounterDispatch(d, now);
+        // ISOLATE THE UNIT.
+        //
+        // This call was bare, so a throw from any single dispatch
+        // escaped the loop before requestAnimationFrame was called
+        // again. _cdRafId kept its already-consumed handle and
+        // _startCounterDispatchLoop's `if (_cdRafId) return` then
+        // refused to restart it, so one bad unit killed the entire
+        // counter-dispatch fleet permanently with no recovery path.
+        //
+        // That is how a one-token scope error presented as every
+        // interceptor freezing in mid-air instead of one drone
+        // misbehaving. The fleet degrades by a unit, never stops.
+        try {
+          _tickCounterDispatch(d, now);
+        } catch (err) {
+          if (!d._tickErrorLogged) {
+            d._tickErrorLogged = true;
+            console.error(`[dispatch] ${d.assetName || d.id} tick failed, unit frozen:`, err);
+          }
+        }
         // LIVE POSITION AUTHORITY. Re-assert the last real fix over
         // whatever the tick computed. Level-triggered on purpose: the
         // tick writes position from four different states and
@@ -8031,7 +8050,10 @@ async function main() {
             d.curLat += (desiredLat - d.curLat) * frac;
             d.curLon += (desiredLon - d.curLon) * frac;
           }
-          d.heading = _easeHeading(d.heading, _bearingRad(d.curLat, d.curLon, enemyLat, enemyLon), dtSec);
+          // dtSecEng, not dtSec. dtSec is declared inside the en_route
+          // branch and this is its SIBLING engaging branch, so the name
+          // never resolved and every frame threw a ReferenceError.
+          d.heading = _easeHeading(d.heading, _bearingRad(d.curLat, d.curLon, enemyLat, enemyLon), dtSecEng);
           if (d.profile.trail) {
             d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
             if (d.trailPositions.length > 500) d.trailPositions.shift();
