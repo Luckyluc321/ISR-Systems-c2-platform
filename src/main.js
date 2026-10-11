@@ -4726,7 +4726,8 @@ async function main() {
       // modelled, not from the middle of the airframe. Metres to the
       // left of the track. No other profile sets this, so no other
       // unit's fire moves.
-      muzzleSideOffsetM: 5,
+      // Door gun, 5 m out of the port side of the cabin.
+      muzzleOffsetM: { forward: 0, side: 5 },
       label: 'Helicopter intercept',
     },
     'army-c-uas': {
@@ -4787,6 +4788,11 @@ async function main() {
       engageOffsetM: 100,        // interceptor shadows target at 100m (was 30m — caused jump)
       supportsRTB: true,         // late-dispatch return-to-base behaviour
       firesTracer: true,         // renders small-arms tracer + downed state on engage
+      // Fires forward, off the nose. 0.5 m on a roughly 1 m airframe.
+      // A quadcopter has no side station: the gun looks where the
+      // airframe looks, which is also why it can translate sideways
+      // without turning and still keep the gun on target.
+      muzzleOffsetM: { forward: 0.5, side: 0 },
       // Allow re-dispatch (button relabels to "Dispatch more" after
       // the first pack goes out). Each click spawns another swarmSize
       // pack — no units picker, unlike police-c-uas. If the first
@@ -8496,14 +8502,29 @@ async function main() {
    * right before moves.
    */
   function _muzzleOffsetFor(d) {
-    const side = d.profile?.muzzleSideOffsetM;
-    if (!side) return { lat: d.curLat, lon: d.curLon };
+    // Where this airframe's rounds leave from, relative to its own
+    // nose-forward axis, in metres:
+    //
+    //   forward  +ve toward the nose
+    //   side     +ve to PORT, the aircraft's left
+    //
+    // Declared per profile because it is a property of the AIRFRAME,
+    // not of the engagement. A door gunner fires out of the left of a
+    // cabin; an interceptor quadcopter fires forward. A profile that
+    // declares nothing keeps the old behaviour exactly, the airframe
+    // centre, so adding this changes no existing unit.
+    //
+    // muzzleSideOffsetM is still honoured so nothing that set it
+    // breaks, but muzzleOffsetM is the shape to use.
+    const cfg = d.profile?.muzzleOffsetM;
+    const fwd  = cfg?.forward ?? 0;
+    const side = cfg?.side ?? d.profile?.muzzleSideOffsetM ?? 0;
+    if (!fwd && !side) return { lat: d.curLat, lon: d.curLon };
     const h = d.heading || 0;
-    // Left of the track. Heading's unit vector is (sin, cos) in
-    // (east, north); rotating it 90 degrees anticlockwise gives
-    // (-cos, sin).
-    const dEast = -Math.cos(h) * side;
-    const dNorth = Math.sin(h) * side;
+    // Heading's unit vector is (sin, cos) in (east, north). Rotating
+    // it a quarter turn anticlockwise gives port: (-cos, sin).
+    const dEast  = Math.sin(h) * fwd + -Math.cos(h) * side;
+    const dNorth = Math.cos(h) * fwd + Math.sin(h) * side;
     return {
       lat: d.curLat + dNorth / 111000,
       lon: d.curLon + dEast / (111000 * Math.cos(d.curLat * Math.PI / 180)),
@@ -8605,6 +8626,13 @@ async function main() {
     // bullet in perceptual terms and gives the streak time to render.
     const travelMs = 220;
 
+    // Rounds leave the MUZZLE, not the belly. The flash already used
+    // _muzzleOffsetFor and the bullets did not, so the flash appeared
+    // at the gun while the tracers came out of the airframe centre.
+    // Snapshotted at fire time: a bullet leaves the barrel once, it
+    // does not follow the aircraft afterwards.
+    const _mz = _muzzleOffsetFor(d);
+
     // Live-target lookup. Priority:
     //   1. If operator is POV'd inside this target's drone, aim at the
     //      live CAMERA position — guarantees the tracer terminates AT
@@ -8669,8 +8697,8 @@ async function main() {
         const tgt = _liveTarget();
         const oa = _originAlt();
         return Cesium.Cartesian3.fromDegrees(
-          d.curLon + (tgt.lon - d.curLon) * t,
-          d.curLat + (tgt.lat - d.curLat) * t,
+          _mz.lon + (tgt.lon - _mz.lon) * t,
+          _mz.lat + (tgt.lat - _mz.lat) * t,
           oa + (tgt.alt - oa) * t,
         );
       }, false),
@@ -8692,12 +8720,12 @@ async function main() {
           const t = _t();
           const tgt = _liveTarget();
           const oa = _originAlt();
-          const headLat = d.curLat + (tgt.lat - d.curLat) * t;
-          const headLon = d.curLon + (tgt.lon - d.curLon) * t;
+          const headLat = _mz.lat + (tgt.lat - _mz.lat) * t;
+          const headLon = _mz.lon + (tgt.lon - _mz.lon) * t;
           const headAlt = oa + (tgt.alt - oa) * t;
           const back = Math.max(0, t - 0.40);
-          const tailLat = d.curLat + (tgt.lat - d.curLat) * back;
-          const tailLon = d.curLon + (tgt.lon - d.curLon) * back;
+          const tailLat = _mz.lat + (tgt.lat - _mz.lat) * back;
+          const tailLon = _mz.lon + (tgt.lon - _mz.lon) * back;
           const tailAlt = oa + (tgt.alt - oa) * back;
           return [
             Cesium.Cartesian3.fromDegrees(tailLon, tailLat, tailAlt),
