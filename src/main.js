@@ -4720,6 +4720,13 @@ async function main() {
       // the bank the model shows and the rate it turns at are now the
       // same manoeuvre rather than two unrelated numbers.
       turnRateRadS: 0.0816,
+      // It goes where the disc points. Sideways or backwards is
+      // possible but slow: 12 m/s is about 43 km/h, past which the only
+      // direction available is forward. Decel firmer than accel, as on
+      // the real thing.
+      lateralSpeedCapMs: 12,
+      accelMs2: 2.5,
+      decelMs2: 3.5,
       // A gun run that has to roll into a 19 second turn cannot resolve in
       // 8 seconds. The pass needs room to develop.
       engageSec: 30,
@@ -5953,6 +5960,58 @@ async function main() {
   // A profile that declares nothing keeps 60, so every existing unit is
   // unchanged.
   const _turnRateOf = (d) => d?.profile?.turnRateRadS ?? TURN_RATE_RAD_S;
+
+  // ROTORCRAFT TRANSLATION. A helicopter goes where its disc points.
+  // It can move sideways or backwards, but only slowly: past roughly
+  // 40 km/h the only direction available to it is forward.
+  //
+  // The generic step moves a unit straight at a point at cruise speed
+  // no matter where its nose is, which is right for a quadcopter and
+  // wrong for this. It is why the Seahawk could hold station abeam by
+  // crabbing at 400 km/h.
+  //
+  // Returns FALSE for any profile that does not declare
+  // lateralSpeedCapMs, and the caller then runs its own step exactly as
+  // before. Exactly one profile declares it.
+  function _rotorcraftStep(d, destLat, destLon, dtSec) {
+    const cap = d.profile?.lateralSpeedCapMs;
+    if (!(cap > 0) || !(dtSec > 0)) return false;
+    const cruise = (d.profile.cruiseKmh * 1000) / 3600;
+    const distM = haversineM(d.curLat, d.curLon, destLat, destLon);
+    const brng = _bearingRad(d.curLat, d.curLon, destLat, destLon);
+    const TAU = Math.PI * 2;
+    // Where the destination lies relative to the NOSE, not to north.
+    const rel = ((brng - (d.heading || 0) + Math.PI) % TAU + TAU) % TAU - Math.PI;
+    // Desired velocity resolved onto the airframe's own axes, each
+    // clamped to what the airframe can actually do on that axis.
+    const wantFwd = Math.max(-cap, Math.min(cruise, Math.cos(rel) * cruise));
+    const wantLat = Math.max(-cap, Math.min(cap,    Math.sin(rel) * cruise));
+    // Ramped, so it does not reach cruise on the first frame or stop
+    // dead on the last. Decelerating is allowed to be firmer than
+    // accelerating, which is true of the real thing.
+    const aUp = (d.profile.accelMs2 ?? 2.5) * dtSec;
+    const aDn = (d.profile.decelMs2 ?? 3.5) * dtSec;
+    const ramp = (cur, want) => {
+      const dv = want - cur;
+      if (dv === 0) return cur;
+      const lim = Math.abs(want) > Math.abs(cur) ? aUp : aDn;
+      return cur + Math.sign(dv) * Math.min(Math.abs(dv), lim);
+    };
+    d._velFwdMs = ramp(d._velFwdMs || 0, wantFwd);
+    d._velLatMs = ramp(d._velLatMs || 0, wantLat);
+    let sF = d._velFwdMs * dtSec;
+    let sL = d._velLatMs * dtSec;
+    const stepM = Math.hypot(sF, sL);
+    // Never overshoot the station.
+    if (stepM > distM && stepM > 0) { const k = distM / stepM; sF *= k; sL *= k; }
+    const h = d.heading || 0;
+    // +sL is to PORT, the same convention as muzzleOffsetM.side.
+    const dEast  = Math.sin(h) * sF + -Math.cos(h) * sL;
+    const dNorth = Math.cos(h) * sF + Math.sin(h) * sL;
+    d.curLat += dNorth / 111000;
+    d.curLon += dEast / (111000 * Math.cos(d.curLat * Math.PI / 180));
+    return true;
+  }
   // Declared HERE, immediately after the constant it falls back to, and
   // not down beside _easeHeading where it was first written. The
   // orientation callback above reads it, the scope gate caught the
@@ -6487,6 +6546,9 @@ async function main() {
       let _prevAlt = null;
       let _prevAltTs = null;
       let _climbPitch = 0;
+      let _prevVF = null;
+      let _prevVT = null;
+      let _accelEase = 0;
       _entitySpec.orientation = new Cesium.CallbackProperty(() => {
         const cart = _positionCb.getValue?.(Cesium.JulianDate.now());
         if (!cart) return undefined;
@@ -6580,8 +6642,46 @@ async function main() {
         _prevAltTs = nowS;
         climbEase = _climbPitch;
 
-        const pitch = -fwd * (1 - climbEase) + (((T.pitchOffsetDeg || 0) * Math.PI) / 180);
-        const roll = _bank + (((T.rollOffsetDeg || 0) * Math.PI) / 180);
+        // DISC TILT. A helicopter accelerates by tipping the disc
+        // forward and decelerates by tipping it back, and it rolls
+        // toward whichever side it is sliding. The fuselage hangs under
+        // the disc, so attitude is a readout of where the aircraft is
+        // TRYING to go, not just where it is pointing.
+        //
+        // Without this it held one fixed nose-down angle whether it was
+        // accelerating, braking, holding station or crabbing, which is
+        // what reads as a model being dragged along a line rather than
+        // flown. Measured by diffing the velocities _rotorcraftStep
+        // writes, the same way the bank and the climb are measured
+        // above.
+        const cruiseMs = Math.max(1, ((d.profile.cruiseKmh || 60) * 1000) / 3600);
+        const vF = d._velFwdMs ?? cruiseMs;
+        const vL = d._velLatMs ?? 0;
+        const latCap = d.profile?.lateralSpeedCapMs || 1;
+        // Nose-down scales with how fast it is ACTUALLY going, so an
+        // aircraft slowing onto station rises toward level instead of
+        // holding a cruise attitude at walking pace.
+        const speedFrac = Math.min(1, Math.abs(vF) / cruiseMs);
+        if (_prevVF != null && _prevVT != null) {
+          const dtv = nowS - _prevVT;
+          if (dtv > 0 && dtv < 1) {
+            const a = (vF - _prevVF) / dtv;                 // m/s^2, signed
+            const full = d.profile.accelMs2 ?? 2.5;
+            _accelEase += (Math.max(-1, Math.min(1, a / full)) - _accelEase)
+              * Math.min(1, dtv * 3);
+          }
+        }
+        _prevVF = vF;
+        _prevVT = nowS;
+        const accelPitch = _accelEase * (((T.accelPitchDeg ?? 8) * Math.PI) / 180);
+        const latRoll = Math.max(-1, Math.min(1, vL / latCap))
+          * (((T.lateralRollDeg ?? 10) * Math.PI) / 180);
+
+        const pitch = -fwd * speedFrac * (1 - climbEase) - accelPitch
+          + (((T.pitchOffsetDeg || 0) * Math.PI) / 180);
+        // Positive roll drops the right wing and +vL is to PORT, so a
+        // slide to port rolls left: subtract.
+        const roll = _bank - latRoll + (((T.rollOffsetDeg || 0) * Math.PI) / 180);
         return Cesium.Transforms.headingPitchRollQuaternion(
           cart, new Cesium.HeadingPitchRoll(heading, pitch, roll));
       }, false);
@@ -8145,10 +8245,12 @@ async function main() {
         // Straight-line fallback (used pre-route-fetch or on OSRM fail)
         const brng = _bearingRad(d.curLat, d.curLon, d.targetLat, d.targetLon);
         d.heading = _easeHeading(d.heading, brng, dtSec, _turnRateOf(d));
+        if (!_rotorcraftStep(d, d.targetLat, d.targetLon, dtSec)) {
         const stepDegLat = (stepM * Math.cos(brng)) / 111000;
         const stepDegLon = (stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
         d.curLat += stepDegLat;
         d.curLon += stepDegLon;
+        }
         if (d.profile.trail) {
           d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
           if (d.trailPositions.length > 500) d.trailPositions.shift();
@@ -8269,6 +8371,7 @@ async function main() {
               beamHeadingRad = _tgtHdg;   // fly PARALLEL, not at it
             }
           }
+          if (!_rotorcraftStep(d, desiredLat, desiredLon, dtSecEng)) {
           const distToDesiredM = haversineM(d.curLat, d.curLon, desiredLat, desiredLon);
           // Cap chase step to 1.6x cruise so interceptor can close
           // faster than en-route but still moves visibly instead of
@@ -8281,6 +8384,7 @@ async function main() {
             const frac = maxStepM / distToDesiredM;
             d.curLat += (desiredLat - d.curLat) * frac;
             d.curLon += (desiredLon - d.curLon) * frac;
+          }
           }
           // dtSecEng, not dtSec. dtSec is declared inside the en_route
           // branch and this is its SIBLING engaging branch, so the name
