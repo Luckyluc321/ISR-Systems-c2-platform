@@ -592,45 +592,25 @@ function _tenantScopedLinkedIds(linkedIds, currentSiteId, activeRole) {
   });
 }
 
-// Temporary detection loss vs fled classifier.
-// Distinguishes two ways a track can drop off sensor: HIDING inside
-// the site perimeter (occlusion, altitude ceiling, RF silence — track
-// probably still there, keep operators alert) vs FLED (crossed the
-// perimeter and is gone).
+// Grace for a track that has DEMONSTRABLY LEFT: last seen outside the
+// perimeter, or inside it near the edge and heading out.
 //
-// Gate:
-//   - fled if last known position is outside the site boundary
-//   - fled if within the perimeter buffer of the edge (default 200m)
-//     AND projected position (last + heading * speed * grace) exits
-//     the boundary
-//   - hiding otherwise
+// 30 s, not 12. 12 was right while a re-acquisition simply continued
+// the same event. It stopped being right once a return AFTER a close
+// became a new, linked event: a drone loitering just outside a
+// boundary and dipping back in would then mint a fresh linked case on
+// every lap. Closing 18 s sooner buys almost nothing; one event
+// instead of ten for one loitering drone is the whole point.
 //
-// Grace formula: clamp(15, 60, 900 / speed_ms) seconds. Slow hover
-// gets the 60s ceiling; fast Shahed / missile gets the 15s floor.
-// Rationale: physics of "how long could this platform reasonably
-// stay inside the site without being re-acquired." Real ops
-// customers tune per-site via site_context.temporary_loss_buffer_m
-// once real data is in.
-// Floor for the detection-loss grace window, in milliseconds.
-//
-// A track that drops out while already outside the perimeter, or
-// heading out of it, waits this long before the event closes. Short,
-// because it has demonstrably left and holding the event open longer
-// just delays the report.
+// The ambiguous case — lost while still INSIDE the perimeter, to
+// altitude or a sensor gap — keeps its longer speed-scaled leash of
+// 15 to 60 s. Uncertainty gets more time, a confirmed departure less.
 //
 // It is ALSO the fallback wherever graceMs is read back off
-// event.temporaryLoss. Those reads cannot miss today, since the single
-// writer always sets it from the classifier below and every branch
-// returns at least this value. The fallback stays anyway: a missing
-// graceMs would make the close comparison false forever and strand the
-// event LIVE, which is the phantom-live failure the unobserved-event
-// sweeper exists to catch. A conservative default beats that.
-//
-// One constant rather than a literal per site, because the countdown
-// panel and the tick MUST agree. They had drifted to 12 s and 30 s,
-// which would have shown 18 seconds remaining on an already-closed
-// event had the fallback ever fired.
-const _LOSS_GRACE_FLOOR_MS = 12000;
+// event.temporaryLoss, and the countdown panel and the tick MUST
+// agree or the panel counts down to a moment the event does not close
+// at. One constant, both readers.
+const _LOSS_GRACE_FLOOR_MS = 30000;
 
 function _classifyDetectionLoss(event) {
   const site = SITES[event.siteId];
@@ -5083,76 +5063,35 @@ async function main() {
   // Tuning: window.__isr_breakaway.
   window.__isr_breakaway = { distM: 500, graceSec: 10 };
 
-  function _promoteBreakawayMember(event, sw, pos, hdgDeg, speedMs) {
-    const childId = nextEventId();
-    const nowIso = new Date().toISOString();
-    const inCov = _shouldAutoDetect(pos.lat, pos.lon, pos.alt);
-    const child = {
-      id: childId,
-      siteId: event.siteId,
-      classification: event.classification,
-      threat: event.threat,
-      platform: 'quadcopter',
-      droneType: `${sw.model || 'Unknown platform'} (detached from ${event.id})`,
-      confidence: event.confidence,
-      status: 'active',
-      startTime: nowIso,
-      endTime: null,
-      duration: 0,
-      entry: null, exit: null,
-      lastPosition: { lat: pos.lat, lon: pos.lon, alt: pos.alt, heading: hdgDeg, speed: speedMs, timestamp: nowIso },
-      contributingSensors: [],
-      evidence: event.evidence ? { ...event.evidence } : null,
-      notes: [{
-        timestamp: nowIso,
-        author: 'AUTO-CORRELATOR',
-        text: `Member ${sw.memberId || sw.role} broke formation from ${event.id}. Promoted to independent track.`,
-      }],
-      templateKey: null,
-      multiSiteTrack: true,
-      // MUST travel with multiSiteTrack. The coverage check reads
-      // coverageGatedTrack, and it is otherwise set in exactly one
-      // place: the template event constructor. An event built
-      // directly here — a breakaway promotion, a per-site linked
-      // event — got undefined, so the coverage block never ran,
-      // inAnyCoverage stayed null, and OUT OF RANGE never fired for
-      // an escaping drone. Splitting one flag into two without
-      // finding every writer is how that happened.
-      coverageGatedTrack: true,
-      detected: inCov,
-      droneCount: 1,
-      memberTracks: [{
-        memberId: `${childId}-m0`,
-        sourceMemberId: sw.memberId || null,
-        nnTrackId: null,
-        kinematics: { lat: pos.lat, lon: pos.lon, alt: pos.alt, heading: hdgDeg, speedMs },
-        inCoverage: inCov,
-        status: 'tracked',
-        classification: event.classification,
-        class_confidence: event.confidence ?? null,
-        formationOffset: { ...(sw.offset || { forward: 0, right: 0, up: 0 }) },
-        role: sw.role || 'detached',
-        model: sw.model || null,
-        rfMHz: sw.rfMHz || null,
-        history: [{ status: 'tracked', at: nowIso, reason: 'breakaway promotion' }],
-      }],
-      provenance: { breakawayOf: event.id, sourceMemberId: sw.memberId || null, promotedAt: nowIso },
-      linkedEventIds: [event.id],
-      spawnTs: wallNow(),
-    };
-    addEvent(child);
-    appendEventArray(event.id, 'linkedEventIds', childId);
+  // A member that breaks formation changes STATE, not identity.
+  //
+  // This used to promote it to its own event at the SAME site. That
+  // gave the operator two cases for one incident, and because the
+  // child went into linkedEventIds the close chain's linkedActive
+  // guard then refused to close the site's case while the escapee
+  // flew — a live case about airspace that site cannot see.
+  //
+  // An event belongs to a SITE, not to a drone. Breaking formation is
+  // not a new observation at a site, so it does not earn an event.
+  // Coming back after a close is, and that one does.
+  // See docs/event-identity-and-linking.md.
+  function _markMemberBrokenAway(event, sw, pos, hdgDeg, speedMs) {
+    // Latch on the member so detection does not re-fire every tick.
+    // Previously the latch was _breakawayChildId, which only existed
+    // because a child was created.
+    sw._brokenAway = true;
+    if (sw.memberId) {
+      setMemberStatus(event.id, sw.memberId, 'broken-away', {
+        reason: 'sustained formation deviation',
+      });
+    }
     appendEventArray(event.id, 'notes', {
-      timestamp: nowIso,
+      timestamp: new Date().toISOString(),
       author: 'AUTO-CORRELATOR',
-      text: `Member ${sw.role || sw.memberId} broke formation. Tracking independently as ${childId}.`,
+      text: `${sw.role || sw.memberId || 'A member'} broke formation. Tracking as a detached member of this event.`,
       type: 'breakaway',
     });
-    if (sw.memberId) setMemberStatus(event.id, sw.memberId, 'broken-away', { childEventId: childId, reason: 'sustained formation deviation' });
-    sw._breakawayChildId = childId;
-    toast(`Formation break · ${sw.model || 'member'} tracking independently as ${childId}.`, 'warn');
-    renderAlertStrip();
-    return child;
+    toast(`${sw.model || sw.role || 'Drone'} broke formation.`, 'warn');
   }
 
   // Onboard-sensor pursuit: does any active response unit still hold
@@ -9084,15 +9023,8 @@ async function main() {
         // Swarm Phase 1: source-of-truth status transition. The sw
         // flag above stays as the render-cache fast path.
         if (sw.memberId) setMemberStatus(d.eventId, sw.memberId, 'neutralised', { reason: 'interceptor kill' });
-        // Swarm Phase 2: a promoted breakaway's child event ends with
-        // its member. Kill closes the child as neutralised.
-        if (sw._breakawayChildId) {
-          const bwChild = getEvent(sw._breakawayChildId);
-          if (bwChild && bwChild.status === 'active') {
-            markNeutralised(bwChild.id, { outcome: 'neutralized', byDispatchId: d.id, needsPostIncident: false });
-            closeEvent(bwChild.id, null);
-          }
-        }
+        // No child event to close. A detached member's fate is the
+        // member status set just above, on this event.
         // Clear any lingering jamming visuals from other counter-
         // dispatches now that this hostile is down. Ellipses on empty
         // air look wrong.
@@ -16205,15 +16137,8 @@ async function main() {
               sw._neutralisedAt = new Date().toISOString();
               // Swarm Phase 1: source-of-truth status transition.
               if (sw.memberId) setMemberStatus(event.id, sw.memberId, 'neutralised', { reason: 'jamming forced landing' });
-              // Swarm Phase 2: close a promoted breakaway's child event
-              // with its member.
-              if (sw._breakawayChildId) {
-                const bwChild = getEvent(sw._breakawayChildId);
-                if (bwChild && bwChild.status === 'active') {
-                  markNeutralised(bwChild.id, { outcome: 'neutralized', needsPostIncident: false });
-                  closeEvent(bwChild.id, null);
-                }
-              }
+              // No child event to close. A detached member's fate is the
+              // member status set just above, on this event.
               // Drop a small downed-drone marker at the landing spot so
               // it's visible in top-down after the billboard hides.
               viewer.entities.add({
@@ -16376,7 +16301,7 @@ async function main() {
           // where our sensors actually see the member (sensors-observe-
           // only — a formation break no sensor witnessed must never be
           // announced from sim ground truth). Promotion fires once.
-          if (!sw._breakawayChildId && !sw.neutralised && leadPos) {
+          if (!sw._brokenAway && !sw.neutralised && leadPos) {
             const _bw = window.__isr_breakaway || { distM: 500, graceSec: 10 };
             const slotMagM = Math.hypot(sw.offset?.forward || 0, sw.offset?.right || 0);
             const devM = haversineM(pos.lat, pos.lon, leadPos.lat, leadPos.lon);
@@ -16385,62 +16310,16 @@ async function main() {
             if (devM > slotMagM + _bw.distM) {
               if (swShouldShow) sw._breakawayObsMs = (sw._breakawayObsMs || 0) + dtBwMs;
               if ((sw._breakawayObsMs || 0) / 1000 >= _bw.graceSec) {
-                _promoteBreakawayMember(event, sw, pos, hdgDeg, speedMs);
+                _markMemberBrokenAway(event, sw, pos, hdgDeg, speedMs);
               }
             } else {
               sw._breakawayObsMs = 0;
             }
-          } else if (sw._breakawayChildId && !sw.neutralised) {
-            const childEv = getEvent(sw._breakawayChildId);
-            if (childEv && childEv.status === 'active') {
-              if (swShouldShow) childEv._lastDetectionTs = wallNow();
-              mutateEvent(childEv.id, {
-                lastPosition: { lat: pos.lat, lon: pos.lon, alt: pos.alt, heading: hdgDeg, speed: speedMs, timestamp: new Date().toISOString() },
-                // Sticky-once-true, matching every other detected write
-                // in the codebase. Coverage loss must not vanish an
-                // active event from the strip; the child's own OOR
-                // close below handles a sustained loss truthfully.
-                ...(swShouldShow ? { detected: true } : {}),
-              });
-              if (childEv.memberTracks?.[0]) {
-                syncMemberTrack(childEv.id, childEv.memberTracks[0].memberId, {
-                  lat: pos.lat, lon: pos.lon, alt: pos.alt,
-                  heading: hdgDeg, speedMs,
-                  inCoverage: swShouldShow,
-                });
-              }
-              // Child owns its coverage-loss close: sustained loss of
-              // the member (outside our mesh AND outside every
-              // responder's onboard range) closes the child 'lost
-              // contact' — which also unblocks the parent's own
-              // coverage-loss close (linkedActive gate).
-              if (!swShouldShow && !_onboardTrackMaintained(childEv, pos)) {
-                if (!sw._bwChildOorSince) sw._bwChildOorSince = nowMs;
-                if ((nowMs - sw._bwChildOorSince) / 1000 >= 30) {
-                  closeEvent(childEv.id, null, { autoOutcome: 'lost contact' });
-                  // The dashed breadcrumb goes with the track.
-                  //
-                  // While a drone is outside coverage the dashed line
-                  // grows behind it, showing where an unobserved object
-                  // went. That is a simulation aid and it is honest
-                  // while the track is still open. Once the track is
-                  // closed as lost, the object is not being tracked at
-                  // all, and a line left frozen mid-ocean reads as a
-                  // position we still hold. We do not.
-                  sw._trackLost = true;
-                  if (sw.projPositions) sw.projPositions.length = 0;
-                  if (sw.projLine) sw.projLine.show = false;
-                  appendEventArray(event.id, 'notes', {
-                    timestamp: new Date().toISOString(),
-                    author: 'AUTO-CORRELATOR',
-                    text: `Breakaway track ${childEv.id} lost. No sensor or responder holds it.`,
-                  });
-                }
-              } else {
-                sw._bwChildOorSince = null;
-              }
-            }
           }
+          // The child-mirroring branch that stood here is gone with the child.
+          // A detached member is mirrored by nothing: it IS a member of this
+          // event, its kinematics already sync through syncMemberTrack, and
+          // its fate is recorded on the member rather than on a second case.
           // P5A: adaptive sample capture (interval decided ONCE per event by platform)
           if (state.recording && (!sw._lastSampleMs || (nowMs - sw._lastSampleMs) >= _sampleIntervalForEvent(event))) {
             state.recording.timeseries.push(_buildDroneSample({
@@ -20896,7 +20775,8 @@ async function main() {
     const preIngress = e.coverageGatedTrack && !e.detected && isActive;
     const temporaryLoss = isActive
       && e.temporaryLoss
-      && e.temporaryLoss.classification === 'hiding';
+      && (e.temporaryLoss.classification === 'hiding'
+        || e.temporaryLoss.classification === 'fled');
     let telemetry = '';
     if (preIngress) {
       telemetry = `
