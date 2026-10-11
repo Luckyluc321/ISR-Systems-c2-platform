@@ -4707,6 +4707,11 @@ async function main() {
       // the gunner can merely SEE the contact.
       firesTracer: true,
       engageRangeM: 800,
+      // Flies a beam pass rather than a nose-on standoff: see the
+      // engaging branch. 250 m abeam sits well inside the 800 m firing
+      // envelope and still reads as two separate aircraft on the map.
+      beamPass: true,
+      engageOffsetM: 250,
       // Declared HERE as well as in _SIM_INTERCEPTOR_PHYSICS because two
       // separate climb routines read two different sources: one takes
       // profile.climbRateMs with a fallback of 6, the other takes the
@@ -8200,8 +8205,43 @@ async function main() {
 
           const offsetM = d.profile.engageOffsetM || 100;
           const bearing = ((d.memberIndex || 0) * (Math.PI * 2 / 3));
-          const desiredLat = enemyLat + (offsetM * Math.cos(bearing)) / 111000;
-          const desiredLon = enemyLon + (offsetM * Math.sin(bearing)) / (111000 * Math.cos(enemyLat * Math.PI / 180));
+          let desiredLat = enemyLat + (offsetM * Math.cos(bearing)) / 111000;
+          let desiredLon = enemyLon + (offsetM * Math.sin(bearing)) / (111000 * Math.cos(enemyLat * Math.PI / 180));
+          // BEAM PASS, for an airframe whose gun is on the SIDE.
+          //
+          // The standoff above is a swarm construct: memberIndex x 120
+          // degrees fans three interceptors around a target, and each
+          // points its nose at it, which is right for a quadcopter with
+          // a forward gun. A single unit has memberIndex 0, so the
+          // bearing is 0, DUE NORTH. Against a northbound Geran that
+          // parked the Seahawk 100 m in front of it, nose turned back
+          // south at the target while its position tracked north. Nose
+          // one way, travel the other: the aircraft flew backwards and
+          // fired over its own tail.
+          //
+          // A door gunner does not fly at the target. It flies ALONGSIDE
+          // it, parallel, with the target abeam on the gun's side, which
+          // is what the gun station's traverse arc assumes.
+          //
+          // Gated on profile.beamPass, which only this airframe declares.
+          // Without it every value below is byte-identical to before,
+          // so the counter-drone swarm's fan is untouched.
+          let beamHeadingRad = null;
+          if (d.profile.beamPass) {
+            const _bpEv = getEvent(d.eventId);
+            const _tgtHdgDeg = _bpEv?.lastPosition?.heading;
+            if (typeof _tgtHdgDeg === 'number') {
+              const _tgtHdg = (_tgtHdgDeg * Math.PI) / 180;
+              // muzzleOffsetM.side is +ve to PORT, so sit to the
+              // target's starboard and the target falls on our left,
+              // where the cabin door and the gunner are.
+              const _side = d.profile.muzzleOffsetM?.side ?? 0;
+              const _perp = _tgtHdg + (_side >= 0 ? Math.PI / 2 : -Math.PI / 2);
+              desiredLat = enemyLat + (offsetM * Math.cos(_perp)) / 111000;
+              desiredLon = enemyLon + (offsetM * Math.sin(_perp)) / (111000 * Math.cos(enemyLat * Math.PI / 180));
+              beamHeadingRad = _tgtHdg;   // fly PARALLEL, not at it
+            }
+          }
           const distToDesiredM = haversineM(d.curLat, d.curLon, desiredLat, desiredLon);
           // Cap chase step to 1.6x cruise so interceptor can close
           // faster than en-route but still moves visibly instead of
@@ -8218,7 +8258,10 @@ async function main() {
           // dtSecEng, not dtSec. dtSec is declared inside the en_route
           // branch and this is its SIBLING engaging branch, so the name
           // never resolved and every frame threw a ReferenceError.
-          d.heading = _easeHeading(d.heading, _bearingRad(d.curLat, d.curLon, enemyLat, enemyLon), dtSecEng);
+          d.heading = _easeHeading(
+            d.heading,
+            beamHeadingRad ?? _bearingRad(d.curLat, d.curLon, enemyLat, enemyLon),
+            dtSecEng);
           if (d.profile.trail) {
             d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
             if (d.trailPositions.length > 500) d.trailPositions.shift();
