@@ -21211,27 +21211,10 @@ async function main() {
         ${_sensorToggleHtml}
       </div>` : '';
 
-    // Brief Incident Summary — for non-missile hostile tracks that entered
-    // and exited a site without being neutralised (drone overflights, etc).
-    // Deliverable to intelligence agencies (PET, FE, Rigspoliti) for their
-    // own downstream operations. Minimal — the deep report is reserved for
-    // full neutralisation events.
-    const briefSum = (e.platform !== 'missile' && e.entry && e.exit && e.outcome !== 'neutralized') ? `
-      <div class="dp-section dp-brief">
-        <div class="dp-brief-hdr">
-          <div class="dp-brief-badge">BRIEF INCIDENT SUMMARY</div>
-        </div>
-        <div class="dp-brief-body">
-          ${e.droneType} entered ${siteName(e.siteId)} perimeter at ${e.entry.timestamp.slice(11,19)}Z,
-          departed at ${e.exit.timestamp.slice(11,19)}Z. Total site dwell ${formatDuration(e.duration)}.
-          Classification ${(e.classification || '').toUpperCase()}, confidence ${e.confidence.toFixed(2)}.
-          No response asset dispatched. Track lost on exit.
-        </div>
-        <div class="dp-brief-cta-row">
-          <button class="dp-brief-cta" data-brief="intel" data-id="${e.id}">Send to intelligence services (Politiets Efterretningstjeneste, Forsvarets Efterretningstjeneste, Rigspolitiet)</button>
-          <button class="dp-brief-cta doc" data-brief="pdf" data-id="${e.id}">Download Brief (PDF)</button>
-        </div>
-      </div>` : '';
+    // The "Brief Incident Summary" section that stood here is removed.
+    // It shipped in f798e41 with the Agent 3 narrative work and was never
+    // signed off. Nothing renders it now. sendBriefToIntelligence and
+    // generateBriefReport are left in place but are unreachable.
 
     // Swarm roster + primary-drone focus.
     // _selectedSwarmIndex picks which drone is the "primary" — its stats
@@ -21808,7 +21791,6 @@ async function main() {
       ${preIngress ? '' : linkedEvents}
       ${preIngress ? '' : outcome}
       ${preIngress ? '' : pir}
-      ${preIngress ? '' : briefSum}
       ${preIngress ? '' : swarmRoster}
       ${preIngress ? '' : reacquired}
       ${preIngress ? '' : sensors}
@@ -21954,14 +21936,6 @@ async function main() {
         else if (pir === 'cordon') dispatchPostIncidentAction(e.id, 'cordon');
         else if (pir === 'beredskab-mass') dispatchPostIncidentAction(e.id, 'beredskab-mass');
         else if (pir === 'pdf-report') generatePirReport(e.id);
-      });
-    });
-    // Brief Incident Summary CTAs (quadcopter / non-missile events)
-    detailBodyEl.querySelectorAll('[data-brief]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const kind = btn.dataset.brief;
-        if (kind === 'intel') sendBriefToIntelligence(e.id);
-        else if (kind === 'pdf') generateBriefReport(e.id);
       });
     });
   }

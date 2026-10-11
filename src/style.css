@@ -3102,61 +3102,6 @@ body.replay-dragging * {
 }
 
 /* ─── Brief Incident Summary (quadcopter overflight → intelligence) ─── */
-.dp-brief {
-  background: rgba(255,255,255,0.02);
-  border-left: 3px solid var(--text-dim);
-  padding: 12px 14px !important;
-}
-.dp-brief-hdr { margin-bottom: 8px; }
-.dp-brief-badge {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.18em;
-  color: var(--text);
-  background: rgba(255,255,255,0.08);
-  padding: 3px 8px;
-  border-radius: 3px;
-  display: inline-block;
-  text-transform: uppercase;
-  font-weight: 600;
-}
-.dp-brief-body {
-  font-size: 11px;
-  line-height: 1.6;
-  color: var(--text);
-  margin-bottom: 10px;
-}
-.dp-brief-cta-row {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.dp-brief-cta {
-  width: 100%;
-  padding: 9px 12px;
-  background: linear-gradient(180deg, #3a4a5f 0%, #26313f 100%);
-  color: #e6edf3;
-  border: none;
-  border-radius: 6px;
-  font-family: var(--font-body, -apple-system, sans-serif);
-  font-size: 11px;
-  letter-spacing: 0.02em;
-  font-weight: 600;
-  cursor: pointer;
-  text-align: left;
-}
-.dp-brief-cta:hover { background: linear-gradient(180deg, #45566d 0%, #2e3a4a 100%); }
-.dp-brief-cta.doc {
-  background: transparent;
-  color: var(--text);
-  border: 1px solid var(--border);
-  text-align: center;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-.dp-brief-cta.doc:hover { border-color: var(--text-dim); }
 
 /* Signal Lost stripe (dp-oor) deleted 2026-09-07. No "signal lost
    but still active" state exists in the real product — coverage loss
