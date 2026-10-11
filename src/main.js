@@ -8957,9 +8957,13 @@ async function main() {
     //
     // muzzleSideOffsetM is still honoured so nothing that set it
     // breaks, but muzzleOffsetM is the shape to use.
+    // Live override, per dispatch kind, so the gun opening can be moved
+    // on a running scenario instead of over a rebuild:
+    //   window.__isr_muzzle_tuning = { 'helicopter-intercept': { forward: -1, side: 5 } }
+    const _mt = (window.__isr_muzzle_tuning || {})[d.kind] || {};
     const cfg = d.profile?.muzzleOffsetM;
-    const fwd  = cfg?.forward ?? 0;
-    const side = cfg?.side ?? d.profile?.muzzleSideOffsetM ?? 0;
+    const fwd  = _mt.forward ?? cfg?.forward ?? 0;
+    const side = _mt.side ?? cfg?.side ?? d.profile?.muzzleSideOffsetM ?? 0;
     if (!fwd && !side) return { lat: d.curLat, lon: d.curLon };
     const h = d.heading || 0;
     // Heading's unit vector is (sin, cos) in (east, north). Rotating
@@ -9070,9 +9074,17 @@ async function main() {
     // Rounds leave the MUZZLE, not the belly. The flash already used
     // _muzzleOffsetFor and the bullets did not, so the flash appeared
     // at the gun while the tracers came out of the airframe centre.
-    // Snapshotted at fire time: a bullet leaves the barrel once, it
-    // does not follow the aircraft afterwards.
-    const _mz = _muzzleOffsetFor(d);
+    //
+    // LIVE, not snapshotted at fire time. Snapshotting is the honest
+    // physics, a bullet leaves the barrel once and does not follow the
+    // aircraft afterwards, and it looked wrong for exactly that reason:
+    // a round is in flight for 220 ms and this aircraft covers 15 m in
+    // that time, most of its own 19.76 m length. So every round visibly
+    // spawned beside the airframe and the later ones of a burst trailed
+    // off behind the tail. Reading the muzzle each frame pins the start
+    // of every round to the gun opening, which is the only place a
+    // round may ever appear to come from.
+    const _mz = () => _muzzleOffsetFor(d);
 
     // Live-target lookup. Priority:
     //   1. If operator is POV'd inside this target's drone, aim at the
@@ -9123,9 +9135,14 @@ async function main() {
     // Origin altitude — absolute ellipsoid so it matches the
     // interceptor billboard (which now also uses absolute altitude).
     // Ground vehicles fire from an 8m mast.
-    const _originAlt = () => d.profile.airborne
-      ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60)
-      : 8;
+    const _originAlt = () => {
+      if (!d.profile.airborne) return 8;
+      // Sampled AT the muzzle rather than at the airframe centre, so
+      // the horizontal origin and the vertical origin describe the same
+      // point on the aircraft.
+      const m = _mz();
+      return _airborneAbsAlt(m.lon, m.lat, d.curAlt || 60);
+    };
 
     // Bullet-in-flight position: interpolated between LIVE origin
     // (interceptor at its cruise altitude) and LIVE target (enemy
@@ -9137,9 +9154,10 @@ async function main() {
         const t = _t();
         const tgt = _liveTarget();
         const oa = _originAlt();
+        const m = _mz();
         return Cesium.Cartesian3.fromDegrees(
-          _mz.lon + (tgt.lon - _mz.lon) * t,
-          _mz.lat + (tgt.lat - _mz.lat) * t,
+          m.lon + (tgt.lon - m.lon) * t,
+          m.lat + (tgt.lat - m.lat) * t,
           oa + (tgt.alt - oa) * t,
         );
       }, false),
@@ -9161,12 +9179,13 @@ async function main() {
           const t = _t();
           const tgt = _liveTarget();
           const oa = _originAlt();
-          const headLat = _mz.lat + (tgt.lat - _mz.lat) * t;
-          const headLon = _mz.lon + (tgt.lon - _mz.lon) * t;
+          const m = _mz();
+          const headLat = m.lat + (tgt.lat - m.lat) * t;
+          const headLon = m.lon + (tgt.lon - m.lon) * t;
           const headAlt = oa + (tgt.alt - oa) * t;
           const back = Math.max(0, t - 0.40);
-          const tailLat = _mz.lat + (tgt.lat - _mz.lat) * back;
-          const tailLon = _mz.lon + (tgt.lon - _mz.lon) * back;
+          const tailLat = m.lat + (tgt.lat - m.lat) * back;
+          const tailLon = m.lon + (tgt.lon - m.lon) * back;
           const tailAlt = oa + (tgt.alt - oa) * back;
           return [
             Cesium.Cartesian3.fromDegrees(tailLon, tailLat, tailAlt),
