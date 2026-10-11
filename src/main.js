@@ -5987,8 +5987,23 @@ async function main() {
     const rel = ((brng - (d.heading || 0) + Math.PI) % TAU + TAU) % TAU - Math.PI;
     // Desired velocity resolved onto the airframe's own axes, each
     // clamped to what the airframe can actually do on that axis.
-    const wantFwd = Math.max(-cap, Math.min(cruise, Math.cos(rel) * cruise));
-    const wantLat = Math.max(-cap, Math.min(cap,    Math.sin(rel) * cruise));
+    let wantFwd = Math.max(-cap, Math.min(cruise, Math.cos(rel) * cruise));
+    let wantLat = Math.max(-cap, Math.min(cap,    Math.sin(rel) * cruise));
+    // SOMETHING BEHIND YOU AND FAR AWAY IS A TURN, NOT A REVERSE.
+    //
+    // Resolved straight onto the axes, a destination dead astern asks
+    // for full rearward speed, so the aircraft would back up at the
+    // lateral cap while pivoting. A real one holds its forward speed and
+    // lets the turn carry it round, which is what makes a course
+    // reversal a wide banked arc instead of a pirouette.
+    //
+    // Only past two turn radii, so a close-in manoeuvre such as sliding
+    // onto a beam-pass station still has every axis available to it.
+    const radiusM = cruise / Math.max(1e-6, _turnRateOf(d));
+    if (Math.abs(rel) > Math.PI / 2 && distM > radiusM * 2) {
+      wantFwd = cruise;
+      wantLat = 0;
+    }
     // Ramped, so it does not reach cruise on the first frame or stop
     // dead on the last. Decelerating is allowed to be firmer than
     // accelerating, which is true of the real thing.
@@ -8813,8 +8828,20 @@ async function main() {
       d.heading = _easeHeading(d.heading, brng, dtSec, _turnRateOf(d));
       const speedMps = (d.profile.cruiseKmh * 1000) / 3600;
       const stepM = speedMps * dtSec;
+      // Flown, not slid. The step below moves the unit straight at the
+      // destination no matter where its nose is, so an aircraft told to
+      // go home pointed the other way crabbed there sideways while the
+      // nose came round separately. Through the flight model it has to
+      // fly where it points, and a course reversal then traces the arc
+      // the airframe can actually hold: radius v / omega, which at 69.4
+      // m/s and 4.67 deg/s is 851 m, so about a 1.7 km half circle over
+      // 38 seconds, banked into the turn the whole way by the same
+      // attitude code as any other turn. Returns false for any profile
+      // without the flight model, which then runs the old step.
+      if (!_rotorcraftStep(d, d.rtbTargetLat, d.rtbTargetLon, dtSec)) {
       d.curLat += (stepM * Math.cos(brng)) / 111000;
       d.curLon += (stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
+      }
       if (d.profile.trail) {
         d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
         if (d.trailPositions.length > 500) d.trailPositions.shift();
@@ -8844,8 +8871,20 @@ async function main() {
       d.heading = _easeHeading(d.heading, brng, dtSec, _turnRateOf(d));
       const speedMps = (d.profile.cruiseKmh * 1000) / 3600;
       const stepM = speedMps * dtSec;
+      // Flown, not slid. The step below moves the unit straight at the
+      // destination no matter where its nose is, so an aircraft told to
+      // go home pointed the other way crabbed there sideways while the
+      // nose came round separately. Through the flight model it has to
+      // fly where it points, and a course reversal then traces the arc
+      // the airframe can actually hold: radius v / omega, which at 69.4
+      // m/s and 4.67 deg/s is 851 m, so about a 1.7 km half circle over
+      // 38 seconds, banked into the turn the whole way by the same
+      // attitude code as any other turn. Returns false for any profile
+      // without the flight model, which then runs the old step.
+      if (!_rotorcraftStep(d, d.originLat, d.originLon, dtSec)) {
       d.curLat += (stepM * Math.cos(brng)) / 111000;
       d.curLon += (stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
+      }
       if (d.profile.trail) {
         d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
         if (d.trailPositions.length > 500) d.trailPositions.shift();
