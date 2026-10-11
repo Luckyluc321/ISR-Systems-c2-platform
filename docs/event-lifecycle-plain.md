@@ -100,7 +100,15 @@ of a link" is not a general rule.
 | Rule | How it works |
 |---|---|
 | **Re-entry opens a NEW linked event** | For multi-site and coverage-gated tracks. The closed case stays closed and the return opens a new event linked to it. A single-site track cannot re-enter at all, its entities are torn down at close, so there is nothing to return to |
-| **A detached member that nobody holds gets a verdict** | 30 seconds outside our sensors AND outside every responder's own sensor range → `status: 'lost'`, a note on the event, a `? LOST` chip on the roster. The dashed breadcrumb keeps running: a verdict on the roster and a breadcrumb on the map answer different questions |
+| **A detached member that nobody holds gets a verdict** | 30 seconds outside our sensors AND outside every responder's own sensor range → `status: 'lost'`, a note on the event, a `? LOST` chip on the roster and a dimmed row |
+
+**The dashed breadcrumb is simulation only, and it keeps running after the
+verdict.** Outside coverage it is the only thing showing where an unobserved
+object went, so it draws for as long as the simulation runs. **A live
+deployment draws no breadcrumb at all**: the line comes from simulated ground
+truth, and outside every sensor radius a real system knows nothing, so there is
+nothing to draw. Live gets the verdict and stops. A verdict on the roster and a
+breadcrumb on the map answer different questions.
 
 ---
 

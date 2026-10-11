@@ -16363,11 +16363,19 @@ async function main() {
           // The breadcrumb is deliberately NOT touched here. The old
           // child-close hid it, on the reasoning that a frozen line
           // reads as a position we still hold. That reasoning is
-          // overruled: outside coverage the dashed line is the only
-          // thing on the map showing where an unobserved object went,
-          // and it runs for as long as the simulation runs. A verdict
-          // on the roster and a breadcrumb on the map answer two
-          // different questions.
+          // overruled for SIMULATION: outside coverage the dashed line
+          // is the only thing on the map showing where an unobserved
+          // object went, and it runs for as long as the simulation
+          // runs. A verdict on the roster and a breadcrumb on the map
+          // answer two different questions.
+          //
+          // IN LIVE THERE IS NO BREADCRUMB AT ALL. The line is drawn
+          // from simulated ground truth, which a real deployment does
+          // not have: outside every sensor radius the platform knows
+          // nothing, so there is nothing to draw. Anyone wiring the
+          // live path must not read the paragraph above as a universal
+          // rule. Sim draws the unobserved leg; live draws the verdict
+          // and stops. See docs/event-lifecycle-plain.md.
           if (sw._brokenAway && !sw.neutralised && !sw._memberLostAt) {
             if (!swShouldShow && !_onboardTrackMaintained(event, pos)) {
               if (!sw._bwOorSince) sw._bwOorSince = nowMs;
