@@ -5125,6 +5125,31 @@ async function main() {
     return false;
   }
 
+  // CLOSING THE EVENT IS NOT STOPPING THE TRACK.
+  //
+  // markTrackClosed sets `live.closed`, and the playback loop skips a
+  // closed track entirely, so the object stops moving and its red
+  // dashed breadcrumb freezes where it stood. For most templates that
+  // is correct: the scenario is over at the close.
+  //
+  // A template declaring `continueAfterClose` keeps flying. Outside
+  // coverage the breadcrumb is the only thing on the map showing where
+  // an unobserved object went, and the rule is that it runs for as long
+  // as the simulation runs. The event still closes and the billboard
+  // still hides, so nothing claims an observation we did not make:
+  // what continues is the dashed line, not the detection.
+  //
+  // SIMULATION ONLY, like every other projected line. A real deployment
+  // has no ground truth to keep flying and therefore nothing to draw.
+  //
+  // Read by BOTH single-track close paths deliberately. They are the
+  // out-of-range close and the out-of-all-coverage close, either can
+  // fire first depending on the grace window, and gating one and not
+  // the other is how this froze in the first place.
+  function _trackContinuesAfterClose(event) {
+    return !!TEMPLATES[event?.templateKey]?.continueAfterClose;
+  }
+
   // Where is the target now, projected from the last time a sensor
   // actually saw it? Dead-reckoned along its last observed heading at
   // its last observed speed.
@@ -15744,7 +15769,7 @@ async function main() {
                     heading: event.lastKnownPosition.heading, leftCoverageOf: 'all-sites-auto' }
                 : (event.exit || null);
               mutateEvent(event.id, { exit: exitPoint });
-              markTrackClosed(p.eventId);
+              if (!_trackContinuesAfterClose(event)) markTrackClosed(p.eventId);
               closeEvent(p.eventId, exitPoint, { autoOutcome: 'left coverage' });
               toast(`Sim auto-ended · ${event.droneType || 'track'} left all sensor coverage with no active pursuit.`, 'info');
               updateContributingRings();
@@ -16046,12 +16071,20 @@ async function main() {
             && !event.multiSiteTrack && event.status === 'active'
             && !cov?.inCoverage && !_onboardTrackMaintained(event, p)) {
           state.closedAt = monoNow();
-          markTrackClosed(p.eventId);
+          if (!_trackContinuesAfterClose(event)) markTrackClosed(p.eventId);
           closeEvent(p.eventId, event.exit || null, { autoOutcome: 'lost contact' });
           updateContributingRings();
           renderAlertStrip();
           if (getSelectedEventId() === p.eventId) renderDetailPanel();
         }
+        // FLIES ON, BUT NOT FOREVER. Once the scripted waypoints are
+        // exhausted there is nothing left to draw, so stop emitting
+        // rather than leave a stationary entity ticking for the rest of
+        // the session. The ordinary completion close further down cannot
+        // do this, because it requires status === 'active' and by now
+        // the event is closed. Harmless for every other template: the
+        // track is already marked closed and this is idempotent.
+        if (p.completed && state.closedAt) markTrackClosed(p.eventId);
       } else {
         // Off-map: hide LEAD drone (swarm handled by its own loop below).
         state.billboard.show = false;

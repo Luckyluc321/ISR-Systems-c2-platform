@@ -943,6 +943,12 @@ export const TEMPLATES = {
     // and invisible until it crosses into coverage, detected on
     // entry, closed on exit by the ordinary single-site chain.
     coverageGated: true,
+    // Keeps flying after Billund's case closes, so the red dashed
+    // breadcrumb continues out along its route instead of freezing at
+    // the coverage edge. The event still closes and the icon still
+    // hides: what continues is the unobserved-path line, not the
+    // detection. See _trackContinuesAfterClose in main.js.
+    continueAfterClose: true,
     classification: 'hostile',
     threat: 'high',
     platform: 'loitering-munition',
@@ -995,6 +1001,12 @@ export const TEMPLATES = {
     // and invisible until it crosses into coverage, detected on
     // entry, closed on exit by the ordinary single-site chain.
     coverageGated: true,
+    // Keeps flying after Billund's case closes, so the red dashed
+    // breadcrumb continues out along its route instead of freezing at
+    // the coverage edge. The event still closes and the icon still
+    // hides: what continues is the unobserved-path line, not the
+    // detection. See _trackContinuesAfterClose in main.js.
+    continueAfterClose: true,
     classification: 'hostile',
     threat: 'high',
     platform: 'loitering-munition',
@@ -1045,6 +1057,12 @@ export const TEMPLATES = {
     // and invisible until it crosses into coverage, detected on
     // entry, closed on exit by the ordinary single-site chain.
     coverageGated: true,
+    // Keeps flying after Billund's case closes, so the red dashed
+    // breadcrumb continues out along its route instead of freezing at
+    // the coverage edge. The event still closes and the icon still
+    // hides: what continues is the unobserved-path line, not the
+    // detection. See _trackContinuesAfterClose in main.js.
+    continueAfterClose: true,
     classification: 'hostile',
     threat: 'high',
     platform: 'loitering-munition',
