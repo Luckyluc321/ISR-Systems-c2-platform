@@ -612,6 +612,13 @@ function _tenantScopedLinkedIds(linkedIds, currentSiteId, activeRole) {
 // at. One constant, both readers.
 const _LOSS_GRACE_FLOOR_MS = 30000;
 
+// How long a dispatch keeps hunting after its OWN seeker loses contact,
+// steering at the target's projected position before it turns for home.
+// Deliberately the same number as the event grace above, so there is one
+// answer to "how long before we accept it is gone" rather than two that
+// drift apart.
+const _PURSUIT_GRACE_MS = _LOSS_GRACE_FLOOR_MS;
+
 function _classifyDetectionLoss(event) {
   const site = SITES[event.siteId];
   const boundary = site?.siteBoundary;
@@ -5118,6 +5125,31 @@ async function main() {
     return false;
   }
 
+  // Where is the target now, projected from the last time a sensor
+  // actually saw it? Dead-reckoned along its last observed heading at
+  // its last observed speed.
+  //
+  // THIS IS A SIMULATION AID, like the dashed breadcrumb. A real
+  // deployment does not hand an interceptor a track nobody is
+  // observing: its own seeker and its operator are the authority, and
+  // the position we would be projecting is a guess. It exists here so a
+  // pursuit continues past the edge of our mesh instead of flying at a
+  // coordinate the target left thirty seconds ago.
+  function _projectedTargetPosition(sw, sinceMs, now) {
+    const last = sw?._lastInCovPos;
+    const hdgDeg = sw?._lastHeadingDeg;
+    const speedMs = sw?._lastInCovSpeedMs;
+    if (!last || typeof hdgDeg !== 'number' || !(speedMs > 0)) return null;
+    const runM = speedMs * Math.max(0, (now - sinceMs) / 1000);
+    const brng = hdgDeg * Math.PI / 180;
+    const M_PER_DEG_LON = 111320 * Math.cos(last.lat * Math.PI / 180);
+    return {
+      lat: last.lat + (runM * Math.cos(brng)) / 111320,
+      lon: last.lon + (runM * Math.sin(brng)) / M_PER_DEG_LON,
+      alt: last.alt,
+    };
+  }
+
   function _rebalancePatrolsToWreckages(event) {
     if (!event || !Array.isArray(event.wreckages) || !event.wreckages.length) return;
     const patrolDispatches = [];
@@ -7574,8 +7606,51 @@ async function main() {
       d.targetLon = Cesium.Math.toDegrees(c.longitude);
     }
 
+    // THE PURSUIT CLOCK BELONGS TO ONE TARGET. An interceptor whose
+    // assignment was downed gets re-tasked to another hostile, and a
+    // clock left over from the previous one would read as "already lost
+    // for 30 seconds" on the first tick of a brand new pursuit and send
+    // the unit straight home. Keyed to the member it was started for.
+    if (d.pursuitLostSince && d._pursuitLostFor !== d.assignedSwarmMember) {
+      d.pursuitLostSince = null;
+      d._pursuitLostFor = null;
+    }
+
+    // CONTACT REGAINED RESETS THE PURSUIT CLOCK. Either our own mesh
+    // sees it again, at this site or any other, or this unit's seeker
+    // has it. Both mean the pursuit is live again and the grace window
+    // starts from scratch the next time contact drops.
+    if (d.pursuitLostSince
+        && (_onboardHoldsTarget || d.assignedSwarmMember?.billboard?.show === true)) {
+      d.pursuitLostSince = null;
+      d._pursuitLostFor = null;
+    }
+
+    // THE CASE CLOSING IS NOT THE UNIT LOSING ITS TARGET.
+    //
+    // `targetLost` means the platform has no open case: the primary
+    // event closed and no linked event is active. It says nothing about
+    // whether this unit still has a drone to chase, and it flips the
+    // moment a swarm clears a site's coverage. Acting on it here sent
+    // every interceptor home at the perimeter even though the escapee
+    // was still airborne a few hundred metres ahead, which pre-empted
+    // the pursuit window below entirely.
+    //
+    // A unit with a live assigned hostile now defers to that window:
+    // its own contact decides when to break off, not the case. A unit
+    // with nothing to chase still goes home immediately, which is every
+    // non-swarm event and so leaves that behaviour untouched.
+    //
+    // This is the narrow half of the chase-vs-case question in
+    // docs/open-question-chase-vs-case.md. It decouples the UNIT from
+    // the case. Whether the CASE should stay open during a pursuit is
+    // still open and still Peter's call.
+    const _hasLivePursuitTarget = !!(d.assignedSwarmMember
+      && !d.assignedSwarmMember.neutralised);
+
     // Phase F: RTB behaviour when target lost signal before arrival
-    if (d.state === 'en_route' && targetLost && d.profile.supportsRTB && !_onboardHoldsTarget) {
+    if (d.state === 'en_route' && targetLost && d.profile.supportsRTB && !_onboardHoldsTarget
+        && !_hasLivePursuitTarget) {
       d.state = 'rtb_via_last_known';
       d.rtbTargetLat = d.targetLat;   // last known coord we had
       d.rtbTargetLon = d.targetLon;
@@ -7610,33 +7685,68 @@ async function main() {
         // The seeker still has it. Our mesh losing the target is not
         // the interceptor losing the target.
         && !_onboardHoldsTarget) {
-      d.state = 'rtb_via_last_known';
-      // Extend the last-known target 1 km along the target's last
-      // heading before signal loss. Interceptor keeps flying past
-      // the drop point in case the target is still moving on the
-      // same trajectory just beyond sensor coverage. If the drone
-      // reacquires mid-chase, rtb_via_last_known snaps back to
-      // en_route (handled below).
-      const PURSUIT_EXTENSION_M = 1000;
       const sw = d.assignedSwarmMember;
-      const lastLat = sw._lastInCovPos?.lat ?? d.targetLat;
-      const lastLon = sw._lastInCovPos?.lon ?? d.targetLon;
-      const hdgDeg  = sw._lastHeadingDeg;
-      if (typeof hdgDeg === 'number') {
-        const brng = hdgDeg * Math.PI / 180;
-        const M_PER_DEG_LON = 111320 * Math.cos(lastLat * Math.PI / 180);
-        d.rtbTargetLat = lastLat + (PURSUIT_EXTENSION_M * Math.cos(brng)) / 111320;
-        d.rtbTargetLon = lastLon + (PURSUIT_EXTENSION_M * Math.sin(brng)) / M_PER_DEG_LON;
-      } else {
-        d.rtbTargetLat = lastLat;
-        d.rtbTargetLon = lastLon;
+
+      // HOLD THE PURSUIT ON A PROJECTED TRACK, THEN GIVE UP.
+      //
+      // This block used to switch to rtb_via_last_known on the FIRST
+      // tick our mesh lost the target. The unit flew to a point 1 km
+      // past the last fix and orbited empty air while the drone carried
+      // on at 25 m/s, so the chase visibly ended at the site perimeter
+      // and the escapee walked away. That is what Lucas reported on
+      // 2026-10-11 running the Copenhagen swarm.
+      //
+      // The unit now keeps hunting for _PURSUIT_GRACE_MS, steering at
+      // the target's dead-reckoned position instead of a frozen
+      // coordinate. Reacquisition at ANY site clears the clock (see the
+      // reset above) and the pursuit simply continues, so a drone that
+      // reappears over another site is followed without the operator
+      // doing anything.
+      //
+      // The envelope caps below still apply unchanged: maxPursuitKm
+      // turns the unit for home regardless of contact, so a projected
+      // pursuit cannot run off the map.
+      if (!d.pursuitLostSince) {
+        d.pursuitLostSince = now;
+        d._pursuitLostFor = sw;
+        toast(`${d.assetName} lost sensor contact. Holding pursuit on projected track.`, 'warn');
       }
-      d.rtbOrbitStartTs = null;
-      d.lastFrameTs = now;
-      if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+      if ((now - d.pursuitLostSince) < _PURSUIT_GRACE_MS) {
+        const proj = _projectedTargetPosition(sw, d.pursuitLostSince, now);
+        if (proj) {
+          d.targetLat = proj.lat;
+          d.targetLon = proj.lon;
+        }
+        // DELIBERATELY NO `return`. The state stays en_route or
+        // engaging and the flight code further down flies the unit at
+        // the projected position. Returning here would freeze it.
+      } else {
+        // Window expired. Fall back to the original behaviour: run out
+        // along the last known trajectory, orbit, then home.
+        d.state = 'rtb_via_last_known';
+        d.pursuitLostSince = null;
+        d._pursuitLostFor = null;
+        const PURSUIT_EXTENSION_M = 1000;
+        const lastLat = sw._lastInCovPos?.lat ?? d.targetLat;
+        const lastLon = sw._lastInCovPos?.lon ?? d.targetLon;
+        const hdgDeg  = sw._lastHeadingDeg;
+        if (typeof hdgDeg === 'number') {
+          const brng = hdgDeg * Math.PI / 180;
+          const M_PER_DEG_LON = 111320 * Math.cos(lastLat * Math.PI / 180);
+          d.rtbTargetLat = lastLat + (PURSUIT_EXTENSION_M * Math.cos(brng)) / 111320;
+          d.rtbTargetLon = lastLon + (PURSUIT_EXTENSION_M * Math.sin(brng)) / M_PER_DEG_LON;
+        } else {
+          d.rtbTargetLat = lastLat;
+          d.rtbTargetLon = lastLon;
+        }
+        d.rtbOrbitStartTs = null;
+        d.lastFrameTs = now;
+        if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
         if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
-      toast(`${d.assetName} lost signal on target. Following last known trajectory to edge of coverage.`, 'warn');
-      return;
+        toast(`${d.assetName} has not reacquired in ${Math.round(_PURSUIT_GRACE_MS / 1000)} s. `
+          + `Breaking off pursuit and returning to base.`, 'warn');
+        return;
+      }
     }
 
     // Distance-based RTB, with pursuit override.
@@ -16274,6 +16384,9 @@ async function main() {
             // position when they lose signal — "keep chasing along
             // the last known trajectory before giving up".
             sw._lastHeadingDeg = hdgDeg;
+            // And its last observed speed, so a pursuit can dead-reckon
+            // the track rather than fly at a frozen point.
+            sw._lastInCovSpeedMs = speedMs;
           }
           // Per-drone OOR/REACQ markers were duplicating the per-site
           // markers fired by processPerSiteMarkers (2 near-identical

@@ -101,6 +101,7 @@ of a link" is not a general rule.
 |---|---|
 | **Re-entry opens a NEW linked event** | For multi-site and coverage-gated tracks. The closed case stays closed and the return opens a new event linked to it. A single-site track cannot re-enter at all, its entities are torn down at close, so there is nothing to return to |
 | **A detached member that nobody holds gets a verdict** | 30 seconds outside our sensors AND outside every responder's own sensor range → `status: 'lost'`, a note on the event, a `? LOST` chip on the roster and a dimmed row |
+| **A chasing unit breaks off on its OWN contact, not on the case** | A counter-drone interceptor used to turn for home the moment our sensors lost the drone, or the moment the case closed. It now keeps hunting the projected track for 30 seconds. Reacquired at any site, the clock resets and it carries on. Fuel and range caps are unchanged, so it cannot chase forever. **The case still closes on its own schedule** — see the gap below |
 
 **The dashed breadcrumb is simulation only, and it keeps running after the
 verdict.** Outside coverage it is the only thing showing where an unobserved
