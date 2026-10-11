@@ -33,8 +33,14 @@ same time.
 ## Why "no link for an operator, except a return"
 
 Linked events are scoped by tenant at the data layer (`_visibleToActor` in
-`src/events.js`), and site→tenant is 1:1. So a cross-site link points at an
-event the operator cannot see. They see their own event carrying a note that it
+`src/events.js`). Most site operators hold exactly one site, so a cross-site
+link points at an event they cannot see.
+
+**It is not 1:1, and the exception matters.** `op-energinet` holds six
+substations (`siteIds` in `src/roles.js`, `isMultiSite: true`). A track moving
+between two Energinet sites produces two events that the **same** operator
+sees, linked. That is correct behaviour, not a leak, but it means "an operator
+never sees the other end of a link" is wrong as a general rule. They see their own event carrying a note that it
 continued elsewhere; they do not get the other site's case in their inbox.
 
 A **gov profile** reads the whole chain, which is the point of the link.
@@ -45,7 +51,8 @@ something came back to **their** site after **their** case had closed.
 ## Why a breakaway is a member, not an event
 
 `event.memberTracks[]` is the source of truth for per-member state, with status
-`tracked | lost | neutralised | broken-away`
+`tracked | lost | neutralised | broken-away`, all four of which now have
+writers
 (`docs/swarm-individual-tracking-architecture.md`). The roster already renders
 it. A drone that leaves formation has changed **state**, not identity. Giving
 it a second event at the same site means the operator sees two cases for one
@@ -68,20 +75,52 @@ events for one flight. Ended means ended only **after** that window.
 
 - A breakaway is a member with `status: 'broken-away'`. No child event, no
   same-site link. `_markMemberBrokenAway` in `src/main.js`
-- `_spawnLinkedSiteEvent` is the only creator of linked events and is
-  cross-site by construction: `_findGroupEventForSite` returns the primary
-  itself for the same site, so the spawn is unreachable there
+- `_spawnLinkedSiteEvent` creates a linked event on a site's first entry
+  and, since 2026-10-11, on a **re-entry after that site's case closed**.
+  `_findGroupEventForSite` returns the ACTIVE event for a site or null, so a
+  closed case falls through to the spawn. It is **not** the only creator of
+  links: `_autoCorrelate` also calls `linkEvents` with no site filter
+- One resolver answers "which event owns this site". Both the per-site
+  ENTRY/EXIT branches and the sensor-contribution writer call
+  `_findGroupEventForSite`. They were two separate lookups until
+  2026-10-11 and they had drifted: the second took the first linked event
+  matching the site with no status filter, so after a re-entry it stamped
+  sensor confidence onto the CLOSED case while the live one stayed empty
 - Operators are filtered by tenant, so a cross-site linked event is already
   invisible to the other site's operator
-- A departure gets a 30 second grace with a visible countdown; a loss inside
-  the perimeter keeps its 15-60 second speed-scaled leash
+- **Returns after the event closed opens a new linked event**, for
+  multi-site and coverage-gated tracks. `_findGroupEventForSite` returns only
+  ACTIVE events, so a return to a closed case falls through to
+  `_spawnLinkedSiteEvent`. It previously reopened the closed event in place
+  and nulled its `outcome`, erasing a verdict already recorded and forwarded.
+  A single-site track is torn down at close, so it has nothing to return to
+- **Re-entry is reachable in the shipped Copenhagen swarm, and how often
+  depends on when you dispatch.** Do not judge this from the template
+  waypoints. The overwatch drone has an evasion policy: panic latches when
+  the lead is within 2 km of Amager AND any interceptor is within
+  `SWARM_DETECT_M` (1000 m) of a live member, after which it stops flying the
+  template and runs due east at 50 m/s with a bearing tilt away from the
+  nearest interceptor. Its egress is therefore seeded from wherever it
+  happened to be when panic latched. **Dispatch early and that eastward run
+  carries it back across Copenhagen's rings, opening a second Copenhagen
+  event linked to the closed one. Dispatch late and it latches further north
+  and leaves outside sensor reach.** Confirmed by a live run on 2026-10-11,
+  after both a static-waypoint analysis and a verification agent concluded
+  the path was monotonic and could not return. It is not monotonic once the
+  drone is being chased
+- A detached member that nobody holds for 30 seconds gets
+  `status: 'lost'`, a dated note on the event, and a `? LOST` chip on the
+  roster. The breadcrumb keeps running: a verdict on the roster and a
+  breadcrumb on the map answer different questions
+- A departure on a multi-site or coverage-gated track gets a 30 second grace
+  with a visible countdown; a loss inside the perimeter keeps its 15-60
+  second speed-scaled leash. **Other templates get neither** (see below)
 
 **Agreed but NOT built.** The table at the top of this document describes the
 target model. These rows of it are not yet true:
 
 | Row | What happens today |
 |---|---|
-| Returns after the event closed → new linked event | **Built** for multi-site tracks. `_findGroupEventForSite` now returns only ACTIVE events, so a return to a closed case falls through to `_spawnLinkedSiteEvent` and opens a new one, linked. It previously reopened the closed event in place and nulled its `outcome`, erasing a verdict already recorded and forwarded. A single-site track is torn down at close, so it has nothing to return to |
 | Returns while live → rejoin to `tracked` | Nothing clears `_brokenAway` or writes `tracked`. A member stays detached for the life of the event |
 | The site's case closes when nothing is observable there | True unless one of our own interceptors is still chasing. `noChase` keeps the event open while any dispatch is `en_route` or `engaging`, and `_hostilesRemainIncludingChildren` counts the detached member as a live hostile. It resolves at the aircraft's fuel cap, not at 30 seconds |
 | The 30 second rule | Applies only to tracks declaring `multiSite` or `coverageGated`. Every other template closes on the same tick as OUT OF RANGE, with no grace and no countdown |

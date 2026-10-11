@@ -612,6 +612,13 @@ function _tenantScopedLinkedIds(linkedIds, currentSiteId, activeRole) {
 // at. One constant, both readers.
 const _LOSS_GRACE_FLOOR_MS = 30000;
 
+// How long a dispatch keeps hunting after its OWN seeker loses contact,
+// steering at the target's projected position before it turns for home.
+// Deliberately the same number as the event grace above, so there is one
+// answer to "how long before we accept it is gone" rather than two that
+// drift apart.
+const _PURSUIT_GRACE_MS = _LOSS_GRACE_FLOOR_MS;
+
 function _classifyDetectionLoss(event) {
   const site = SITES[event.siteId];
   const boundary = site?.siteBoundary;
@@ -5118,6 +5125,35 @@ async function main() {
     return false;
   }
 
+  // Where is the target now, projected from the last time a sensor
+  // actually saw it? Dead-reckoned along its last observed heading at
+  // its last observed speed.
+  //
+  // THIS IS A SIMULATION AID, like the dashed breadcrumb. A real
+  // deployment does not hand an interceptor a track nobody is
+  // observing: its own seeker and its operator are the authority, and
+  // the position we would be projecting is a guess. It exists here so a
+  // pursuit continues past the edge of our mesh instead of flying at a
+  // coordinate the target left thirty seconds ago.
+  // `now` is compared against the anchor's OWN timestamp, not against
+  // whenever the caller noticed the loss. See _lastInCovAtMs.
+  function _projectedTargetPosition(sw, now) {
+    const last = sw?._lastInCovPos;
+    const hdgDeg = sw?._lastHeadingDeg;
+    const speedMs = sw?._lastInCovSpeedMs;
+    const anchorMs = sw?._lastInCovAtMs;
+    if (!last || typeof hdgDeg !== 'number' || !(speedMs > 0)
+        || typeof anchorMs !== 'number') return null;
+    const runM = speedMs * Math.max(0, (now - anchorMs) / 1000);
+    const brng = hdgDeg * Math.PI / 180;
+    const M_PER_DEG_LON = 111320 * Math.cos(last.lat * Math.PI / 180);
+    return {
+      lat: last.lat + (runM * Math.cos(brng)) / 111320,
+      lon: last.lon + (runM * Math.sin(brng)) / M_PER_DEG_LON,
+      alt: last.alt,
+    };
+  }
+
   function _rebalancePatrolsToWreckages(event) {
     if (!event || !Array.isArray(event.wreckages) || !event.wreckages.length) return;
     const patrolDispatches = [];
@@ -6048,8 +6084,11 @@ async function main() {
    *
    * ACQUIRES ON THE AIRCRAFT'S OWN SENSOR, not on a coordinate handed
    * down from the dispatch. The profile already declares the reach that
-   * matters, onboardSensorRangeM, 800 m for this airframe's EO/IR
-   * turret, and the same number already governs whether a pursuit holds
+   * matters, onboardSensorRangeM, which CD_PROFILE sets to 2000 m for
+   * this airframe with the caveat recorded there that it is a
+   * representative figure and not an air-to-air capability claim. This
+   * docstring said 800 m until 2026-10-11, which matched nothing in the
+   * code. The same number already governs whether a pursuit holds
    * when the site mesh loses the target. A gunner lays on what the
    * aircraft can see, so the gun uses the same figure.
    *
@@ -7176,66 +7215,77 @@ async function main() {
 
   function _startCounterDispatchLoop() {
     if (_cdRafId) return;
+    // WHY THE RESCHEDULE SITS IN A `finally`.
+    //
+    // A throw anywhere in this arrow used to skip the reschedule at the
+    // bottom. _cdRafId kept its already-consumed handle and
+    // _startCounterDispatchLoop's `if (_cdRafId) return` then refused to
+    // restart it, so the whole counter-dispatch fleet froze permanently
+    // with no recovery path. The per-unit try below stops one bad unit
+    // taking the others. This finally stops anything at all taking the
+    // loop itself.
     const tick = () => {
-      const now = wallNow();
-      for (const [, d] of _counterDispatches) {
-        // ISOLATE THE UNIT.
-        //
-        // This call was bare, so a throw from any single dispatch
-        // escaped the loop before requestAnimationFrame was called
-        // again. _cdRafId kept its already-consumed handle and
-        // _startCounterDispatchLoop's `if (_cdRafId) return` then
-        // refused to restart it, so one bad unit killed the entire
-        // counter-dispatch fleet permanently with no recovery path.
-        //
-        // That is how a one-token scope error presented as every
-        // interceptor freezing in mid-air instead of one drone
-        // misbehaving. The fleet degrades by a unit, never stops.
-        try {
-          _tickCounterDispatch(d, now);
-        } catch (err) {
-          if (!d._tickErrorLogged) {
-            d._tickErrorLogged = true;
-            console.error(`[dispatch] ${d.assetName || d.id} tick failed, unit frozen:`, err);
-          }
-        }
-        // LIVE POSITION AUTHORITY. Re-assert the last real fix over
-        // whatever the tick computed. Level-triggered on purpose: the
-        // tick writes position from four different states and
-        // interpolates altitude ahead of all of them, so gating each
-        // one would leave the next person to add physics responsible
-        // for remembering this unit is not ours to move.
-        if (reassertLivePosition(d)) {
-          if (d.profile?.trail) {
-            d.trailPositions.push(Cesium.Cartesian3.fromDegrees(
-              d.curLon, d.curLat,
-              d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
-            if (d.trailPositions.length > 500) d.trailPositions.shift();
-          }
-          // A tracker that has gone quiet leaves the unit frozen, which
-          // is the truth. Marking it stale stops that reading as a unit
-          // still driving to the scene, which would wedge the event
-          // open and let the record claim it lost its target.
-          const stale = isTelemetryStale(d, now);
-          if (stale !== d.telemetryStale) {
-            d.telemetryStale = stale;
-            if (stale) toast(`${d.assetName} position feed has gone quiet.`, 'warn');
+      try {
+        const now = wallNow();
+        for (const [, d] of _counterDispatches) {
+          // ISOLATE THE UNIT.
+          //
+          // The WHOLE per-unit body is inside this try, not just the
+          // physics call. A throw from reassertLivePosition, the trail
+          // push, the staleness check or the event mirror freezes that
+          // one unit and logs once. The fleet degrades by a unit, never
+          // stops.
+          //
+          // That is how a one-token scope error presented as every
+          // interceptor freezing in mid-air instead of one drone
+          // misbehaving.
+          try {
+              _tickCounterDispatch(d, now);
+            // LIVE POSITION AUTHORITY. Re-assert the last real fix over
+            // whatever the tick computed. Level-triggered on purpose: the
+            // tick writes position from four different states and
+            // interpolates altitude ahead of all of them, so gating each
+            // one would leave the next person to add physics responsible
+            // for remembering this unit is not ours to move.
+            if (reassertLivePosition(d)) {
+              if (d.profile?.trail) {
+                d.trailPositions.push(Cesium.Cartesian3.fromDegrees(
+                  d.curLon, d.curLat,
+                  d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
+                if (d.trailPositions.length > 500) d.trailPositions.shift();
+              }
+              // A tracker that has gone quiet leaves the unit frozen, which
+              // is the truth. Marking it stale stops that reading as a unit
+              // still driving to the scene, which would wedge the event
+              // open and let the record claim it lost its target.
+              const stale = isTelemetryStale(d, now);
+              if (stale !== d.telemetryStale) {
+                d.telemetryStale = stale;
+                if (stale) toast(`${d.assetName} position feed has gone quiet.`, 'warn');
+                _syncDispatchToEvent(d);
+              }
+            }
+            // Persist live dispatch state onto event.counterDispatches so
+            // consumers reading from the shared event object (multi-tab
+            // cross-tenant echo panel, "Other agencies on case", future
+            // report generators) see up-to-date state without needing
+            // access to the browser-local _counterDispatches Map.
+            // Same tick loop that drives the physics also mirrors state
+            // into the persisted snapshot — one place, always fresh.
             _syncDispatchToEvent(d);
+          } catch (err) {
+            if (!d._tickErrorLogged) {
+              d._tickErrorLogged = true;
+              console.error(`[dispatch] ${d.assetName || d.id} tick failed, unit frozen:`, err);
+            }
           }
         }
-        // Persist live dispatch state onto event.counterDispatches so
-        // consumers reading from the shared event object (multi-tab
-        // cross-tenant echo panel, "Other agencies on case", future
-        // report generators) see up-to-date state without needing
-        // access to the browser-local _counterDispatches Map.
-        // Same tick loop that drives the physics also mirrors state
-        // into the persisted snapshot — one place, always fresh.
-        _syncDispatchToEvent(d);
-      }
-      if (_counterDispatches.size > 0) {
-        _cdRafId = requestAnimationFrame(tick);
-      } else {
-        _cdRafId = null;
+      } finally {
+        if (_counterDispatches.size > 0) {
+          _cdRafId = requestAnimationFrame(tick);
+        } else {
+          _cdRafId = null;
+        }
       }
     };
     _cdRafId = requestAnimationFrame(tick);
@@ -7563,8 +7613,73 @@ async function main() {
       d.targetLon = Cesium.Math.toDegrees(c.longitude);
     }
 
+    // THE PURSUIT CLOCK BELONGS TO ONE TARGET. An interceptor whose
+    // assignment was downed gets re-tasked to another hostile, and a
+    // clock left over from the previous one would read as "already lost
+    // for 30 seconds" on the first tick of a brand new pursuit and send
+    // the unit straight home. Keyed to the member it was started for.
+    if (d.pursuitLostSince && d._pursuitLostFor !== d.assignedSwarmMember) {
+      d.pursuitLostSince = null;
+      d._pursuitLostFor = null;
+    }
+
+    // CONTACT REGAINED RESETS THE PURSUIT CLOCK. Either our own mesh
+    // sees it again, at this site or any other, or this unit's seeker
+    // has it. Both mean the pursuit is live again and the grace window
+    // starts from scratch the next time contact drops.
+    if (d.pursuitLostSince
+        && (_onboardHoldsTarget || d.assignedSwarmMember?.billboard?.show === true)) {
+      d.pursuitLostSince = null;
+      d._pursuitLostFor = null;
+      // Shares the loss message's debounce stamp deliberately, so a
+      // target sitting on a boundary cannot ping-pong two toasts at
+      // frame rate. One or the other, at most every ten seconds.
+      if (now - (d._pursuitToastTs || 0) > 10000) {
+        d._pursuitToastTs = now;
+        toast(`${d.assetName} reacquired target. Pursuit continues.`, 'info');
+      }
+    }
+
+    // THE CASE CLOSING IS NOT THE UNIT LOSING ITS TARGET.
+    //
+    // `targetLost` means the platform has no open case: the primary
+    // event closed and no linked event is active. It says nothing about
+    // whether this unit still has a drone to chase, and it flips the
+    // moment a swarm clears a site's coverage. Acting on it here sent
+    // every interceptor home at the perimeter even though the escapee
+    // was still airborne a few hundred metres ahead, which pre-empted
+    // the pursuit window below entirely.
+    //
+    // A unit with a live assigned hostile now defers to that window:
+    // its own contact decides when to break off, not the case. A unit
+    // with nothing to chase still goes home immediately, which is every
+    // non-swarm event and so leaves that behaviour untouched.
+    //
+    // This is the narrow half of the chase-vs-case question in
+    // docs/open-question-chase-vs-case.md. It decouples the UNIT from
+    // the case. Whether the CASE should stay open during a pursuit is
+    // still open and still Peter's call.
+    // BOUNDED. Deferring to the pursuit window relies on the window
+    // eventually arming, which needs `billboard.show === false`. Once an
+    // event closes, onDroneTick stops running for it, so `show` freezes
+    // at whatever it last was. If it froze TRUE the window never arms
+    // and, with Phase F gated, a unit could have no exit left at all:
+    // for a live-telemetry unit the battery and distance caps are
+    // themselves gated on `!_telemetryIsLive`, so there would be none.
+    // Two grace windows after the case went quiet, stop deferring and
+    // let Phase F do its job.
+    if (targetLost) {
+      if (!d._caseLostAt) d._caseLostAt = now;
+    } else {
+      d._caseLostAt = null;
+    }
+    const _hasLivePursuitTarget = !!(d.assignedSwarmMember
+      && !d.assignedSwarmMember.neutralised)
+      && (now - (d._caseLostAt || now)) < 2 * _PURSUIT_GRACE_MS;
+
     // Phase F: RTB behaviour when target lost signal before arrival
-    if (d.state === 'en_route' && targetLost && d.profile.supportsRTB && !_onboardHoldsTarget) {
+    if (d.state === 'en_route' && targetLost && d.profile.supportsRTB && !_onboardHoldsTarget
+        && !_hasLivePursuitTarget) {
       d.state = 'rtb_via_last_known';
       d.rtbTargetLat = d.targetLat;   // last known coord we had
       d.rtbTargetLon = d.targetLon;
@@ -7599,33 +7714,87 @@ async function main() {
         // The seeker still has it. Our mesh losing the target is not
         // the interceptor losing the target.
         && !_onboardHoldsTarget) {
-      d.state = 'rtb_via_last_known';
-      // Extend the last-known target 1 km along the target's last
-      // heading before signal loss. Interceptor keeps flying past
-      // the drop point in case the target is still moving on the
-      // same trajectory just beyond sensor coverage. If the drone
-      // reacquires mid-chase, rtb_via_last_known snaps back to
-      // en_route (handled below).
-      const PURSUIT_EXTENSION_M = 1000;
       const sw = d.assignedSwarmMember;
-      const lastLat = sw._lastInCovPos?.lat ?? d.targetLat;
-      const lastLon = sw._lastInCovPos?.lon ?? d.targetLon;
-      const hdgDeg  = sw._lastHeadingDeg;
-      if (typeof hdgDeg === 'number') {
-        const brng = hdgDeg * Math.PI / 180;
-        const M_PER_DEG_LON = 111320 * Math.cos(lastLat * Math.PI / 180);
-        d.rtbTargetLat = lastLat + (PURSUIT_EXTENSION_M * Math.cos(brng)) / 111320;
-        d.rtbTargetLon = lastLon + (PURSUIT_EXTENSION_M * Math.sin(brng)) / M_PER_DEG_LON;
-      } else {
-        d.rtbTargetLat = lastLat;
-        d.rtbTargetLon = lastLon;
+
+      // HOLD THE PURSUIT ON A PROJECTED TRACK, THEN GIVE UP.
+      //
+      // This block used to switch to rtb_via_last_known on the FIRST
+      // tick our mesh lost the target. The unit flew to a point 1 km
+      // past the last fix and orbited empty air while the drone carried
+      // on at 25 m/s, so the chase visibly ended at the site perimeter
+      // and the escapee walked away. That is what Lucas reported on
+      // 2026-10-11 running the Copenhagen swarm.
+      //
+      // The unit now keeps hunting for _PURSUIT_GRACE_MS, steering at
+      // the target's dead-reckoned position instead of a frozen
+      // coordinate. Reacquisition at ANY site clears the clock (see the
+      // reset above) and the pursuit simply continues, so a drone that
+      // reappears over another site is followed without the operator
+      // doing anything.
+      //
+      // The envelope caps below still apply unchanged: maxPursuitKm
+      // turns the unit for home regardless of contact, so a projected
+      // pursuit cannot run off the map.
+      // NO PROJECTION MEANS NOTHING TO HOLD ON TO, so break off at once
+      // rather than hold for 30 seconds flying at a frozen coordinate,
+      // which would be the original bug plus a delay.
+      //
+      // This is the case for the swarm LEAD. Its wrapper carries none of
+      // the last-observed fields, because the writer loop runs over
+      // state.swarmBillboards and the lead lives at
+      // state.leadSwarmMember. Interceptor 0 of every pack draws the
+      // lead, so one unit in three keeps the old behaviour. Recorded as
+      // a known gap rather than fixed here, because the fix belongs in
+      // the lead path and that path is load-bearing for every scenario
+      // in the build.
+      const proj = _projectedTargetPosition(sw, now);
+      if (proj && !d.pursuitLostSince) {
+        d.pursuitLostSince = now;
+        d._pursuitLostFor = sw;
+        // DEBOUNCED. A target flickering across the coverage boundary or
+        // the seeker radius restarts this clock every other frame, and
+        // toast() replaces the text of a single pinned element rather
+        // than stacking, so an undebounced message here would clobber
+        // every detection, handover and overdue notification at frame
+        // rate and pin itself permanently.
+        if (now - (d._pursuitToastTs || 0) > 10000) {
+          d._pursuitToastTs = now;
+          toast(`${d.assetName} lost sensor contact. Holding pursuit on projected track.`, 'warn');
+        }
       }
-      d.rtbOrbitStartTs = null;
-      d.lastFrameTs = now;
-      if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
+      if (proj && (now - d.pursuitLostSince) < _PURSUIT_GRACE_MS) {
+        d.targetLat = proj.lat;
+        d.targetLon = proj.lon;
+        // DELIBERATELY NO `return`. The state stays en_route or
+        // engaging and the flight code further down flies the unit at
+        // the projected position. Returning here would freeze it.
+      } else {
+        // Window expired. Fall back to the original behaviour: run out
+        // along the last known trajectory, orbit, then home.
+        d.state = 'rtb_via_last_known';
+        d.pursuitLostSince = null;
+        d._pursuitLostFor = null;
+        const PURSUIT_EXTENSION_M = 1000;
+        const lastLat = sw._lastInCovPos?.lat ?? d.targetLat;
+        const lastLon = sw._lastInCovPos?.lon ?? d.targetLon;
+        const hdgDeg  = sw._lastHeadingDeg;
+        if (typeof hdgDeg === 'number') {
+          const brng = hdgDeg * Math.PI / 180;
+          const M_PER_DEG_LON = 111320 * Math.cos(lastLat * Math.PI / 180);
+          d.rtbTargetLat = lastLat + (PURSUIT_EXTENSION_M * Math.cos(brng)) / 111320;
+          d.rtbTargetLon = lastLon + (PURSUIT_EXTENSION_M * Math.sin(brng)) / M_PER_DEG_LON;
+        } else {
+          d.rtbTargetLat = lastLat;
+          d.rtbTargetLon = lastLon;
+        }
+        d.rtbOrbitStartTs = null;
+        d.lastFrameTs = now;
+        if (d.radiationEntity) { viewer.entities.remove(d.radiationEntity); d.radiationEntity = null; }
         if (d.jammingPipEntity) { viewer.entities.remove(d.jammingPipEntity); d.jammingPipEntity = null; }
-      toast(`${d.assetName} lost signal on target. Following last known trajectory to edge of coverage.`, 'warn');
-      return;
+        toast(`${d.assetName} has not reacquired in ${Math.round(_PURSUIT_GRACE_MS / 1000)} s. `
+          + `Breaking off pursuit and returning to base.`, 'warn');
+        return;
+      }
     }
 
     // Distance-based RTB, with pursuit override.
@@ -11123,17 +11292,23 @@ async function main() {
       const tickSeq = _contribTickSeq;
       const hitSites = _sitesSeeingPoint(lat, lon, altM);
       for (const sid of hitSites) {
-        let targetEvent = event;
-        if (event.siteId !== sid) {
-          const linkedIds = event.linkedEventIds || [];
-          let matched = null;
-          for (const lid of linkedIds) {
-            const le = getEvent(lid);
-            if (le && le.siteId === sid) { matched = le; break; }
-          }
-          if (!matched) continue;
-          targetEvent = matched;
-        }
+        // ONE RESOLVER, SHARED WITH THE PER-SITE LIFECYCLE.
+        //
+        // This took the first linked event matching the site with no
+        // status filter, which was correct only while a site could hold
+        // exactly one event. Re-entry after close now opens a SECOND
+        // case for the same site, so a first match stamped sensors onto
+        // the CLOSED one: its contributingSensors and peakConfidence
+        // kept growing after its report was generated and forwarded,
+        // while the live case stayed empty and got swept 'lost contact'
+        // fifteen seconds later with the drones still inside the rings.
+        //
+        // _findGroupEventForSite returns the ACTIVE event for the site
+        // or null, and is the same resolver the ENTRY/EXIT branches use.
+        // Two functions answering "which event owns this site" is how
+        // the drift happened; there is now one.
+        const targetEvent = _findGroupEventForSite(event, sid);
+        if (!targetEvent) continue;
         if (!targetEvent.contributingSensors) targetEvent.contributingSensors = [];
         // First call for this event in the current tick? Reset every
         // sensor's confidence to 0 so all drones this tick start from a
@@ -16257,6 +16432,32 @@ async function main() {
             // position when they lose signal — "keep chasing along
             // the last known trajectory before giving up".
             sw._lastHeadingDeg = hdgDeg;
+            // WHEN the anchor above was taken. A pursuit dead-reckons
+            // from `_lastInCovPos`, so it has to run the clock from the
+            // instant that position was recorded. Running it from the
+            // instant the INTERCEPTOR lost contact instead put the
+            // projection `speed * seekerHoldDuration` behind the target
+            // and left it there, which steered the unit backwards past
+            // itself. Anchor and clock are now the same instant.
+            sw._lastInCovAtMs = nowMs;
+            // Speed for the dead reckoning, measured over a window wide
+            // enough to survive per-tick jitter.
+            //
+            // NOT the `speedMs` above. That guards on `dt > 0.02`, which
+            // is false at any frame rate above 50 fps, so on a normal
+            // display it is the literal 25 it was initialised with. Fine
+            // for a roster readout, useless as the input to a
+            // projection: overwatch panic at 50 m/s would have been
+            // dead-reckoned at half speed. Left untouched because it is
+            // shared across the roster and the swarm lead.
+            const spAnchor = sw._covSpeedAnchor;
+            if (!spAnchor || (nowMs - spAnchor.ts) >= 500) {
+              if (spAnchor && nowMs > spAnchor.ts) {
+                sw._lastInCovSpeedMs = haversineM(spAnchor.lat, spAnchor.lon, pos.lat, pos.lon)
+                  / ((nowMs - spAnchor.ts) / 1000);
+              }
+              sw._covSpeedAnchor = { lat: pos.lat, lon: pos.lon, ts: nowMs };
+            }
           }
           // Per-drone OOR/REACQ markers were duplicating the per-site
           // markers fired by processPerSiteMarkers (2 near-identical
@@ -16330,6 +16531,57 @@ async function main() {
           // A detached member is mirrored by nothing: it IS a member of this
           // event, its kinematics already sync through syncMemberTrack, and
           // its fate is recorded on the member rather than on a second case.
+
+          // A DETACHED MEMBER THAT LOSES CONTACT GETS A VERDICT.
+          //
+          // When a breakaway owned a child event, that child closed
+          // itself 'lost contact' after 30 seconds outside both our
+          // sensor mesh and every responder's onboard range. Deleting
+          // the child deleted the verdict with it, so a detached drone
+          // could fly out of all coverage and leave NO record at all:
+          // it stayed 'broken-away' into the closed event, the member
+          // history and the post-incident report. The verdict now lands
+          // on the member, which is where its fate belongs. Same
+          // trigger, same window, same note.
+          //
+          // The breadcrumb is deliberately NOT touched here. The old
+          // child-close hid it, on the reasoning that a frozen line
+          // reads as a position we still hold. That reasoning is
+          // overruled for SIMULATION: outside coverage the dashed line
+          // is the only thing on the map showing where an unobserved
+          // object went, and it runs for as long as the simulation
+          // runs. A verdict on the roster and a breadcrumb on the map
+          // answer two different questions.
+          //
+          // IN LIVE THERE IS NO BREADCRUMB AT ALL. The line is drawn
+          // from simulated ground truth, which a real deployment does
+          // not have: outside every sensor radius the platform knows
+          // nothing, so there is nothing to draw. Anyone wiring the
+          // live path must not read the paragraph above as a universal
+          // rule. Sim draws the unobserved leg; live draws the verdict
+          // and stops. See docs/event-lifecycle-plain.md.
+          if (sw._brokenAway && !sw.neutralised && !sw._memberLostAt) {
+            if (!swShouldShow && !_onboardTrackMaintained(event, pos)) {
+              if (!sw._bwOorSince) sw._bwOorSince = nowMs;
+              if ((nowMs - sw._bwOorSince) >= _LOSS_GRACE_FLOOR_MS) {
+                sw._memberLostAt = nowMs;
+                if (sw.memberId) {
+                  setMemberStatus(event.id, sw.memberId, 'lost', {
+                    reason: 'no sensor or responder holds it',
+                  });
+                }
+                appendEventArray(event.id, 'notes', {
+                  timestamp: new Date().toISOString(),
+                  author: 'AUTO-CORRELATOR',
+                  text: `${sw.role || sw.memberId || 'A detached member'} lost. `
+                    + `No sensor or responder holds it.`,
+                  type: 'member-lost',
+                });
+              }
+            } else {
+              sw._bwOorSince = null;
+            }
+          }
           // P5A: adaptive sample capture (interval decided ONCE per event by platform)
           if (state.recording && (!sw._lastSampleMs || (nowMs - sw._lastSampleMs) >= _sampleIntervalForEvent(event))) {
             state.recording.timeseries.push(_buildDroneSample({
@@ -20994,13 +21246,14 @@ async function main() {
       var totalDrones = droneList.length;
 
       const fmtRow = (d, idx) => `
-        <div class="dp-swarm-row ${idx === _selectedSwarmIndex ? 'is-focused' : ''} ${d.status === 'neutralised' ? 'is-downed' : ''}" data-swarm-idx="${idx}" title="Click to focus ${d.id} (${d.model})">
+        <div class="dp-swarm-row ${idx === _selectedSwarmIndex ? 'is-focused' : ''} ${d.status === 'neutralised' ? 'is-downed' : ''} ${d.status === 'lost' ? 'is-lost' : ''}" data-swarm-idx="${idx}" title="Click to focus ${d.id} (${d.model})">
           <span class="dp-swarm-id">${d.id}</span>
           <span class="dp-swarm-model">${d.model}</span>
           <span class="dp-swarm-role">${d.role}</span>
           <span class="dp-swarm-status">${
             d.status === 'neutralised' ? `<span class="dp-swarm-status-downed">× DOWNED</span>`
             : d.status === 'broken-away' ? `<span class="dp-swarm-status-breakaway">↗ DETACHED</span>`
+            : d.status === 'lost' ? `<span class="dp-swarm-status-lost">? LOST</span>`
             : ''
           }</span>
           ${d.status === 'neutralised'

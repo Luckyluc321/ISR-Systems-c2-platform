@@ -49,7 +49,13 @@ For tracks that get the countdown, the wait depends on *where it was last seen*:
 | Inside, near the edge, heading out | 30 seconds |
 | **Inside** the fence, not leaving — lost to altitude or a gap | **15 to 60 seconds**, longer if it was slow |
 
-Uncertainty gets more time. A confirmed departure gets less.
+A **slow** track that might be hiding gets the most time, up to 60 seconds.
+
+**The two cross over at about 30 metres per second**, and above that a
+departure gets MORE time than a possible hider: a departure is a flat 30
+seconds, while the hiding window is `900 / speed` capped at 15 seconds. A
+Shahed at 50 m/s that goes quiet inside the fence gets 18 seconds. One that
+leaves gets 30. Nobody designed that; it is where the arithmetic lands.
 
 ---
 
@@ -79,7 +85,31 @@ can still see where it went.
 | 3 | Nothing left over Copenhagen → Copenhagen's case closes |
 
 **The Copenhagen operator never sees Amager's case.** Events are filtered by
-tenant and one site is one tenant. A government profile reads the whole chain.
+tenant, and Copenhagen and Amager are different tenants. A government profile
+reads the whole chain.
+
+**One operator can hold several sites, though.** `op-energinet` holds six
+substations. A track moving between two of them makes two events that the same
+operator sees, linked. Correct, but it means "an operator never sees both ends
+of a link" is not a general rule.
+
+---
+
+## Built, as of 2026-10-11
+
+| Rule | How it works |
+|---|---|
+| **Re-entry opens a NEW linked event** | For multi-site and coverage-gated tracks. The closed case stays closed and the return opens a new event linked to it. A single-site track cannot re-enter at all, its entities are torn down at close, so there is nothing to return to |
+| **A detached member that nobody holds gets a verdict** | 30 seconds outside our sensors AND outside every responder's own sensor range → `status: 'lost'`, a note on the event, a `? LOST` chip on the roster and a dimmed row |
+| **A chasing unit breaks off on its OWN contact, not on the case** | A counter-drone interceptor used to turn for home the moment our sensors lost the drone, or the moment the case closed. It now keeps hunting the projected track for 30 seconds. Reacquired at any site, the clock resets and it carries on. Fuel and range caps are unchanged, so it cannot chase forever. **The case still closes on its own schedule** — see the gap below |
+
+**The dashed breadcrumb is simulation only, and it keeps running after the
+verdict.** Outside coverage it is the only thing showing where an unobserved
+object went, so it draws for as long as the simulation runs. **A live
+deployment draws no breadcrumb at all**: the line comes from simulated ground
+truth, and outside every sensor radius a real system knows nothing, so there is
+nothing to draw. Live gets the verdict and stops. A verdict on the roster and a
+breadcrumb on the map answer different questions.
 
 ---
 
@@ -89,13 +119,11 @@ These are written down so nobody reads the tables above as the finished design.
 
 | Gap | What happens instead today |
 |---|---|
-| Re-entry should open a NEW linked event | **Done** for multi-site tracks: the closed case stays closed and the return opens a new event linked to it. A single-site track cannot re-enter at all — its entities are torn down at close — so there is nothing to return to |
 | **The 30-second rule should apply to every track** | Only coverage-gated and multi-site tracks get it. Most close instantly |
 | **A chase should not hold a site's case open** | While one of our interceptors is pursuing, the case stays open even with nothing over the site. It resolves at the aircraft's fuel limit, not at 30 seconds |
 | **Rejoin** | Nothing ever clears `broken-away`. A member that rejoins the formation stays marked detached |
-| **Status `lost`** | Never written. Only `tracked`, `broken-away` and `neutralised` exist |
 | **The summary should list every member and its fate** | The post-incident report never reads `memberTracks` |
-| **A detached row should dim** | Only `neutralised` rows dim. A detached member gets the chip but no dimming |
+| **A detached row should dim** | A `broken-away` row gets the ↗ DETACHED chip but no dimming. `neutralised` and `lost` rows both dim |
 
 ---
 

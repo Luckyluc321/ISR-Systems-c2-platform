@@ -1,8 +1,14 @@
 # Beam-pass intercept
 
+> **PARTLY REVERTED. 2026-10-11.** `src/rotorcraft_attitude.js` does not
+> exist, and no course-over-ground bank model is in the build: the helicopter's
+> attitude went back to its previous behaviour when the trail-policy work was
+> reverted. The pass geometry, the engagement ranges and the orbit below are
+> live. The attitude section is a proposal, marked where it starts.
+
 **Scope:** how a door-gun helicopter is vectored onto a crossing target.
-`src/intercept.js`, consumed by the dispatch aim in `main.js`. Opt-in per
-dispatch profile, so only `helicopter-intercept` uses it today.
+`src/intercept.js` was also reverted, so the pass logic that survives lives in
+the dispatch tick in `main.js` under `helicopter-intercept`.
 
 ## How an intercept actually runs
 
@@ -343,8 +349,11 @@ can bear. Driving bank off nose heading rolled the aircraft 18° through a pass
 that should be dead level, and the 90° yaw is the largest heading change in the
 whole engagement, so it produced the worst possible roll at the worst moment.
 
-`src/rotorcraft_attitude.js` derives bank from **course over ground**, measured
-from successive positions. Turn the flight path and it banks into the turn;
+**NOT BUILT, from here to the end of this section.** The module below was
+reverted and the described behaviour is not in the code.
+
+`src/rotorcraft_attitude.js` would derive bank from **course over ground**,
+measured from successive positions. Turn the flight path and it banks into the turn;
 swing the nose alone and the disc stays level.
 
 | | Bank |

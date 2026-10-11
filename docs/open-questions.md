@@ -94,7 +94,7 @@ A track feed that reorders, adds or drops array entries between ticks reproduces
 
 **Owner:** unassigned · **Trigger:** Q5 done
 
-`_promoteBreakawayMember` mints a **new** event identity for an object that would already carry a stable one from the edge. The event promotion still has to happen, because that is what receivers coordinate on, but the identity half becomes redundant and the `provenance.breakawayOf` chain-walking may contradict the external id.
+**Superseded 2026-10-11:** `_promoteBreakawayMember` is gone. `_markMemberBrokenAway` sets a member status on the existing event and mints no event identity, so the identity half of this is resolved. The event promotion still has to happen, because that is what receivers coordinate on, but the identity half becomes redundant and the `provenance.breakawayOf` chain-walking may contradict the external id.
 
 This is the one place in the codebase that already models "the same object, re-identified", and it does so by creating a second identity and cross-linking. Worth revisiting once there is a real id to compare against.
 
