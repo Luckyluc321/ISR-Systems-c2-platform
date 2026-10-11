@@ -94,6 +94,20 @@ events for one flight. Ended means ended only **after** that window.
   `_spawnLinkedSiteEvent`. It previously reopened the closed event in place
   and nulled its `outcome`, erasing a verdict already recorded and forwarded.
   A single-site track is torn down at close, so it has nothing to return to
+- **Re-entry is reachable in the shipped Copenhagen swarm, and how often
+  depends on when you dispatch.** Do not judge this from the template
+  waypoints. The overwatch drone has an evasion policy: panic latches when
+  the lead is within 2 km of Amager AND any interceptor is within
+  `SWARM_DETECT_M` (1000 m) of a live member, after which it stops flying the
+  template and runs due east at 50 m/s with a bearing tilt away from the
+  nearest interceptor. Its egress is therefore seeded from wherever it
+  happened to be when panic latched. **Dispatch early and that eastward run
+  carries it back across Copenhagen's rings, opening a second Copenhagen
+  event linked to the closed one. Dispatch late and it latches further north
+  and leaves outside sensor reach.** Confirmed by a live run on 2026-10-11,
+  after both a static-waypoint analysis and a verification agent concluded
+  the path was monotonic and could not return. It is not monotonic once the
+  drone is being chased
 - A detached member that nobody holds for 30 seconds gets
   `status: 'lost'`, a dated note on the event, and a `? LOST` chip on the
   roster. The breadcrumb keeps running: a verdict on the roster and a
