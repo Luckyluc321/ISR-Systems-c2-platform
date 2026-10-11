@@ -10490,24 +10490,7 @@ async function main() {
     return false;
   }
 
-  function processDroneSiteMarkers(event, state, droneKey, curPos, prevPos, droneLabel = null, ownerEventId = null) {
-    // WHOSE STATE MACHINE vs WHOSE MARKER.
-    //
-    // Coverage and perimeter history for this drone lives on `event`,
-    // which is always the parent, and must stay there: it is what makes
-    // a transition a transition. Move it and the drone looks like it
-    // has just appeared, firing a spurious ENTRY.
-    //
-    // The MARKER is a different question. It belongs to whichever event
-    // an operator will click to see it. For a drone that has broken
-    // formation and been promoted to its own track, that is the child.
-    // Attributing it to the parent meant the escaped drone's own ENTRY,
-    // EXIT and OUT OF RANGE markers vanished the moment the operator
-    // selected it: the parent was no longer selected or live, so its
-    // markers were removed, and the child had nothing to recreate.
-    //
-    // Those coordinates are the product. They are what gets forwarded.
-    const ownerId = ownerEventId || event.id;
+  function processDroneSiteMarkers(event, state, droneKey, curPos, prevPos, droneLabel = null) {
     if (!event || !curPos) return;
     // Lazily initialise tick-loop internal state via mutators. Silent
     // (no listener fire) because these init writes shouldn't provoke
@@ -10524,7 +10507,7 @@ async function main() {
     if (!droneInside) { droneInside = new Map(); setEventMapKey(event.id, '_droneInsideState', droneKey, droneInside); }
 
     const _persist = (kind, lat, lon, color, label) => {
-      appendEventArray(ownerId, 'perSiteCrossings', { kind, lat, lon, color, label, timestamp: new Date().toISOString() });
+      appendEventArray(event.id, 'perSiteCrossings', { kind, lat, lon, color, label, timestamp: new Date().toISOString() });
     };
     const _log = (siteId, kind, lat, lon) => {
       appendEventArray(event.id, '_droneTransitionLog', {
@@ -10627,7 +10610,7 @@ async function main() {
             agg.entryCount++;
             const suffix = agg.entryCount > 1 ? ` #${agg.entryCount}` : '';
             const lbl = `ENTRY${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid}`;
-            _dropMarker(hit.lat, hit.lon, '#4dd2ff', lbl, ownerId);
+            _dropMarker(hit.lat, hit.lon, '#4dd2ff', lbl, event.id);
             _persist('entry', hit.lat, hit.lon, '#4dd2ff', lbl);
           }
         } else {
@@ -10635,7 +10618,7 @@ async function main() {
           agg.droneEntryCount.set(droneKey, n);
           const suffix = n > 1 ? ` #${n}` : '';
           const lbl = `ENTRY${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid} · ${droneLabel || droneKey}`;
-          _dropMarker(hit.lat, hit.lon, '#4dd2ff', lbl, ownerId);
+          _dropMarker(hit.lat, hit.lon, '#4dd2ff', lbl, event.id);
           _persist('entry', hit.lat, hit.lon, '#4dd2ff', lbl);
         }
       }
@@ -10650,7 +10633,7 @@ async function main() {
             agg.exitCount++;
             const suffix = agg.exitCount > 1 ? ` #${agg.exitCount}` : '';
             const lbl = `EXIT${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid}`;
-            _dropMarker(hit.lat, hit.lon, '#ffb84d', lbl, ownerId);
+            _dropMarker(hit.lat, hit.lon, '#ffb84d', lbl, event.id);
             _persist('exit', hit.lat, hit.lon, '#ffb84d', lbl);
           }
         } else {
@@ -10658,7 +10641,7 @@ async function main() {
           agg.droneExitCount.set(droneKey, n);
           const suffix = n > 1 ? ` #${n}` : '';
           const lbl = `EXIT${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid} · ${droneLabel || droneKey}`;
-          _dropMarker(hit.lat, hit.lon, '#ffb84d', lbl, ownerId);
+          _dropMarker(hit.lat, hit.lon, '#ffb84d', lbl, event.id);
           _persist('exit', hit.lat, hit.lon, '#ffb84d', lbl);
         }
       }
@@ -10681,7 +10664,7 @@ async function main() {
             const color = isFirst ? '#4dd2ff' : '#4dff9c';
             const tail = isFirst ? '' : ' signal returned';
             const lbl = `${kind}${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid}${tail}`;
-            _dropMarker(hit.lat, hit.lon, color, lbl, ownerId);
+            _dropMarker(hit.lat, hit.lon, color, lbl, event.id);
             _persist(isFirst ? 'detected' : 'reacq', hit.lat, hit.lon, color, lbl);
           }
         } else {
@@ -10693,7 +10676,7 @@ async function main() {
           const color = isFirst ? '#4dd2ff' : '#4dff9c';
           const tail = isFirst ? '' : ' signal returned';
           const lbl = `${kind}${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid} · ${droneLabel || droneKey}${tail}`;
-          _dropMarker(hit.lat, hit.lon, color, lbl, ownerId);
+          _dropMarker(hit.lat, hit.lon, color, lbl, event.id);
           _persist(isFirst ? 'detected' : 'reacq', hit.lat, hit.lon, color, lbl);
         }
       }
@@ -10713,7 +10696,7 @@ async function main() {
             agg.oorCount++;
             const suffix = agg.oorCount > 1 ? ` #${agg.oorCount}` : '';
             const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid} signal lost`;
-            _dropMarker(hit.lat, hit.lon, '#ff5a5a', lbl, ownerId);
+            _dropMarker(hit.lat, hit.lon, '#ff5a5a', lbl, event.id);
             _persist('oor', hit.lat, hit.lon, '#ff5a5a', lbl);
             agg._oorFiredThisCycle = true;
             agg._pendingOorPos = null;
@@ -10726,7 +10709,7 @@ async function main() {
           agg.droneOorCount.set(droneKey, n);
           const suffix = n > 1 ? ` #${n}` : '';
           const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid} · ${droneLabel || droneKey}`;
-          _dropMarker(hit.lat, hit.lon, '#ff5a5a', lbl, ownerId);
+          _dropMarker(hit.lat, hit.lon, '#ff5a5a', lbl, event.id);
           _persist('oor', hit.lat, hit.lon, '#ff5a5a', lbl);
           toast(`OUT OF RANGE · ${droneLabel || droneKey} left ${site.name || site.code || sid} sensor coverage.`, 'warn');
         }
@@ -10805,12 +10788,10 @@ async function main() {
       agg.oorCount = (agg.oorCount || 0) + 1;
       const now = new Date().toISOString();
       const suffix = agg.oorCount > 1 ? ` #${agg.oorCount}` : '';
-      // event.id, NOT ownerId. ownerId is a const inside
-      // processDroneSiteMarkers and this is a sibling function, so the
-      // name does not resolve and every call threw a ReferenceError.
-      // This path has no owner concept and cannot cheaply acquire one:
-      // it is parent-scoped by signature and does not know which
-      // drone's death emptied the site.
+      // Parent-scoped by design. This function does not know which drone's
+      // death emptied the site, and it should not: a member that has broken
+      // formation is a MEMBER with a status, not a separate owner of
+      // markers. See docs/swarm-individual-tracking-architecture.md.
       const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site?.code || site?.name || sid} signal lost`;
       _dropMarker(pos.lat, pos.lon, '#ff5a5a', lbl, event.id);
       appendEventArray(event.id, 'perSiteCrossings', { kind: 'oor', lat: pos.lat, lon: pos.lon, color: '#ff5a5a', label: lbl, timestamp: now });
@@ -16522,16 +16503,7 @@ async function main() {
           const swKey = `sw${i}`;
           sw._id = swKey;
           const swCur = { lat: pos.lat, lon: pos.lon };
-          // A member that has broken formation owns its own markers.
-          //
-          // Only once the child event is live. Before promotion, and after
-          // the child closes as lost contact, the parent is still the right
-          // owner, because that is the only event an operator can select.
-          const _bwChild = sw._breakawayChildId ? getEvent(sw._breakawayChildId) : null;
-          const _markerOwnerId = (_bwChild && _bwChild.status === 'active')
-            ? _bwChild.id
-            : null;
-          processDroneSiteMarkers(event, state, swKey, swCur, sw._markerPrevPos, sw.model || sw.role, _markerOwnerId);
+          processDroneSiteMarkers(event, state, swKey, swCur, sw._markerPrevPos, sw.model || sw.role);
           sw.prevPos = { lat: pos.lat, lon: pos.lon };
           sw.prevTs = nowMs;
         }
