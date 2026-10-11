@@ -9725,8 +9725,80 @@ async function main() {
       // silently discarded the interceptor's confirmed neutralisation.
       const machineOutcomes = ['left coverage', 'lost contact'];
       if (!event.outcome || event.outcome === 'awaiting_neutralization' || machineOutcomes.includes(event.outcome)) {
+        // ROUNDS DECIDE IT, NOT THE TIMER.
+        //
+        // This branch neutralised a single target the moment the
+        // engagement window closed, whether four rounds had connected or
+        // four hundred. The swarm path has run a survivability roll
+        // since P2; a lone Shahed or Geran did not.
+        //
+        // Gated to a gun-armed dispatch that is NOT the swarm, which
+        // today is the helicopter alone. Every other kind, in particular
+        // the jamming ones, keeps the unconditional outcome: feeding a
+        // jammer through resolveKineticEffect returns 'survive' with
+        // reason no-kinetic-profile and it would never neutralise
+        // anything again.
+        //
+        // The door gun is far more lethal than a quadcopter's, which the
+        // weapon table already says: 0.22 damage per hit against 0.16.
+        // On a Geran, toughness 0.60, that is 0.088 per round, so 99%
+        // at about 11 rounds, under three bursts. A full gun run is 88
+        // rounds and kills it outright. A run broken off early can fail,
+        // and then the aircraft re-engages.
+        const _gunRun = d.kind !== 'counter-drone-swarm' && d.profile.firesTracer;
+        const _st = droneState.get(d.eventId);
+        if (_gunRun && d._firedAtLeastOnce) {
+          const _fx = resolveKineticEffect({
+            weaponKind: d.kind,
+            roundsFired: d._roundsFired || 0,
+            hitQuality: 1,
+            targetPlatform: event.platform,
+            // Accumulated on the track's render-cache entry, which is
+            // where the swarm keeps sw._damageAccum for its members.
+            // Not on the event: every event write goes through
+            // events.js and this is per-engagement bookkeeping, not
+            // case state.
+            accumulatedDamage: _st?._damageAccum || 0,
+          });
+          if (_st) _st._damageAccum = _fx.damage;
+          if (_fx.outcome === 'survive') {
+            toast(`${event.droneType || 'Target'} not neutralised after `
+              + `${d._roundsFired || 0} rounds. Still flying. ${d.assetName} re-engaging.`, 'warn');
+            d._firedAtLeastOnce = false;
+            d._roundsFired = 0;
+            d.engageStartTs = null;
+            d.state = 'en_route';
+            // wallNow(), NOT `now`: that name does not exist in this
+            // function's scope and reading it froze every dispatch for
+            // the session the last time it was tried.
+            d.lastFrameTs = wallNow();
+            return;
+          }
+        }
         markNeutralised(event.id, { outcome: 'neutralized', byDispatchId: d.id, needsPostIncident: false });
-        toast(`Threat neutralised. ${d.assetName} confirmed disruption.`, 'ok');
+        // OBSERVED BY US, OR REPORTED TO US?
+        //
+        // A kill outside every sensor ring is real but unwitnessed by
+        // the network. Nothing is drawn for it, because a fireball at a
+        // position no sensor covers claims an observation we did not
+        // make, exactly as a detection before coverage would. The
+        // outcome still stands: the dispatching unit saw it on its own
+        // seeker and reported it, the same way a crew radios a result.
+        // What changes is the provenance, and the record says which.
+        const _kp = _liveTargetPositionFor(d) || event.lastPosition;
+        const _observed = !!(_kp && _sitesSeeingPoint(_kp.lat, _kp.lon, _kp.alt).length);
+        appendEventArray(event.id, 'notes', {
+          timestamp: new Date().toISOString(),
+          author: d.assetName || 'RESPONSE UNIT',
+          text: _observed
+            ? `Target neutralised and confirmed by site sensors.`
+            : `Target neutralised. Position and result REPORTED BY ${d.assetName || 'the response unit'} `
+              + `on its own sensor, outside all site coverage. Not witnessed by the network.`,
+          type: 'engagement-result',
+        });
+        toast(_observed
+          ? `Threat neutralised. ${d.assetName} confirmed disruption.`
+          : `Threat neutralised. Reported by ${d.assetName}, outside sensor coverage.`, 'ok');
       }
     } else if (d.profile.visualVerifyOnly) {
       toast(`${d.assetName} visual verify complete. Standing by.`, 'info');
