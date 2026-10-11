@@ -5135,12 +5135,16 @@ async function main() {
   // the position we would be projecting is a guess. It exists here so a
   // pursuit continues past the edge of our mesh instead of flying at a
   // coordinate the target left thirty seconds ago.
-  function _projectedTargetPosition(sw, sinceMs, now) {
+  // `now` is compared against the anchor's OWN timestamp, not against
+  // whenever the caller noticed the loss. See _lastInCovAtMs.
+  function _projectedTargetPosition(sw, now) {
     const last = sw?._lastInCovPos;
     const hdgDeg = sw?._lastHeadingDeg;
     const speedMs = sw?._lastInCovSpeedMs;
-    if (!last || typeof hdgDeg !== 'number' || !(speedMs > 0)) return null;
-    const runM = speedMs * Math.max(0, (now - sinceMs) / 1000);
+    const anchorMs = sw?._lastInCovAtMs;
+    if (!last || typeof hdgDeg !== 'number' || !(speedMs > 0)
+        || typeof anchorMs !== 'number') return null;
+    const runM = speedMs * Math.max(0, (now - anchorMs) / 1000);
     const brng = hdgDeg * Math.PI / 180;
     const M_PER_DEG_LON = 111320 * Math.cos(last.lat * Math.PI / 180);
     return {
@@ -6080,8 +6084,11 @@ async function main() {
    *
    * ACQUIRES ON THE AIRCRAFT'S OWN SENSOR, not on a coordinate handed
    * down from the dispatch. The profile already declares the reach that
-   * matters, onboardSensorRangeM, 800 m for this airframe's EO/IR
-   * turret, and the same number already governs whether a pursuit holds
+   * matters, onboardSensorRangeM, which CD_PROFILE sets to 2000 m for
+   * this airframe with the caveat recorded there that it is a
+   * representative figure and not an air-to-air capability claim. This
+   * docstring said 800 m until 2026-10-11, which matched nothing in the
+   * code. The same number already governs whether a pursuit holds
    * when the site mesh loses the target. A gunner lays on what the
    * aircraft can see, so the gun uses the same figure.
    *
@@ -7624,6 +7631,13 @@ async function main() {
         && (_onboardHoldsTarget || d.assignedSwarmMember?.billboard?.show === true)) {
       d.pursuitLostSince = null;
       d._pursuitLostFor = null;
+      // Shares the loss message's debounce stamp deliberately, so a
+      // target sitting on a boundary cannot ping-pong two toasts at
+      // frame rate. One or the other, at most every ten seconds.
+      if (now - (d._pursuitToastTs || 0) > 10000) {
+        d._pursuitToastTs = now;
+        toast(`${d.assetName} reacquired target. Pursuit continues.`, 'info');
+      }
     }
 
     // THE CASE CLOSING IS NOT THE UNIT LOSING ITS TARGET.
@@ -7645,8 +7659,23 @@ async function main() {
     // docs/open-question-chase-vs-case.md. It decouples the UNIT from
     // the case. Whether the CASE should stay open during a pursuit is
     // still open and still Peter's call.
+    // BOUNDED. Deferring to the pursuit window relies on the window
+    // eventually arming, which needs `billboard.show === false`. Once an
+    // event closes, onDroneTick stops running for it, so `show` freezes
+    // at whatever it last was. If it froze TRUE the window never arms
+    // and, with Phase F gated, a unit could have no exit left at all:
+    // for a live-telemetry unit the battery and distance caps are
+    // themselves gated on `!_telemetryIsLive`, so there would be none.
+    // Two grace windows after the case went quiet, stop deferring and
+    // let Phase F do its job.
+    if (targetLost) {
+      if (!d._caseLostAt) d._caseLostAt = now;
+    } else {
+      d._caseLostAt = null;
+    }
     const _hasLivePursuitTarget = !!(d.assignedSwarmMember
-      && !d.assignedSwarmMember.neutralised);
+      && !d.assignedSwarmMember.neutralised)
+      && (now - (d._caseLostAt || now)) < 2 * _PURSUIT_GRACE_MS;
 
     // Phase F: RTB behaviour when target lost signal before arrival
     if (d.state === 'en_route' && targetLost && d.profile.supportsRTB && !_onboardHoldsTarget
@@ -7706,17 +7735,36 @@ async function main() {
       // The envelope caps below still apply unchanged: maxPursuitKm
       // turns the unit for home regardless of contact, so a projected
       // pursuit cannot run off the map.
-      if (!d.pursuitLostSince) {
+      // NO PROJECTION MEANS NOTHING TO HOLD ON TO, so break off at once
+      // rather than hold for 30 seconds flying at a frozen coordinate,
+      // which would be the original bug plus a delay.
+      //
+      // This is the case for the swarm LEAD. Its wrapper carries none of
+      // the last-observed fields, because the writer loop runs over
+      // state.swarmBillboards and the lead lives at
+      // state.leadSwarmMember. Interceptor 0 of every pack draws the
+      // lead, so one unit in three keeps the old behaviour. Recorded as
+      // a known gap rather than fixed here, because the fix belongs in
+      // the lead path and that path is load-bearing for every scenario
+      // in the build.
+      const proj = _projectedTargetPosition(sw, now);
+      if (proj && !d.pursuitLostSince) {
         d.pursuitLostSince = now;
         d._pursuitLostFor = sw;
-        toast(`${d.assetName} lost sensor contact. Holding pursuit on projected track.`, 'warn');
-      }
-      if ((now - d.pursuitLostSince) < _PURSUIT_GRACE_MS) {
-        const proj = _projectedTargetPosition(sw, d.pursuitLostSince, now);
-        if (proj) {
-          d.targetLat = proj.lat;
-          d.targetLon = proj.lon;
+        // DEBOUNCED. A target flickering across the coverage boundary or
+        // the seeker radius restarts this clock every other frame, and
+        // toast() replaces the text of a single pinned element rather
+        // than stacking, so an undebounced message here would clobber
+        // every detection, handover and overdue notification at frame
+        // rate and pin itself permanently.
+        if (now - (d._pursuitToastTs || 0) > 10000) {
+          d._pursuitToastTs = now;
+          toast(`${d.assetName} lost sensor contact. Holding pursuit on projected track.`, 'warn');
         }
+      }
+      if (proj && (now - d.pursuitLostSince) < _PURSUIT_GRACE_MS) {
+        d.targetLat = proj.lat;
+        d.targetLon = proj.lon;
         // DELIBERATELY NO `return`. The state stays en_route or
         // engaging and the flight code further down flies the unit at
         // the projected position. Returning here would freeze it.
@@ -16384,9 +16432,32 @@ async function main() {
             // position when they lose signal — "keep chasing along
             // the last known trajectory before giving up".
             sw._lastHeadingDeg = hdgDeg;
-            // And its last observed speed, so a pursuit can dead-reckon
-            // the track rather than fly at a frozen point.
-            sw._lastInCovSpeedMs = speedMs;
+            // WHEN the anchor above was taken. A pursuit dead-reckons
+            // from `_lastInCovPos`, so it has to run the clock from the
+            // instant that position was recorded. Running it from the
+            // instant the INTERCEPTOR lost contact instead put the
+            // projection `speed * seekerHoldDuration` behind the target
+            // and left it there, which steered the unit backwards past
+            // itself. Anchor and clock are now the same instant.
+            sw._lastInCovAtMs = nowMs;
+            // Speed for the dead reckoning, measured over a window wide
+            // enough to survive per-tick jitter.
+            //
+            // NOT the `speedMs` above. That guards on `dt > 0.02`, which
+            // is false at any frame rate above 50 fps, so on a normal
+            // display it is the literal 25 it was initialised with. Fine
+            // for a roster readout, useless as the input to a
+            // projection: overwatch panic at 50 m/s would have been
+            // dead-reckoned at half speed. Left untouched because it is
+            // shared across the roster and the swarm lead.
+            const spAnchor = sw._covSpeedAnchor;
+            if (!spAnchor || (nowMs - spAnchor.ts) >= 500) {
+              if (spAnchor && nowMs > spAnchor.ts) {
+                sw._lastInCovSpeedMs = haversineM(spAnchor.lat, spAnchor.lon, pos.lat, pos.lon)
+                  / ((nowMs - spAnchor.ts) / 1000);
+              }
+              sw._covSpeedAnchor = { lat: pos.lat, lon: pos.lon, ts: nowMs };
+            }
           }
           // Per-drone OOR/REACQ markers were duplicating the per-site
           // markers fired by processPerSiteMarkers (2 near-identical

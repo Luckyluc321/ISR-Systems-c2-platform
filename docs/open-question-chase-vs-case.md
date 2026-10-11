@@ -55,6 +55,24 @@ of them the case driving the unit:
 `_PURSUIT_GRACE_MS` is deliberately the same number as `_LOSS_GRACE_FLOOR_MS`,
 so there is one answer to "how long before we accept it is gone".
 
+**Known gap: the swarm lead gets no projected pursuit.** The last-observed
+fields the projection needs (`_lastInCovPos`, `_lastHeadingDeg`,
+`_lastInCovAtMs`, `_lastInCovSpeedMs`) are written by a loop over
+`state.swarmBillboards`, and the lead lives at `state.leadSwarmMember`, which
+that loop never visits. `_allDownableHostiles` puts the lead at index 0 and
+`_assignInterceptorTarget` picks `memberIndex % downable.length`, so
+interceptor 0 of every pack draws the lead and keeps the pre-2026-10-11
+behaviour: it breaks off immediately rather than holding for 30 seconds at a
+coordinate it cannot project from. That is deliberate. Holding without a
+projection would be the original defect plus a delay. The fix is four
+additive writes in the lead's coverage branch, and that branch is load-bearing
+for every scenario in the build, so it was left for its own change.
+
+**An escape is a legitimate outcome.** The interceptor closes at about 8 m/s
+on a 25 m/s target, so from much more than 400 m behind it will not reacquire
+inside the window. That is the intended behaviour and not a reason to widen
+the seeker or the window.
+
 **The projection is a simulation aid**, like the dashed breadcrumb. It
 dead-reckons from the last observed position, heading and speed. A real
 deployment does not hand an interceptor a track nobody is observing: its own
