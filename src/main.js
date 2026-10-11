@@ -4684,7 +4684,7 @@ async function main() {
       // Set slightly under the maximum because nobody plans a sortie to
       // dry tanks, not because the airframe cannot do it.
       enduranceMin: 280,
-      cruiseKmh: 250, arriveAtM: 500, engageSec: 8,
+      cruiseKmh: 250, arriveAtM: 500,   // engageSec is set below, with the turn physics
       // THE DOOR GUN ACTUALLY FIRES.
       //
       // firesTracer was on counter-drone-swarm alone, so
@@ -4712,6 +4712,17 @@ async function main() {
       // envelope and still reads as two separate aircraft on the map.
       beamPass: true,
       engageOffsetM: 250,
+      // REAL TURN PHYSICS. omega = g * tan(bank) / v. At 250 km/h
+      // (69.4 m/s) in a 30 degree bank that is 0.0816 rad/s, about
+      // 4.7 deg/s, so 90 degrees takes 19 seconds. The shared
+      // default is 60 deg/s, which is a quadcopter pirouette and read as
+      // the aircraft snapping round. maxBankDeg moved 18 -> 30 to match:
+      // the bank the model shows and the rate it turns at are now the
+      // same manoeuvre rather than two unrelated numbers.
+      turnRateRadS: 0.0816,
+      // A gun run that has to roll into a 19 second turn cannot resolve in
+      // 8 seconds. The pass needs room to develop.
+      engageSec: 30,
       // Declared HERE as well as in _SIM_INTERCEPTOR_PHYSICS because two
       // separate climb routines read two different sources: one takes
       // profile.climbRateMs with a fallback of 6, the other takes the
@@ -5931,6 +5942,22 @@ async function main() {
   // treated it as a free global.
   //   grep -c TURN_RATE_RAD_S dist/assets/index-*.js   -> 1 means broken, 0 means resolved
   const TURN_RATE_RAD_S = Math.PI / 3;        // 60 deg/s, so 90 deg takes 1.5 s
+  // How fast an airframe may change heading, in rad/s.
+  //
+  // TURN_RATE_RAD_S is 60 deg/s. A quadcopter really can yaw that fast,
+  // which is why it was fine until something with a rotor disc and 69 m/s
+  // of forward speed used it. A coordinated turn gives
+  // omega = g * tan(bank) / v, so a Seahawk at 250 km/h turns at 2.6 deg/s
+  // in an 18 degree bank and 4.7 deg/s in 30. At 60 it pirouettes.
+  //
+  // A profile that declares nothing keeps 60, so every existing unit is
+  // unchanged.
+  const _turnRateOf = (d) => d?.profile?.turnRateRadS ?? TURN_RATE_RAD_S;
+  // Declared HERE, immediately after the constant it falls back to, and
+  // not down beside _easeHeading where it was first written. The
+  // orientation callback above reads it, the scope gate caught the
+  // temporal dead zone, and the comment a few lines up records that
+  // TURN_RATE_RAD_S itself had to be moved for exactly this reason.
 
   // Shared empty object for the "no tuning set" case, so a per-frame
   // read does not allocate. Frozen so a caller cannot write tuning into
@@ -6466,7 +6493,7 @@ async function main() {
         const T = _hT();
         const TAU = Math.PI * 2;
         const nowS = monoNow() / 1000;
-        const maxBank = ((T.maxBankDeg ?? 18) * Math.PI) / 180;
+        const maxBank = ((T.maxBankDeg ?? 30) * Math.PI) / 180;
 
         if (_prevH != null && _prevT != null) {
           const dt = nowS - _prevT;
@@ -6477,7 +6504,7 @@ async function main() {
             const dh = ((d.heading - _prevH + Math.PI) % TAU + TAU) % TAU - Math.PI;
             // Signed rate as a fraction of the maximum the unit can turn,
             // so a hard turn banks fully and a gentle one barely tips.
-            const frac = Math.max(-1, Math.min(1, (dh / dt) / TURN_RATE_RAD_S));
+            const frac = Math.max(-1, Math.min(1, (dh / dt) / _turnRateOf(d)));
             // Eased, so the roll leads into the turn and settles out of
             // it rather than appearing on the frame the heading moves.
             _bank += (frac * maxBank - _bank) * Math.min(1, dt * 3);
@@ -7922,12 +7949,12 @@ async function main() {
   // _createCounterDispatchEntities, because two things need it and only
   // one of them is in this function. See the note at its declaration.
 
-  function _easeHeading(current, target, dtSec) {
+  function _easeHeading(current, target, dtSec, maxRateRadS = TURN_RATE_RAD_S) {
     if (typeof current !== 'number' || !Number.isFinite(current)) return target;
     if (!Number.isFinite(target) || !(dtSec > 0)) return current;
     const TAU = Math.PI * 2;
     let delta = ((target - current + Math.PI) % TAU + TAU) % TAU - Math.PI;
-    const maxStep = TURN_RATE_RAD_S * dtSec;
+    const maxStep = (maxRateRadS > 0 ? maxRateRadS : TURN_RATE_RAD_S) * dtSec;
     if (Math.abs(delta) <= maxStep) return target;
     return current + Math.sign(delta) * maxStep;
   }
@@ -8098,7 +8125,7 @@ async function main() {
         d.curLon = step.lon;
         d.routeSegIdx = step.segIdx;
         d.routeSegProgress = step.segProgress;
-        d.heading = _easeHeading(d.heading, step.headingRad, dtSec);
+        d.heading = _easeHeading(d.heading, step.headingRad, dtSec, _turnRateOf(d));
         if (step.isEnd) {
           d.state = 'engaging';
           d.arrivedTs = now;
@@ -8117,7 +8144,7 @@ async function main() {
       } else {
         // Straight-line fallback (used pre-route-fetch or on OSRM fail)
         const brng = _bearingRad(d.curLat, d.curLon, d.targetLat, d.targetLon);
-        d.heading = _easeHeading(d.heading, brng, dtSec);
+        d.heading = _easeHeading(d.heading, brng, dtSec, _turnRateOf(d));
         const stepDegLat = (stepM * Math.cos(brng)) / 111000;
         const stepDegLon = (stepM * Math.sin(brng)) / (111000 * Math.cos(d.curLat * Math.PI / 180));
         d.curLat += stepDegLat;
@@ -8261,7 +8288,7 @@ async function main() {
           d.heading = _easeHeading(
             d.heading,
             beamHeadingRad ?? _bearingRad(d.curLat, d.curLon, enemyLat, enemyLon),
-            dtSecEng);
+            dtSecEng, _turnRateOf(d));
           if (d.profile.trail) {
             d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
             if (d.trailPositions.length > 500) d.trailPositions.shift();
@@ -8571,7 +8598,7 @@ async function main() {
       d.lastFrameTs = now;
       if (dtSec <= 0) return;
       const brng = _bearingRad(d.curLat, d.curLon, d.rtbTargetLat, d.rtbTargetLon);
-      d.heading = _easeHeading(d.heading, brng, dtSec);
+      d.heading = _easeHeading(d.heading, brng, dtSec, _turnRateOf(d));
       const speedMps = (d.profile.cruiseKmh * 1000) / 3600;
       const stepM = speedMps * dtSec;
       d.curLat += (stepM * Math.cos(brng)) / 111000;
@@ -8602,7 +8629,7 @@ async function main() {
       d.lastFrameTs = now;
       if (dtSec <= 0) return;
       const brng = _bearingRad(d.curLat, d.curLon, d.originLat, d.originLon);
-      d.heading = _easeHeading(d.heading, brng, dtSec);
+      d.heading = _easeHeading(d.heading, brng, dtSec, _turnRateOf(d));
       const speedMps = (d.profile.cruiseKmh * 1000) / 3600;
       const stepM = speedMps * dtSec;
       d.curLat += (stepM * Math.cos(brng)) / 111000;
