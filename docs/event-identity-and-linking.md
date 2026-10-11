@@ -1,7 +1,7 @@
 # When is it a new event, and when is it a link?
 
-**Status:** agreed 2026-10-11. Describes the target model. See "What is
-wrong today" for the gap.
+**Status:** target model, agreed 2026-10-11. Partly built. See "What is built,
+and what is not" before relying on any row of the table.
 
 One question decides almost everything about how an incident reads on an
 operator's screen: *is this the same event, a different event, or a link
@@ -62,17 +62,32 @@ the perimeter is held for a speed-scaled grace window before the event closes
 (`_classifyDetectionLoss`), precisely so a sensor gap does not mint a hundred
 events for one flight. Ended means ended only **after** that window.
 
-## What is wrong today
+## What is built, and what is not
 
-| Gap | Where | Effect |
-|---|---|---|
-| Breakaway creates a same-site child event | `_promoteBreakawayMember`, `src/main.js` — `siteId: event.siteId` | The operator gets a second case for one incident |
-| That child is written into `linkedEventIds` | same function | The close chain's `linkedActive` guard refuses to close the parent while the escapee flies, so the site's case stays open about airspace it cannot see |
-| Marker and counter ownership split between the two | `processDroneSiteMarkers` | Already caused two separate defects; both were symptoms of this split, not independent bugs |
+**Built, as of 2026-10-11:**
 
-The cross-site path is **correct today** and is not part of the gap: a drone
-reaching another site opens that site's own event, linked both ways, under that
-site's tenant.
+- A breakaway is a member with `status: 'broken-away'`. No child event, no
+  same-site link. `_markMemberBrokenAway` in `src/main.js`
+- `_spawnLinkedSiteEvent` is the only creator of linked events and is
+  cross-site by construction: `_findGroupEventForSite` returns the primary
+  itself for the same site, so the spawn is unreachable there
+- Operators are filtered by tenant, so a cross-site linked event is already
+  invisible to the other site's operator
+- A departure gets a 30 second grace with a visible countdown; a loss inside
+  the perimeter keeps its 15-60 second speed-scaled leash
+
+**Agreed but NOT built.** The table at the top of this document describes the
+target model. These rows of it are not yet true:
+
+| Row | What happens today |
+|---|---|
+| Returns after the event closed → new linked event | `_handlePerSiteLifecycle` **reopens the closed event in place**: `status = 'active'`, `endTime = null`, and `outcome = null`, which **erases the recorded outcome**. No new event, no link |
+| Returns while live → rejoin to `tracked` | Nothing clears `_brokenAway` or writes `tracked`. A member stays detached for the life of the event |
+| The site's case closes when nothing is observable there | True unless one of our own interceptors is still chasing. `noChase` keeps the event open while any dispatch is `en_route` or `engaging`, and `_hostilesRemainIncludingChildren` counts the detached member as a live hostile. It resolves at the aircraft's fuel cap, not at 30 seconds |
+| The 30 second rule | Applies only to tracks declaring `multiSite` or `coverageGated`. Every other template closes on the same tick as OUT OF RANGE, with no grace and no countdown |
+
+`provenance.breakawayOf` now has readers and no writer. All reads use optional
+chaining so nothing throws, but four code paths that keyed off it are inert.
 
 ## Related
 

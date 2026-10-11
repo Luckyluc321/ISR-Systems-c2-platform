@@ -5062,19 +5062,22 @@ async function main() {
   // throughout: promotion creates tracking context, never action.
   // Tuning: window.__isr_breakaway.
   window.__isr_breakaway = { distM: 500, graceSec: 10 };
-
   // A member that breaks formation changes STATE, not identity.
   //
   // This used to promote it to its own event at the SAME site. That
   // gave the operator two cases for one incident, and because the
   // child went into linkedEventIds the close chain's linkedActive
-  // guard then refused to close the site's case while the escapee
-  // flew — a live case about airspace that site cannot see.
+  // guard refused to close the site's case while the escapee flew —
+  // a live case about airspace that site cannot see.
   //
   // An event belongs to a SITE, not to a drone. Breaking formation is
   // not a new observation at a site, so it does not earn an event.
-  // Coming back after a close is, and that one does.
   // See docs/event-identity-and-linking.md.
+  //
+  // pos, hdgDeg and speedMs are unused now that no child event is
+  // built from them. Kept so the call site reads the same as the
+  // detection that triggers it, and so a future per-member loss
+  // classification has them to hand.
   function _markMemberBrokenAway(event, sw, pos, hdgDeg, speedMs) {
     // Latch on the member so detection does not re-fire every tick.
     // Previously the latch was _breakawayChildId, which only existed
@@ -16355,20 +16358,23 @@ async function main() {
             sw.trailPositions.push(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, _safeTrailAlt(pos.alt)));
             if (sw.trailPositions.length > 400) sw.trailPositions.shift();
             sw.projLine.show = false;
-            // Re-acquired. A track that comes back is tracked again, so
-            // the lost flag is cleared and the next coverage gap draws
-            // its breadcrumb as normal.
-            sw._trackLost = false;
             // Wipe projPositions on re-entry so the NEXT out-of-cov
             // cycle starts fresh. Otherwise the dashed projection line
             // draws a straight segment from the previous cycle's last
             // out-of-cov point across the map to the new re-exit point.
             if (sw.projPositions && sw.projPositions.length) sw.projPositions.length = 0;
-          } else if (sw._trackLost) {
-            // Closed as lost contact. The member may still be moving in
-            // the simulation, but nothing is observing it and nothing
-            // should be drawn for it.
-            sw.projLine.show = false;
+          // The `else if (sw._trackLost)` branch that stood here is gone.
+          //
+          // Its only writer was inside the child-event close that this
+          // commit removed, so it was a reader with no writer. It existed
+          // to stop drawing a breadcrumb for a member whose own event had
+          // closed as lost contact — a state that no longer exists, because
+          // a detached member has no event of its own.
+          //
+          // A detached member of a LIVE event must keep its breadcrumb. That
+          // dotted line is the only thing on the map showing where an
+          // escapee went, and suppressing it is the exact failure this
+          // simulation spent a day chasing.
           } else {
             sw.projPositions.push(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, pos.alt));
             if (sw.projPositions.length > 300) sw.projPositions.shift();
