@@ -89,7 +89,7 @@ These are written down so nobody reads the tables above as the finished design.
 
 | Gap | What happens instead today |
 |---|---|
-| **Re-entry should open a NEW linked event** | The closed event is **reopened in place**: status back to active, end time wiped, **recorded outcome erased**, note "Event reactivated". A closed case can come back to life |
+| Re-entry should open a NEW linked event | **Done** for multi-site tracks: the closed case stays closed and the return opens a new event linked to it. A single-site track cannot re-enter at all — its entities are torn down at close — so there is nothing to return to |
 | **The 30-second rule should apply to every track** | Only coverage-gated and multi-site tracks get it. Most close instantly |
 | **A chase should not hold a site's case open** | While one of our interceptors is pursuing, the case stays open even with nothing over the site. It resolves at the aircraft's fuel limit, not at 30 seconds |
 | **Rejoin** | Nothing ever clears `broken-away`. A member that rejoins the formation stays marked detached |

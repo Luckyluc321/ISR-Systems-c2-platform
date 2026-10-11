@@ -11298,13 +11298,21 @@ async function main() {
 
   // Find the event that represents this threat at siteId (either the
   // primary event or one of its linked/shadow events).
+  // The event this group currently has at a site, if any.
+  //
+  // Prefers an ACTIVE event. A site can now hold more than one: a
+  // closed case plus the new one a return opened. Returning the closed
+  // one would make the caller reopen it, which is the behaviour this
+  // exists to prevent. Returns null when every event for the site is
+  // closed, so the caller spawns a fresh one.
   function _findGroupEventForSite(primaryEvent, siteId) {
-    if (primaryEvent.siteId === siteId) return primaryEvent;
+    const candidates = [];
+    if (primaryEvent.siteId === siteId) candidates.push(primaryEvent);
     for (const lid of (primaryEvent.linkedEventIds || [])) {
       const le = getEvent(lid);
-      if (le && le.siteId === siteId) return le;
+      if (le && le.siteId === siteId) candidates.push(le);
     }
-    return null;
+    return candidates.find(e => e.status === 'active') || null;
   }
 
   function _handlePerSiteLifecycle(primaryEvent, state, currentSites) {
@@ -11323,17 +11331,16 @@ async function main() {
           toast(`DETECTED · ${primaryEvent.droneType} within ${siteName_} sensor range.`, 'warn');
           renderAlertStrip();
         }
-        if (existing.status === 'closed') {
-          // Re-entry after close — reactivate. Rare but supported.
-          existing.status = 'active';
-          existing.endTime = null;
-          // Clear the machine-derived autoOutcome from the earlier
-          // close: the event is live again, its final outcome is
-          // unknown again. Operator/kinetic outcomes never reach this
-          // branch (a neutralised track cannot re-enter coverage).
-          existing.outcome = null;
-          addNote(existing.id, `Track re-acquired at ${SITES[sid]?.name || sid}. Event reactivated.`, 'AUTO-CORRELATOR');
-        }
+        // Nothing to do for a closed event here: _findGroupEventForSite
+        // only returns ACTIVE ones now, so reaching this branch means the
+        // site has a live case and this is an ordinary re-acquisition.
+        //
+        // A return to a site whose case has CLOSED falls through to the
+        // spawn below and opens a NEW event, linked to the old one. It used
+        // to reopen the closed event in place — status back to active,
+        // endTime nulled and outcome nulled, which ERASED a verdict that
+        // had already been recorded and forwarded. Ended means ended; the
+        // return is a new observation and earns its own case.
       } else {
         // No event yet for this site → spawn one with correlator link
         const spawnedId = _spawnLinkedSiteEvent(primaryEvent, sid);

@@ -81,7 +81,7 @@ target model. These rows of it are not yet true:
 
 | Row | What happens today |
 |---|---|
-| Returns after the event closed → new linked event | `_handlePerSiteLifecycle` **reopens the closed event in place**: `status = 'active'`, `endTime = null`, and `outcome = null`, which **erases the recorded outcome**. No new event, no link |
+| Returns after the event closed → new linked event | **Built** for multi-site tracks. `_findGroupEventForSite` now returns only ACTIVE events, so a return to a closed case falls through to `_spawnLinkedSiteEvent` and opens a new one, linked. It previously reopened the closed event in place and nulled its `outcome`, erasing a verdict already recorded and forwarded. A single-site track is torn down at close, so it has nothing to return to |
 | Returns while live → rejoin to `tracked` | Nothing clears `_brokenAway` or writes `tracked`. A member stays detached for the life of the event |
 | The site's case closes when nothing is observable there | True unless one of our own interceptors is still chasing. `noChase` keeps the event open while any dispatch is `en_route` or `engaging`, and `_hostilesRemainIncludingChildren` counts the detached member as a live hostile. It resolves at the aircraft's fuel cap, not at 30 seconds |
 | The 30 second rule | Applies only to tracks declaring `multiSite` or `coverageGated`. Every other template closes on the same tick as OUT OF RANGE, with no grace and no countdown |
