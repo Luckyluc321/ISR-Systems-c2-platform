@@ -1,7 +1,8 @@
 # Open question: should a chase keep a site's case open?
 
-**Status:** OPEN. Not a bug to fix, a doctrine question to answer. Flagged
-2026-10-11. Lucas wants an operational view on it — Peter's.
+**Status:** OPEN, and narrower than first written. A site has no response
+assets, so half of this is settled by the account model. Flagged 2026-10-11.
+Lucas wants an operational view on the rest — Peter's.
 
 ## The question in one line
 
@@ -18,19 +19,27 @@ grace.
 So Copenhagen can hold a live case about a drone 40 km away that no Copenhagen
 sensor can see, for as long as the pursuit lasts.
 
-## Why it is genuinely two-sided
+## The account model answers half of it
 
-**Close it.** An event answers *what did this site observe*. The site has
-stopped observing. Holding the case open claims knowledge no sensor is
-reporting, which is the rule the rest of the platform obeys. The operator is
-not responsible for airspace 40 km away. And the dispatch panel still shows the
-aircraft, so nobody is blind.
+**A site has no response assets.** It does not dispatch anything. It observes,
+and it escalates to a state department — police, Forsvarskommandoen — and that
+department decides what to send. Operators send, receivers respond.
 
-**Keep it open.** An operator who committed an asset has a duty of care for it.
-Closing the case while their aircraft is airborne and engaged reads as the
-system losing interest. The engagement outcome — did it down the thing or not —
-belongs to the incident that caused the launch, and a closed case is an awkward
-place to put it.
+So the "duty of care for an asset I committed" argument does **not** apply to a
+site operator. They did not commit it. The aircraft belongs to the department
+that launched it.
+
+That collapses most of the case for keeping a site's event open:
+
+**Close it, for the site.** An event answers *what did this site observe*. The
+site has stopped observing. It does not own the asset, did not launch it, and
+is not responsible for airspace 40 km away. Holding the case open claims
+knowledge no sensor is reporting, which is the rule everything else obeys.
+
+**The remaining open question is about the DEPARTMENT, not the site.**
+Forsvarskommandoen did commit the aircraft. Their view of the engagement should
+survive the site's case closing, because the pursuit is theirs. Today both are
+bound to the same event, so there is no way to close one and not the other.
 
 ## What a middle answer would look like
 
@@ -53,10 +62,18 @@ engaging, so it needs to be its own piece of work with its own verification.
 
 ## The question to put to an operational reader
 
-> An interceptor you launched is pursuing a drone that has left your airspace.
-> On your screen, is that incident still open?
+> Copenhagen Airport reports a drone and you launch an interceptor. The drone
+> leaves Copenhagen's airspace and your aircraft is still pursuing it.
+>
+> Copenhagen's own case: open or closed?
+> And on your screen at Forsvarskommandoen: what are you looking at?
 
-The answer decides the design. It is not a software question.
+The first half we think is settled — Copenhagen closes, because Copenhagen is
+not watching anything any more and did not launch the aircraft. The second half
+is the real question: what the dispatching department sees once the reporting
+site has gone quiet.
+
+It is not a software question.
 
 ## Related
 
