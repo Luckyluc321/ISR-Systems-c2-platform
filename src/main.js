@@ -119,6 +119,7 @@ EVENTS.forEach(ev => {
 });
 import {
   TEMPLATES, addLiveTrack, markTrackClosed, removeLiveTrack, anyTrackLive,
+  isTrackLive,
   onDroneUpdate, distanceToPerimeter, pointInPolygon, makeSubstationThreats,
 } from './drones.js';
 // Register substation threat templates for every energy-typed site (module
@@ -11169,6 +11170,23 @@ async function main() {
     for (const eventId of expiredGhostEventIds(droneState, { now: monoNow(), ghostMs: GHOST_MS })) {
       const state = droneState.get(eventId);
       if (!state) continue;
+      // A STILL-FLYING TRACK IS NOT A GHOST.
+      //
+      // The ghost period clears the map 15 s after a case closes, which
+      // is right when the scenario ended at the close. A
+      // continueAfterClose track has NOT ended: it is still flying and
+      // still drawing the dashed breadcrumb that is the only thing
+      // showing where the unobserved object went. Tearing it down here
+      // removed that line 15 s after OUT OF RANGE, which is the exact
+      // behaviour the flag exists to prevent.
+      //
+      // Deferred, not cancelled. The track marks itself closed when its
+      // waypoints run out, isTrackLive then goes false, and this teardown
+      // runs on the next pass with the recording persisted as usual.
+      if (isTrackLive(eventId)) {
+        const _ev = EVENTS.find(e => e.id === eventId);
+        if (_ev && _trackContinuesAfterClose(_ev)) continue;
+      }
       // Persist BEFORE teardown. removeDroneEntities deletes the
       // droneState entry, and state.recording is the only copy for any
       // close path that does not already persist: left coverage, lost
