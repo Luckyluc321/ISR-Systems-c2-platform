@@ -6549,6 +6549,11 @@ async function main() {
       let _prevVF = null;
       let _prevVT = null;
       let _accelEase = 0;
+      // The attitude ACTUALLY shown, as opposed to the one just
+      // computed. Rate-limited toward it below.
+      let _rollOut = null;
+      let _pitchOut = null;
+      let _prevAT = null;
       _entitySpec.orientation = new Cesium.CallbackProperty(() => {
         const cart = _positionCb.getValue?.(Cesium.JulianDate.now());
         if (!cart) return undefined;
@@ -6677,13 +6682,44 @@ async function main() {
         const latRoll = Math.max(-1, Math.min(1, vL / latCap))
           * (((T.lateralRollDeg ?? 10) * Math.PI) / 180);
 
-        const pitch = -fwd * speedFrac * (1 - climbEase) - accelPitch
+        const pitchWant = -fwd * speedFrac * (1 - climbEase) - accelPitch
           + (((T.pitchOffsetDeg || 0) * Math.PI) / 180);
         // Positive roll drops the right wing and +vL is to PORT, so a
         // slide to port rolls left: subtract.
-        const roll = _bank - latRoll + (((T.rollOffsetDeg || 0) * Math.PI) / 180);
+        const rollWant = _bank - latRoll + (((T.rollOffsetDeg || 0) * Math.PI) / 180);
+
+        // AN AIRFRAME HAS A MAXIMUM ROLL RATE, and that is what makes a
+        // turn read as an aircraft leaning into it rather than snapping
+        // to an angle.
+        //
+        // Every term above is an exponential ease with a time constant
+        // of about a third of a second, so the attitude arrived in
+        // roughly one second. Worse, the input the bank chases is a
+        // SQUARE WAVE: _easeHeading turns at a constant maximum rate, so
+        // the measured turn rate is either full or zero and never
+        // anything between. The aircraft therefore slammed to the bank
+        // angle, held it, and slammed back.
+        //
+        // Rate-limiting the OUTPUT fixes both. The attitude now travels
+        // to where it is going at a bounded degrees-per-second, so a 30
+        // degree bank builds over about three seconds in many small
+        // increments rather than one movement, and the square wave at
+        // the input becomes a ramp at the output for free.
+        const rollRate  = ((T.rollRateDegS  ?? 10) * Math.PI) / 180;
+        const pitchRate = ((T.pitchRateDegS ??  6) * Math.PI) / 180;
+        const dtA = (_prevAT == null) ? 0 : Math.min(0.5, Math.max(0, nowS - _prevAT));
+        _prevAT = nowS;
+        const toward = (cur, want, rate) => {
+          if (cur == null || dtA <= 0) return want;
+          const dv = want - cur;
+          const lim = rate * dtA;
+          return Math.abs(dv) <= lim ? want : cur + Math.sign(dv) * lim;
+        };
+        _rollOut  = toward(_rollOut,  rollWant,  rollRate);
+        _pitchOut = toward(_pitchOut, pitchWant, pitchRate);
+
         return Cesium.Transforms.headingPitchRollQuaternion(
-          cart, new Cesium.HeadingPitchRoll(heading, pitch, roll));
+          cart, new Cesium.HeadingPitchRoll(heading, _pitchOut, _rollOut));
       }, false);
     }
     d.entity = viewer.entities.add(_entitySpec);
