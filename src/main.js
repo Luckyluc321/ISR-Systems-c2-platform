@@ -4685,6 +4685,28 @@ async function main() {
       // dry tanks, not because the airframe cannot do it.
       enduranceMin: 280,
       cruiseKmh: 250, arriveAtM: 500, engageSec: 8,
+      // THE DOOR GUN ACTUALLY FIRES.
+      //
+      // firesTracer was on counter-drone-swarm alone, so
+      // _fireMachineGunBurst was never called for this airframe. The
+      // gun station traversed onto the contact at onboardSensorRangeM
+      // and nothing left the barrel. The kill itself already worked:
+      // with no consequenceOnly and no visualVerifyOnly this aircraft
+      // falls into the generic markNeutralised branch at the end of its
+      // engagement, so it was downing the target silently.
+      //
+      // engageRangeM is NOT cosmetic. _fireMachineGunBurst holds fire
+      // outside `engageRangeM || 300`, measured as 3D slant, and 300 is
+      // the quadcopter's forward-gun figure. This aircraft stops
+      // closing at arriveAtM (500 m) and climbs to min(targetAlt,
+      // ceiling), so against a 900 m target under a 3438 m ceiling it
+      // levels off at the target's altitude and the slant is roughly
+      // the lateral 500 m. 500 is outside 300, so with the default it
+      // would aim and never pull the trigger. 800 is a door-gun
+      // envelope and leaves margin without reaching the 2000 m at which
+      // the gunner can merely SEE the contact.
+      firesTracer: true,
+      engageRangeM: 800,
       // Declared HERE as well as in _SIM_INTERCEPTOR_PHYSICS because two
       // separate climb routines read two different sources: one takes
       // profile.climbRateMs with a fallback of 6, the other takes the
