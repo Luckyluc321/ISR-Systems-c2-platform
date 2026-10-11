@@ -4724,6 +4724,9 @@ async function main() {
       // possible but slow: 12 m/s is about 43 km/h, past which the only
       // direction available is forward. Decel firmer than accel, as on
       // the real thing.
+      // Scrambled against a transiting track, so it is vectored onto
+      // where the track will be rather than onto its last-known dot.
+      vectoredIntercept: true,
       lateralSpeedCapMs: 12,
       accelMs2: 2.5,
       decelMs2: 3.5,
@@ -7807,26 +7810,55 @@ async function main() {
     // Reads the target's true position rather than its rendered one.
     // The billboard is hidden when no site sensor sees it, which is the
     // whole point: the seeker still has it.
+    // THE TRUE position of what this unit is chasing, from a rendered
+    // billboard and never from a stale event field. A swarm member when
+    // one is assigned; otherwise the event's own single track, which is
+    // the case for anything scrambled at a lone Shahed or Geran.
+    //
+    // The seeker used to require an assigned swarm member and returned
+    // false without one, so a helicopter's 2000 m seeker never held
+    // anything and the aircraft steered on dead reckoning right through
+    // the merge. The swarm branch is unchanged.
+    const _seekerTargetPos = () => {
+      const sw = d.assignedSwarmMember;
+      let cart = null;
+      if (sw) {
+        if (sw.neutralised) return null;
+        cart = sw.billboard?.position?.getValue?.(Cesium.JulianDate.now());
+      } else {
+        cart = droneState.get(d.eventId)?.billboard?.position
+          ?.getValue?.(Cesium.JulianDate.now());
+      }
+      if (!cart) return null;
+      const c = Cesium.Cartographic.fromCartesian(cart);
+      return { lat: Cesium.Math.toDegrees(c.latitude),
+               lon: Cesium.Math.toDegrees(c.longitude),
+               alt: c.height };
+    };
+
     const _onboardHoldsTarget = (() => {
       const range = d.profile?.onboardSensorRangeM;
-      const sw = d.assignedSwarmMember;
-      if (!range || !sw || sw.neutralised) return false;
-      const cart = sw.billboard?.position?.getValue?.(Cesium.JulianDate.now());
-      if (!cart) return false;
-      const c = Cesium.Cartographic.fromCartesian(cart);
-      const tLat = Cesium.Math.toDegrees(c.latitude);
-      const tLon = Cesium.Math.toDegrees(c.longitude);
-      return haversineM(d.curLat, d.curLon, tLat, tLon) <= range;
+      if (!range) return false;
+      const t = _seekerTargetPos();
+      if (!t) return false;
+      return haversineM(d.curLat, d.curLon, t.lat, t.lon) <= range;
     })();
 
     // While the seeker holds it, keep steering at the real position.
     // Without this the interceptor would hold the contact and still fly
     // at a stale coordinate, which is worse than either behaviour alone.
     if (_onboardHoldsTarget) {
-      const cart = d.assignedSwarmMember.billboard.position.getValue(Cesium.JulianDate.now());
-      const c = Cesium.Cartographic.fromCartesian(cart);
-      d.targetLat = Cesium.Math.toDegrees(c.latitude);
-      d.targetLon = Cesium.Math.toDegrees(c.longitude);
+      const t = _seekerTargetPos();
+      if (t) {
+        d.targetLat = t.lat;
+        d.targetLon = t.lon;
+        if (typeof t.alt === 'number') d.targetAlt = t.alt;
+        // Its own seeker has the target, so the dead-reckoned vector is
+        // no longer the best thing it knows. Drop it, and let the
+        // vectored branch restart cleanly if contact is lost again.
+        d._vecLostAt = null;
+        d._vecFrom = null;
+      }
     }
 
     // THE PURSUIT CLOCK BELONGS TO ONE TARGET. An interceptor whose
@@ -8199,6 +8231,46 @@ async function main() {
           d.targetLat = live.lat;
           d.targetLon = live.lon;
           if (typeof live.alt === 'number') d.targetAlt = live.alt;
+          d._vecLostAt = null;
+          d._vecFrom = null;
+        } else if (d.profile.vectoredIntercept) {
+          // VECTORED INTERCEPT.
+          //
+          // The refresh above stops the moment our mesh loses the
+          // track, and the unit then flies to a FROZEN coordinate at
+          // the coverage edge. For a quadcopter launched at a drone
+          // over the site that is fine, because the target is right
+          // there. For an aircraft scrambled against something transiting
+          // the country it is useless: the Geran clears Billund's rings
+          // in under a minute and does not reach Karup for another
+          // twenty, so the helicopter flew 60 km SOUTH to where the
+          // track had been while the track flew north. Any meeting was
+          // the two happening to cross.
+          //
+          // A scrambled interceptor is not vectored onto a last-known
+          // dot. It is vectored onto where the track will BE, from its
+          // last observed course and speed. That is what a real ground
+          // station passes to it and it needs no live sensor contact.
+          //
+          // Dead reckoning, so it is a simulation aid in the same sense
+          // as the dashed breadcrumb: honest here because we have ground
+          // truth, and in a real deployment this vector would come from
+          // the dispatching department rather than from us.
+          const lk = targetEv.lastPosition;
+          if (lk && typeof lk.heading === 'number' && lk.speed > 0) {
+            if (!d._vecLostAt) {
+              d._vecLostAt = now;
+              d._vecFrom = { lat: lk.lat, lon: lk.lon, alt: lk.alt,
+                             hdg: lk.heading, spd: lk.speed };
+            }
+            const f = d._vecFrom;
+            const runM = f.spd * ((now - d._vecLostAt) / 1000);
+            const b = (f.hdg * Math.PI) / 180;
+            d.targetLat = f.lat + (runM * Math.cos(b)) / 111320;
+            d.targetLon = f.lon + (runM * Math.sin(b))
+              / (111320 * Math.cos(f.lat * Math.PI / 180));
+            if (typeof f.alt === 'number') d.targetAlt = f.alt;
+          }
         }
       }
 
