@@ -1,8 +1,9 @@
 # Open question: should a chase keep a site's case open?
 
-**Status:** OPEN, and narrower than first written. A site has no response
-assets, so half of this is settled by the account model. Flagged 2026-10-11.
-Lucas wants an operational view on the rest — Peter's.
+**Status:** OPEN. Flagged 2026-10-11, corrected the same day. A site owns no
+**counter-drone** response, which settles part of this, but two site operators
+do own an on-site team and the code does not care which kind it is. Lucas wants
+an operational view on the rest, Peter's.
 
 ## The question in one line
 
@@ -19,15 +20,26 @@ grace.
 So Copenhagen can hold a live case about a drone 40 km away that no Copenhagen
 sensor can see, for as long as the pursuit lasts.
 
-## The account model answers half of it
+## The account model answers part of it
 
-**A site has no response assets.** It does not dispatch anything. It observes,
-and it escalates to a state department — police, Forsvarskommandoen — and that
-department decides what to send. Operators send, receivers respond.
+**A site owns no counter-drone response.** It observes, and it escalates to a
+state department, police or Forsvarskommandoen, and that department decides
+what to send. Operators send, receivers respond.
 
 So the "duty of care for an asset I committed" argument does **not** apply to a
-site operator. They did not commit it. The aircraft belongs to the department
-that launched it.
+site operator for an interceptor. They did not commit it. The aircraft belongs
+to the department that launched it.
+
+**One correction, and it is not cosmetic.** Two site operators DO own a
+dispatchable unit: `op-cph-airports` and `op-esbjerg-port` each hold a
+`wildlife-response` team (`ROLE_SCOPE_MC` in `src/main.js`,
+`src/response_assets.js`). It exists for biological targets, moves at 20 km/h
+and will never chase a drone 40 km out. But **the close chain does not check
+what kind of unit it is**: `noChase` is false while ANY dispatch of the
+event is `en_route` or `engaging`. So an airport's own bird team, dispatched
+and still walking, holds the airport's case open on exactly the same mechanism
+as a fighter. The doctrine and the code disagree here, and the code wins
+today.
 
 That collapses most of the case for keeping a site's event open:
 
@@ -68,10 +80,14 @@ engaging, so it needs to be its own piece of work with its own verification.
 > Copenhagen's own case: open or closed?
 > And on your screen at Forsvarskommandoen: what are you looking at?
 
-The first half we think is settled — Copenhagen closes, because Copenhagen is
+The first half we think is settled: Copenhagen closes, because Copenhagen is
 not watching anything any more and did not launch the aircraft. The second half
-is the real question: what the dispatching department sees once the reporting
+is the real question, what the dispatching department sees once the reporting
 site has gone quiet.
+
+A third, smaller one for the same conversation: should an airport's own
+wildlife team being out on the apron hold the airport's case open? Mechanically
+it does today.
 
 It is not a software question.
 

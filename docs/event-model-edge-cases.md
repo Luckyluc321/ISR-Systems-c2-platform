@@ -58,13 +58,17 @@ question is not "where is it" but "had it already left".
 
 | Last confirmed position | Classification | Grace |
 |---|---|---|
-| Outside the site perimeter | `fled` | `_LOSS_GRACE_FLOOR_MS` (12 s) |
-| Inside, within `temporary_loss_buffer_m` of the edge, projected path exits | `fled` | 12 s |
+| Outside the site perimeter | `fled` | `_LOSS_GRACE_FLOOR_MS` (30 s) |
+| Inside, within `temporary_loss_buffer_m` of the edge, projected path exits | `fled` | 30 s |
 | Inside, not leaving | `hiding` | `900 / speed`, clamped 15 to 60 s |
-| No perimeter or no last-known position on record | `fled` | 12 s |
+| No perimeter or no last-known position on record | `fled` | 30 s |
 
 Speed-scaled rather than fixed, so a slow loiterer gets the full minute and a
-fast mover 15 s. `temporary_loss_buffer_m` is per-site configuration,
+fast mover 15 s. **The two cross over at about 30 m/s**: above that a
+departure's flat 30 s is LONGER than a possible hider's `900 / speed`. The
+floor was raised from 12 s to 30 s on 2026-10-11, because a return after close
+now mints a new linked event rather than reopening the old one, so closing too
+early produces link storms. `temporary_loss_buffer_m` is per-site configuration,
 defaulting to 200 m.
 
 Closing the instant a detection drops would register a hundred linked events

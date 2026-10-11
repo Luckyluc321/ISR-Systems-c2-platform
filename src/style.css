@@ -9729,6 +9729,24 @@ body.workspace-map-active #receiver-view {
   align-self: center;
 }
 
+/* Swarm roster lost-contact state. A detached member nobody holds any
+   more: dimmed, but it keeps its last-known telemetry columns, unlike a
+   downed member whose position stopped meaning anything. */
+.dp-swarm-row.is-lost { opacity: 0.68; }
+.dp-swarm-status-lost {
+  color: #9aa4b2;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 0 4px;
+  border: 1px solid rgba(154, 164, 178, 0.38);
+  border-radius: 3px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  align-self: center;
+}
+
 /* ── Sim composer: threat + path dropdowns (site-picker grammar) ── */
 .sim-composer-field { margin-bottom: 8px; }
 .sim-composer-hdr {

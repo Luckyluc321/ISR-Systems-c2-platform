@@ -1,5 +1,17 @@
 # Track trend line — provenance-keyed policy
 
+> **REVERTED, NOT IN THE BUILD. 2026-10-11.**
+>
+> `src/trail_policy.js` does not exist. This design was reverted whole, along
+> with `shouldShowTrail`, `shouldAppendTrailPoint`, `isSimulatedTrack` and
+> `state._simTrackFlying`, because it was applied to the "single-drone lead
+> path" without accounting for the fact that **every swarm has a lead that
+> runs that path**. It put a permanent trend line on the Copenhagen swarm
+> from the moment of detection.
+>
+> The reasoning below is kept because the question it answers is still open.
+> Nothing in it describes code that runs. Read it as a proposal.
+
 **Scope:** the red dashed trend line behind a tracked object, its length, and when
 it draws. Implemented in `src/trail_policy.js`, consumed by the single-drone lead
 path in `main.js`. The swarm path has its own breadcrumb design and is not covered

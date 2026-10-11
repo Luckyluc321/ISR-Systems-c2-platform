@@ -7176,66 +7176,77 @@ async function main() {
 
   function _startCounterDispatchLoop() {
     if (_cdRafId) return;
+    // WHY THE RESCHEDULE SITS IN A `finally`.
+    //
+    // A throw anywhere in this arrow used to skip the reschedule at the
+    // bottom. _cdRafId kept its already-consumed handle and
+    // _startCounterDispatchLoop's `if (_cdRafId) return` then refused to
+    // restart it, so the whole counter-dispatch fleet froze permanently
+    // with no recovery path. The per-unit try below stops one bad unit
+    // taking the others. This finally stops anything at all taking the
+    // loop itself.
     const tick = () => {
-      const now = wallNow();
-      for (const [, d] of _counterDispatches) {
-        // ISOLATE THE UNIT.
-        //
-        // This call was bare, so a throw from any single dispatch
-        // escaped the loop before requestAnimationFrame was called
-        // again. _cdRafId kept its already-consumed handle and
-        // _startCounterDispatchLoop's `if (_cdRafId) return` then
-        // refused to restart it, so one bad unit killed the entire
-        // counter-dispatch fleet permanently with no recovery path.
-        //
-        // That is how a one-token scope error presented as every
-        // interceptor freezing in mid-air instead of one drone
-        // misbehaving. The fleet degrades by a unit, never stops.
-        try {
-          _tickCounterDispatch(d, now);
-        } catch (err) {
-          if (!d._tickErrorLogged) {
-            d._tickErrorLogged = true;
-            console.error(`[dispatch] ${d.assetName || d.id} tick failed, unit frozen:`, err);
-          }
-        }
-        // LIVE POSITION AUTHORITY. Re-assert the last real fix over
-        // whatever the tick computed. Level-triggered on purpose: the
-        // tick writes position from four different states and
-        // interpolates altitude ahead of all of them, so gating each
-        // one would leave the next person to add physics responsible
-        // for remembering this unit is not ours to move.
-        if (reassertLivePosition(d)) {
-          if (d.profile?.trail) {
-            d.trailPositions.push(Cesium.Cartesian3.fromDegrees(
-              d.curLon, d.curLat,
-              d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
-            if (d.trailPositions.length > 500) d.trailPositions.shift();
-          }
-          // A tracker that has gone quiet leaves the unit frozen, which
-          // is the truth. Marking it stale stops that reading as a unit
-          // still driving to the scene, which would wedge the event
-          // open and let the record claim it lost its target.
-          const stale = isTelemetryStale(d, now);
-          if (stale !== d.telemetryStale) {
-            d.telemetryStale = stale;
-            if (stale) toast(`${d.assetName} position feed has gone quiet.`, 'warn');
+      try {
+        const now = wallNow();
+        for (const [, d] of _counterDispatches) {
+          // ISOLATE THE UNIT.
+          //
+          // The WHOLE per-unit body is inside this try, not just the
+          // physics call. A throw from reassertLivePosition, the trail
+          // push, the staleness check or the event mirror freezes that
+          // one unit and logs once. The fleet degrades by a unit, never
+          // stops.
+          //
+          // That is how a one-token scope error presented as every
+          // interceptor freezing in mid-air instead of one drone
+          // misbehaving.
+          try {
+              _tickCounterDispatch(d, now);
+            // LIVE POSITION AUTHORITY. Re-assert the last real fix over
+            // whatever the tick computed. Level-triggered on purpose: the
+            // tick writes position from four different states and
+            // interpolates altitude ahead of all of them, so gating each
+            // one would leave the next person to add physics responsible
+            // for remembering this unit is not ours to move.
+            if (reassertLivePosition(d)) {
+              if (d.profile?.trail) {
+                d.trailPositions.push(Cesium.Cartesian3.fromDegrees(
+                  d.curLon, d.curLat,
+                  d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
+                if (d.trailPositions.length > 500) d.trailPositions.shift();
+              }
+              // A tracker that has gone quiet leaves the unit frozen, which
+              // is the truth. Marking it stale stops that reading as a unit
+              // still driving to the scene, which would wedge the event
+              // open and let the record claim it lost its target.
+              const stale = isTelemetryStale(d, now);
+              if (stale !== d.telemetryStale) {
+                d.telemetryStale = stale;
+                if (stale) toast(`${d.assetName} position feed has gone quiet.`, 'warn');
+                _syncDispatchToEvent(d);
+              }
+            }
+            // Persist live dispatch state onto event.counterDispatches so
+            // consumers reading from the shared event object (multi-tab
+            // cross-tenant echo panel, "Other agencies on case", future
+            // report generators) see up-to-date state without needing
+            // access to the browser-local _counterDispatches Map.
+            // Same tick loop that drives the physics also mirrors state
+            // into the persisted snapshot — one place, always fresh.
             _syncDispatchToEvent(d);
+          } catch (err) {
+            if (!d._tickErrorLogged) {
+              d._tickErrorLogged = true;
+              console.error(`[dispatch] ${d.assetName || d.id} tick failed, unit frozen:`, err);
+            }
           }
         }
-        // Persist live dispatch state onto event.counterDispatches so
-        // consumers reading from the shared event object (multi-tab
-        // cross-tenant echo panel, "Other agencies on case", future
-        // report generators) see up-to-date state without needing
-        // access to the browser-local _counterDispatches Map.
-        // Same tick loop that drives the physics also mirrors state
-        // into the persisted snapshot — one place, always fresh.
-        _syncDispatchToEvent(d);
-      }
-      if (_counterDispatches.size > 0) {
-        _cdRafId = requestAnimationFrame(tick);
-      } else {
-        _cdRafId = null;
+      } finally {
+        if (_counterDispatches.size > 0) {
+          _cdRafId = requestAnimationFrame(tick);
+        } else {
+          _cdRafId = null;
+        }
       }
     };
     _cdRafId = requestAnimationFrame(tick);
@@ -11123,17 +11134,23 @@ async function main() {
       const tickSeq = _contribTickSeq;
       const hitSites = _sitesSeeingPoint(lat, lon, altM);
       for (const sid of hitSites) {
-        let targetEvent = event;
-        if (event.siteId !== sid) {
-          const linkedIds = event.linkedEventIds || [];
-          let matched = null;
-          for (const lid of linkedIds) {
-            const le = getEvent(lid);
-            if (le && le.siteId === sid) { matched = le; break; }
-          }
-          if (!matched) continue;
-          targetEvent = matched;
-        }
+        // ONE RESOLVER, SHARED WITH THE PER-SITE LIFECYCLE.
+        //
+        // This took the first linked event matching the site with no
+        // status filter, which was correct only while a site could hold
+        // exactly one event. Re-entry after close now opens a SECOND
+        // case for the same site, so a first match stamped sensors onto
+        // the CLOSED one: its contributingSensors and peakConfidence
+        // kept growing after its report was generated and forwarded,
+        // while the live case stayed empty and got swept 'lost contact'
+        // fifteen seconds later with the drones still inside the rings.
+        //
+        // _findGroupEventForSite returns the ACTIVE event for the site
+        // or null, and is the same resolver the ENTRY/EXIT branches use.
+        // Two functions answering "which event owns this site" is how
+        // the drift happened; there is now one.
+        const targetEvent = _findGroupEventForSite(event, sid);
+        if (!targetEvent) continue;
         if (!targetEvent.contributingSensors) targetEvent.contributingSensors = [];
         // First call for this event in the current tick? Reset every
         // sensor's confidence to 0 so all drones this tick start from a
@@ -16330,6 +16347,49 @@ async function main() {
           // A detached member is mirrored by nothing: it IS a member of this
           // event, its kinematics already sync through syncMemberTrack, and
           // its fate is recorded on the member rather than on a second case.
+
+          // A DETACHED MEMBER THAT LOSES CONTACT GETS A VERDICT.
+          //
+          // When a breakaway owned a child event, that child closed
+          // itself 'lost contact' after 30 seconds outside both our
+          // sensor mesh and every responder's onboard range. Deleting
+          // the child deleted the verdict with it, so a detached drone
+          // could fly out of all coverage and leave NO record at all:
+          // it stayed 'broken-away' into the closed event, the member
+          // history and the post-incident report. The verdict now lands
+          // on the member, which is where its fate belongs. Same
+          // trigger, same window, same note.
+          //
+          // The breadcrumb is deliberately NOT touched here. The old
+          // child-close hid it, on the reasoning that a frozen line
+          // reads as a position we still hold. That reasoning is
+          // overruled: outside coverage the dashed line is the only
+          // thing on the map showing where an unobserved object went,
+          // and it runs for as long as the simulation runs. A verdict
+          // on the roster and a breadcrumb on the map answer two
+          // different questions.
+          if (sw._brokenAway && !sw.neutralised && !sw._memberLostAt) {
+            if (!swShouldShow && !_onboardTrackMaintained(event, pos)) {
+              if (!sw._bwOorSince) sw._bwOorSince = nowMs;
+              if ((nowMs - sw._bwOorSince) >= _LOSS_GRACE_FLOOR_MS) {
+                sw._memberLostAt = nowMs;
+                if (sw.memberId) {
+                  setMemberStatus(event.id, sw.memberId, 'lost', {
+                    reason: 'no sensor or responder holds it',
+                  });
+                }
+                appendEventArray(event.id, 'notes', {
+                  timestamp: new Date().toISOString(),
+                  author: 'AUTO-CORRELATOR',
+                  text: `${sw.role || sw.memberId || 'A detached member'} lost. `
+                    + `No sensor or responder holds it.`,
+                  type: 'member-lost',
+                });
+              }
+            } else {
+              sw._bwOorSince = null;
+            }
+          }
           // P5A: adaptive sample capture (interval decided ONCE per event by platform)
           if (state.recording && (!sw._lastSampleMs || (nowMs - sw._lastSampleMs) >= _sampleIntervalForEvent(event))) {
             state.recording.timeseries.push(_buildDroneSample({
@@ -20994,13 +21054,14 @@ async function main() {
       var totalDrones = droneList.length;
 
       const fmtRow = (d, idx) => `
-        <div class="dp-swarm-row ${idx === _selectedSwarmIndex ? 'is-focused' : ''} ${d.status === 'neutralised' ? 'is-downed' : ''}" data-swarm-idx="${idx}" title="Click to focus ${d.id} (${d.model})">
+        <div class="dp-swarm-row ${idx === _selectedSwarmIndex ? 'is-focused' : ''} ${d.status === 'neutralised' ? 'is-downed' : ''} ${d.status === 'lost' ? 'is-lost' : ''}" data-swarm-idx="${idx}" title="Click to focus ${d.id} (${d.model})">
           <span class="dp-swarm-id">${d.id}</span>
           <span class="dp-swarm-model">${d.model}</span>
           <span class="dp-swarm-role">${d.role}</span>
           <span class="dp-swarm-status">${
             d.status === 'neutralised' ? `<span class="dp-swarm-status-downed">× DOWNED</span>`
             : d.status === 'broken-away' ? `<span class="dp-swarm-status-breakaway">↗ DETACHED</span>`
+            : d.status === 'lost' ? `<span class="dp-swarm-status-lost">? LOST</span>`
             : ''
           }</span>
           ${d.status === 'neutralised'

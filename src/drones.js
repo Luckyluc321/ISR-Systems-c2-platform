@@ -1548,6 +1548,8 @@ function bearingBetween(lat1, lon1, lat2, lon2) {
 // ── Playback state ──
 const _liveTracks = new Map(); // eventId -> { template, startTime, closed }
 const _listeners = new Set();
+// One log line per failing listener, not one per frame.
+const _listenerErrLogged = new WeakSet();
 let _rafId = null;
 
 function interpolate(waypoints, tSec) {
@@ -1579,7 +1581,7 @@ function speedAt(waypoints, tSec) {
   return Math.round(Math.hypot(dLat, dLon) * 10) / 10;
 }
 
-function _tick() {
+function _tickBody() {
   const updates = [];
   for (const [eventId, live] of _liveTracks) {
     if (live.closed) continue;
@@ -1597,9 +1599,44 @@ function _tick() {
       completed: elapsed >= live.template.durationSec,
     });
   }
-  if (updates.length) _listeners.forEach(fn => fn(updates));
-  if (_liveTracks.size > 0) _rafId = requestAnimationFrame(_tick);
-  else _rafId = null;
+  // One listener's failure must not starve the others, and no failure
+  // may reach the reschedule in _tick. Logged once per listener so a
+  // bug that throws every frame stays visible without flooding.
+  if (updates.length) {
+    for (const fn of _listeners) {
+      try {
+        fn(updates);
+      } catch (err) {
+        if (!_listenerErrLogged.has(fn)) {
+          _listenerErrLogged.add(fn);
+          console.error('[drones] track listener failed, playback continues:', err);
+        }
+      }
+    }
+  }
+}
+
+// WHY THE RESCHEDULE SITS IN A `finally`.
+//
+// This loop drives every drone in every scenario. It used to end with
+// the reschedule as a trailing statement after a bare
+// `_listeners.forEach(fn => fn(updates))`, and the sole listener is
+// onDroneTick in main.js, about 1,300 lines of work per position. A
+// throw anywhere in it escaped the forEach, escaped _tick, and the
+// reschedule never ran. `_rafId` kept its already-consumed handle, so
+// addLiveTrack's `if (!_rafId)` guard then refused to restart the
+// loop: every drone stopped, including tracks spawned afterwards,
+// until the page was reloaded. That failure mode shipped twice.
+//
+// The reschedule is now unconditional on the way out. A bug inside the
+// body is logged once and the simulation keeps running.
+function _tick() {
+  try {
+    _tickBody();
+  } finally {
+    if (_liveTracks.size > 0) _rafId = requestAnimationFrame(_tick);
+    else _rafId = null;
+  }
 }
 
 export function addLiveTrack(eventId, template) {
