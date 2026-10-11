@@ -10805,9 +10805,15 @@ async function main() {
       agg.oorCount = (agg.oorCount || 0) + 1;
       const now = new Date().toISOString();
       const suffix = agg.oorCount > 1 ? ` #${agg.oorCount}` : '';
+      // event.id, NOT ownerId. ownerId is a const inside
+      // processDroneSiteMarkers and this is a sibling function, so the
+      // name does not resolve and every call threw a ReferenceError.
+      // This path has no owner concept and cannot cheaply acquire one:
+      // it is parent-scoped by signature and does not know which
+      // drone's death emptied the site.
       const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site?.code || site?.name || sid} signal lost`;
-      _dropMarker(pos.lat, pos.lon, '#ff5a5a', lbl, ownerId);
-      appendEventArray(ownerId, 'perSiteCrossings', { kind: 'oor', lat: pos.lat, lon: pos.lon, color: '#ff5a5a', label: lbl, timestamp: now });
+      _dropMarker(pos.lat, pos.lon, '#ff5a5a', lbl, event.id);
+      appendEventArray(event.id, 'perSiteCrossings', { kind: 'oor', lat: pos.lat, lon: pos.lon, color: '#ff5a5a', label: lbl, timestamp: now });
       agg._oorFiredThisCycle = true;
       agg._pendingOorPos = null;
       toast(`OUT OF RANGE · ${event.droneType || 'track'} left ${site?.name || site?.code || sid} sensor coverage.`, 'warn');
