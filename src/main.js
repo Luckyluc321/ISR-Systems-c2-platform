@@ -16100,9 +16100,18 @@ async function main() {
         // rather than leave a stationary entity ticking for the rest of
         // the session. The ordinary completion close further down cannot
         // do this, because it requires status === 'active' and by now
-        // the event is closed. Harmless for every other template: the
-        // track is already marked closed and this is idempotent.
-        if (p.completed && state.closedAt) markTrackClosed(p.eventId);
+        // the event is closed.
+        //
+        // Flag-gated even though it would be a no-op without the gate,
+        // because this line sits in the branch the SWARM LEAD also runs
+        // and markTrackClosed stops every member of a swarm at once.
+        // "It is already closed so calling it again is idempotent" is an
+        // argument; the gate is a guarantee. Every functional line of
+        // this change is now reachable only for a template that declares
+        // continueAfterClose, of which there are three.
+        if (p.completed && state.closedAt && _trackContinuesAfterClose(event)) {
+          markTrackClosed(p.eventId);
+        }
       } else {
         // Off-map: hide LEAD drone (swarm handled by its own loop below).
         state.billboard.show = false;
