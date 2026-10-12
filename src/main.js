@@ -15901,7 +15901,17 @@ async function main() {
       ? '/aircraft/shahed_238_drone.glb'
       : (isQuadcopter ? '/aircraft/assault_drone_concept.glb'
         : (isHostileHeli ? '/aircraft/mi-24_hind.glb'
-          : (isAirliner ? '/aircraft/airbus_a320_indonesian_presidential_livery.glb' : null)));
+          // THE BAKED ONE, not the rigged source. The source is a skinned
+          // mesh whose gear, flaps and brakes only exist inside a 28 s
+          // animation that cannot play here, so it flew clean with the
+          // gear up. scripts/bake_landing_pose.py evaluates the skin once
+          // at t=28.17 and writes plain triangles with the joints already
+          // applied, per primitive so the livery survives.
+          //
+          // Which frame is gear-down was measured, not guessed: the
+          // model's lowest point sits at Y 9.75 with the gear stowed and
+          // Y -0.09 from t=24 on, so the gear reaches 9.84 m lower there.
+          : (isAirliner ? '/aircraft/a320_landing_config.glb' : null)));
     const _shouldSwapModel = isLoiterMun || isQuadcopter || isHostileHeli || isAirliner;
 
     // Flight rig — closure-captured per entity so each Shahed has
