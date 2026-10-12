@@ -791,6 +791,7 @@ import { buildCordon, assignPatrols, clearCordonCache } from './perimeter.js';
 import { loadSiteLights, loadNationalLights, bucketByRadiance, LIGHT_STYLES, LIGHT_CLASSES } from './night_infrastructure_lights.js';
 import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from './runway_lighting.js';
 import { createParkedAircraft } from './static_aircraft.js';
+import { A320_POSES } from './a320_poses.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -9576,6 +9577,58 @@ async function main() {
   //
   // Yellow-white glow (like a 5.56mm tracer round), not the green
   // "big ball" flash Lucas hated.
+  // A320 landing configuration, plus engines that turn.
+  //
+  // Which sample along the animation reads as "configured to land" is not
+  // derivable from the data, so it is picked by eye and remembered:
+  //   window.__isr_a320_pose('28.17')   set it
+  //   window.__isr_a320_pose()          list the available samples
+  let _a320Pose = '28.17';
+  if (typeof window !== 'undefined') {
+    window.__isr_a320_pose = (t) => {
+      if (t == null) {
+        console.log('[a320] poses:', Object.keys(A320_POSES).sort((a, b) => a - b).join(', '),
+          '  current:', _a320Pose);
+        return Object.keys(A320_POSES);
+      }
+      if (!A320_POSES[t]) { console.warn('[a320] no pose', t); return null; }
+      _a320Pose = String(t);
+      console.log('[a320] pose', _a320Pose, '- relaunch the track to see it');
+      return _a320Pose;
+    };
+  }
+
+  // Fan speed. 2.2 rev/s reads as spinning without strobing into a still
+  // disc at 60 fps the way an exact multiple of the frame rate would.
+  const _A320_FAN_RPS = 2.2;
+
+  function _a320NodeTransforms() {
+    const pose = A320_POSES[_a320Pose] || {};
+    const out = {};
+    for (const [node, trs] of Object.entries(pose)) {
+      const spec = {};
+      if (trs.translation) spec.translation = new Cesium.Cartesian3(...trs.translation);
+      if (trs.scale) spec.scale = new Cesium.Cartesian3(...trs.scale);
+      if (trs.rotation) {
+        spec.rotation = new Cesium.Quaternion(...trs.rotation);
+      }
+      out[node] = spec;
+    }
+    // The engines override whatever the pose says, because they are the
+    // one part that should not hold still. Spun off monoNow() so they
+    // freeze when the simulation freezes, like every other hand-driven
+    // moving part in this file.
+    for (const eng of ['Engine.L_082', 'Engine.R_083']) {
+      out[eng] = {
+        rotation: new Cesium.CallbackProperty(() => Cesium.Quaternion.fromAxisAngle(
+          Cesium.Cartesian3.UNIT_Y,
+          ((monoNow() / 1000) * _A320_FAN_RPS * Math.PI * 2) % (Math.PI * 2),
+          new Cesium.Quaternion()), false),
+      };
+    }
+    return out;
+  }
+
   // Tracer density. Tuned for the close view, where individual rounds
   // should be distinguishable, and harmless far out where they merge.
   const _T_ROUNDS = 8;
@@ -16134,6 +16187,18 @@ async function main() {
         // Floor derived from real metres like everything else.
         scale: isAirliner ? 1
           : (isHostileHeli ? 1.121 : (isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5))),
+        // LANDING CONFIGURATION, AND TURNING ENGINES.
+        //
+        // The model's own 28 s animation cannot run: the clock is pinned
+        // so the sun holds still and Cesium drives model animations off
+        // that clock. The configuration is baked instead, applied the
+        // same way the helicopter's rotors are, and the fans are spun by
+        // hand off the simulation clock.
+        //
+        // Pose is chosen live because the quaternions do not say which
+        // end of the animation is gear-down:
+        //   window.__isr_a320_pose('28.17')
+        ...(isAirliner ? { nodeTransformations: _a320NodeTransforms() } : {}),
         minimumPixelSize: isAirliner ? Math.round(37.57 * MODEL_PX_PER_M)
           : (isHostileHeli ? Math.round(21.5 * MODEL_PX_PER_M)
             : (isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20))),
