@@ -43,6 +43,22 @@ export const PARKED = [
     // slice. Same axis convention as the Seahawk, so the -90 heading
     // offset in this file is already right for it.
     scale: 1,
+    // SAT ON TOP OF THE IMAGERY, NOT IN IT. A GLB authored for a product
+    // render is lit for a studio: bright, saturated and specular. Dropped
+    // onto SDFI orthophoto it reads as a sticker, and a red livery is the
+    // worst case because nothing in a Danish airfield is that colour.
+    //
+    // Two controls, both nudgeable live:
+    //   tint / tintAmount  mix the model toward a colour, 0 is untouched
+    //   brightness         scales the light reaching it, 1 is untouched
+    //
+    // The tint is a desaturated blue-grey chosen against the SDFI
+    // palette rather than invented: the imagery sits in cool greys and
+    // muted greens, so pulling the model that way is what makes it sit
+    // in the scene instead of on it.
+    tint: '#9aa3a8',
+    tintAmount: 0.38,
+    brightness: 0.72,
     // Same rule as every other model in this repo: CC-BY needs an
     // attribution entry, CC0 and Sketchfab Standard do not.
     attribution: null,
@@ -83,6 +99,17 @@ export function createParkedAircraft(viewer, Cesium, { rows = PARKED } = {}) {
         uri: row.uri,
         scale: row.scale ?? 1,
         minimumPixelSize: 0,
+        // Mixed toward the tint rather than multiplied by it, so the
+        // livery keeps its shape and loses its studio saturation.
+        color: Cesium.Color.fromCssColorString(row.tint || '#ffffff'),
+        colorBlendMode: Cesium.ColorBlendMode.MIX,
+        colorBlendAmount: row.tintAmount ?? 0,
+        // Dims the light reaching the model. This is what takes the
+        // shine off, as opposed to the tint, which takes the colour out.
+        lightColor: (() => {
+          const b = row.brightness;
+          return (b == null || b === 1) ? undefined : new Cesium.Cartesian3(b, b, b);
+        })(),
         // Clamped to the terrain, so it sits on the apron rather than
         // at an absolute altitude that would float or sink with the
         // height model.
