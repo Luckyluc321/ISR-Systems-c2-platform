@@ -93,18 +93,41 @@ export const TEMPLATES = {
     ],
     evidence: { rfCarrier: '1090 MHz ADS-B', rfMatch: 'SAS743 A320neo, flight plan match', modality: 'RF + acoustic + visual', evidenceSize: '92.1 MB', note: 'Cleared commercial approach, no threat, logged for audit.' },
     waypoints: [
-      { lat: 55.57500, lon: 12.57500, alt: 800, heading: 40, tSec: 0  },
-      { lat: 55.58300, lon: 12.58800, alt: 630, heading: 40, tSec: 10 },
-      { lat: 55.59100, lon: 12.60100, alt: 460, heading: 40, tSec: 20 },
-      { lat: 55.59900, lon: 12.61400, alt: 300, heading: 40, tSec: 30 },
-      { lat: 55.60300, lon: 12.63400, alt: 90,  heading: 40, tSec: 40 },
-      { lat: 55.60500, lon: 12.64020, alt: 3,   heading: 40, tSec: 45 },
-      { lat: 55.61200, lon: 12.64800, alt: 0,   heading: 40, tSec: 55 },
-      { lat: 55.62000, lon: 12.65650, alt: 0,   heading: 40, tSec: 65 },
-      { lat: 55.62700, lon: 12.66300, alt: 0,   heading: 40, tSec: 75 },
-      { lat: 55.62960, lon: 12.66590, alt: 0,   heading: 40, tSec: 82 },
+      // A REAL APPROACH, not the dive this was. The previous profile flew
+      // final at 235 kt descending 3,347 fpm on an 8 degree slope. An
+      // A320 flies final at 136 kt, 750 fpm, 3 degrees, and the gap
+      // between those two is the difference between an airliner landing
+      // and a missile arriving.
+      //
+      // Generated from the geometry rather than eyeballed: 70 m/s along
+      // the reciprocal of runway 04R's 040, altitude = range * tan(3),
+      // from 10 km out to the 55.60500 / 12.64020 touchdown zone. The
+      // last four points shallow the slope into a flare instead of
+      // flying the glideslope into the tarmac, and the rollout
+      // decelerates 70 m/s to about 12.
+      //
+      //   10 km out   524 m    t+0
+      //    4 km out   210 m    t+86
+      //    1.5 km     79 m     t+121
+      //    400 m      21 m     t+137      flare begins
+      //    threshold  0 m      t+143      touchdown
+      //    rollout                        t+187
+      { lat: 55.53619, lon: 12.53798, alt: 524, heading: 40, tSec: 0   },
+      { lat: 55.54995, lon: 12.55843, alt: 419, heading: 40, tSec: 29  },
+      { lat: 55.56371, lon: 12.57887, alt: 314, heading: 40, tSec: 57  },
+      { lat: 55.57747, lon: 12.59931, alt: 210, heading: 40, tSec: 86  },
+      { lat: 55.58780, lon: 12.61465, alt: 131, heading: 40, tSec: 107 },
+      { lat: 55.59468, lon: 12.62487, alt: 79,  heading: 40, tSec: 121 },
+      { lat: 55.59949, lon: 12.63202, alt: 42,  heading: 40, tSec: 131 },
+      { lat: 55.60225, lon: 12.63611, alt: 21,  heading: 40, tSec: 137 },
+      { lat: 55.60397, lon: 12.63867, alt: 5,   heading: 40, tSec: 141 },
+      { lat: 55.60500, lon: 12.64020, alt: 0,   heading: 40, tSec: 143 },
+      { lat: 55.60775, lon: 12.64429, alt: 0,   heading: 40, tSec: 149 },
+      { lat: 55.61119, lon: 12.64940, alt: 0,   heading: 40, tSec: 159 },
+      { lat: 55.61463, lon: 12.65451, alt: 0,   heading: 40, tSec: 173 },
+      { lat: 55.61739, lon: 12.65860, alt: 0,   heading: 40, tSec: 187 },
     ],
-    durationSec: 82,
+    durationSec: 187,
   },
 
   // ── Recon drone, HALE (Reaper/Global-Hawk class), high altitude circular loiter ──

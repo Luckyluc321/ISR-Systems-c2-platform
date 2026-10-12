@@ -15875,7 +15875,36 @@ async function main() {
     const _bankedOrientation = () => {
       const cart = _billboardRef?.position?.getValue?.(Cesium.JulianDate.now());
       if (!cart) return undefined;
-      const T = window.__isr_shahed_tuning || {};
+      // PER-AIRFRAME, not one global. This rig read
+      // __isr_shahed_tuning for every track that reached it, so an
+      // airliner would have flown with a loitering munition's
+      // characteristics: 30 degrees of pitch authority, 35 of bank, and
+      // a nose that follows the flight path exactly.
+      //
+      // An A320 on final does none of that. It sits NOSE UP about five
+      // degrees while descending three, because it is flying at high
+      // angle of attack with flaps out, so pitch derived from the climb
+      // angle alone points it at the runway like a dart. pitchOffsetDeg
+      // carries that body attitude; the clamps carry the fact that an
+      // airliner is not an agile airframe.
+      //
+      // pitchSign is the one value here I cannot read off the model:
+      // it depends on which way the asset's nose is authored. Flip it
+      // live if the nose pitches the wrong way:
+      //   window.__isr_airliner_tuning = { pitchSign: -1 }
+      const _AIRLINER_RIG = {
+        pitchOffsetDeg: 5,     // body attitude on final, nose up
+        pitchClampDeg: 12,     // not an agile airframe
+        bankClampDeg: 25,
+        bankFactor: 1.2,       // gentle, and it is flying straight anyway
+        pitchSmoothing: 0.06,  // heavy aircraft, slow attitude changes
+        rollSmoothing: 0.05,
+        headingSmoothing: 0.10,
+        pitchSign: 1,
+      };
+      const T = isAirliner
+        ? { ..._AIRLINER_RIG, ...(window.__isr_airliner_tuning || {}) }
+        : (window.__isr_shahed_tuning || {});
       const headingOffset  = ((T.headingOffsetDeg || 0) * Math.PI) / 180;
       const pitchOffset    = ((T.pitchOffsetDeg   || 0) * Math.PI) / 180;
       // Asset-space axis flips. 1 for a model whose nose sits on body
