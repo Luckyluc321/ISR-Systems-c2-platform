@@ -15922,22 +15922,23 @@ async function main() {
       ? '/aircraft/shahed_238_drone.glb'
       : (isQuadcopter ? '/aircraft/assault_drone_concept.glb'
         : (isHostileHeli ? '/aircraft/mi-24_hind.glb'
-          // THE BAKED ONE, not the rigged source. The source is a skinned
-          // mesh whose gear, flaps and brakes only exist inside a 28 s
-          // animation that cannot play here, so it flew clean with the
-          // gear up. scripts/bake_landing_pose.py evaluates the skin once
-          // at t=28.17 and writes plain triangles with the joints already
-          // applied, per primitive so the livery survives.
+          // THE RIGGED SOURCE, running its OWN animation. The builder
+          // authored 28 seconds of gear, doors, flaps, ailerons and air
+          // brakes across 248 channels, and nothing hand-made is going to
+          // beat it.
           //
-          // Which frame is gear-down was measured, not guessed: the
-          // model's lowest point sits at Y 9.75 with the gear stowed and
-          // Y -0.09 from t=24 on, so the gear reaches 9.84 m lower there.
+          // I spent a long time avoiding it because the clock is pinned
+          // for the sun and Cesium drives model animations off that
+          // clock. I never checked what unpinning costs. It is 0.25
+          // degrees of sun movement per minute: 1.38 degrees across this
+          // entire 5.5 minute approach, and 0.12 across the 28 second
+          // animation. Invisible. The constraint I built two bakes around
+          // was not a constraint.
           //
-          // The bake emits THREE nodes: the airframe, and the gear at two
-          // positions. The gear is 68% of the model's triangles and is
-          // entirely inside the fuselage when stowed, so "gear up" is
-          // simply not drawing it. Scaled between by range below.
-          : (isAirliner ? '/aircraft/a320_landing_config.glb' : null)));
+          // a320_landing_config.glb and scripts/bake_landing_pose.py stay
+          // in the tree. The script is the right tool for a model with no
+          // animation, and this one is not that.
+          : (isAirliner ? '/aircraft/airbus_a320_indonesian_presidential_livery.glb' : null)));
     const _shouldSwapModel = isLoiterMun || isQuadcopter || isHostileHeli || isAirliner;
 
     // Flight rig — closure-captured per entity so each Shahed has
@@ -16230,26 +16231,10 @@ async function main() {
         // Floor derived from real metres like everything else.
         scale: isAirliner ? 1
           : (isHostileHeli ? 1.121 : (isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5))),
-        // GEAR COMES DOWN ON APPROACH, not 18 km out. Real aircraft
-        // extend at roughly 5 to 8 nm, and this one was gear-down for
-        // the whole final because the configuration was baked once.
-        //
-        // The bake splits the gear into its own nodes, so the renderer
-        // can choose. Nothing is loaded or swapped: all three nodes are
-        // in the one file and the unwanted ones are scaled to nothing.
-        // That is only affordable because the gear, at 68% of the
-        // triangles, is invisible inside the fuselage when stowed, so
-        // "up" needs no geometry at all.
-        //
-        //   beyond 9 km   no gear drawn
-        //   9 to 7.5 km   part extended
-        //   inside 7.5 km fully down
-        ...(isAirliner ? { nodeTransformations: {
-          gear_down: { scale: new Cesium.CallbackProperty(
-            () => _gearScale(_billboardRef, 'down'), false) },
-          gear_mid: { scale: new Cesium.CallbackProperty(
-            () => _gearScale(_billboardRef, 'mid'), false) },
-        } } : {}),
+        // Animations run for this one. The gear, flaps and brakes are
+        // the builder's, not ours, and they need the clock (enabled
+        // where the track is created).
+        ...(isAirliner ? { runAnimations: true } : {}),
         // NO BAKED POSE. Applying the animation's node transforms through
         // nodeTransformations tore the aircraft to pieces: wings, flaps
         // and gear scattered around the fuselage, and the map dropped to
@@ -16315,6 +16300,20 @@ async function main() {
         () => ((isLoiterMun || isAirliner) ? _bankedOrientation() : _quadOrientation()),
         false,
       );
+    }
+    if (isAirliner) {
+      // THE CLOCK HAS TO RUN for the model's own animation to advance,
+      // and it is pinned at init so the sun holds still.
+      //
+      // Unpinning it moves the sun 0.25 degrees a minute, so 1.38 across
+      // this whole approach. That is below anything a viewer could see,
+      // and the auto imagery branch already runs the clock live, so this
+      // is not new behaviour for the scene.
+      //
+      // Set here rather than in an imagery branch, so day mode's own
+      // settings are untouched and the clock only runs when something
+      // needs it.
+      viewer.clock.shouldAnimate = true;
     }
     const billboard = viewer.entities.add(_droneEntitySpec);
     _billboardRef = billboard;
