@@ -8658,53 +8658,7 @@ async function main() {
         }
       } else {
         // Straight-line fallback (used pre-route-fetch or on OSRM fail)
-        let brng = _bearingRad(d.curLat, d.curLon, d.targetLat, d.targetLon);
-        // ROLL ONTO THE TARGET'S COURSE BEFORE THE MERGE, not at it.
-        //
-        // A beam pass needs the two aircraft flying the SAME way. This
-        // one is scrambled from Karup southbound against a northbound
-        // Geran, so they close head-on and the aircraft needs about 176
-        // degrees of turn to go parallel. At 4.67 deg/s that is 38
-        // seconds, against a 30 second engagement: it never finished the
-        // turn, so it fired while still pointing the other way. That is
-        // how the Geran could be off the helicopter's right while the
-        // helicopter was off the Geran's right. Both were true, because
-        // they were nose to nose.
-        //
-        // Inside three turn radii there is no longer time to fly at the
-        // target and then turn. The heading target becomes the TARGET'S
-        // OWN COURSE, and because _rotorcraftStep only lets it move
-        // where it points, it arcs round onto that course instead of
-        // driving straight in. The beam station still pulls it sideways,
-        // but only at the 12 m/s lateral cap, so the turn dominates and
-        // what comes out is an ordinary lead turn into formation.
-        if (d.profile.beamPass) {
-          const _bpEv2 = getEvent(d.eventId);
-          const _tHdg = _bpEv2?.lastPosition?.heading;
-          if (typeof _tHdg === 'number') {
-            // START THE TURN WHEN THERE IS EXACTLY TIME FOR IT, which is
-            // not a fixed distance. Head-on the two close at the SUM of
-            // their speeds, 69.4 + 51.4 = 120.8 m/s here, so a gap that
-            // looks like 37 seconds of flying is 21 seconds of merge. A
-            // distance trigger is wrong by that factor and wrong again
-            // for any other approach angle.
-            //
-            // Compare the time left before the merge against the time
-            // the turn itself needs, and commit when they are equal with
-            // a little margin. Self-correcting: a tail chase needs
-            // almost no turn and triggers late, a head-on needs 176
-            // degrees and triggers early.
-            const TAU = Math.PI * 2;
-            const _tHdgRad = (_tHdg * Math.PI) / 180;
-            const _tSpd = _bpEv2?.lastPosition?.speed || 0;
-            const _closing = Math.max(1, ((d.profile.cruiseKmh * 1000) / 3600) + _tSpd);
-            const _tMerge = haversineM(d.curLat, d.curLon, d.targetLat, d.targetLon) / _closing;
-            const _delta = Math.abs(
-              ((_tHdgRad - (d.heading || 0) + Math.PI) % TAU + TAU) % TAU - Math.PI);
-            const _tTurn = _delta / Math.max(1e-6, _turnRateOf(d));
-            if (_tMerge <= _tTurn * 1.25) brng = _tHdgRad;
-          }
-        }
+        const brng = _bearingRad(d.curLat, d.curLon, d.targetLat, d.targetLon);
         d.heading = _easeHeading(d.heading, brng, dtSec, _turnRateOf(d));
         if (!_rotorcraftStep(d, d.targetLat, d.targetLon, dtSec)) {
         const stepDegLat = (stepM * Math.cos(brng)) / 111000;
@@ -8816,7 +8770,6 @@ async function main() {
           // Gated on profile.beamPass, which only this airframe declares.
           // Without it every value below is byte-identical to before,
           // so the counter-drone swarm's fan is untouched.
-          let beamHeadingRad = null;
           if (d.profile.beamPass) {
             const _bpEv = getEvent(d.eventId);
             const _tgtHdgDeg = _bpEv?.lastPosition?.heading;
@@ -8842,15 +8795,30 @@ async function main() {
               // these are real lat/lon offsets from the target.
               const _side = ((window.__isr_muzzle_tuning || {})[d.kind] || {}).side
                 ?? d.profile.muzzleOffsetM?.side ?? 0;
-              // side NEGATIVE is the gun's side, and in geographic terms
-              // that is the aircraft's right. For the target to end up
-              // there while flying parallel, the aircraft has to sit to
-              // the target's LEFT, which is 90 degrees anticlockwise of
-              // the target's heading.
-              const _perp = _tgtHdg + (_side >= 0 ? Math.PI / 2 : -Math.PI / 2);
+              // A HEAD-ON FIRING PASS, not a formation join.
+              //
+              // The aircraft is scrambled southbound against a northbound
+              // Geran and they fly PAST each other. It does not turn onto
+              // the target's course and it never flies alongside.
+              //
+              // The gun is on the right. Flying head-on, for the target
+              // to be off the aircraft's right the aircraft must be on
+              // the target's right as well: opposite courses mean both
+              // read "right" at once. That is not a contradiction, it is
+              // what a head-on pass looks like, and mistaking it for one
+              // is what sent the aircraft down the wrong side.
+              //
+              // So the offset is 90 degrees CLOCKWISE of the target's
+              // heading, which is its right, for a right-hand gun.
+              const _perp = _tgtHdg + (_side >= 0 ? -Math.PI / 2 : Math.PI / 2);
               desiredLat = enemyLat + (offsetM * Math.cos(_perp)) / 111000;
               desiredLon = enemyLon + (offsetM * Math.sin(_perp)) / (111000 * Math.cos(enemyLat * Math.PI / 180));
-              beamHeadingRad = _tgtHdg;   // fly PARALLEL, not at it
+              // Deliberately NOT setting a parallel heading. On a
+              // head-on pass the nose follows the flight path through
+              // the merge; the gun does the tracking, inside its own
+              // 90 degree window. Forcing parallel asked for 176 degrees
+              // of turn in a 30 second engagement, which never completed
+              // and left it firing while pointed the wrong way.
             }
           }
           if (!_rotorcraftStep(d, desiredLat, desiredLon, dtSecEng)) {
@@ -8871,9 +8839,14 @@ async function main() {
           // dtSecEng, not dtSec. dtSec is declared inside the en_route
           // branch and this is its SIBLING engaging branch, so the name
           // never resolved and every frame threw a ReferenceError.
+          // The nose points at the target and the turn rate does the
+          // rest: through the merge it physically cannot swing fast
+          // enough to follow, so it lags onto the flight path, which is
+          // what a pass looks like. The gun tracks inside its own window
+          // while the airframe flies through.
           d.heading = _easeHeading(
             d.heading,
-            beamHeadingRad ?? _bearingRad(d.curLat, d.curLon, enemyLat, enemyLon),
+            _bearingRad(d.curLat, d.curLon, enemyLat, enemyLon),
             dtSecEng, _turnRateOf(d));
           if (d.profile.trail) {
             d.trailPositions.push(Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.profile.airborne ? _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60) : 0));
