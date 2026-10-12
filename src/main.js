@@ -7447,6 +7447,70 @@ async function main() {
   };
   window.__isr_gunTest.stop = _gunTestStop;
 
+  // ── Airframe axis diagnostic ────────────────────────────────────
+  //
+  //   window.__isr_heliDebug()        on
+  //   window.__isr_heliDebug(false)   off
+  //
+  // Draws, on every airborne dispatch, what the CODE believes about the
+  // aircraft, so it can be compared against what the MODEL is doing:
+  //
+  //   RED    20 m along d.heading          where the code thinks the nose is
+  //   GREEN  10 m to port of d.heading     where the code thinks the left is
+  //   YELLOW a dot at the computed muzzle  where rounds are told to leave
+  //
+  // If the red line does not run out of the nose, the heading the muzzle
+  // and the attitude are built from disagrees with the rendered model,
+  // and that single fact explains both rounds leaving from the wrong
+  // place and a bank that does not look like a bank.
+  let _heliDbg = null;
+  window.__isr_heliDebug = (on = true) => {
+    if (_heliDbg) { _heliDbg.forEach(e => viewer.entities.remove(e)); _heliDbg = null; }
+    if (!on) { console.log('[heliDebug] off'); return; }
+    const mk = (colorCss, width) => viewer.entities.add({
+      polyline: {
+        positions: new Cesium.CallbackProperty(() => [], false),
+        width, arcType: Cesium.ArcType.NONE,
+        material: Cesium.Color.fromCssColorString(colorCss),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    });
+    const at = (d, fwd, side) => {
+      const h = d.heading || 0;
+      const dE = Math.sin(h) * fwd + -Math.cos(h) * side;
+      const dN = Math.cos(h) * fwd + Math.sin(h) * side;
+      return Cesium.Cartesian3.fromDegrees(
+        d.curLon + dE / (111000 * Math.cos(d.curLat * Math.PI / 180)),
+        d.curLat + dN / 111000,
+        _airborneAbsAlt(d.curLon, d.curLat, d.curAlt || 60));
+    };
+    const pick = () => {
+      for (const [, d] of _counterDispatches) if (d.profile?.airborne && d.curLat != null) return d;
+      return null;
+    };
+    const nose = mk('#ff3b3b', 4), port = mk('#3bff6a', 4);
+    nose.polyline.positions = new Cesium.CallbackProperty(() => {
+      const d = pick(); return d ? [at(d, 0, 0), at(d, 20, 0)] : [];
+    }, false);
+    port.polyline.positions = new Cesium.CallbackProperty(() => {
+      const d = pick(); return d ? [at(d, 0, 0), at(d, 0, 10)] : [];
+    }, false);
+    const muzzle = viewer.entities.add({
+      position: new Cesium.CallbackProperty(() => {
+        const d = pick(); if (!d) return undefined;
+        const m = _muzzleOffsetFor(d);
+        return Cesium.Cartesian3.fromDegrees(m.lon, m.lat,
+          _airborneAbsAlt(m.lon, m.lat, d.curAlt || 60));
+      }, false),
+      point: { pixelSize: 12, color: Cesium.Color.YELLOW,
+               outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+               disableDepthTestDistance: Number.POSITIVE_INFINITY },
+    });
+    _heliDbg = [nose, port, muzzle];
+    console.log('[heliDebug] RED = nose per d.heading, GREEN = port, YELLOW = muzzle. '
+      + 'Compare against the model. window.__isr_heliDebug(false) to clear.');
+  };
+
   function _startCounterDispatchLoop() {
     if (_cdRafId) return;
     // WHY THE RESCHEDULE SITS IN A `finally`.
