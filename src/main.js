@@ -7502,6 +7502,59 @@ async function main() {
   };
   window.__isr_gunTest.stop = _gunTestStop;
 
+  // ── Muzzle probe ────────────────────────────────────────────────
+  //
+  //   window.__isr_muzzleProbe()        on
+  //   window.__isr_muzzleProbe(false)   off
+  //
+  // Draws all four candidate muzzle positions at once, using the
+  // magnitudes measured off the model's Gun_Station node (2.79 m along
+  // the fuselage, 0.85 m across it). Exactly one of them sits on the
+  // right-hand door. Which one it is settles the sign convention of this
+  // file's body frame once, instead of being inferred a fifth time.
+  //
+  //   RED     forward +2.79   side +0.85
+  //   GREEN   forward -2.79   side +0.85
+  //   BLUE    forward +2.79   side -0.85
+  //   ORANGE  forward -2.79   side -0.85
+  //
+  // Ignores window.__isr_muzzle_tuning on purpose, so a leftover console
+  // override cannot move the probes.
+  let _mzProbe = null;
+  window.__isr_muzzleProbe = (on = true) => {
+    if (_mzProbe) { _mzProbe.forEach(e => viewer.entities.remove(e)); _mzProbe = null; }
+    if (!on) { console.log('[muzzleProbe] off'); return; }
+    const pick = () => {
+      for (const [, d] of _counterDispatches) {
+        if (d.profile?.icon === 'helicopter' && d.curLat != null) return d;
+      }
+      return null;
+    };
+    const combos = [
+      ['#ff2b2b', 'RED',     2.79,  0.85],
+      ['#2bff5a', 'GREEN',  -2.79,  0.85],
+      ['#2b8cff', 'BLUE',    2.79, -0.85],
+      ['#ff9b1f', 'ORANGE', -2.79, -0.85],
+    ];
+    _mzProbe = combos.map(([css, , fwd, side]) => viewer.entities.add({
+      position: new Cesium.CallbackProperty(() => {
+        const d = pick(); if (!d) return undefined;
+        const h = d.heading || 0;
+        const dE = Math.sin(h) * fwd + -Math.cos(h) * side;
+        const dN = Math.cos(h) * fwd + Math.sin(h) * side;
+        const lat = d.curLat + dN / 111000;
+        const lon = d.curLon + dE / (111000 * Math.cos(d.curLat * Math.PI / 180));
+        return Cesium.Cartesian3.fromDegrees(lon, lat,
+          _airborneAbsAlt(lon, lat, (d.curAlt || 60) + 0.67));
+      }, false),
+      point: { pixelSize: 11, color: Cesium.Color.fromCssColorString(css),
+               outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+               disableDepthTestDistance: Number.POSITIVE_INFINITY },
+    }));
+    console.log('[muzzleProbe] RED +fwd/+side | GREEN -fwd/+side | '
+      + 'BLUE +fwd/-side | ORANGE -fwd/-side. Say which dot is on the right-hand door.');
+  };
+
   // ── Airframe axis diagnostic ────────────────────────────────────
   //
   //   window.__isr_heliDebug()        on
