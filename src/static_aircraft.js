@@ -118,6 +118,55 @@ export function createParkedAircraft(viewer, Cesium, { rows = PARKED } = {}) {
       console.log(`[parked ${id}]`, vals);
       return row;
     };
+    // CLICK TO PLACE. Absolute lat/lon is the wrong interface for lining
+    // something up against a feature you can see: you would have to know
+    // the coordinate first, which is the whole problem. Arm this, click
+    // the spot on the map, done.
+    //
+    //   __isr_parkedPick('bll-terminal-1')
+    //
+    // One click only, then it disarms, so it cannot hijack normal
+    // interaction with the map.
+    window.__isr_parkedPick = (id) => {
+      const row = rows.find(r => r.id === id);
+      if (!row) { console.warn('[parked] no such stand:', id); return; }
+      const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+      console.log(`[parked ${id}] armed - click the spot on the map`);
+      handler.setInputAction((click) => {
+        const ray = viewer.camera.getPickRay(click.position);
+        const cart = ray && viewer.scene.globe.pick(ray, viewer.scene);
+        handler.destroy();
+        if (!cart) { console.warn('[parked] click missed the globe, try again'); return; }
+        const c = Cesium.Cartographic.fromCartesian(cart);
+        row.lat = Number(Cesium.Math.toDegrees(c.latitude).toFixed(6));
+        row.lon = Number(Cesium.Math.toDegrees(c.longitude).toFixed(6));
+        build(row);
+        console.log(`[parked ${id}] placed`, { lat: row.lat, lon: row.lon });
+      }, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+    };
+
+    // RELATIVE NUDGE, in metres and degrees, so it can be walked into
+    // place without knowing a single coordinate:
+    //
+    //   __isr_parkedNudge('bll-terminal-1', { north: 10 })
+    //   __isr_parkedNudge('bll-terminal-1', { east: -5, headingDeg: 15 })
+    //
+    // north/east are metres and signed. headingDeg and scale are added
+    // to what is there, not set.
+    window.__isr_parkedNudge = (id, { north = 0, east = 0, headingDeg = 0, scale = 0 } = {}) => {
+      const row = rows.find(r => r.id === id);
+      if (!row) { console.warn('[parked] no such stand:', id); return null; }
+      row.lat = Number((row.lat + north / 111320).toFixed(6));
+      row.lon = Number((row.lon + east
+        / (111320 * Math.cos(row.lat * Math.PI / 180))).toFixed(6));
+      if (headingDeg) row.headingDeg = (((row.headingDeg || 0) + headingDeg) % 360 + 360) % 360;
+      if (scale) row.scale = Number(((row.scale ?? 1) + scale).toFixed(4));
+      build(row);
+      console.log(`[parked ${id}]`,
+        { lat: row.lat, lon: row.lon, headingDeg: row.headingDeg, scale: row.scale });
+      return row;
+    };
+
     window.__isr_parkedList = () => {
       console.table(rows.map(r => ({ id: r.id, lat: r.lat, lon: r.lon,
         headingDeg: r.headingDeg, scale: r.scale, uri: r.uri })));
