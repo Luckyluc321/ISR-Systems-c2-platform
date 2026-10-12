@@ -4758,11 +4758,18 @@ async function main() {
       // capability anywhere user-facing.
       onboardSensorRangeM: 2000,
       icon: 'helicopter', trail: true, airborne: true,
-      // Rounds leave from the left cabin door, where the gunner is
-      // modelled, not from the middle of the airframe. Metres to the
-      // left of the track. No other profile sets this, so no other
-      // unit's fire moves.
-      // Door gun, 5 m out of the port side of the cabin.
+      // Rounds leave from the cabin door where the gunner is modelled,
+      // not from the middle of the airframe. No other profile sets
+      // this, so no other unit's fire moves.
+      //
+      // STARBOARD. The model's Gun_Station sits at X = -95, and with
+      // the nose on -Y and Z up that is the right-hand side. The code
+      // had it on port because the traverse arc was hardcoded there,
+      // and I kept it on port once more rather than trust the
+      // arithmetic over the existing constant. Lucas confirmed the gun
+      // is on the right. The arc now derives from this sign instead of
+      // carrying its own, so there is one place to be wrong.
+      //
       // MEASURED OFF THE MODEL, not guessed. The GLB carries a
       // Gun_Station node at model coords (-95, -310, +75), the fuselage
       // lies along Y with Tail_Rotor at +894.7 so the nose is -Y, and
@@ -4775,13 +4782,13 @@ async function main() {
       // point hanging off the flank behind the door. That is what was
       // being seen as rounds coming from the tail.
       //
-      // The side stays POSITIVE, meaning port. The gun traverse arc is
-      // centred on -PI/2, which is port, so the whole rig already
-      // assumes a left-hand gun and this change does not touch that
-      // assumption. If the opening is actually on the right, flip the
-      // sign live rather than rebuilding:
-      //   window.__isr_muzzle_tuning = { 'helicopter-intercept': { forward: 2.79, side: -0.85 } }
-      muzzleOffsetM: { forward: 2.79, side: 0.85 },
+      // Sign is NEGATIVE for starboard. Everything that cares about
+      // which side the gun is on reads this one field: the muzzle
+      // position, the traverse arc's rest bearing, and which side of
+      // the target's track the beam pass flies. Flip it live to try the
+      // other side without a rebuild:
+      //   window.__isr_muzzle_tuning = { 'helicopter-intercept': { forward: 2.79, side: 0.85 } }
+      muzzleOffsetM: { forward: 2.79, side: -0.85 },   // -ve = starboard
       label: 'Helicopter intercept',
     },
     'army-c-uas': {
@@ -6303,11 +6310,26 @@ async function main() {
       // so a contact crossing the starboard beam makes it flip sign and
       // the gun picks the far stop rather than holding at the near one.
       // The arc is a property of where the target is, so that is what
-      // gets limited. Rest is the port beam at -90 degrees, and the
-      // traverse reaches `limit` either side of it.
+      // gets limited.
+      //
+      // WHICH BEAM IT RESTS ON COMES FROM THE MUZZLE, not from a
+      // constant. It was hardcoded to the port beam at -90 degrees
+      // while the model's own Gun_Station node sits at X = -95, which
+      // is STARBOARD. The gun therefore traversed to the opposite side
+      // from the side it is mounted on, and the two could be changed
+      // independently and silently disagree. One number decides it now:
+      // muzzleOffsetM.side, positive to port.
+      //
+      // Relative bearing theta is negative to port and positive to
+      // starboard, so the rest is -90 for a port gun and +90 for a
+      // starboard one, with the traverse reaching `limit` either side.
       const limit = T.gunTraverseLimitRad ?? _GUN_TRAVERSE_LIMIT;
-      const lo = -Math.PI / 2 - limit;
-      const hi = -Math.PI / 2 + limit;
+      const _mcfg = d.profile?.muzzleOffsetM;
+      const _mtun = (window.__isr_muzzle_tuning || {})[d.kind] || {};
+      const _gunSide = _mtun.side ?? _mcfg?.side ?? d.profile?.muzzleSideOffsetM ?? 0;
+      const rest = _gunSide >= 0 ? -Math.PI / 2 : Math.PI / 2;
+      const lo = rest - limit;
+      const hi = rest + limit;
       if (theta > hi || theta < lo) {
         // Outside the arc: hold at whichever stop is nearer, measured
         // round the dead zone rather than across it.
