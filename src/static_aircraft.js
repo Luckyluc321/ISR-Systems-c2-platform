@@ -57,14 +57,19 @@ export const PARKED = [
     // uniform is the converted light, so it is not reachable safely from
     // an entity. Tint alone carries it.
     //
-    // The tint is a desaturated blue-grey chosen against the SDFI
-    // palette rather than invented: the imagery sits in cool greys and
-    // muted greens, so pulling the model that way is what makes it sit
-    // in the scene instead of on it.
-    tint: '#9aa3a8',
-    // Up from 0.38, since the brightness lever is gone and this now has
-    // to take both the saturation and some of the shine out on its own.
-    tintAmount: 0.5,
+    // WHITE, not a terrain-matched grey. The first attempt pulled the
+    // model toward the imagery's cool greys on the theory that blending
+    // into the scene was the goal. It is not: the reference is the other
+    // aircraft on this apron, which is white, and this model ships with a
+    // red livery that reads as a warning colour on an airfield.
+    //
+    // So the mix goes toward white and hard enough to kill the red.
+    // Parked airliners are white; that IS the terrain match here.
+    tint: '#ffffff',
+    // High, because a red livery needs washing out rather than muting.
+    // Below about 0.6 the red still shows through at distance, which is
+    // exactly where it draws the eye.
+    tintAmount: 0.72,
     // Same rule as every other model in this repo: CC-BY needs an
     // attribution entry, CC0 and Sketchfab Standard do not.
     attribution: null,
