@@ -15893,6 +15893,16 @@ async function main() {
       // live if the nose pitches the wrong way:
       //   window.__isr_airliner_tuning = { pitchSign: -1 }
       const _AIRLINER_RIG = {
+        // 180, because it flew tail-first without it. The asset's nose is
+        // on -Z and this rig's zero does not land there.
+        //
+        // That single error produced BOTH reported faults: the aircraft
+        // reversed, and its trail appearing "in front of" it. The trail
+        // was always correct, drawn behind the true direction of travel;
+        // it only read as ahead because the model was pointing the wrong
+        // way. I sent Lucas to turn off the projections overlay, which
+        // was never involved.
+        headingOffsetDeg: 180,
         pitchOffsetDeg: 5,     // body attitude on final, nose up
         pitchClampDeg: 12,     // not an agile airframe
         bankClampDeg: 25,
