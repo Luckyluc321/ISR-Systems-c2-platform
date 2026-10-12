@@ -78,6 +78,16 @@ export const TEMPLATES = {
   // ── Jet, friendly (commercial airliner approach onto runway 04R) ──
   cph_jet_friendly: {
     siteId: 'cph',
+    // COOPERATIVE. Known from its transponder, not from our sensors,
+    // which is what the ADS-B evidence below already claims. The
+    // sensors-observe-only rule hides a track outside coverage and draws
+    // its unobserved path as a breadcrumb: right for a drone, wrong for
+    // an airliner. One 18 km out is squawking and a controller has it
+    // the whole way in.
+    //
+    // Only this flag exempts a track from the coverage visibility gate,
+    // and only this template carries it.
+    cooperative: true,
     classification: 'friendly',
     threat: null,
     platform: 'jet',
@@ -112,22 +122,23 @@ export const TEMPLATES = {
       //    400 m      21 m     t+137      flare begins
       //    threshold  0 m      t+143      touchdown
       //    rollout                        t+187
-      { lat: 55.53619, lon: 12.53798, alt: 524, heading: 40, tSec: 0   },
-      { lat: 55.54995, lon: 12.55843, alt: 419, heading: 40, tSec: 29  },
-      { lat: 55.56371, lon: 12.57887, alt: 314, heading: 40, tSec: 57  },
-      { lat: 55.57747, lon: 12.59931, alt: 210, heading: 40, tSec: 86  },
-      { lat: 55.58780, lon: 12.61465, alt: 131, heading: 40, tSec: 107 },
-      { lat: 55.59468, lon: 12.62487, alt: 79,  heading: 40, tSec: 121 },
-      { lat: 55.59949, lon: 12.63202, alt: 42,  heading: 40, tSec: 131 },
-      { lat: 55.60225, lon: 12.63611, alt: 21,  heading: 40, tSec: 137 },
-      { lat: 55.60397, lon: 12.63867, alt: 5,   heading: 40, tSec: 141 },
-      { lat: 55.60500, lon: 12.64020, alt: 0,   heading: 40, tSec: 143 },
-      { lat: 55.60775, lon: 12.64429, alt: 0,   heading: 40, tSec: 149 },
-      { lat: 55.61119, lon: 12.64940, alt: 0,   heading: 40, tSec: 159 },
-      { lat: 55.61463, lon: 12.65451, alt: 0,   heading: 40, tSec: 173 },
-      { lat: 55.61739, lon: 12.65860, alt: 0,   heading: 40, tSec: 187 },
+      { lat: 55.48113, lon: 12.45621, alt: 943, heading: 40, tSec: 0   },
+      { lat: 55.50866, lon: 12.49710, alt: 734, heading: 40, tSec: 49  },
+      { lat: 55.53619, lon: 12.53798, alt: 524, heading: 40, tSec: 101 },
+      { lat: 55.55683, lon: 12.56865, alt: 367, heading: 40, tSec: 141 },
+      { lat: 55.57403, lon: 12.59420, alt: 236, heading: 40, tSec: 175 },
+      { lat: 55.58780, lon: 12.61465, alt: 131, heading: 40, tSec: 202 },
+      { lat: 55.59468, lon: 12.62487, alt: 79,  heading: 40, tSec: 217 },
+      { lat: 55.59949, lon: 12.63202, alt: 42,  heading: 40, tSec: 226 },
+      { lat: 55.60225, lon: 12.63611, alt: 21,  heading: 40, tSec: 232 },
+      { lat: 55.60397, lon: 12.63867, alt: 5,   heading: 40, tSec: 236 },
+      { lat: 55.60500, lon: 12.64020, alt: 0,   heading: 40, tSec: 238 },
+      { lat: 55.60775, lon: 12.64429, alt: 0,   heading: 40, tSec: 245 },
+      { lat: 55.61119, lon: 12.64940, alt: 0,   heading: 40, tSec: 257 },
+      { lat: 55.61463, lon: 12.65451, alt: 0,   heading: 40, tSec: 277 },
+      { lat: 55.61739, lon: 12.65860, alt: 0,   heading: 40, tSec: 319 },
     ],
-    durationSec: 187,
+    durationSec: 319,
   },
 
   // ── Recon drone, HALE (Reaper/Global-Hawk class), high altitude circular loiter ──

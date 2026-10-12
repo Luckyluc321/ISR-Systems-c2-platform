@@ -16849,9 +16849,23 @@ async function main() {
         // every frame and the operator sees the drone floating in front
         // of their camera. Same _povActive gate the swarm branch uses.
         const povSuppressed = !!state._singleDronePovRef?._povActive;
+        // A COOPERATIVE TRACK IS VISIBLE OUTSIDE COVERAGE.
+        //
+        // Sensors-observe-only is the rule for a NON-cooperative
+        // contact: if nothing of ours hears it, we do not draw it, and
+        // the dashed breadcrumb is all that is honest. An airliner
+        // squawking ADS-B is the opposite case. It is telling us where
+        // it is, from 18 km out, and a controller has it the whole way
+        // in. Hiding it until it reaches a sensor ring would be the
+        // platform pretending not to know something it is being told.
+        //
+        // Declared per template and carried on the event, so exactly one
+        // track type is exempt and the rule is untouched for every
+        // other.
+        const _coop = !!(TEMPLATES[event.templateKey]?.cooperative);
         const shouldShow = (leadDown || povSuppressed) ? false : (state.closedAt
           ? false
-          : (leadInCov || beingChased));
+          : (leadInCov || beingChased || _coop));
         state.billboard.show = shouldShow;
         state.shadow.show = shouldShow && !povSuppressed;
         // Also hide the lead's trail polyline once the lead is dead —
