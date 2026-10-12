@@ -21,17 +21,17 @@ export const PARKED = [
     id: 'bll-terminal-1',
     site: 'billund',
     label: 'Terminal apron, in front of BLL-N03',
-    // Seeded on the BLL-N03 sensor itself. The real spot is wherever the
-    // 2D aircraft is painted in the imagery, a few tens of metres off
-    // this, so expect to move it.
-    lat: 55.73700,
-    lon: 9.15000,
+    // Placed on the aircraft painted into the orthophoto, by clicking it
+    // on the map and nudging. Not derivable from the manifest: the paint
+    // is in the imagery and the manifest does not know it exists.
+    lat: 55.737268,
+    lon: 9.154616,
     // Metres above the terrain. Aircraft sit ON the apron, so this is
     // the model origin's height above ground, not an altitude.
     heightM: 0,
-    // Compass degrees the nose points. Billund's aprons face the runway
-    // apron taxiway, roughly north, but dial it in.
-    headingDeg: 0,
+    // Compass degrees the nose points. 220 puts it nose southwest,
+    // matching the painted aircraft's parking angle on this stand.
+    headingDeg: 220,
     uri: '/aircraft/airbus_a380.glb',
     // SCALE 1 IS CORRECT, measured rather than assumed. This model is
     // authored in real metres: X spans 79.80, which is the A380's 79.75 m
