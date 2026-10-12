@@ -15987,7 +15987,19 @@ async function main() {
         // terms, and I was wrong at 0 and again at 180 before Lucas
         // found it. Written down so nobody recomputes it.
         headingOffsetDeg: 90,
-        pitchOffsetDeg: 5,     // body attitude on final, nose up
+        // ZERO, not 5. I set 5 for the nose-up body attitude an airliner
+        // holds on final, and it came out as 5 degrees of RIGHT BANK on a
+        // dead straight approach.
+        //
+        // The reason is the same mismatch that made the heading need +90:
+        // this asset's body frame is a quarter turn from what the rig
+        // assumes, so a rotation applied about the lateral axis lands on
+        // the longitudinal one. Pitch becomes roll.
+        //
+        // Zero removes the visible fault. The nose-up attitude is worth
+        // having back, but only once the frame is understood rather than
+        // compensated for a third time.
+        pitchOffsetDeg: 0,
         pitchClampDeg: 12,     // not an agile airframe
         bankClampDeg: 25,
         bankFactor: 1.2,       // gentle, and it is flying straight anyway
