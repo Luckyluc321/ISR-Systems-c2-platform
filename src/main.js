@@ -15827,12 +15827,29 @@ async function main() {
     const isHostileHeli = platform === 'mi-24-hind'
       || platform === 'helicopter-military'
       || platform === 'helicopter';
-    const MODEL_SWAP_M = isHostileHeli ? 6000 : 250;
+    // COMMERCIAL AIRLINER. Only the 'jet' platform reaches this, which
+    // today is one template, the SAS approach onto 04R, so nothing else
+    // changes shape.
+    //
+    // Measured off the file rather than assumed: spans are 37.76 along
+    // -Z, 34.11 across X and 11.91 up Y, against a real A320's 37.57 m
+    // length, 35.80 m wingspan and 11.76 m height. So it is authored in
+    // true metres, scale 1, and it is a standard glTF Y-up / -Z-forward
+    // model, which lands on the same canonical pose as the others after
+    // Cesium's axis correction and therefore takes the same heading
+    // convention.
+    //
+    // It swaps in from 12 km rather than 250 m. A 37 m airliner on final
+    // is the subject of the shot and has to be solid long before a 3 m
+    // drone would be worth drawing.
+    const isAirliner = platform === 'jet';
+    const MODEL_SWAP_M = isHostileHeli ? 6000 : (isAirliner ? 12000 : 250);
     const _modelUri = isLoiterMun
       ? '/aircraft/shahed_238_drone.glb'
       : (isQuadcopter ? '/aircraft/assault_drone_concept.glb'
-        : (isHostileHeli ? '/aircraft/mi-24_hind.glb' : null));
-    const _shouldSwapModel = isLoiterMun || isQuadcopter || isHostileHeli;
+        : (isHostileHeli ? '/aircraft/mi-24_hind.glb'
+          : (isAirliner ? '/aircraft/airbus_a320_indonesian_presidential_livery.glb' : null)));
+    const _shouldSwapModel = isLoiterMun || isQuadcopter || isHostileHeli || isAirliner;
 
     // Flight rig — closure-captured per entity so each Shahed has
     // independent orientation smoothing. Reads live from
@@ -16076,10 +16093,13 @@ async function main() {
         // exposes the scale factor.
         // Mi-24: 21.5 m over all, model longest axis 19.18, so 1.121.
         // Floor derived from real metres like everything else.
-        scale: isHostileHeli ? 1.121 : (isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5)),
-        minimumPixelSize: isHostileHeli ? Math.round(21.5 * MODEL_PX_PER_M)
-          : (isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20)),
-        maximumScale: isHostileHeli ? 1.121 * MODEL_MAX_EXAGGERATION : undefined,
+        scale: isAirliner ? 1
+          : (isHostileHeli ? 1.121 : (isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5))),
+        minimumPixelSize: isAirliner ? Math.round(37.57 * MODEL_PX_PER_M)
+          : (isHostileHeli ? Math.round(21.5 * MODEL_PX_PER_M)
+            : (isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20))),
+        maximumScale: isAirliner ? MODEL_MAX_EXAGGERATION
+          : (isHostileHeli ? 1.121 * MODEL_MAX_EXAGGERATION : undefined),
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
         shadows: Cesium.ShadowMode.DISABLED,
         // Its rotors turn, by the same hand-driven route as ours. The
