@@ -32,11 +32,16 @@ export const PARKED = [
     // Compass degrees the nose points. Billund's aprons face the runway
     // apron taxiway, roughly north, but dial it in.
     headingDeg: 0,
-    // Until the real airliner GLB lands, this points at a model that
-    // already exists so the position can be dialled in now and the
-    // model swapped later. Position and heading carry over; only scale
-    // needs redoing.
-    uri: '/aircraft/f-35a_lightning_ii.glb',
+    uri: '/aircraft/airbus_a380.glb',
+    // SCALE 1 IS CORRECT, measured rather than assumed. This model is
+    // authored in real metres: X spans 79.80, which is the A380's 79.75 m
+    // wingspan; Y spans 72.45 against its 72.72 m length; Z spans 24.11
+    // against 24.09 m. Wheels sit at Z ~ 0, so terrain clamping puts it
+    // on the apron rather than through it.
+    //
+    // Nose on -Y, tail fin at +Y rising to 23.8 m, wings the 79.8 m
+    // slice. Same axis convention as the Seahawk, so the -90 heading
+    // offset in this file is already right for it.
     scale: 1,
     // Same rule as every other model in this repo: CC-BY needs an
     // attribution entry, CC0 and Sketchfab Standard do not.
