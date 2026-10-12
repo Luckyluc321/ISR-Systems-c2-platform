@@ -16228,11 +16228,21 @@ async function main() {
         // out of the airframe, anything still using the old static spec
         // would sit next to a spinning one with frozen blades. A loitering
         // munition is a different airframe and has no rotor nodes.
-        ...(isLoiterMun ? {} : { nodeTransformations: _quadRotorTransforms(
+        // Rotor spin is for the quadcopter alone. A Shahed has no rotor
+        // nodes, and neither does an airliner, whose own node transforms
+        // are its landing configuration and are set where the model is.
+        ...((isLoiterMun || isAirliner) ? {} : { nodeTransformations: _quadRotorTransforms(
           () => (window.__isr_quad_tuning || {}).rotorRps ?? 12) }),
       };
+      // THE AIRLINER FLIES THE FIXED-WING RIG, not the quadcopter one.
+      //
+      // This read `isLoiterMun ? banked : quad`, so everything that was
+      // not a Shahed got the quadcopter rig, including the airliner.
+      // That is why its heading offset appeared to do nothing: the
+      // tuning lives on _bankedOrientation and the aircraft never called
+      // it. It flew tail-first on the quad rig's conventions.
       _droneEntitySpec.orientation = new Cesium.CallbackProperty(
-        () => (isLoiterMun ? _bankedOrientation() : _quadOrientation()),
+        () => ((isLoiterMun || isAirliner) ? _bankedOrientation() : _quadOrientation()),
         false,
       );
     }
