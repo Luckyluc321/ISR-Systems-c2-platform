@@ -4796,7 +4796,12 @@ async function main() {
       // and which side of the target's track the beam pass flies. They
       // are consistent WITHIN this file's mirrored frame, which is what
       // matters, and positive lands all three on the right-hand door.
-      muzzleOffsetM: { forward: 2.79, side: 0.85 },   // see the note above: this IS the right-hand door
+      // forward is NEGATIVE for the same reason `side` reads as its
+      // opposite: this file's body frame is turned relative to the
+      // model, so a positive `forward` put the muzzle 2.79 m AFT, back
+      // by the tail boom. The magnitude is the measured one; only the
+      // sign follows the frame.
+      muzzleOffsetM: { forward: -2.79, side: 0.85 },
       label: 'Helicopter intercept',
     },
     'army-c-uas': {
@@ -8598,12 +8603,27 @@ async function main() {
             const _tgtHdgDeg = _bpEv?.lastPosition?.heading;
             if (typeof _tgtHdgDeg === 'number') {
               const _tgtHdg = (_tgtHdgDeg * Math.PI) / 180;
-              // muzzleOffsetM.side is +ve to PORT, so sit to the
-              // target's starboard and the target falls on our left,
-              // where the cabin door and the gunner are.
+              // SIT ON THE SIDE OPPOSITE THE GUN.
+              //
+              // The gun is out of the RIGHT-hand door (positive `side`,
+              // see the profile note on this file's mirrored labels), so
+              // the target has to end up on the aircraft's RIGHT. Flying
+              // parallel, that means the aircraft sits to the target's
+              // LEFT, which is 90 degrees ANTICLOCKWISE of the target's
+              // heading.
+              //
+              // This had it the other way round, so the helicopter
+              // approached down the target's right-hand side, put the
+              // Geran off its left where there is no gun, and then had
+              // to cut across the track at the last moment to have any
+              // chance of a shot. That cut across is what read as
+              // circling the wrong way mid-engagement.
+              //
+              // Geographic bearings here, not the mirrored body frame:
+              // these are real lat/lon offsets from the target.
               const _side = ((window.__isr_muzzle_tuning || {})[d.kind] || {}).side
                 ?? d.profile.muzzleOffsetM?.side ?? 0;
-              const _perp = _tgtHdg + (_side >= 0 ? Math.PI / 2 : -Math.PI / 2);
+              const _perp = _tgtHdg + (_side >= 0 ? -Math.PI / 2 : Math.PI / 2);
               desiredLat = enemyLat + (offsetM * Math.cos(_perp)) / 111000;
               desiredLon = enemyLon + (offsetM * Math.sin(_perp)) / (111000 * Math.cos(enemyLat * Math.PI / 180));
               beamHeadingRad = _tgtHdg;   // fly PARALLEL, not at it
@@ -8644,7 +8664,28 @@ async function main() {
         _fireMachineGunBurst(d);
         d._nextTracerTs = now + 1400;
       }
-      if (engageDur >= d.profile.engageSec) {
+      // BREAK OFF WHEN IT CAN NO LONGER SHOOT, not only on the timer.
+      //
+      // The engagement ran a fixed window regardless of whether the
+      // target was still inside the firing envelope, so a target that
+      // outran the envelope was still nominally being engaged and the
+      // return-to-base manoeuvre only began when the clock expired. The
+      // break-off should begin the moment there is nothing left to
+      // shoot at.
+      //
+      // Only for a gun-armed airframe with a firing envelope to leave.
+      // Everything else keeps the timer exactly as before.
+      let _outOfEnvelope = false;
+      if (d.profile.firesTracer && d.profile.engageRangeM) {
+        const _lt = _liveTargetPositionFor(d);
+        if (_lt) {
+          const _d2 = haversineM(d.curLat, d.curLon, _lt.lat, _lt.lon);
+          const _dz = (typeof _lt.alt === 'number' ? _lt.alt : (d.targetAlt || 0))
+            - (d.curAlt || 0);
+          _outOfEnvelope = Math.sqrt(_d2 * _d2 + _dz * _dz) > d.profile.engageRangeM;
+        }
+      }
+      if (engageDur >= d.profile.engageSec || _outOfEnvelope) {
         // Sim-mode outcome: compute physics-driven hit chance the moment
         // the engagement window closes. Real (live) events bypass this
         // and use adapter-reported outcomes only. See
