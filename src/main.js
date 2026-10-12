@@ -4783,6 +4783,10 @@ async function main() {
       // envelope and still reads as a close pass on the map.
       beamPass: true,
       engageOffsetM: 400,
+      // Flies home after the pass rather than fading out where it
+      // finished. Deliberately not supportsRTB, which would also arm the
+      // case-closed return and send it home before it ever got there.
+      returnsToBase: true,
       // REAL TURN PHYSICS. omega = g * tan(bank) / v. At 250 km/h
       // (69.4 m/s) in a 30 degree bank that is 0.0816 rad/s, about
       // 4.7 deg/s, so 90 degrees takes 19 seconds. The shared
@@ -6403,7 +6407,12 @@ async function main() {
    * Eased off the simulation clock, so it tracks rather than snaps and
    * stops when the scenario is paused.
    */
-  const _GUN_TRAVERSE_LIMIT = (45 * Math.PI) / 180;
+  // 60, not 45. At 45 the arc is 90 degrees wide and, on a 400 m pass
+  // closing at 121 m/s, the target is inside it for 6.6 seconds and the
+  // gun sits on a stop either side of that. 60 widens the window to 120
+  // degrees and roughly doubles the tracking time, which is what reads
+  // as the gunner following the target rather than snapping to a limit.
+  const _GUN_TRAVERSE_LIMIT = (60 * Math.PI) / 180;
 
   /**
    * What the door gun has acquired, or null when it has nothing.
@@ -9407,12 +9416,32 @@ async function main() {
     // model units, so the barrel is over a metre up. Without this the
     // rounds left from under the cabin floor.
     const up = _mt.up ?? cfg?.up ?? 0;
-    if (!fwd && !side) return { lat: d.curLat, lon: d.curLon, up };
+    // THE MUZZLE RIDES THE TRAVERSE. The offsets above are the barrel
+    // tip with the gun at REST, but the gun now sweeps a 90 degree arc
+    // tracking the target, and the tip swings about a metre as it does.
+    // A fixed origin therefore drifts off the barrel exactly when the
+    // gunner is working hardest.
+    //
+    // The barrel vector is the tip minus the pintle, rotated by the
+    // gun's own aim angle, and added back. pivot* defaults to the
+    // Gun_Station node measured off the model. aimSign flips the
+    // rotation sense, which is the one thing here I cannot read off the
+    // file; flip it live if the muzzle swings the wrong way.
+    const aim = (d._gunAim || 0) * (cfg?.aimSign ?? 1);
+    let fwdA = fwd, sideA = side;
+    if (aim) {
+      const pF = cfg?.pivotForward ?? 2.79;
+      const pS = cfg?.pivotSide ?? -0.855;
+      const bF = fwd - pF, bS = side - pS;
+      fwdA  = pF + bF * Math.cos(aim) - bS * Math.sin(aim);
+      sideA = pS + bF * Math.sin(aim) + bS * Math.cos(aim);
+    }
+    if (!fwdA && !sideA) return { lat: d.curLat, lon: d.curLon, up };
     const h = d.heading || 0;
     // Heading's unit vector is (sin, cos) in (east, north). Rotating
     // it a quarter turn anticlockwise gives port: (-cos, sin).
-    const dEast  = Math.sin(h) * fwd + -Math.cos(h) * side;
-    const dNorth = Math.cos(h) * fwd + Math.sin(h) * side;
+    const dEast  = Math.sin(h) * fwdA + -Math.cos(h) * sideA;
+    const dNorth = Math.cos(h) * fwdA + Math.sin(h) * sideA;
     return {
       up,
       lat: d.curLat + dNorth / 111000,
@@ -9461,8 +9490,13 @@ async function main() {
     const dist3D = Math.sqrt(dist2D * dist2D + altDelta * altDelta);
     if (dist3D > engageRangeM) return;
     d._firedAtLeastOnce = true;   // gates the kill decision below
-    const roundCount = 4;
-    const roundGap = 70;
+    // Denser and tighter. Four rounds 70 ms apart read as one smear at
+    // close range; eight at 45 ms read as a burst of separate tracers
+    // with gaps between them, which is what a gun actually looks like.
+    // Zoomed out they overlap into the thick line again, which is the
+    // read that already worked.
+    const roundCount = _T_ROUNDS;
+    const roundGap = _T_GAP;
     // Accumulated round count drives the neutralisation policy: many
     // rounds → explosion (warhead cook-off), few rounds → physics-fall
     // (control disabled, airframe intact). Reset only when the
@@ -9508,6 +9542,15 @@ async function main() {
   //
   // Yellow-white glow (like a 5.56mm tracer round), not the green
   // "big ball" flash Lucas hated.
+  // Tracer density. Tuned for the close view, where individual rounds
+  // should be distinguishable, and harmless far out where they merge.
+  const _T_ROUNDS = 8;
+  const _T_GAP = 45;
+  // Camera distance at which the airframe becomes a symbol. The same
+  // number the 3D model swaps at, so the tracer changes read at exactly
+  // the moment the aircraft does.
+  const _T_SWAP_M = () => (window.__isr_heli_tuning || {}).swapM ?? 6000;
+
   function _fireSingleTracerRound(d, target) {
     const startTs = Date.now();
     // Travel time was 110ms — only 6 frames at 60Hz, the eye barely
@@ -9611,6 +9654,10 @@ async function main() {
         outlineColor: Cesium.Color.fromCssColorString('#ffb800'),
         outlineWidth: 2,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
+        // CLOSE IN ONLY. Up close these are the shots: discrete rounds
+        // with gaps between them. Far out they would be specks, and the
+        // streak below carries the read instead.
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, _T_SWAP_M()),
       },
     });
 
@@ -9641,6 +9688,12 @@ async function main() {
           return Cesium.Color.fromCssColorString('#ffe066').withAlpha(0.90 * (1 - _t() * 0.25));
         }, false)),
         arcType: Cesium.ArcType.NONE,
+        // FAR OUT ONLY. This is the thick line that already reads well
+        // once the airframe is a symbol, and it comes in at exactly the
+        // distance the 3D model drops out. Close in it would smear the
+        // individual rounds back into one streak, which is the thing
+        // being fixed.
+        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(_T_SWAP_M(), Number.MAX_VALUE),
       },
     });
 
@@ -10181,6 +10234,13 @@ async function main() {
           }
         }
         markNeutralised(event.id, { outcome: 'neutralized', byDispatchId: d.id, needsPostIncident: false });
+        // A DESTROYED DRONE STOPS FLYING. markNeutralised sets the
+        // outcome on the event, and that is all it does: the track is a
+        // separate thing. For a continueAfterClose template, which keeps
+        // flying precisely so its breadcrumb survives the case closing,
+        // the result was a Geran shot down and carrying on north with
+        // the dotted line still growing.
+        markTrackClosed(d.eventId);
         // OBSERVED BY US, OR REPORTED TO US?
         //
         // A kill outside every sensor ring is real but unwitnessed by
@@ -10274,6 +10334,23 @@ async function main() {
     // _resolveEngagement again once the unit is back at base. Without
     // the guard this branch would fire on arrival and send it straight
     // back out, and the unit would never finish.
+    // AIRBORNE UNITS WITH A BASE FLY HOME. Without this the helicopter
+    // reached the fallback at the bottom of this function, which fades
+    // the entity out and deletes it after five seconds, so it vanished
+    // in mid-air instead of turning for Karup.
+    //
+    // Not `supportsRTB`: that flag also arms Phase F, which returns a
+    // unit the moment the CASE closes, and Billund's case closes long
+    // before this aircraft reaches the target. It would have turned for
+    // home on the way out.
+    if (d.profile.returnsToBase && d.profile.airborne
+        && d.originLat != null && !d.rtbCompleted
+        && d.state !== 'rtb_home' && d.state !== 'rtb_via_last_known') {
+      d.state = 'rtb_home';
+      d.lastFrameTs = wallNow();
+      toast(`${d.assetName} breaking off. Returning to base.`, 'info');
+      return;
+    }
     if (leavesSceneUnassisted(d.profile) && !d.rtbCompleted) {
       // NO outcome is stamped here, deliberately.
       //
