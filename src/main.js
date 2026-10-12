@@ -9577,6 +9577,27 @@ async function main() {
   //
   // Yellow-white glow (like a 5.56mm tracer round), not the green
   // "big ball" flash Lucas hated.
+  // Which gear node to draw, by range to the runway threshold.
+  //
+  // A scale of zero is how a node is hidden: Cesium's nodeTransformations
+  // has no visibility, and collapsing the geometry to a point costs
+  // nothing to draw. The threshold is 04R's, measured off the sensor
+  // labelled "Runway 04R Central".
+  const _RWY_04R_THR = { lat: 55.60404, lon: 12.62142 };
+  const _GEAR_ZERO = new Cesium.Cartesian3(0.0001, 0.0001, 0.0001);
+  const _GEAR_ONE = new Cesium.Cartesian3(1, 1, 1);
+  function _gearScale(ref, which) {
+    try {
+      const cart = ref?.position?.getValue?.(Cesium.JulianDate.now());
+      if (!cart) return _GEAR_ZERO;
+      const c = Cesium.Cartographic.fromCartesian(cart);
+      const d = haversineM(Cesium.Math.toDegrees(c.latitude),
+        Cesium.Math.toDegrees(c.longitude), _RWY_04R_THR.lat, _RWY_04R_THR.lon);
+      if (which === 'down') return d <= 7500 ? _GEAR_ONE : _GEAR_ZERO;
+      return (d > 7500 && d <= 9000) ? _GEAR_ONE : _GEAR_ZERO;
+    } catch (_) { return _GEAR_ZERO; }
+  }
+
   // A320 landing configuration, plus engines that turn.
   //
   // Which sample along the animation reads as "configured to land" is not
@@ -15911,6 +15932,11 @@ async function main() {
           // Which frame is gear-down was measured, not guessed: the
           // model's lowest point sits at Y 9.75 with the gear stowed and
           // Y -0.09 from t=24 on, so the gear reaches 9.84 m lower there.
+          //
+          // The bake emits THREE nodes: the airframe, and the gear at two
+          // positions. The gear is 68% of the model's triangles and is
+          // entirely inside the fuselage when stowed, so "gear up" is
+          // simply not drawing it. Scaled between by range below.
           : (isAirliner ? '/aircraft/a320_landing_config.glb' : null)));
     const _shouldSwapModel = isLoiterMun || isQuadcopter || isHostileHeli || isAirliner;
 
@@ -16192,6 +16218,26 @@ async function main() {
         // Floor derived from real metres like everything else.
         scale: isAirliner ? 1
           : (isHostileHeli ? 1.121 : (isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5))),
+        // GEAR COMES DOWN ON APPROACH, not 18 km out. Real aircraft
+        // extend at roughly 5 to 8 nm, and this one was gear-down for
+        // the whole final because the configuration was baked once.
+        //
+        // The bake splits the gear into its own nodes, so the renderer
+        // can choose. Nothing is loaded or swapped: all three nodes are
+        // in the one file and the unwanted ones are scaled to nothing.
+        // That is only affordable because the gear, at 68% of the
+        // triangles, is invisible inside the fuselage when stowed, so
+        // "up" needs no geometry at all.
+        //
+        //   beyond 9 km   no gear drawn
+        //   9 to 7.5 km   part extended
+        //   inside 7.5 km fully down
+        ...(isAirliner ? { nodeTransformations: {
+          gear_down: { scale: new Cesium.CallbackProperty(
+            () => _gearScale(_billboardRef, 'down'), false) },
+          gear_mid: { scale: new Cesium.CallbackProperty(
+            () => _gearScale(_billboardRef, 'mid'), false) },
+        } } : {}),
         // NO BAKED POSE. Applying the animation's node transforms through
         // nodeTransformations tore the aircraft to pieces: wings, flaps
         // and gear scattered around the fuselage, and the map dropped to

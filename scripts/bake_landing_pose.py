@@ -161,6 +161,13 @@ def main():
     ap.add_argument("--split-nodes", default="",
                     help="comma-separated joint names whose vertices become "
                          "their own unskinned nodes, so they stay rotatable")
+    ap.add_argument("--group", action="append", default=[],
+                    help="NAME:SUBSTR|SUBSTR:TIME - emit a node called NAME "
+                         "containing only the triangles whose dominant joint "
+                         "name contains one of the substrings, baked at TIME. "
+                         "Prefix the substrings with ! to invert. Repeatable, "
+                         "so one file can carry the same parts at several "
+                         "configurations and the renderer picks between them.")
     args = ap.parse_args()
 
     g, binary = read_glb(args.src)
@@ -267,57 +274,98 @@ def main():
         out["images"].append({"bufferView": nbv,
                               "mimeType": im.get("mimeType", "image/png")})
 
-    groups = {"body": []}
+    # --group turns one bake into several, each a node of its own, each
+    # at its own time. That is what lets a single file carry an airframe
+    # plus its gear both stowed and extended: the renderer scales the one
+    # it does not want to zero, and the configuration changes without a
+    # second model to download.
+    specs = []
+    for spec in args.group:
+        nm, pats, tm = spec.split(":")
+        inv = pats.startswith("!")
+        specs.append((nm, [p.lstrip("!") for p in pats.split("|")], inv, float(tm)))
+    if not specs:
+        specs = [("body", [], False, args.time)]
+
+    groups = {nm: [] for nm, _, _, _ in specs}
     for nm in split:
         groups[nm] = []
 
-    stats = {"prims": 0, "verts": 0, "tris": 0, "split": 0}
-    for ni, node in enumerate(g["nodes"]):
-        if node.get("mesh") is None:
-            continue
-        for prim in g["meshes"][node["mesh"]]["primitives"]:
-            at = prim["attributes"]
-            pos = accessor(g, binary, at["POSITION"])
-            nrm = accessor(g, binary, at["NORMAL"]) if "NORMAL" in at else None
-            jnt = accessor(g, binary, at["JOINTS_0"]) if "JOINTS_0" in at else None
-            wgt = accessor(g, binary, at["WEIGHTS_0"]) if "WEIGHTS_0" in at else None
-            uv = accessor(g, binary, at["TEXCOORD_0"]) if "TEXCOORD_0" in at else None
-            idx = [v[0] for v in accessor(g, binary, prim["indices"])]
+    # Each group needs the skin evaluated at ITS time, so the matrices are
+    # rebuilt per time rather than once.
+    def skin_at(t):
+        gcache.clear()
+        posed.clear()
+        if anim:
+            for ch in anim["channels"]:
+                s2 = anim["samplers"][ch["sampler"]]
+                nd2, path2 = ch["target"]["node"], ch["target"]["path"]
+                times2 = [x[0] for x in accessor(g, binary, s2["input"])]
+                vals2 = accessor(g, binary, s2["output"])
+                posed.setdefault(nd2, {})[path2] = sample(
+                    times2, vals2, t, path2 == "rotation")
+        return [mat_mul(global_of(j), list(ibm[k]))
+                for k, j in enumerate(skin["joints"])]
 
-            bp, bn, dom = [], [], []
-            for vi, p in enumerate(pos):
-                if jnt and wgt:
-                    m = [0.0] * 16
+    joint_name = [names[j] for j in skin["joints"]]
+
+    stats = {"prims": 0, "verts": 0, "tris": 0, "split": 0}
+    for gname, pats, inv, gtime in specs:
+        mats = skin_at(gtime)
+        for ni, node in enumerate(g["nodes"]):
+            if node.get("mesh") is None:
+                continue
+            for prim in g["meshes"][node["mesh"]]["primitives"]:
+                at = prim["attributes"]
+                pos = accessor(g, binary, at["POSITION"])
+                nrm = accessor(g, binary, at["NORMAL"]) if "NORMAL" in at else None
+                jnt = accessor(g, binary, at["JOINTS_0"]) if "JOINTS_0" in at else None
+                wgt = accessor(g, binary, at["WEIGHTS_0"]) if "WEIGHTS_0" in at else None
+                uv = accessor(g, binary, at["TEXCOORD_0"]) if "TEXCOORD_0" in at else None
+                idx = [v[0] for v in accessor(g, binary, prim["indices"])]
+
+                def owns(vi):
+                    if not (jnt and wgt):
+                        return not inv and not pats
                     best_w, best_j = -1.0, -1
                     for k in range(4):
-                        w = wgt[vi][k]
-                        if w <= 0:
-                            continue
-                        j = jnt[vi][k]
-                        sm = skin_mats[j]
-                        for c in range(16):
-                            m[c] += sm[c] * w
-                        if w > best_w:
-                            best_w, best_j = w, j
-                    dom.append(best_j)
-                else:
-                    m = global_of(ni)
-                    dom.append(-1)
-                bp.append(apply_point(m, p))
-                if nrm:
-                    bn.append(normalise(apply_vector(m, nrm[vi])))
+                        if wgt[vi][k] > best_w:
+                            best_w, best_j = wgt[vi][k], jnt[vi][k]
+                    nm2 = joint_name[best_j] if 0 <= best_j < len(joint_name) else ""
+                    hit = any(pt in nm2 for pt in pats) if pats else True
+                    return (not hit) if inv else hit
 
-            key = "body"
-            if split_joint_idx:
-                owners = {dom[i] for i in idx}
-                if owners and owners <= split_joint_idx:
-                    jname = names[skin["joints"][next(iter(owners))]]
-                    key = jname
-                    stats["split"] += 1
-            groups[key].append((bp, bn, uv, idx, prim.get("material", 0)))
-            stats["prims"] += 1
-            stats["verts"] += len(bp)
-            stats["tris"] += len(idx) // 3
+                keep = [t for t in range(0, len(idx), 3)
+                        if all(owns(idx[t + k]) for k in range(3))]
+                if not keep:
+                    continue
+
+                used = sorted({idx[t + k] for t in keep for k in range(3)})
+                remap = {v: i for i, v in enumerate(used)}
+                bp, bn, buv = [], [], []
+                for vi in used:
+                    if jnt and wgt:
+                        m = [0.0] * 16
+                        for k in range(4):
+                            w = wgt[vi][k]
+                            if w <= 0:
+                                continue
+                            sm = mats[jnt[vi][k]]
+                            for c in range(16):
+                                m[c] += sm[c] * w
+                    else:
+                        m = global_of(ni)
+                    bp.append(apply_point(m, pos[vi]))
+                    if nrm:
+                        bn.append(normalise(apply_vector(m, nrm[vi])))
+                    if uv:
+                        buv.append(uv[vi])
+                nidx = [remap[idx[t + k]] for t in keep for k in range(3)]
+                groups[gname].append((bp, bn, buv if uv else None, nidx,
+                                      prim.get("material", 0)))
+                stats["prims"] += 1
+                stats["verts"] += len(bp)
+                stats["tris"] += len(nidx) // 3
 
     for key, prims in groups.items():
         if not prims:
