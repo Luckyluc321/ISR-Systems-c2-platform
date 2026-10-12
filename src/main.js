@@ -4812,12 +4812,21 @@ async function main() {
       // and which side of the target's track the beam pass flies. They
       // are consistent WITHIN this file's mirrored frame, which is what
       // matters, and positive lands all three on the right-hand door.
-      // forward is NEGATIVE for the same reason `side` reads as its
-      // opposite: this file's body frame is turned relative to the
-      // model, so a positive `forward` put the muzzle 2.79 m AFT, back
-      // by the tail boom. The magnitude is the measured one; only the
-      // sign follows the frame.
-      muzzleOffsetM: { forward: -2.79, side: 0.85 },
+      // THE FRAME IS NOW MEASURED, not inferred. A four-way probe drawn
+      // on the airframe settled it: code `forward` maps to the model's
+      // -Y, which is the nose, and code `side` maps to the model's +X.
+      // So the gun, which sits at model X = -95, is at a NEGATIVE side.
+      //
+      // And this is the BARREL TIP, not the pintle. The Door_Gunner mesh
+      // runs X from -104 to +26 about the Gun_Station post, so its long
+      // axis points outboard and the opening is the far end:
+      //
+      //   pintle post    model (-95, -310)   forward 2.79, side -0.85
+      //   barrel tip     model (-199, -298)  forward 2.68, side -1.79
+      //
+      // A metre further out. The post is where the rounds appeared to
+      // come from before, which reads as the mount rather than the gun.
+      muzzleOffsetM: { forward: 2.68, side: -1.79 },
       label: 'Helicopter intercept',
     },
     'army-c-uas': {
@@ -6361,6 +6370,14 @@ async function main() {
       const rest = _gunSide >= 0 ? -Math.PI / 2 : Math.PI / 2;
       const lo = rest - limit;
       const hi = rest + limit;
+      // The aim solution below puts node rotation 0 at a relative
+      // bearing of -PI/2, and node 0 is the gun exactly as modelled,
+      // out of its own door. For a starboard gun the rest is +PI/2, so
+      // feeding theta in raw would ask for a 180 degree swing into the
+      // cabin. Shifting theta by the difference puts node 0 back on the
+      // rest bearing whichever side the gun is on, and the shift is
+      // zero for a port gun, so that case is untouched.
+      const _nodeShift = rest + Math.PI / 2;
       if (theta > hi || theta < lo) {
         // Outside the arc: hold at whichever stop is nearer, measured
         // round the dead zone rather than across it.
@@ -6370,7 +6387,8 @@ async function main() {
           + Math.PI * 2) % (Math.PI * 2) - Math.PI);
         theta = dHi <= dLo ? hi : lo;
       }
-      want = Math.atan2(Math.cos(theta), -Math.sin(theta));
+      const _thetaNode = theta - _nodeShift;
+      want = Math.atan2(Math.cos(_thetaNode), -Math.sin(_thetaNode));
     }
     const now = monoNow() / 1000;
     if (d._gunAim == null) { d._gunAim = want; d._gunAimTs = now; }
@@ -8706,7 +8724,12 @@ async function main() {
               // these are real lat/lon offsets from the target.
               const _side = ((window.__isr_muzzle_tuning || {})[d.kind] || {}).side
                 ?? d.profile.muzzleOffsetM?.side ?? 0;
-              const _perp = _tgtHdg + (_side >= 0 ? -Math.PI / 2 : Math.PI / 2);
+              // side NEGATIVE is the gun's side, and in geographic terms
+              // that is the aircraft's right. For the target to end up
+              // there while flying parallel, the aircraft has to sit to
+              // the target's LEFT, which is 90 degrees anticlockwise of
+              // the target's heading.
+              const _perp = _tgtHdg + (_side >= 0 ? Math.PI / 2 : -Math.PI / 2);
               desiredLat = enemyLat + (offsetM * Math.cos(_perp)) / 111000;
               desiredLon = enemyLon + (offsetM * Math.sin(_perp)) / (111000 * Math.cos(enemyLat * Math.PI / 180));
               beamHeadingRad = _tgtHdg;   // fly PARALLEL, not at it
