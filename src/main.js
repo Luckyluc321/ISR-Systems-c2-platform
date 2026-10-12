@@ -4762,13 +4762,22 @@ async function main() {
       // not from the middle of the airframe. No other profile sets
       // this, so no other unit's fire moves.
       //
-      // STARBOARD. The model's Gun_Station sits at X = -95, and with
-      // the nose on -Y and Z up that is the right-hand side. The code
-      // had it on port because the traverse arc was hardcoded there,
-      // and I kept it on port once more rather than trust the
-      // arithmetic over the existing constant. Lucas confirmed the gun
-      // is on the right. The arc now derives from this sign instead of
-      // carrying its own, so there is one place to be wrong.
+      // THE GUN IS ON THE RIGHT-HAND DOOR, and this POSITIVE value is
+      // what puts it there. Read that twice before changing the sign.
+      //
+      // The code's own frame is MIRRORED relative to the model. Proof,
+      // not opinion: the gun station's rest is node rotation 0, which is
+      // the gun exactly as the artist modelled it, and
+      // _gunStationAim reaches rotation 0 at a relative bearing of
+      // -PI/2 — the bearing this file calls "port". The model has
+      // Gun_Station at X = -95, the right-hand side. So the direction
+      // this code labels port is the model's STARBOARD, and a positive
+      // `side` puts the muzzle out of the right-hand door.
+      //
+      // Flipping the sign to "correct" the label rotated the gunner 180
+      // degrees to fire into his own cabin, because at +PI/2 the aim
+      // solution becomes atan2(0, -1) = PI. Do not do it again. The
+      // labels are wrong; the behaviour is right.
       //
       // MEASURED OFF THE MODEL, not guessed. The GLB carries a
       // Gun_Station node at model coords (-95, -310, +75), the fuselage
@@ -4782,13 +4791,12 @@ async function main() {
       // point hanging off the flank behind the door. That is what was
       // being seen as rounds coming from the tail.
       //
-      // Sign is NEGATIVE for starboard. Everything that cares about
-      // which side the gun is on reads this one field: the muzzle
-      // position, the traverse arc's rest bearing, and which side of
-      // the target's track the beam pass flies. Flip it live to try the
-      // other side without a rebuild:
-      //   window.__isr_muzzle_tuning = { 'helicopter-intercept': { forward: 2.79, side: 0.85 } }
-      muzzleOffsetM: { forward: 2.79, side: -0.85 },   // -ve = starboard
+      // Everything that cares which side the gun is on reads this one
+      // field: the muzzle position, the traverse arc's rest bearing,
+      // and which side of the target's track the beam pass flies. They
+      // are consistent WITHIN this file's mirrored frame, which is what
+      // matters, and positive lands all three on the right-hand door.
+      muzzleOffsetM: { forward: 2.79, side: 0.85 },   // see the note above: this IS the right-hand door
       label: 'Helicopter intercept',
     },
     'army-c-uas': {
@@ -6312,17 +6320,19 @@ async function main() {
       // The arc is a property of where the target is, so that is what
       // gets limited.
       //
-      // WHICH BEAM IT RESTS ON COMES FROM THE MUZZLE, not from a
-      // constant. It was hardcoded to the port beam at -90 degrees
-      // while the model's own Gun_Station node sits at X = -95, which
-      // is STARBOARD. The gun therefore traversed to the opposite side
-      // from the side it is mounted on, and the two could be changed
-      // independently and silently disagree. One number decides it now:
-      // muzzleOffsetM.side, positive to port.
+      // WHICH BEAM IT RESTS ON COMES FROM THE MUZZLE, not from its own
+      // constant, so the mount and the traverse can no longer disagree.
       //
-      // Relative bearing theta is negative to port and positive to
-      // starboard, so the rest is -90 for a port gun and +90 for a
-      // starboard one, with the traverse reaching `limit` either side.
+      // rest = -90 for a positive `side`. That is the value that makes
+      // the aim solution come out at node rotation 0, which is the gun
+      // exactly as modelled, pointing out of the right-hand door. The
+      // other sign produces atan2(0, -1) = PI and swings the gunner
+      // through 180 degrees to fire into the cabin, which is what
+      // happened when this was "fixed" to match the label.
+      //
+      // The traverse reaches `limit` either side of the rest, 45 by
+      // default, so a 90 degree window. The gun physically cannot point
+      // into the airframe from there.
       const limit = T.gunTraverseLimitRad ?? _GUN_TRAVERSE_LIMIT;
       const _mcfg = d.profile?.muzzleOffsetM;
       const _mtun = (window.__isr_muzzle_tuning || {})[d.kind] || {};
