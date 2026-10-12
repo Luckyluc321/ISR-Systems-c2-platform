@@ -2202,6 +2202,10 @@ async function main() {
   // mode.
   const _SENSOR_ONLINE_DAY = '#4dff9c';
   const _SENSOR_ONLINE_NIGHT = '#5aa9cc';
+  function _setNightVisionLook(on) {
+    if (window.__isr_nvgStage) window.__isr_nvgStage.enabled = !!on;
+    _applySensorNightTint(!!on);
+  }
   function _applySensorNightTint(on) {
     const css = on ? _SENSOR_ONLINE_NIGHT : _SENSOR_ONLINE_DAY;
     const col = Cesium.Color.fromCssColorString(css);
@@ -2226,8 +2230,13 @@ async function main() {
     // hundred lines further down: this function is called before that
     // line executes and the direct reference would be a temporal dead
     // zone. Shift+N still toggles it by hand between mode changes.
-    if (window.__isr_nvgStage) window.__isr_nvgStage.enabled = !!on;
-    _applySensorNightTint(!!on);
+    // OFF-SWITCH ONLY. This function's `on` is the SIM toggle, not the
+    // imagery mode: the night branch calls it as
+    // _setNightGrade(_isSimMode()), so wiring the night-vision look to
+    // it meant pressing NIGHT passed false and nothing came on. Day and
+    // auto do call this with false though, so the look follows them off
+    // from here. The ON switch lives in the night branch itself.
+    if (!on) _setNightVisionLook(false);
     const stages = viewer.scene.postProcessStages;
     try {
       if (on && viewer.scene.highDynamicRangeSupported) {
@@ -2438,6 +2447,11 @@ async function main() {
       // a one-line flip. Infrastructure lighting below is the real feature.
       _applyCityLights(false);
       _setNightGrade(_isSimMode());
+      // The night-vision look follows the NIGHT button, unconditionally,
+      // and not the sim toggle the grade above is gated on. After
+      // _setNightGrade, because that call turns it off when sim mode is
+      // false. Day and auto turn it off through the same function.
+      _setNightVisionLook(true);
       _updateInfraLights();
       if (window.__isr_sdfiLayer) window.__isr_sdfiLayer.show = false;
       nightBloom.enabled = false;
@@ -4860,7 +4874,11 @@ async function main() {
       //
       // A metre further out. The post is where the rounds appeared to
       // come from before, which reads as the mount rather than the gun.
-      muzzleOffsetM: { forward: 2.68, side: -1.79 },
+      // `up` is height above the airframe's reference altitude, which
+      // sits near the belly. The gun mesh spans Z 75..184 in model units
+      // and the barrel is toward the top of that, so about 1.35 m.
+      // Without it the rounds left from under the cabin floor.
+      muzzleOffsetM: { forward: 2.68, side: -1.79, up: 1.35 },
       label: 'Helicopter intercept',
     },
     'army-c-uas': {
@@ -7588,6 +7606,17 @@ async function main() {
   //
   // Ignores window.__isr_muzzle_tuning on purpose, so a leftover console
   // override cannot move the probes.
+  // Nudge the muzzle on a running scenario. Merges, so one axis at a
+  // time is fine, and M moves as soon as it is called.
+  window.__isr_muzzleSet = (patch) => {
+    const t = (window.__isr_muzzle_tuning = window.__isr_muzzle_tuning || {});
+    const base = t['helicopter-intercept']
+      || { ...CD_PROFILE['helicopter-intercept'].muzzleOffsetM };
+    t['helicopter-intercept'] = { ...base, ...patch };
+    console.log('[muzzle]', t['helicopter-intercept']);
+    return t['helicopter-intercept'];
+  };
+
   let _mzProbe = null;
   window.__isr_muzzleProbe = (on = true) => {
     if (_mzProbe) { _mzProbe.forEach(e => viewer.entities.remove(e)); _mzProbe = null; }
@@ -7598,48 +7627,15 @@ async function main() {
       }
       return null;
     };
-    // LABELLED, not colour-coded. The night-vision filter renders every
-    // colour as the same green, so the first version of this was
-    // unreadable in exactly the screenshot it was built for.
-    const combos = [
-      ['A',  2.79,  0.85],
-      ['B', -2.79,  0.85],
-      ['C',  2.79, -0.85],
-      ['D', -2.79, -0.85],
-    ];
-    _mzProbe = combos.map(([tag, fwd, side]) => viewer.entities.add({
-      position: new Cesium.CallbackProperty(() => {
-        const d = pick(); if (!d) return undefined;
-        const h = d.heading || 0;
-        const dE = Math.sin(h) * fwd + -Math.cos(h) * side;
-        const dN = Math.cos(h) * fwd + Math.sin(h) * side;
-        const lat = d.curLat + dN / 111000;
-        const lon = d.curLon + dE / (111000 * Math.cos(d.curLat * Math.PI / 180));
-        return Cesium.Cartesian3.fromDegrees(lon, lat,
-          _airborneAbsAlt(lon, lat, (d.curAlt || 60) + 0.67));
-      }, false),
-      point: { pixelSize: 9, color: Cesium.Color.WHITE,
-               outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
-               disableDepthTestDistance: Number.POSITIVE_INFINITY },
-      label: {
-        text: tag,
-        font: 'bold 22px monospace',
-        fillColor: Cesium.Color.WHITE,
-        outlineColor: Cesium.Color.BLACK,
-        outlineWidth: 4,
-        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
-        pixelOffset: new Cesium.Cartesian2(0, -20),
-        disableDepthTestDistance: Number.POSITIVE_INFINITY,
-      },
-    }));
-    // The LIVE configured muzzle, wherever the profile and any console
-    // override currently put it. This is the one that actually fires.
-    _mzProbe.push(viewer.entities.add({
+    // ONE MARKER. The four candidates did their job: Lucas read C off
+    // the airframe and that settled the frame. All that is left to check
+    // is where rounds actually leave, so this now draws only that.
+    _mzProbe = [viewer.entities.add({
       position: new Cesium.CallbackProperty(() => {
         const d = pick(); if (!d) return undefined;
         const m = _muzzleOffsetFor(d);
         return Cesium.Cartesian3.fromDegrees(m.lon, m.lat,
-          _airborneAbsAlt(m.lon, m.lat, (d.curAlt || 60) + 0.67));
+          _airborneAbsAlt(m.lon, m.lat, (d.curAlt || 60) + (m.up || 0)));
       }, false),
       point: { pixelSize: 13, color: Cesium.Color.fromCssColorString('#ff2b2b'),
                outlineColor: Cesium.Color.WHITE, outlineWidth: 2,
@@ -7652,10 +7648,14 @@ async function main() {
         pixelOffset: new Cesium.Cartesian2(0, -22),
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
-    }));
-    console.log('[muzzleProbe]  A = +fwd +side   B = -fwd +side   '
-      + 'C = +fwd -side   D = -fwd -side');
-    console.log('[muzzleProbe]  M = the LIVE muzzle. That is where rounds leave.');
+    })];
+    const _cur = (window.__isr_muzzle_tuning || {})['helicopter-intercept']
+      || CD_PROFILE['helicopter-intercept'].muzzleOffsetM;
+    console.log('[muzzleProbe] M is where rounds leave. Now:', _cur);
+    console.log('[muzzleProbe] Nudge it live and watch M move:');
+    console.log("              __isr_muzzleSet({ up: 1.6 })      + is UP");
+    console.log("              __isr_muzzleSet({ forward: 3.0 }) + is toward the NOSE");
+    console.log("              __isr_muzzleSet({ side: -2.1 })   - is toward the GUN side");
     console.log('[muzzleProbe]  Which letter is on the right-hand door?');
   };
 
@@ -9321,13 +9321,19 @@ async function main() {
     const cfg = d.profile?.muzzleOffsetM;
     const fwd  = _mt.forward ?? cfg?.forward ?? 0;
     const side = _mt.side ?? cfg?.side ?? d.profile?.muzzleSideOffsetM ?? 0;
-    if (!fwd && !side) return { lat: d.curLat, lon: d.curLon };
+    // Height above the airframe's own reference altitude. The model
+    // origin sits near the belly, and the gun mesh spans Z 75..184 in
+    // model units, so the barrel is over a metre up. Without this the
+    // rounds left from under the cabin floor.
+    const up = _mt.up ?? cfg?.up ?? 0;
+    if (!fwd && !side) return { lat: d.curLat, lon: d.curLon, up };
     const h = d.heading || 0;
     // Heading's unit vector is (sin, cos) in (east, north). Rotating
     // it a quarter turn anticlockwise gives port: (-cos, sin).
     const dEast  = Math.sin(h) * fwd + -Math.cos(h) * side;
     const dNorth = Math.cos(h) * fwd + Math.sin(h) * side;
     return {
+      up,
       lat: d.curLat + dNorth / 111000,
       lon: d.curLon + dEast / (111000 * Math.cos(d.curLat * Math.PI / 180)),
     };
@@ -9498,7 +9504,7 @@ async function main() {
       // the horizontal origin and the vertical origin describe the same
       // point on the aircraft.
       const m = _mz();
-      return _airborneAbsAlt(m.lon, m.lat, d.curAlt || 60);
+      return _airborneAbsAlt(m.lon, m.lat, (d.curAlt || 60) + (m.up || 0));
     };
 
     // Bullet-in-flight position: interpolated between LIVE origin
