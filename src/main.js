@@ -4908,18 +4908,18 @@ async function main() {
       // `up` is 0.95, not the 1.15 that was dialled in. The model says
       // why, and it is five centimetres:
       //
-      //   gunner figure, crown   1.10 m above the model origin
-      //   gun and mount          0.67 .. 1.66 m
+      // `up` is MEASURED off the barrel, not guessed. A bounding box
+      // lumps the barrel in with the mount and the seat, which is what
+      // produced 1.35, then 1.15, then 0.95, none of them right. The
+      // vertices separate it cleanly: the far-outboard slice of the gun
+      // mesh, X -104 to -78, is a thin cylinder of radius 9 units
+      // sitting at Z 94..106 relative to the pintle. That is the barrel,
+      // and nothing else in the mesh is that thin. Absolute Z is 175,
+      // which at 0.009 scale is 1.575 m.
       //
-      // 1.15 sits just ABOVE the gunner's head. Judged from outside the
-      // door that reads as "in the opening", which is how it passed, and
-      // from any other angle it floats over him. 0.95 is below the crown
-      // and inside the gun body, at about the barrel's height on a
-      // seated gunner.
-      //
-      // forward and side are untouched: those were dialled in on the
-      // airframe and are correct.
-      muzzleOffsetM: { forward: 3.0, side: -1.8, up: 0.95 },
+      // forward and side are untouched: dialled in on the airframe and
+      // correct. Height was never visible from a side-on marker.
+      muzzleOffsetM: { forward: 3.0, side: -1.8, up: 1.575 },
       label: 'Helicopter intercept',
     },
     'army-c-uas': {
@@ -6953,6 +6953,11 @@ async function main() {
         };
         _rollOut  = toward(_rollOut,  rollWant,  rollRate);
         _pitchOut = toward(_pitchOut, pitchWant, pitchRate);
+        // Publish the attitude actually being drawn. The muzzle is a
+        // point ON this airframe, so it has to be rotated by the same
+        // bank and pitch the model is rendered with, or it floats.
+        d._rollOut = _rollOut;
+        d._pitchOut = _pitchOut;
 
         return Cesium.Transforms.headingPitchRollQuaternion(
           cart, new Cesium.HeadingPitchRoll(heading, _pitchOut, _rollOut));
@@ -9439,14 +9444,32 @@ async function main() {
     // The values below were dialled in on the airframe with the marker
     // on screen and confirmed sitting in the gun opening. A metre of
     // drift at full traverse is worth far less than losing that.
-    if (!fwd && !side) return { lat: d.curLat, lon: d.curLon, up };
+    if (!fwd && !side && !up) return { lat: d.curLat, lon: d.curLon, up: 0 };
+    // THE AIRFRAME IS NOT LEVEL, and this offset is a point bolted to
+    // it. Until now it was applied in the world horizontal plane while
+    // the aircraft banked up to 30 degrees: a point 1.8 m out to the
+    // side, at 30 degrees, is 0.9 m out of position vertically. That is
+    // why no fixed set of numbers ever looked right from more than one
+    // camera angle, and why it kept appearing at the gunner's chest from
+    // one side and over his head from another.
+    //
+    // Rotate the body offset the same way the model is rotated: roll
+    // about the nose, pitch about the port axis, then heading.
+    const _roll = d._rollOut || 0;
+    const _pitch = d._pitchOut || 0;
+    // Positive roll drops the right wing, so a point to PORT rises.
+    const sR = side * Math.cos(_roll) - up * Math.sin(_roll);
+    const uR = up * Math.cos(_roll) + side * Math.sin(_roll);
+    // Positive pitch is nose up, so a point FORWARD rises.
+    const fP = fwd * Math.cos(_pitch) - uR * Math.sin(_pitch);
+    const uP = uR * Math.cos(_pitch) + fwd * Math.sin(_pitch);
     const h = d.heading || 0;
     // Heading's unit vector is (sin, cos) in (east, north). Rotating
     // it a quarter turn anticlockwise gives port: (-cos, sin).
-    const dEast  = Math.sin(h) * fwd + -Math.cos(h) * side;
-    const dNorth = Math.cos(h) * fwd + Math.sin(h) * side;
+    const dEast  = Math.sin(h) * fP + -Math.cos(h) * sR;
+    const dNorth = Math.cos(h) * fP + Math.sin(h) * sR;
     return {
-      up,
+      up: uP,
       lat: d.curLat + dNorth / 111000,
       lon: d.curLon + dEast / (111000 * Math.cos(d.curLat * Math.PI / 180)),
     };
