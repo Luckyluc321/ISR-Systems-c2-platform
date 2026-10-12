@@ -2190,6 +2190,17 @@ async function main() {
   // reverted everywhere else. Day is left exactly as it was.
   const _defaultTonemapper = viewer.scene.postProcessStages.tonemapper;
   function _setNightGrade(on) {
+    // NIGHT MODE IS THE NIGHT-VISION LOOK. Lucas asked for the green NVG
+    // stage to replace how night mode read, so it follows the same
+    // switch instead of being a separate keypress. Everything below,
+    // the HDR tonemapping and the bloom point-spread work, still runs
+    // underneath it and is untouched.
+    //
+    // Read off window rather than the const, which is declared several
+    // hundred lines further down: this function is called before that
+    // line executes and the direct reference would be a temporal dead
+    // zone. Shift+N still toggles it by hand between mode changes.
+    if (window.__isr_nvgStage) window.__isr_nvgStage.enabled = !!on;
     const stages = viewer.scene.postProcessStages;
     try {
       if (on && viewer.scene.highDynamicRangeSupported) {
