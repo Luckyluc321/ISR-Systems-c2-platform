@@ -790,6 +790,7 @@ import { fetchDrivingRoute, computeSegmentLengths, advanceAlongPolyline } from '
 import { buildCordon, assignPatrols, clearCordonCache } from './perimeter.js';
 import { loadSiteLights, loadNationalLights, bucketByRadiance, LIGHT_STYLES, LIGHT_CLASSES } from './night_infrastructure_lights.js';
 import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from './runway_lighting.js';
+import { createParkedAircraft } from './static_aircraft.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -1649,6 +1650,13 @@ async function main() {
     console.warn('[render_profile] sovereign profile active but SDFI_TOKEN missing — falling back to Bing imagery. Register at dataforsyningen.dk (My page → Token).');
   }
   window.__isr_sdfiLayer = sdfiLayer;   // exposed for workspace map mode toggle
+
+  // Parked aircraft on the aprons. Billund's terminal renders flat
+  // because of the height model's vintage, so solid foreground geometry
+  // is what makes that side of the field read as a place. Data lives in
+  // static_aircraft.js; positions are dialled in with __isr_parkedSet
+  // and written back there.
+  createParkedAircraft(viewer, Cesium);
 
   // Keyed off the coverage rectangles, which are generated from the
   // built meshes, so this cannot claim ground that was not built and
