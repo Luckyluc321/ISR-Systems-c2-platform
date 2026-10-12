@@ -2189,6 +2189,32 @@ async function main() {
   // Scene-wide by nature, so it is applied ONLY in night + Sim and fully
   // reverted everywhere else. Day is left exactly as it was.
   const _defaultTonemapper = viewer.scene.postProcessStages.tonemapper;
+  // SENSORS READ BLUE UNDER NIGHT VISION.
+  //
+  // Online sensors are #4dff9c, a green, which is the one colour that
+  // disappears into the night-vision tint. Under it they go to a muted
+  // blue of the perimeter's family but deliberately weaker and a shade
+  // off it, so the two stay distinguishable: the perimeter is #4dd2ff at
+  // 0.7, this is #5aa9cc, less saturated and darker.
+  //
+  // Only the ONLINE ones. Degraded and offline are orange and red
+  // because that is status, and status must not be repainted by a view
+  // mode.
+  const _SENSOR_ONLINE_DAY = '#4dff9c';
+  const _SENSOR_ONLINE_NIGHT = '#5aa9cc';
+  function _applySensorNightTint(on) {
+    const css = on ? _SENSOR_ONLINE_NIGHT : _SENSOR_ONLINE_DAY;
+    const col = Cesium.Color.fromCssColorString(css);
+    for (const e of viewer.entities.values) {
+      if (!e.point) continue;
+      const t = e.properties?.type?.getValue?.();
+      if (t !== 'sensor') continue;
+      if (e.properties?.online?.getValue?.() !== true) continue;
+      e.point.color = col;
+      e.point.outlineColor = col.withAlpha(0.4);
+    }
+  }
+
   function _setNightGrade(on) {
     // NIGHT MODE IS THE NIGHT-VISION LOOK. Lucas asked for the green NVG
     // stage to replace how night mode read, so it follows the same
@@ -2201,6 +2227,7 @@ async function main() {
     // line executes and the direct reference would be a temporal dead
     // zone. Shift+N still toggles it by hand between mode changes.
     if (window.__isr_nvgStage) window.__isr_nvgStage.enabled = !!on;
+    _applySensorNightTint(!!on);
     const stages = viewer.scene.postProcessStages;
     try {
       if (on && viewer.scene.highDynamicRangeSupported) {
@@ -3109,8 +3136,12 @@ async function main() {
     // because the point rendered on top of everything at sea-level height.
     // CLAMP_TO_GROUND makes Cesium re-compute per frame — natural placement.
     for (const sensor of site.sensors) {
+      // Reads the live night state so a site rendered AFTER the mode
+      // changed comes up in the right colour, rather than green until
+      // the next toggle.
+      const _nightNow = !!window.__isr_nvgStage?.enabled;
       const color = sensor.status === 'online'
-        ? Cesium.Color.fromCssColorString('#4dff9c')
+        ? Cesium.Color.fromCssColorString(_nightNow ? _SENSOR_ONLINE_NIGHT : _SENSOR_ONLINE_DAY)
         : sensor.status === 'degraded'
           ? Cesium.Color.fromCssColorString('#ff8c3d')
           : Cesium.Color.fromCssColorString('#ff3838');
@@ -3130,6 +3161,9 @@ async function main() {
           type: 'sensor',
           siteId: site.id,
           sensorId: sensor.id,
+          // So the night tint can repaint the online ones without
+          // touching a degraded or offline status colour.
+          online: sensor.status === 'online',
         },
       });
 
@@ -7598,8 +7632,30 @@ async function main() {
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
       },
     }));
+    // The LIVE configured muzzle, wherever the profile and any console
+    // override currently put it. This is the one that actually fires.
+    _mzProbe.push(viewer.entities.add({
+      position: new Cesium.CallbackProperty(() => {
+        const d = pick(); if (!d) return undefined;
+        const m = _muzzleOffsetFor(d);
+        return Cesium.Cartesian3.fromDegrees(m.lon, m.lat,
+          _airborneAbsAlt(m.lon, m.lat, (d.curAlt || 60) + 0.67));
+      }, false),
+      point: { pixelSize: 13, color: Cesium.Color.fromCssColorString('#ff2b2b'),
+               outlineColor: Cesium.Color.WHITE, outlineWidth: 2,
+               disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      label: {
+        text: 'M', font: 'bold 24px monospace',
+        fillColor: Cesium.Color.fromCssColorString('#ff2b2b'),
+        outlineColor: Cesium.Color.WHITE, outlineWidth: 4,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(0, -22),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
+    }));
     console.log('[muzzleProbe]  A = +fwd +side   B = -fwd +side   '
       + 'C = +fwd -side   D = -fwd -side');
+    console.log('[muzzleProbe]  M = the LIVE muzzle. That is where rounds leave.');
     console.log('[muzzleProbe]  Which letter is on the right-hand door?');
   };
 
