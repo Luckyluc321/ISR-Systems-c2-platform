@@ -9416,32 +9416,21 @@ async function main() {
     // model units, so the barrel is over a metre up. Without this the
     // rounds left from under the cabin floor.
     const up = _mt.up ?? cfg?.up ?? 0;
-    // THE MUZZLE RIDES THE TRAVERSE. The offsets above are the barrel
-    // tip with the gun at REST, but the gun now sweeps a 90 degree arc
-    // tracking the target, and the tip swings about a metre as it does.
-    // A fixed origin therefore drifts off the barrel exactly when the
-    // gunner is working hardest.
+    // NO TRAVERSE ROTATION. I had the muzzle swing about the pintle as
+    // the gun tracked, reasoning that the barrel tip moves about a metre
+    // across a 120 degree arc. It does, but the pivot and the rotation
+    // sense were both assumptions, and the result put the rounds behind
+    // the gunner's head.
     //
-    // The barrel vector is the tip minus the pintle, rotated by the
-    // gun's own aim angle, and added back. pivot* defaults to the
-    // Gun_Station node measured off the model. aimSign flips the
-    // rotation sense, which is the one thing here I cannot read off the
-    // file; flip it live if the muzzle swings the wrong way.
-    const aim = (d._gunAim || 0) * (cfg?.aimSign ?? 1);
-    let fwdA = fwd, sideA = side;
-    if (aim) {
-      const pF = cfg?.pivotForward ?? 2.79;
-      const pS = cfg?.pivotSide ?? -0.855;
-      const bF = fwd - pF, bS = side - pS;
-      fwdA  = pF + bF * Math.cos(aim) - bS * Math.sin(aim);
-      sideA = pS + bF * Math.sin(aim) + bS * Math.cos(aim);
-    }
-    if (!fwdA && !sideA) return { lat: d.curLat, lon: d.curLon, up };
+    // The values below were dialled in on the airframe with the marker
+    // on screen and confirmed sitting in the gun opening. A metre of
+    // drift at full traverse is worth far less than losing that.
+    if (!fwd && !side) return { lat: d.curLat, lon: d.curLon, up };
     const h = d.heading || 0;
     // Heading's unit vector is (sin, cos) in (east, north). Rotating
     // it a quarter turn anticlockwise gives port: (-cos, sin).
-    const dEast  = Math.sin(h) * fwdA + -Math.cos(h) * sideA;
-    const dNorth = Math.cos(h) * fwdA + Math.sin(h) * sideA;
+    const dEast  = Math.sin(h) * fwd + -Math.cos(h) * side;
+    const dNorth = Math.cos(h) * fwd + Math.sin(h) * side;
     return {
       up,
       lat: d.curLat + dNorth / 111000,
@@ -9550,6 +9539,16 @@ async function main() {
   // number the 3D model swaps at, so the tracer changes read at exactly
   // the moment the aircraft does.
   const _T_SWAP_M = () => (window.__isr_heli_tuning || {}).swapM ?? 6000;
+  // Is the camera close enough that the airframe is a model rather than
+  // a symbol? Same threshold, so the tracers change read at the moment
+  // the aircraft does.
+  function _camNear(d) {
+    try {
+      if (d?.curLat == null) return false;
+      const c = Cesium.Cartesian3.fromDegrees(d.curLon, d.curLat, d.curAlt || 60);
+      return Cesium.Cartesian3.distance(viewer.camera.positionWC, c) < _T_SWAP_M();
+    } catch (_) { return false; }
+  }
 
   function _fireSingleTracerRound(d, target) {
     const startTs = Date.now();
@@ -9654,10 +9653,6 @@ async function main() {
         outlineColor: Cesium.Color.fromCssColorString('#ffb800'),
         outlineWidth: 2,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        // CLOSE IN ONLY. Up close these are the shots: discrete rounds
-        // with gaps between them. Far out they would be specks, and the
-        // streak below carries the read instead.
-        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, _T_SWAP_M()),
       },
     });
 
@@ -9674,7 +9669,10 @@ async function main() {
           const headLat = m.lat + (tgt.lat - m.lat) * t;
           const headLon = m.lon + (tgt.lon - m.lon) * t;
           const headAlt = oa + (tgt.alt - oa) * t;
-          const back = Math.max(0, t - 0.40);
+          // 8% of the flight near the aircraft, 40% far out. The short
+          // tail is what makes each round a dash with a gap behind it
+          // rather than one continuous smear.
+          const back = Math.max(0, t - (_camNear(d) ? 0.08 : 0.40));
           const tailLat = m.lat + (tgt.lat - m.lat) * back;
           const tailLon = m.lon + (tgt.lon - m.lon) * back;
           const tailAlt = oa + (tgt.alt - oa) * back;
@@ -9683,17 +9681,17 @@ async function main() {
             Cesium.Cartesian3.fromDegrees(headLon, headLat, headAlt),
           ];
         }, false),
-        width: 4.5,
+        // ADAPTIVE, not hidden. Hiding the streak up close left only the
+        // 7 px bullet head, which is the small ball. One entity whose
+        // LENGTH and WIDTH follow the camera instead: a short bright
+        // dash near the aircraft, so eight rounds 45 ms apart read as
+        // separate shots with gaps between them, and the long thick line
+        // once it is a symbol, which already read well.
+        width: new Cesium.CallbackProperty(() => (_camNear(d) ? 2.6 : 4.5), false),
         material: new Cesium.ColorMaterialProperty(new Cesium.CallbackProperty(() => {
           return Cesium.Color.fromCssColorString('#ffe066').withAlpha(0.90 * (1 - _t() * 0.25));
         }, false)),
         arcType: Cesium.ArcType.NONE,
-        // FAR OUT ONLY. This is the thick line that already reads well
-        // once the airframe is a symbol, and it comes in at exactly the
-        // distance the 3D model drops out. Close in it would smear the
-        // individual rounds back into one streak, which is the thing
-        // being fixed.
-        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(_T_SWAP_M(), Number.MAX_VALUE),
       },
     });
 
@@ -10348,7 +10346,14 @@ async function main() {
         && d.state !== 'rtb_home' && d.state !== 'rtb_via_last_known') {
       d.state = 'rtb_home';
       d.lastFrameTs = wallNow();
-      toast(`${d.assetName} breaking off. Returning to base.`, 'info');
+      // Say WHY it is breaking off. A unit turning for home without a
+      // stated reason reads as the simulation losing interest.
+      const _ev = getEvent(d.eventId);
+      const _killed = _ev?.outcome === 'neutralized';
+      toast(_killed
+        ? `${_ev?.droneType || 'Target'} neutralised by ${d.assetName}. Returning to base.`
+        : `${d.assetName} breaking off, target out of range. Returning to base.`,
+        _killed ? 'ok' : 'warn');
       return;
     }
     if (leavesSceneUnassisted(d.profile) && !d.rtbCompleted) {
