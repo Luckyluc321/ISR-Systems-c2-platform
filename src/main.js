@@ -2929,7 +2929,12 @@ async function main() {
   viewer.scene.postProcessStages.add(nvgStage);
   window.__isr_nvgStage = nvgStage;
   window.addEventListener('keydown', (ev) => {
-    if (ev.key === 'n' || ev.key === 'N') {
+    // SHIFT+N, not a bare 'n'. An unmodified letter turning the whole
+    // screen green is a footgun: it was hit by accident mid-session and
+    // cost a debugging round, because a colour-coded overlay is
+    // unreadable through a monochrome filter. Shift keeps it one
+    // keystroke away without being reachable by a stray press.
+    if ((ev.key === 'N' || ev.key === 'n') && ev.shiftKey) {
       if (ev.target && (ev.target.tagName === 'INPUT' || ev.target.tagName === 'TEXTAREA')) return;
       nvgStage.enabled = !nvgStage.enabled;
     }
@@ -7530,13 +7535,16 @@ async function main() {
       }
       return null;
     };
+    // LABELLED, not colour-coded. The night-vision filter renders every
+    // colour as the same green, so the first version of this was
+    // unreadable in exactly the screenshot it was built for.
     const combos = [
-      ['#ff2b2b', 'RED',     2.79,  0.85],
-      ['#2bff5a', 'GREEN',  -2.79,  0.85],
-      ['#2b8cff', 'BLUE',    2.79, -0.85],
-      ['#ff9b1f', 'ORANGE', -2.79, -0.85],
+      ['A',  2.79,  0.85],
+      ['B', -2.79,  0.85],
+      ['C',  2.79, -0.85],
+      ['D', -2.79, -0.85],
     ];
-    _mzProbe = combos.map(([css, , fwd, side]) => viewer.entities.add({
+    _mzProbe = combos.map(([tag, fwd, side]) => viewer.entities.add({
       position: new Cesium.CallbackProperty(() => {
         const d = pick(); if (!d) return undefined;
         const h = d.heading || 0;
@@ -7547,12 +7555,23 @@ async function main() {
         return Cesium.Cartesian3.fromDegrees(lon, lat,
           _airborneAbsAlt(lon, lat, (d.curAlt || 60) + 0.67));
       }, false),
-      point: { pixelSize: 11, color: Cesium.Color.fromCssColorString(css),
+      point: { pixelSize: 9, color: Cesium.Color.WHITE,
                outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
                disableDepthTestDistance: Number.POSITIVE_INFINITY },
+      label: {
+        text: tag,
+        font: 'bold 22px monospace',
+        fillColor: Cesium.Color.WHITE,
+        outlineColor: Cesium.Color.BLACK,
+        outlineWidth: 4,
+        style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+        pixelOffset: new Cesium.Cartesian2(0, -20),
+        disableDepthTestDistance: Number.POSITIVE_INFINITY,
+      },
     }));
-    console.log('[muzzleProbe] RED +fwd/+side | GREEN -fwd/+side | '
-      + 'BLUE +fwd/-side | ORANGE -fwd/-side. Say which dot is on the right-hand door.');
+    console.log('[muzzleProbe]  A = +fwd +side   B = -fwd +side   '
+      + 'C = +fwd -side   D = -fwd -side');
+    console.log('[muzzleProbe]  Which letter is on the right-hand door?');
   };
 
   // ── Airframe axis diagnostic ────────────────────────────────────
