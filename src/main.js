@@ -4763,7 +4763,25 @@ async function main() {
       // left of the track. No other profile sets this, so no other
       // unit's fire moves.
       // Door gun, 5 m out of the port side of the cabin.
-      muzzleOffsetM: { forward: 0, side: 5 },
+      // MEASURED OFF THE MODEL, not guessed. The GLB carries a
+      // Gun_Station node at model coords (-95, -310, +75), the fuselage
+      // lies along Y with Tail_Rotor at +894.7 so the nose is -Y, and
+      // the model scale is 0.009 (2196.3 units over a published 19.76 m
+      // airframe). That puts the gun 2.79 m FORWARD of centre and
+      // 0.85 m out to the side.
+      //
+      // It previously said 0 forward and 5 m out: 5.8x too far to the
+      // side and 2.79 m too far aft, which on a 19.76 m aircraft is a
+      // point hanging off the flank behind the door. That is what was
+      // being seen as rounds coming from the tail.
+      //
+      // The side stays POSITIVE, meaning port. The gun traverse arc is
+      // centred on -PI/2, which is port, so the whole rig already
+      // assumes a left-hand gun and this change does not touch that
+      // assumption. If the opening is actually on the right, flip the
+      // sign live rather than rebuilding:
+      //   window.__isr_muzzle_tuning = { 'helicopter-intercept': { forward: 2.79, side: -0.85 } }
+      muzzleOffsetM: { forward: 2.79, side: 0.85 },
       label: 'Helicopter intercept',
     },
     'army-c-uas': {
