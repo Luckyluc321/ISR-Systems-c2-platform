@@ -122,23 +122,32 @@ export const TEMPLATES = {
       //    400 m      21 m     t+137      flare begins
       //    threshold  0 m      t+143      touchdown
       //    rollout                        t+187
-      { lat: 55.48113, lon: 12.45621, alt: 943, heading: 40, tSec: 0   },
-      { lat: 55.50866, lon: 12.49710, alt: 734, heading: 40, tSec: 49  },
-      { lat: 55.53619, lon: 12.53798, alt: 524, heading: 40, tSec: 101 },
-      { lat: 55.55683, lon: 12.56865, alt: 367, heading: 40, tSec: 141 },
-      { lat: 55.57403, lon: 12.59420, alt: 236, heading: 40, tSec: 175 },
-      { lat: 55.58780, lon: 12.61465, alt: 131, heading: 40, tSec: 202 },
-      { lat: 55.59468, lon: 12.62487, alt: 79,  heading: 40, tSec: 217 },
-      { lat: 55.59949, lon: 12.63202, alt: 42,  heading: 40, tSec: 226 },
-      { lat: 55.60225, lon: 12.63611, alt: 21,  heading: 40, tSec: 232 },
-      { lat: 55.60397, lon: 12.63867, alt: 5,   heading: 40, tSec: 236 },
-      { lat: 55.60500, lon: 12.64020, alt: 0,   heading: 40, tSec: 238 },
-      { lat: 55.60775, lon: 12.64429, alt: 0,   heading: 40, tSec: 245 },
-      { lat: 55.61119, lon: 12.64940, alt: 0,   heading: 40, tSec: 257 },
-      { lat: 55.61463, lon: 12.65451, alt: 0,   heading: 40, tSec: 277 },
-      { lat: 55.61739, lon: 12.65860, alt: 0,   heading: 40, tSec: 319 },
+      // ON THE RUNWAY CENTRELINE. The touchdown point inherited from the
+      // old template was 836 m OFF 04R's axis, so the whole approach flew
+      // parallel to the runway rather than down it.
+      //
+      // Derived instead from the sensor labelled "Runway 04R Central"
+      // at 55.61643 / 12.63982: threshold is 1800 m back along the
+      // reciprocal of 040, giving 55.60404 / 12.62142 on a 3596 m
+      // runway. Everything else is the same 3 degree geometry.
+      { lat: 55.48017, lon: 12.43743, alt: 943, heading: 40, tSec: 0   },
+      { lat: 55.50770, lon: 12.47832, alt: 734, heading: 40, tSec: 49  },
+      { lat: 55.53523, lon: 12.51920, alt: 524, heading: 40, tSec: 101 },
+      { lat: 55.55587, lon: 12.54987, alt: 367, heading: 40, tSec: 141 },
+      { lat: 55.57307, lon: 12.57542, alt: 236, heading: 40, tSec: 175 },
+      { lat: 55.58684, lon: 12.59587, alt: 131, heading: 40, tSec: 202 },
+      { lat: 55.59372, lon: 12.60609, alt: 79,  heading: 40, tSec: 217 },
+      { lat: 55.59853, lon: 12.61324, alt: 42,  heading: 40, tSec: 226 },
+      { lat: 55.60129, lon: 12.61733, alt: 21,  heading: 40, tSec: 232 },
+      { lat: 55.60301, lon: 12.61989, alt: 5,   heading: 40, tSec: 236 },
+      { lat: 55.60404, lon: 12.62142, alt: 0,   heading: 40, tSec: 238 },
+      { lat: 55.60679, lon: 12.62551, alt: 0,   heading: 40, tSec: 244 },
+      { lat: 55.61023, lon: 12.63062, alt: 0,   heading: 40, tSec: 255 },
+      { lat: 55.61367, lon: 12.63573, alt: 0,   heading: 40, tSec: 269 },
+      { lat: 55.61711, lon: 12.64084, alt: 0,   heading: 40, tSec: 289 },
+      { lat: 55.62056, lon: 12.64595, alt: 0,   heading: 40, tSec: 331 },
     ],
-    durationSec: 319,
+    durationSec: 331,
   },
 
   // ── Recon drone, HALE (Reaper/Global-Hawk class), high altitude circular loiter ──
