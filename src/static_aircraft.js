@@ -48,17 +48,23 @@ export const PARKED = [
     // onto SDFI orthophoto it reads as a sticker, and a red livery is the
     // worst case because nothing in a Danish airfield is that colour.
     //
-    // Two controls, both nudgeable live:
+    // One control, nudgeable live:
     //   tint / tintAmount  mix the model toward a colour, 0 is untouched
-    //   brightness         scales the light reaching it, 1 is untouched
+    //
+    // There was a `brightness` here that set the model's lightColor. It
+    // threw "Invalid vec3 value for uniform model_lightColorHdr" and
+    // stopped rendering: the scene runs HDR for the night grade and that
+    // uniform is the converted light, so it is not reachable safely from
+    // an entity. Tint alone carries it.
     //
     // The tint is a desaturated blue-grey chosen against the SDFI
     // palette rather than invented: the imagery sits in cool greys and
     // muted greens, so pulling the model that way is what makes it sit
     // in the scene instead of on it.
     tint: '#9aa3a8',
-    tintAmount: 0.38,
-    brightness: 0.72,
+    // Up from 0.38, since the brightness lever is gone and this now has
+    // to take both the saturation and some of the shine out on its own.
+    tintAmount: 0.5,
     // Same rule as every other model in this repo: CC-BY needs an
     // attribution entry, CC0 and Sketchfab Standard do not.
     attribution: null,
@@ -104,12 +110,12 @@ export function createParkedAircraft(viewer, Cesium, { rows = PARKED } = {}) {
         color: Cesium.Color.fromCssColorString(row.tint || '#ffffff'),
         colorBlendMode: Cesium.ColorBlendMode.MIX,
         colorBlendAmount: row.tintAmount ?? 0,
-        // Dims the light reaching the model. This is what takes the
-        // shine off, as opposed to the tint, which takes the colour out.
-        lightColor: (() => {
-          const b = row.brightness;
-          return (b == null || b === 1) ? undefined : new Cesium.Cartesian3(b, b, b);
-        })(),
+        // NO lightColor. Setting it to a Cartesian3 here threw
+        // "Invalid vec3 value for uniform model_lightColorHdr" and
+        // stopped rendering outright. The scene runs with
+        // highDynamicRange on for the night grade, and that uniform is
+        // the HDR-converted light, so this is not a safe knob to reach
+        // for from an entity. The tint below does the job on its own.
         // Clamped to the terrain, so it sits on the apron rather than
         // at an absolute altitude that would float or sink with the
         // height model.
