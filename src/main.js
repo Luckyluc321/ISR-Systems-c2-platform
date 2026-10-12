@@ -4771,11 +4771,18 @@ async function main() {
       // the gunner can merely SEE the contact.
       firesTracer: true,
       engageRangeM: 800,
-      // Flies a beam pass rather than a nose-on standoff: see the
-      // engaging branch. 250 m abeam sits well inside the 800 m firing
-      // envelope and still reads as two separate aircraft on the map.
+      // HEAD-ON FIRING PASS. The separation is what decides how long the
+      // target spends inside the gun's 90 degree window, and the two
+      // close at 121 m/s, so it is a few seconds either way:
+      //
+      //   250 m apart -> in arc for 4.1 s -> about 12 rounds
+      //   400 m apart -> in arc for 6.6 s -> about 19 rounds
+      //
+      // The kill needs 11, so 250 left no margin at all for a burst
+      // landing badly. 400 is still well inside the 800 m firing
+      // envelope and still reads as a close pass on the map.
       beamPass: true,
-      engageOffsetM: 250,
+      engageOffsetM: 400,
       // REAL TURN PHYSICS. omega = g * tan(bank) / v. At 250 km/h
       // (69.4 m/s) in a 30 degree bank that is 0.0816 rad/s, about
       // 4.7 deg/s, so 90 degrees takes 19 seconds. The shared
@@ -6094,6 +6101,37 @@ async function main() {
   // A profile that declares nothing keeps 60, so every existing unit is
   // unchanged.
   const _turnRateOf = (d) => d?.profile?.turnRateRadS ?? TURN_RATE_RAD_S;
+
+  // THE PASS POINT: offset from the target, across its track, on the
+  // side the gun is on.
+  //
+  // This has to be flown from FAR OUT. It was applied only once the unit
+  // reached arriveAtM, 500 m, and head-on the two close at 121 m/s, so
+  // that is four seconds to build 250 m of separation against a 12 m/s
+  // lateral cap. It never happened: they merged with no offset and
+  // passed through each other's altitude.
+  //
+  // It also decides where the NOSE points, which is what makes the gun
+  // usable. Pointed at the target, the relative bearing is zero, dead
+  // ahead, and a door gun whose arc is 45 to 135 degrees off the beam
+  // pins to a stop and sits there. Pointed down the pass line, the
+  // target sweeps through the beam as the two cross, which is the only
+  // geometry in which the gunner can fire at all.
+  function _passPointFor(d, tgtLat, tgtLon) {
+    if (!d.profile?.beamPass) return null;
+    const hdg = getEvent(d.eventId)?.lastPosition?.heading;
+    if (typeof hdg !== 'number') return null;
+    const side = ((window.__isr_muzzle_tuning || {})[d.kind] || {}).side
+      ?? d.profile.muzzleOffsetM?.side ?? 0;
+    // 90 degrees clockwise of the target's course is its right, which is
+    // where a right-hand gun needs to be for a head-on pass.
+    const perp = ((hdg * Math.PI) / 180) + (side >= 0 ? -Math.PI / 2 : Math.PI / 2);
+    const off = d.profile.engageOffsetM || 250;
+    return {
+      lat: tgtLat + (off * Math.cos(perp)) / 111000,
+      lon: tgtLon + (off * Math.sin(perp)) / (111000 * Math.cos(tgtLat * Math.PI / 180)),
+    };
+  }
 
   // ROTORCRAFT TRANSLATION. A helicopter goes where its disc points.
   // It can move sideways or backwards, but only slowly: past roughly
@@ -8658,6 +8696,14 @@ async function main() {
         }
       } else {
         // Straight-line fallback (used pre-route-fetch or on OSRM fail)
+        // Aim at the PASS POINT, not at the target, and do it BEFORE
+        // the bearing is taken so the NOSE flies the pass line as well.
+        // Pointing the nose at the target is what left the relative
+        // bearing at zero and the gun pinned at a stop. Null for any
+        // profile without a beam pass, and then this is the previous
+        // behaviour exactly.
+        const _pp = _passPointFor(d, d.targetLat, d.targetLon);
+        if (_pp) { d.targetLat = _pp.lat; d.targetLon = _pp.lon; }
         const brng = _bearingRad(d.curLat, d.curLon, d.targetLat, d.targetLon);
         d.heading = _easeHeading(d.heading, brng, dtSec, _turnRateOf(d));
         if (!_rotorcraftStep(d, d.targetLat, d.targetLon, dtSec)) {
