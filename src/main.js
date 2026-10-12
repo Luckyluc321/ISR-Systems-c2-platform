@@ -8658,7 +8658,53 @@ async function main() {
         }
       } else {
         // Straight-line fallback (used pre-route-fetch or on OSRM fail)
-        const brng = _bearingRad(d.curLat, d.curLon, d.targetLat, d.targetLon);
+        let brng = _bearingRad(d.curLat, d.curLon, d.targetLat, d.targetLon);
+        // ROLL ONTO THE TARGET'S COURSE BEFORE THE MERGE, not at it.
+        //
+        // A beam pass needs the two aircraft flying the SAME way. This
+        // one is scrambled from Karup southbound against a northbound
+        // Geran, so they close head-on and the aircraft needs about 176
+        // degrees of turn to go parallel. At 4.67 deg/s that is 38
+        // seconds, against a 30 second engagement: it never finished the
+        // turn, so it fired while still pointing the other way. That is
+        // how the Geran could be off the helicopter's right while the
+        // helicopter was off the Geran's right. Both were true, because
+        // they were nose to nose.
+        //
+        // Inside three turn radii there is no longer time to fly at the
+        // target and then turn. The heading target becomes the TARGET'S
+        // OWN COURSE, and because _rotorcraftStep only lets it move
+        // where it points, it arcs round onto that course instead of
+        // driving straight in. The beam station still pulls it sideways,
+        // but only at the 12 m/s lateral cap, so the turn dominates and
+        // what comes out is an ordinary lead turn into formation.
+        if (d.profile.beamPass) {
+          const _bpEv2 = getEvent(d.eventId);
+          const _tHdg = _bpEv2?.lastPosition?.heading;
+          if (typeof _tHdg === 'number') {
+            // START THE TURN WHEN THERE IS EXACTLY TIME FOR IT, which is
+            // not a fixed distance. Head-on the two close at the SUM of
+            // their speeds, 69.4 + 51.4 = 120.8 m/s here, so a gap that
+            // looks like 37 seconds of flying is 21 seconds of merge. A
+            // distance trigger is wrong by that factor and wrong again
+            // for any other approach angle.
+            //
+            // Compare the time left before the merge against the time
+            // the turn itself needs, and commit when they are equal with
+            // a little margin. Self-correcting: a tail chase needs
+            // almost no turn and triggers late, a head-on needs 176
+            // degrees and triggers early.
+            const TAU = Math.PI * 2;
+            const _tHdgRad = (_tHdg * Math.PI) / 180;
+            const _tSpd = _bpEv2?.lastPosition?.speed || 0;
+            const _closing = Math.max(1, ((d.profile.cruiseKmh * 1000) / 3600) + _tSpd);
+            const _tMerge = haversineM(d.curLat, d.curLon, d.targetLat, d.targetLon) / _closing;
+            const _delta = Math.abs(
+              ((_tHdgRad - (d.heading || 0) + Math.PI) % TAU + TAU) % TAU - Math.PI);
+            const _tTurn = _delta / Math.max(1e-6, _turnRateOf(d));
+            if (_tMerge <= _tTurn * 1.25) brng = _tHdgRad;
+          }
+        }
         d.heading = _easeHeading(d.heading, brng, dtSec, _turnRateOf(d));
         if (!_rotorcraftStep(d, d.targetLat, d.targetLon, dtSec)) {
         const stepDegLat = (stepM * Math.cos(brng)) / 111000;
