@@ -8591,7 +8591,8 @@ async function main() {
               // muzzleOffsetM.side is +ve to PORT, so sit to the
               // target's starboard and the target falls on our left,
               // where the cabin door and the gunner are.
-              const _side = d.profile.muzzleOffsetM?.side ?? 0;
+              const _side = ((window.__isr_muzzle_tuning || {})[d.kind] || {}).side
+                ?? d.profile.muzzleOffsetM?.side ?? 0;
               const _perp = _tgtHdg + (_side >= 0 ? Math.PI / 2 : -Math.PI / 2);
               desiredLat = enemyLat + (offsetM * Math.cos(_perp)) / 111000;
               desiredLon = enemyLon + (offsetM * Math.sin(_perp)) / (111000 * Math.cos(enemyLat * Math.PI / 180));
