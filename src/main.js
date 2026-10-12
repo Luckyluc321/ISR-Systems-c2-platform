@@ -4881,18 +4881,20 @@ async function main() {
       // DIALLED IN ON THE AIRFRAME, not computed. Lucas moved the live
       // marker until it sat on the gun and read these back:
       //
-      //   forward 2.68   along the fuselage, + toward the nose
-      //   side   -1.79   across it, - toward the gun's own door
+      //   forward 3.0    along the fuselage, + toward the nose
+      //   side   -1.8    across it, - toward the gun's own door
       //   up      1.15   above the airframe reference, which is near
       //                  the belly, so this is the barrel's height
       //
-      // My computed 1.35 came off the top of the Gun_Station mount
-      // rather than the barrel centreline and sat visibly above the gun.
-      // Anything left is under half a metre on a 19.76 m airframe, which
-      // at the 250 m this aircraft engages from is far below what the
-      // tracer itself subtends. Nudge with __isr_muzzleSet if it ever
-      // matters.
-      muzzleOffsetM: { forward: 2.68, side: -1.79, up: 1.15 },
+      // Every number I derived from the model was close and none was
+      // right. The bounding box of the Gun_Station mount gave 2.68 and
+      // 1.35; the barrel is further toward the nose and lower than the
+      // mount's extremes, which a bounding box cannot tell you. These
+      // came off the airframe with the marker on screen.
+      //
+      // Confirmed sitting in the gun opening. Do not "correct" these
+      // against the mesh bounds again.
+      muzzleOffsetM: { forward: 3.0, side: -1.8, up: 1.15 },
       label: 'Helicopter intercept',
     },
     'army-c-uas': {
