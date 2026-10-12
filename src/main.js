@@ -4905,7 +4905,21 @@ async function main() {
       //
       // Confirmed sitting in the gun opening. Do not "correct" these
       // against the mesh bounds again.
-      muzzleOffsetM: { forward: 3.0, side: -1.8, up: 1.15 },
+      // `up` is 0.95, not the 1.15 that was dialled in. The model says
+      // why, and it is five centimetres:
+      //
+      //   gunner figure, crown   1.10 m above the model origin
+      //   gun and mount          0.67 .. 1.66 m
+      //
+      // 1.15 sits just ABOVE the gunner's head. Judged from outside the
+      // door that reads as "in the opening", which is how it passed, and
+      // from any other angle it floats over him. 0.95 is below the crown
+      // and inside the gun body, at about the barrel's height on a
+      // seated gunner.
+      //
+      // forward and side are untouched: those were dialled in on the
+      // airframe and are correct.
+      muzzleOffsetM: { forward: 3.0, side: -1.8, up: 0.95 },
       label: 'Helicopter intercept',
     },
     'army-c-uas': {
