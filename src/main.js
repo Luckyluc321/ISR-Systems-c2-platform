@@ -16187,18 +16187,25 @@ async function main() {
         // Floor derived from real metres like everything else.
         scale: isAirliner ? 1
           : (isHostileHeli ? 1.121 : (isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5))),
-        // LANDING CONFIGURATION, AND TURNING ENGINES.
+        // NO BAKED POSE. Applying the animation's node transforms through
+        // nodeTransformations tore the aircraft to pieces: wings, flaps
+        // and gear scattered around the fuselage, and the map dropped to
+        // a crawl.
         //
-        // The model's own 28 s animation cannot run: the clock is pinned
-        // so the sun holds still and Cesium drives model animations off
-        // that clock. The configuration is baked instead, applied the
-        // same way the helicopter's rotors are, and the fans are spun by
-        // hand off the simulation clock.
+        // The reason is that these are SKELETON JOINTS, not free nodes.
+        // The model has a _rootJoint and a skinned mesh, so the mesh is
+        // deformed by the joint hierarchy rather than drawn under it.
+        // Overriding 83 of those joints while leaving the other 165 at
+        // their defaults breaks the skin, and the vertices follow joints
+        // that no longer agree with each other.
         //
-        // Pose is chosen live because the quaternions do not say which
-        // end of the animation is gear-down:
-        //   window.__isr_a320_pose('28.17')
-        ...(isAirliner ? { nodeTransformations: _a320NodeTransforms() } : {}),
+        // The helicopter's rotors work this way because they are plain
+        // nodes on an unskinned model. That difference is the whole
+        // thing, and I did not check it before reusing the pattern.
+        //
+        // src/a320_poses.js is kept: the data is correct and the problem
+        // is how it was applied. Posing a skinned model needs the joints
+        // driven as a complete set, or the animation driven properly.
         minimumPixelSize: isAirliner ? Math.round(37.57 * MODEL_PX_PER_M)
           : (isHostileHeli ? Math.round(21.5 * MODEL_PX_PER_M)
             : (isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20))),
