@@ -15966,7 +15966,9 @@ async function main() {
       // clockwise in a y-up frame, and the image's up vector after a
       // rotation t is (-sin t, cos t), so t = atan2(-dx, -dy).
       const dx = b.x - a.x, dy = b.y - a.y;
-      if (!dx && !dy) return 0;
+      // A NaN here does not tilt the icon, it removes it: the value goes
+      // into the vertex shader and the quad degenerates.
+      if (!Number.isFinite(dx) || !Number.isFinite(dy) || (!dx && !dy)) return 0;
       return Math.atan2(-dx, -dy);
     };
 
@@ -16015,7 +16017,11 @@ async function main() {
     // is the subject of the shot and has to be solid long before a 3 m
     // drone would be worth drawing.
     const isAirliner = platform === 'jet';
-    const MODEL_SWAP_M = isHostileHeli ? 6000 : (isAirliner ? 12000 : 250);
+    // 12 km covered the entire 10 km approach, so the 3D model was always
+    // up and the symbol never appeared at all. That is why it "went
+    // missing" when the approach shortened from 18 km. 5 km gives the
+    // symbol the outer half of the final and the model the inner half.
+    const MODEL_SWAP_M = isHostileHeli ? 6000 : (isAirliner ? 5000 : 250);
     const _modelUri = isLoiterMun
       ? '/aircraft/shahed_238_drone.glb'
       : (isQuadcopter ? '/aircraft/assault_drone_concept.glb'
@@ -16492,6 +16498,13 @@ async function main() {
         // Advancing it is what costs. 142 skin joints re-evaluated every
         // frame on a 75,815 vertex model, which Lucas saw as the
         // aircraft starting to pivot and bank the instant the clock ran.
+        // BORN RETRACTED. Without this the model renders gear-down for
+        // the frames between being created and the first tick, which
+        // reads as the wheels being out and then vanishing. The tick
+        // clears this property shortly after, as it does every step.
+        ...((isAirliner && TEMPLATES[event.templateKey]?.gearRetracts
+             && ((window.__isr_airliner_tuning || {}).gear ?? true))
+          ? { nodeTransformations: gearPose(Cesium, 0) } : {}),
         ...(isAirliner ? { runAnimations: ((window.__isr_airliner_tuning || {}).animate ?? false)
           ? new Cesium.CallbackProperty(() => _airlinerAnimRunning(), false)
           : false } : {}),
@@ -17539,7 +17552,12 @@ async function main() {
           // whole sequence costs well under two seconds of per-frame
           // work. Raise _STEPS for a smoother swing and more cost,
           // lower it for the opposite.
-          const _STEPS = (window.__isr_airliner_tuning || {}).gearSteps ?? 40;
+          // 120 steps over 12 s is one every 100 ms, which is motion
+          // rather than a march. 40 was one every 300 ms and read like a
+          // stop-motion robot. The hold below drops to 25 ms so the
+          // property is still defined for only a quarter of the frames
+          // during the extension, and none at all outside it.
+          const _STEPS = (window.__isr_airliner_tuning || {}).gearSteps ?? 120;
           const _step = Math.round(state._gear.fraction() * _STEPS);
           const _mg = state.billboard?.model;
           if (_mg && _step !== state._gearStep) {
@@ -17547,7 +17565,7 @@ async function main() {
             _mg.nodeTransformations = gearPose(Cesium, _step / _STEPS);
             state._gearHeldSince = monoNow();
           } else if (_mg && state._gearHeldSince
-                     && monoNow() - state._gearHeldSince > 60) {
+                     && monoNow() - state._gearHeldSince > 25) {
             _mg.nodeTransformations = undefined;
             state._gearHeldSince = null;
           }
