@@ -55,6 +55,33 @@ import { RIGID_PARTS } from './a320_rigid_gearup.js';
 // airframe, because the whole airframe had to come out of the skin.
 const GEAR = /wheel|gear|wheeldoor/i;
 
+// DOORS CLOSE AGAIN. On an A320 the main gear bay doors and the nose
+// gear forward doors open to let the gear down and then SHUT while the
+// gear stays extended; only the small leg-mounted fairings travel with
+// the strut. The model's rest pose is a static display pose, gear down
+// with the bay doors hanging open, which on approach reads as two large
+// panels under the fuselage close to the ground.
+//
+// So doors follow a different curve from the legs. The legs run 0 to 1
+// once. The doors open, wait for the legs to travel, then close:
+//
+//   gear fraction   0 ────────────────────────────────── 1
+//   doors           0 ──/‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾\── 0
+//                      0.18                    0.82
+//
+// Door fraction 0 is the RETRACTED delta, which is the door closed, so
+// ending at 0 shuts them with the gear still down.
+const DOOR = /door/i;
+const DOOR_OPEN_BY = 0.18;
+const DOOR_SHUT_FROM = 0.82;
+
+function doorFraction(f) {
+  if (f <= 0) return 0;
+  if (f < DOOR_OPEN_BY) return f / DOOR_OPEN_BY;
+  if (f <= DOOR_SHUT_FROM) return 1;
+  return Math.max(0, (1 - f) / (1 - DOOR_SHUT_FROM));
+}
+
 /** Find the Model primitive Cesium built for an entity, or null while it
  *  is still loading. ModelVisualizer keeps it in _modelHash, keyed by
  *  entity id. Private, so every access is guarded: if the shape of this
@@ -96,6 +123,7 @@ export function createGearDriver(Cesium, viewer, {
     for (const node of p.nodes) {
       parts.push({
         node,
+        isDoor: DOOR.test(p.joint),
         t: new Cesium.Cartesian3(p.t[0], p.t[1], p.t[2]),
         r: new Cesium.Quaternion(p.r[0], p.r[1], p.r[2], p.r[3]),
         s: new Cesium.Cartesian3(p.s[0], p.s[1], p.s[2]),
@@ -123,9 +151,11 @@ export function createGearDriver(Cesium, viewer, {
       let node;
       try { node = model.getNode(p.node); } catch (_) { node = null; }
       if (!node) continue;
-      Cesium.Cartesian3.lerp(p.t, Cesium.Cartesian3.ZERO, f, T);
-      Cesium.Cartesian3.lerp(p.s, ONE, f, S);
-      Cesium.Quaternion.slerp(p.r, IDENT, f, R);
+      // Doors run their own profile: open, hold, shut.
+      const pf = p.isDoor ? doorFraction(f) : f;
+      Cesium.Cartesian3.lerp(p.t, Cesium.Cartesian3.ZERO, pf, T);
+      Cesium.Cartesian3.lerp(p.s, ONE, pf, S);
+      Cesium.Quaternion.slerp(p.r, IDENT, pf, R);
       // Same composition ModelVisualizer uses: the node's ORIGINAL local
       // matrix times the delta. A node transform is a delta, not a pose.
       Cesium.Matrix4.fromTranslationQuaternionRotationScale(T, R, S, scratch);
