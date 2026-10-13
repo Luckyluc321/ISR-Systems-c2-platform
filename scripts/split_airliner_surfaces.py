@@ -221,16 +221,23 @@ def trs(t, r, s):
          [2*(x*z-y*w), 2*(y*z+x*w), 1-2*(x*x+y*y)]]
     return [[R[i][j]*s[j] for j in range(3)] + [t[i]] for i in range(3)] + [[0,0,0,1]]
 
+# THE CLIP'S ROOT CARRIES THE AIRCRAFT'S OWN MOTION. Fuselage_02 has a
+# translation channel running from +9.32 m at t=0 to 0 at t=21.875: that
+# is the aeroplane descending, not a part moving. Every joint hangs off
+# it, so sampling globals without pinning it put a 9.32 m translation
+# into all 60 deltas and threw the gear clean off the airframe.
+PIN = re.compile(r'Fuselage_02$')
+
 def local_at(i):
     n = gltf['nodes'][i]
-    c = sampled.get(i, {})
+    c = {} if PIN.search(names[i]) else sampled.get(i, {})
     # A NODE MAY BE A MATRIX INSTEAD OF TRS, and in this file two of them
     # are: node 1 carries a 0.01 scale and node 5 carries 100. Ignoring
     # `matrix` dropped the 0.01 and left the 100, which is how the delta
     # came out with a scale of 100 and a metre of translation instead of
     # a hinge rotation. An animated node always uses TRS, so the matrix
     # only ever applies to the static chain above the skeleton.
-    if 'matrix' in n and i not in sampled:
+    if 'matrix' in n and not c:
         m = n['matrix']
         return [[m[0], m[4], m[8], m[12]], [m[1], m[5], m[9], m[13]],
                 [m[2], m[6], m[10], m[14]], [m[3], m[7], m[11], m[15]]]
