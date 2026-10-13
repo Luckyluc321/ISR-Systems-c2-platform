@@ -16473,10 +16473,15 @@ async function main() {
         ...(isAirliner ? { runAnimations: ((window.__isr_airliner_tuning || {}).animate ?? false)
           ? new Cesium.CallbackProperty(() => _airlinerAnimRunning(), false)
           : false } : {}),
-        // AIRBRAKES, driven node by node rather than by running the
-        // skeleton. Only applied when the model's own animation is NOT
-        // running, so the two never fight over the same four nodes.
-        ...((isAirliner && !((window.__isr_airliner_tuning || {}).animate ?? false))
+        // AIRBRAKES, OFF. Driving these four nodes detached the panels
+        // and sent the frame rate back down, so the premise was wrong:
+        // the weight isolation makes it safe to move those 140 vertices,
+        // but it does not make it CHEAP, and a node transform on a
+        // skinned model is not the same thing as one on the Mi-24's
+        // plain nodes. Kept behind a switch while that is worked out:
+        //   window.__isr_airliner_tuning = { airbrakes: true }
+        ...((isAirliner && (window.__isr_airliner_tuning || {}).airbrakes
+            && !((window.__isr_airliner_tuning || {}).animate ?? false))
           ? { nodeTransformations: airbrakeTransforms(Cesium,
               () => _airbrakes.fraction()) }
           : {}),
