@@ -54,10 +54,15 @@ export function gearPose(Cesium, f) {
   return out;
 }
 
-/** A real A320 selects gear down passing about 2000 ft, 7 to 9 km out.
- *  This approach starts at 10 km and 530 m, so the default puts the
- *  sequence early in the shot where it can be seen. */
-export function createGearState({ monoNow, extendBelowAglM = 450, extendMs = 9000 }) {
+/** A real A320 selects gear down passing about 2000 ft, 7 to 9 km out,
+ *  and the gear takes roughly 10 to 15 seconds to travel and lock. 12 s
+ *  sits in the middle of that. This approach starts at 10 km and 530 m,
+ *  so the trigger puts the sequence early in the shot where it is seen.
+ *
+ *  The step count in main.js is about RENDERING smoothness and does not
+ *  affect this pace, but the two want to move together: 40 steps over
+ *  12 s keeps one change every 300 ms. */
+export function createGearState({ monoNow, extendBelowAglM = 450, extendMs = 12000 }) {
   let t0 = null;
   return {
     update(aglM) {

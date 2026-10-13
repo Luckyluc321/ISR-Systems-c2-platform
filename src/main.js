@@ -17533,13 +17533,13 @@ async function main() {
         if (state._gear && TEMPLATES[event.templateKey]?.gearRetracts
             && ((window.__isr_airliner_tuning || {}).gear ?? true)) {
           state._gear.update(p.alt);
-          // 30 steps over 9 s is one every 300 ms. The hold below is
+          // 40 steps over 12 s is one every 300 ms. The hold below is
           // 60 ms, so the property is defined for about a fifth of the
           // frames during the extension and not at all outside it: the
           // whole sequence costs well under two seconds of per-frame
           // work. Raise _STEPS for a smoother swing and more cost,
           // lower it for the opposite.
-          const _STEPS = (window.__isr_airliner_tuning || {}).gearSteps ?? 30;
+          const _STEPS = (window.__isr_airliner_tuning || {}).gearSteps ?? 40;
           const _step = Math.round(state._gear.fraction() * _STEPS);
           const _mg = state.billboard?.model;
           if (_mg && _step !== state._gearStep) {
