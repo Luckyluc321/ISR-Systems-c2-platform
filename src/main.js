@@ -20200,7 +20200,7 @@ async function main() {
       { key: 'cph_fixedwing_hostile', label: 'Fixed wing, hostile' },
       { key: 'cph_recon_hostile', label: 'Reconnaissance drone (HALE), hostile', cls: 'recon' },
       { key: 'cph_jet_friendly', label: 'Jet (SAS 743), friendly', cls: 'friendly' },
-      { key: 'cph_jet_goaround', label: 'Jet (SAS 743), go-around at 470 ft', cls: 'friendly' },
+      { key: 'cph_jet_goaround', label: 'Jet (SAS 743), go-around at 185 ft', cls: 'friendly' },
       { key: 'cph_missile_hostile', label: 'Cruise missile, critical', cls: 'critical' },
       { key: 'cph_missile_inbound_sw', label: 'Cruise missile inbound from SW (continuation)', cls: 'critical' },
       { key: 'swarm_recon_cph_amk', label: 'SWARM · 5-drone recon (CPH → Amager)', cls: 'critical' },
