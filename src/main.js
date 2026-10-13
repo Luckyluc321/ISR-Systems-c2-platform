@@ -16127,6 +16127,7 @@ async function main() {
     //   Roll    — target proportional to yaw rate (heading change per
     //     second) times bankFactor. Positive yaw = right turn = right
     //     wing down. Clamped and smoothed.
+    let _touchdownMs = null;
     let _smoothedHeading = null;   // radians, compass bearing (CW from N)
     let _smoothedPitch = 0;        // radians, +up
     let _smoothedRoll = 0;         // radians, +right wing down
@@ -16228,6 +16229,7 @@ async function main() {
       const rollSign       = T.rollSign           ?? 1;
       const stripIconTrim  = T.stripIconTrim      ?? false;
       const flareFadeM     = T.flarePitchFadeM    ?? 0;
+      const derotateMs     = T.derotateMs         ?? 3000;
       const headingSmooth  = T.headingSmoothing   ?? 0.18;
       const pitchSmooth    = T.pitchSmoothing     ?? 0.10;
       const rollSmooth     = T.rollSmoothing      ?? 0.08;
@@ -16295,14 +16297,27 @@ async function main() {
       _prevPosCart = Cesium.Cartesian3.clone(cart);
       _prevTime = now;
 
-      // AGL, not the cartographic height, because the cart is above the
-      // ellipsoid and the runway surface is 38 m up: a height-based fade
-      // would never reach zero on the ground. The tick publishes the
-      // waypoint altitude, which is already AGL.
+      // THE FLARE, AND THE DEROTATION AFTER IT.
+      //
+      // This faded the nose-up attitude out BELOW 20 m, which is exactly
+      // backwards: an airliner holds its nose UP through the flare,
+      // touches on the main wheels, and only then lowers the nose. Fading
+      // early arrived flat or slightly nose-down, which also drove the
+      // nose gear under the surface, because the model's origin sits at
+      // the wheels.
+      //
+      // So the offset is held in full right through touchdown, and faded
+      // afterwards over derotateMs. That IS the nose coming down, and it
+      // happens on the ground where it belongs rather than in the air.
+      //
+      // monoNow, so it freezes with the simulation like everything else.
       const _agl = stateHolder.aglM;
-      const _pitchFade = (flareFadeM > 0 && typeof _agl === 'number')
-        ? Math.min(1, Math.max(0, _agl / flareFadeM))
-        : 1;
+      if (flareFadeM > 0 && typeof _agl === 'number' && _agl <= 0.3
+          && _touchdownMs === null) {
+        _touchdownMs = monoNow();
+      }
+      const _pitchFade = _touchdownMs === null ? 1
+        : Math.max(0, 1 - (monoNow() - _touchdownMs) / derotateMs);
       // World-semantic attitude, BEFORE the asset-space sign flips, so
       // anything bolted to the airframe rotates by what the aircraft is
       // actually doing rather than by this model's axis conventions.
