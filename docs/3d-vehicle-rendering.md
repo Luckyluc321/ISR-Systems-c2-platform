@@ -158,6 +158,53 @@ cannot desynchronise it.
 One accepted wart: the animation advances on `viewer.clock`, not on
 `monoNow()`, so it does not freeze when the simulation is paused.
 
+## 5b. Texture budget: check it before blaming the geometry
+
+A Sketchfab download is sized for a product render, not for a scene that
+already holds terrain, imagery, buildings and a post-processing grade.
+Uncompressed GPU cost is `width * height * 4 * 1.33` per image, and it is
+independent of how large the model draws on screen.
+
+The A320 made the map unusable: seconds per frame, ten seconds to pan.
+The cause was not its geometry, which is only 75,815 vertices across 26
+primitives. It was **sixteen 4096x4096 textures**, four materials with a
+base colour, occlusion, normal and specular map each, for **1,431 MB of
+GPU memory in one aircraft.**
+
+Measured across the fleet:
+
+| Model | File | GPU | Textures |
+|---|---|---|---|
+| a320_landing_config.glb (unused) | 93.8 MB | **1431 MB** | 16 at 4096 |
+| airbus_a320_indonesian_presidential_livery.glb (source) | 97.1 MB | **1431 MB** | 16 at 4096 |
+| boeing_787-9_qantas_centenary.glb | 16.3 MB | 240 MB | 10 at 4096 |
+| a320_opt.glb (in use) | 12.8 MB | 123 MB | 16 at 2048 |
+| f-35a_lightning_ii.glb | 19.5 MB | 111 MB | 25 at 1024 |
+| airbus_a380.glb | 17.1 MB | 99 MB | 20 at 1024 |
+| mh-60r_seahawk_crewed.glb | 6.2 MB | 34 MB | 6 at 1024 |
+
+The A320 was the only outlier by an order of magnitude. Note that file
+size does not predict it: the 787 Dreamliner is 40.2 MB on disk and only
+21 MB on the GPU, while the A320 Qantas 787 is 16.3 MB on disk and 240 MB
+on the GPU.
+
+Size each map to what it contributes at the range the model is seen:
+
+- **base colour** carries the livery, so 2048
+- **normal** 1024
+- **occlusion and specular** are low-frequency, so 512. These were the
+  worst offenders here: three of them were 15 to 18 MB PNGs costing 89 MB
+  of GPU each, for maps nobody can resolve on a landing aircraft.
+
+`scripts/optimise_glb_textures.py` does this and rewrites the GLB. It
+re-encodes to JPEG wherever an image has no meaningful alpha, which also
+cut the file from 97 MB to 13 MB and removed the first-load stall.
+
+**Verify a rewrite rather than trusting it.** Compare every non-image
+bufferView byte-for-byte against the source, and check the animation
+channel and skin joint counts. For a320_opt.glb: 9 of 9 bufferViews
+identical, 248 channels, 142 joints.
+
 ## 6. Skinned and unskinned models are not interchangeable
 
 `nodeTransformations` drives plain nodes. The Mi-24's rotors work that way

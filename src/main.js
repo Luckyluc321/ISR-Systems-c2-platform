@@ -15961,7 +15961,30 @@ async function main() {
           // a320_landing_config.glb and scripts/bake_landing_pose.py stay
           // in the tree. The script is the right tool for a model with no
           // animation, and this one is not that.
-          : (isAirliner ? '/aircraft/airbus_a320_indonesian_presidential_livery.glb' : null)));
+          //
+          // TEXTURE-OPTIMISED COPY, and this is why the map crawled.
+          //
+          // The source model carries SIXTEEN 4096x4096 textures: four
+          // materials with a base colour, occlusion, normal and specular
+          // map each. Uncompressed with mipmaps that is 1,431 MB of GPU
+          // memory for one aircraft, against 99 MB for the parked A380,
+          // on top of terrain, imagery, buildings and the night grade.
+          // The result was seconds per frame, not frames per second.
+          //
+          // a320_opt.glb is the same model with the textures sized to
+          // what each map actually contributes at this range: base
+          // colour 2048 (it carries the livery), normal 1024, occlusion
+          // and specular 512 (both low-frequency and neither worth 89 MB
+          // apiece). 1,431 MB -> 123 MB, and the file drops 97 MB -> 13 MB,
+          // which is also the first-load stall gone.
+          //
+          // Geometry and animation are untouched and verified so: all 9
+          // non-image bufferViews are byte-identical to the source, with
+          // the same 248 animation channels and 142 skin joints.
+          //
+          // Rebuild with scripts/optimise_glb_textures.py. The source
+          // file stays in the tree, so reverting is this one line.
+          : (isAirliner ? '/aircraft/a320_opt.glb' : null)));
     const _shouldSwapModel = isLoiterMun || isQuadcopter || isHostileHeli || isAirliner;
 
     // Flight rig — closure-captured per entity so each Shahed has
