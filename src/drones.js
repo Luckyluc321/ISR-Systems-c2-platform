@@ -228,6 +228,115 @@ export const TEMPLATES = {
     durationSec: 243,
   },
 
+  // ═══════════════════════════════════════════════════════════════
+  // GO-AROUND. The "without ISR" half of the promo film.
+  //
+  // A SEPARATE PATH, not a change to cph_jet_friendly. That one lands
+  // correctly and is finished; nothing here touches it.
+  //
+  // Identical to it waypoint for waypoint until t+109, which is T-0:38,
+  // 144 m and 2.5 km out: about 470 ft on a 1.4 nm final. That is a late
+  // go-around, which is the point. Nobody saw the drones until somebody
+  // looked out of a window.
+  //
+  // Then a real missed approach:
+  //   TOGA, and the aircraft SINKS about 9 m first, because thrust takes
+  //     time to spool and the attitude has to change before it climbs
+  //   rotation, climb at roughly 2500 fpm easing off as it accelerates
+  //   straight ahead on 041, which from 04R is out over the Oresund
+  //   level at 1000 m, about 3300 ft, still accelerating
+  //   a 180 degree right turn at 25 degrees of bank, 2410 m radius
+  //   outbound over the water
+  //
+  // The gear comes up on its own: the driver retracts once the aircraft
+  // has climbed 80 m back from its lowest point, which is what a real
+  // crew does on a positive rate of climb.
+  cph_jet_goaround: {
+    siteId: 'cph',
+    cooperative: true,
+    classification: 'friendly',
+    threat: null,
+    platform: 'jet',
+    droneType: 'Commercial airliner (SAS 743, A320neo)',
+    confidence: 0.98,
+    confidenceTrend: 'ADS-B correlated, flight plan match',
+    contributingSensors: [
+      { id: 'N07', confidence: 0.98 },
+      { id: 'N08', confidence: 0.96 },
+      { id: 'N09', confidence: 0.94 },
+      { id: 'N15', confidence: 0.92 },
+      { id: 'N17', confidence: 0.90 },
+    ],
+    evidence: { rfCarrier: '1090 MHz ADS-B', rfMatch: 'SAS743 A320neo, flight plan match', modality: 'RF + acoustic + visual', evidenceSize: '92.1 MB', note: 'Cleared commercial approach, go-around flown at 470 ft. Logged for audit.' },
+    terrainRelativeAlt: true,
+    groundOffsetM: 2,
+    iconBearingTrimDeg: 0,
+    iconTracksFlightPath: true,
+    gearRetracts: true,
+    waypoints: [
+      { lat: 55.52460, lon: 12.49881, alt: 530, heading: 41, tSec: 0 },
+      { lat: 55.53271, lon: 12.51137, alt: 468.2, heading: 41, tSec: 17 },
+      { lat: 55.54015, lon: 12.52289, alt: 411.5, heading: 41, tSec: 32 },
+      { lat: 55.54690, lon: 12.53336, alt: 360, heading: 41, tSec: 46 },
+      { lat: 55.55299, lon: 12.54279, alt: 313.7, heading: 41, tSec: 59 },
+      { lat: 55.55839, lon: 12.55116, alt: 272.5, heading: 41, tSec: 70 },
+      { lat: 55.56313, lon: 12.55849, alt: 236.4, heading: 41, tSec: 80 },
+      { lat: 55.56752, lon: 12.56530, alt: 203, heading: 41, tSec: 89 },
+      { lat: 55.57157, lon: 12.57158, alt: 172.1, heading: 41, tSec: 97 },
+      { lat: 55.57529, lon: 12.57734, alt: 143.8, heading: 41, tSec: 105 },
+      { lat: 55.57624, lon: 12.57880, alt: 134.8, heading: 41, tSec: 111 },   // TOGA, momentary sink
+      { lat: 55.57732, lon: 12.58048, alt: 130.8, heading: 41, tSec: 113 },   // rotation, sink arrested
+      { lat: 55.57925, lon: 12.58348, alt: 181.6, heading: 41, tSec: 117 },
+      { lat: 55.58123, lon: 12.58655, alt: 231.4, heading: 41, tSec: 121 },
+      { lat: 55.58326, lon: 12.58968, alt: 280.2, heading: 41, tSec: 125 },
+      { lat: 55.58532, lon: 12.59288, alt: 328, heading: 41, tSec: 129 },
+      { lat: 55.58743, lon: 12.59615, alt: 374.8, heading: 41, tSec: 133 },
+      { lat: 55.58958, lon: 12.59948, alt: 420.6, heading: 41, tSec: 137 },
+      { lat: 55.59178, lon: 12.60288, alt: 465.4, heading: 41, tSec: 141 },
+      { lat: 55.59402, lon: 12.60635, alt: 509.2, heading: 41, tSec: 145 },
+      { lat: 55.59630, lon: 12.60988, alt: 552, heading: 41, tSec: 149 },
+      { lat: 55.59862, lon: 12.61349, alt: 593.8, heading: 41, tSec: 153 },
+      { lat: 55.60099, lon: 12.61715, alt: 634.6, heading: 41, tSec: 157 },
+      { lat: 55.60340, lon: 12.62089, alt: 674.4, heading: 41, tSec: 161 },
+      { lat: 55.60586, lon: 12.62469, alt: 713.2, heading: 41, tSec: 165 },
+      { lat: 55.60836, lon: 12.62856, alt: 751, heading: 41, tSec: 169 },
+      { lat: 55.61090, lon: 12.63250, alt: 787.8, heading: 41, tSec: 173 },
+      { lat: 55.61347, lon: 12.63648, alt: 823.6, heading: 41, tSec: 177 },
+      { lat: 55.61603, lon: 12.64046, alt: 858.4, heading: 41, tSec: 181 },
+      { lat: 55.61860, lon: 12.64444, alt: 892.2, heading: 41, tSec: 185 },
+      { lat: 55.62117, lon: 12.64842, alt: 925, heading: 41, tSec: 189 },
+      { lat: 55.62374, lon: 12.65240, alt: 957, heading: 41, tSec: 193 },
+      { lat: 55.62631, lon: 12.65638, alt: 989, heading: 41, tSec: 197 },
+      { lat: 55.62888, lon: 12.66035, alt: 1000, heading: 41, tSec: 201 },
+      { lat: 55.63289, lon: 12.66657, alt: 1000, heading: 41, tSec: 207 },
+      { lat: 55.63707, lon: 12.67305, alt: 1000, heading: 41, tSec: 213 },
+      { lat: 55.64133, lon: 12.67964, alt: 1000, heading: 41, tSec: 219 },
+      { lat: 55.64394, lon: 12.68446, alt: 1000, heading: 41, tSec: 223 },
+      { lat: 55.64604, lon: 12.69001, alt: 1000, heading: 41, tSec: 227 },
+      { lat: 55.64756, lon: 12.69612, alt: 1000, heading: 41, tSec: 231 },
+      { lat: 55.64846, lon: 12.70261, alt: 1000, heading: 41, tSec: 235 },
+      { lat: 55.64871, lon: 12.70927, alt: 1000, heading: 41, tSec: 239 },
+      { lat: 55.64830, lon: 12.71591, alt: 1000, heading: 41, tSec: 243 },
+      { lat: 55.64725, lon: 12.72233, alt: 1000, heading: 41, tSec: 247 },
+      { lat: 55.64558, lon: 12.72832, alt: 1000, heading: 41, tSec: 251 },
+      { lat: 55.64336, lon: 12.73371, alt: 1000, heading: 41, tSec: 255 },
+      { lat: 55.64063, lon: 12.73833, alt: 1000, heading: 41, tSec: 259 },
+      { lat: 55.63750, lon: 12.74205, alt: 1000, heading: 41, tSec: 263 },
+      { lat: 55.63404, lon: 12.74474, alt: 1000, heading: 41, tSec: 267 },
+      { lat: 55.63038, lon: 12.74633, alt: 1000, heading: 41, tSec: 271 },
+      { lat: 55.62661, lon: 12.74678, alt: 1000, heading: 41, tSec: 275 },
+      { lat: 55.62286, lon: 12.74605, alt: 1000, heading: 41, tSec: 279 },
+      { lat: 55.61924, lon: 12.74419, alt: 1000, heading: 41, tSec: 283 },
+      { lat: 55.61585, lon: 12.74124, alt: 1000, heading: 41, tSec: 287 },
+      { lat: 55.61280, lon: 12.73730, alt: 1000, heading: 41, tSec: 291 },
+      { lat: 55.60713, lon: 12.72850, alt: 1000, heading: 41, tSec: 299 },
+      { lat: 55.60145, lon: 12.71971, alt: 1000, heading: 41, tSec: 307 },
+      { lat: 55.59577, lon: 12.71091, alt: 1000, heading: 41, tSec: 315 },
+      { lat: 55.59009, lon: 12.70212, alt: 1000, heading: 41, tSec: 323 },
+    ],
+    durationSec: 323,
+  },
+
   // ── Recon drone, HALE (Reaper/Global-Hawk class), high altitude circular loiter ──
   // Detected by passive coherent location (PCL): our RF mesh triangulates reflections
   // of civil broadcast signals (DVB-T, FM) bouncing off the target. Backed by

@@ -16129,6 +16129,7 @@ async function main() {
     //     second) times bankFactor. Positive yaw = right turn = right
     //     wing down. Clamped and smoothed.
     let _touchdownMs = null;
+    let _lastHoriz = 0;
     let _smoothedHeading = null;   // radians, compass bearing (CW from N)
     let _smoothedPitch = 0;        // radians, +up
     let _smoothedRoll = 0;         // radians, +right wing down
@@ -16198,6 +16199,7 @@ async function main() {
         // bank rolled the aircraft LEFT.
         pitchSign: -1,
         rollSign: -1,
+        coordinatedBank: true,
         // STRIP THE 2D ICON'S BEARING TRIM OUT OF THE 3D ATTITUDE.
         //
         // stateHolder.headingRad carries __isr_icon_tuning.bearingTrimDeg,
@@ -16265,6 +16267,7 @@ async function main() {
         const dNorth = (curr.latitude  - prev.latitude)  * R;
         const dEast  = (curr.longitude - prev.longitude) * R * Math.cos(meanLat);
         const dHoriz = Math.sqrt(dNorth * dNorth + dEast * dEast);
+        _lastHoriz = dHoriz / dt;
         if (dHoriz > 0.1) {
           targetPitch = Math.atan2(dAlt, dHoriz);
           if (targetPitch >  pitchClamp) targetPitch =  pitchClamp;
@@ -16279,7 +16282,18 @@ async function main() {
         while (dh >  Math.PI) dh -= 2 * Math.PI;
         while (dh < -Math.PI) dh += 2 * Math.PI;
         const yawRate = dh / dt;
-        targetRoll = yawRate * bankFactor;
+        // COORDINATED TURN, for an airframe that actually banks to turn.
+        // The physics is tan(bank) = v * omega / g, so the bank an
+        // aircraft holds depends on how fast it is going, not on a fixed
+        // multiplier. A constant bankFactor is fine for a drone that
+        // flies one speed; on an airliner that approaches at 70 m/s and
+        // flies its missed approach at 105 it is wrong at both ends. The
+        // go-around's 180 degree turn wants 25 degrees of bank and a
+        // fixed factor gives about 3.
+        const _spd = _prevPosCart ? (typeof _lastHoriz === 'number' ? _lastHoriz : 0) : 0;
+        targetRoll = (T.coordinatedBank && _spd > 5)
+          ? Math.atan((_spd * yawRate) / 9.81)
+          : yawRate * bankFactor;
         if (targetRoll >  bankClamp) targetRoll =  bankClamp;
         if (targetRoll < -bankClamp) targetRoll = -bankClamp;
       }

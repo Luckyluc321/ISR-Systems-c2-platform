@@ -128,6 +128,8 @@ export function createGearDriver(Cesium, viewer, {
   let t0 = null;          // when gear was selected down
   let td = null;          // when the wheels touched
   let ts = null;          // when the spoilers began to stow
+  let tUp = null;         // when the gear was selected UP again
+  let minAgl = null;      // lowest point reached, for spotting a climb
   let lastPos = null;     // for ground speed, measured not assumed
   let lastPosMs = 0;
   let applied = null;     // last fraction written, so we only write on change
@@ -209,7 +211,17 @@ export function createGearDriver(Cesium, viewer, {
       if (t0 === null && typeof aglM === 'number' && aglM > 0 && aglM <= extendBelowAglM) {
         t0 = monoNow();
       }
-      const f = t0 === null ? 0 : Math.min(1, (monoNow() - t0) / extendMs);
+      // GEAR UP ON A POSITIVE RATE OF CLIMB. On a go-around the crew
+      // calls for gear up as soon as the aircraft is climbing, and
+      // without this it would fly its missed approach with the wheels
+      // hanging out. Detected from the aircraft's own height rather than
+      // from a flag, so any route that climbs away gets it for free.
+      if (typeof aglM === 'number') {
+        minAgl = minAgl === null ? aglM : Math.min(minAgl, aglM);
+        if (t0 !== null && tUp === null && aglM > minAgl + 80) tUp = monoNow();
+      }
+      let f = t0 === null ? 0 : Math.min(1, (monoNow() - t0) / extendMs);
+      if (tUp !== null) f = Math.max(0, f - (monoNow() - tUp) / extendMs);
       // Spoilers fire on touchdown, not on height.
       if (td === null && typeof aglM === 'number' && aglM <= 0.3) {
         td = monoNow();
