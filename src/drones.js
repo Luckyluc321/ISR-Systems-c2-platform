@@ -116,6 +116,9 @@ export const TEMPLATES = {
     // between the bare height model that globe.getHeight() reads and the
     // built-up paved surface that is actually drawn.
     groundOffsetM: 2,
+    // Gear retracts in flight and extends on the approach. Off for every
+    // other template, whose models have no gear worth driving.
+    gearRetracts: true,
     // NO ICON BEARING TRIM. The shared default is -2 degrees, tuned so a
     // canvas icon's drawn apex lines up with its course. The 3D rig reads
     // the same heading field, so on an airliner that trim is the nose

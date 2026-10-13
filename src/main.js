@@ -793,8 +793,7 @@ import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from '
 import { createParkedAircraft } from './static_aircraft.js';
 import { A320_POSES } from './a320_poses.js';
 import { createWingVortices } from './airliner_vortices.js';
-// airliner_surfaces.js is dormant: see the note at the model uri.
-// import { rigidTransforms, createAirbrakeState, createGearState } from './airliner_surfaces.js';
+import { gearPose, createGearState } from './airliner_surfaces.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -15856,6 +15855,11 @@ async function main() {
     // on viewer.clock and that is the clock it has to be measured
     // against. The consequence, accepted rather than hidden: the gear
     // keeps extending if the simulation is paused mid-sequence.
+    // Gear, applied in discrete steps and then released. See
+    // airliner_surfaces.js for why this is not a per-frame property.
+    const _gear = createGearState({ monoNow,
+      extendBelowAglM: (window.__isr_airliner_tuning || {}).gearBelowAglM ?? 450,
+      extendMs: (window.__isr_airliner_tuning || {}).gearExtendMs ?? 9000 });
     let _animT0 = null;
     let _clockWasAnimating = null;
     // Airbrakes. Four nodes driven by hand instead of the whole 142-joint
@@ -16859,7 +16863,7 @@ async function main() {
       swarmBillboards,   // formation[1..N] only — LEAD is state.leadSwarmMember
       leadSwarmMember,   // formation[0] wrapper, same shape as swarmBillboards entries
       spawnMs: monoNow(),   // shared timing reference for swarm interpolation
-      trailPositions, shadowPositions,
+      trailPositions, shadowPositions, _gear,
       stateHolder,      // { headingRad } — updated in tick, read by billboard rotation callback
       entryDropped: false, entryMarker: null,
       exitDropped: false, exitMarker: null, wasInCoverage: false,
@@ -17522,6 +17526,26 @@ async function main() {
         // AGL for the orientation rig, which fades its pitch offset out
         // near the ground and cannot read it off the cartographic height.
         if (state.stateHolder) state.stateHolder.aglM = p.alt;
+        // GEAR, in steps. A pose is assigned only when the step CHANGES,
+        // held briefly so the model visualizer picks it up, then the
+        // property is cleared. Cesium leaves the node matrices where they
+        // were, so the gear stays put at no further cost.
+        if (state._gear && TEMPLATES[event.templateKey]?.gearRetracts
+            && ((window.__isr_airliner_tuning || {}).gear ?? true)) {
+          state._gear.update(p.alt);
+          const _STEPS = 12;
+          const _step = Math.round(state._gear.fraction() * _STEPS);
+          const _mg = state.billboard?.model;
+          if (_mg && _step !== state._gearStep) {
+            state._gearStep = _step;
+            _mg.nodeTransformations = gearPose(Cesium, _step / _STEPS);
+            state._gearHeldSince = monoNow();
+          } else if (_mg && state._gearHeldSince
+                     && monoNow() - state._gearHeldSince > 200) {
+            _mg.nodeTransformations = undefined;
+            state._gearHeldSince = null;
+          }
+        }
 
         // COMPUTED ONCE AND REUSED. The drop line and the trail used to
         // rebuild this from p.alt independently, which is how the trail
