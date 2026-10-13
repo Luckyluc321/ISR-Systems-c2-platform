@@ -15988,26 +15988,62 @@ async function main() {
         // terms, and I was wrong at 0 and again at 180 before Lucas
         // found it. Written down so nobody recomputes it.
         headingOffsetDeg: 90,
-        // ZERO, not 5. I set 5 for the nose-up body attitude an airliner
-        // holds on final, and it came out as 5 degrees of RIGHT BANK on a
-        // dead straight approach.
+        // FIVE, and the sign below is why it failed at five before.
         //
-        // The reason is the same mismatch that made the heading need +90:
-        // this asset's body frame is a quarter turn from what the rig
-        // assumes, so a rotation applied about the lateral axis lands on
-        // the longitudinal one. Pitch becomes roll.
+        // "PITCH BECOMES ROLL" WAS THE WRONG DIAGNOSIS. I wrote that the
+        // body frame was a quarter turn out so a lateral rotation landed
+        // on the longitudinal axis, and zeroed this to hide it. Probing
+        // the actual transform refutes it: at HPR (h=130, p=10, r=0) the
+        // model's +X axis stays at 0.000 elevation and the nose tilts; at
+        // (h=130, p=0, r=10) the nose stays at 0.000 and +X tilts. Pitch
+        // acts on the lateral axis and roll on the longitudinal one, as
+        // intended. There is no axis leak to compensate for.
         //
-        // Zero removes the visible fault. The nose-up attitude is worth
-        // having back, but only once the frame is understood rather than
-        // compensated for a third time.
-        pitchOffsetDeg: 0,
+        // The 5 degrees of apparent right bank was two other faults,
+        // both fixed here: a permanent 2 degree yaw crab (stripIconTrim
+        // below) and an inverted pitch sign putting the nose DOWN on a
+        // descent, at up to 12x model scale.
+        pitchOffsetDeg: 5,
         pitchClampDeg: 12,     // not an agile airframe
         bankClampDeg: 25,
         bankFactor: 1.2,       // gentle, and it is flying straight anyway
         pitchSmoothing: 0.06,  // heavy aircraft, slow attitude changes
         rollSmoothing: 0.05,
         headingSmoothing: 0.10,
-        pitchSign: 1,
+        // BOTH NEGATIVE, and this file already wrote down why. The
+        // Shahed's note at the top of this section states the rule: a
+        // nose on body -X needs heading +90, and "also reverses Cesium's
+        // pitch and roll axes through the airframe". This asset needs the
+        // same +90, so it is the same case and needs the same two flips.
+        // It carried pitchSign 1 and no rollSign at all. The rule was
+        // written down and not applied.
+        //
+        // Measured consequences of the old values: HPR pitch +10 put the
+        // nose 10 degrees DOWN, so the -3 degree glideslope rendered as
+        // nose 3 degrees ABOVE the horizon (a 6 degree angle of attack,
+        // plausible enough to survive review), and a commanded right
+        // bank rolled the aircraft LEFT.
+        pitchSign: -1,
+        rollSign: -1,
+        // STRIP THE 2D ICON'S BEARING TRIM OUT OF THE 3D ATTITUDE.
+        //
+        // stateHolder.headingRad carries __isr_icon_tuning.bearingTrimDeg,
+        // which defaults to -2 and exists to align the drawn apex of a
+        // canvas ICON with its course. The 3D rig reads the same field, so
+        // every model in this app crabs 2 degrees off its flight path.
+        // On a 37.6 m airliner against runway edges that is the nose
+        // visibly off the centreline, and it is what reads as "tilted to
+        // the right compared with its trend line".
+        //
+        // Removed for this airframe ONLY. The trim is correct for the
+        // icons it was tuned against, and the shared fix would silently
+        // re-aim the Shahed, the quadcopters and the Mi-24.
+        stripIconTrim: true,
+        // Fade pitchOffsetDeg out below this height AGL. The offset is
+        // additive and unconditional, so on the rollout, where the
+        // computed pitch is 0, a flat 5 degrees would sit the aircraft
+        // on the runway with its tail in the tarmac.
+        flarePitchFadeM: 20,
       };
       const T = isAirliner
         ? { ..._AIRLINER_RIG, ...(window.__isr_airliner_tuning || {}) }
@@ -16019,6 +16055,8 @@ async function main() {
       // boundary below so everything above stays world-semantic.
       const pitchSign      = T.pitchSign          ?? 1;
       const rollSign       = T.rollSign           ?? 1;
+      const stripIconTrim  = T.stripIconTrim      ?? false;
+      const flareFadeM     = T.flarePitchFadeM    ?? 0;
       const headingSmooth  = T.headingSmoothing   ?? 0.18;
       const pitchSmooth    = T.pitchSmoothing     ?? 0.10;
       const rollSmooth     = T.rollSmoothing      ?? 0.08;
@@ -16031,7 +16069,16 @@ async function main() {
       // stateHolder.headingRad = -atan2(dLon, dLat); invert to get
       // compass bearing (CW from north, radians) which matches
       // Cesium HeadingPitchRoll's heading convention.
-      const targetHeading = -stateHolder.headingRad;
+      //
+      // It also carries the 2D icon's bearingTrimDeg, which is canvas
+      // art alignment and has no business in a 3D model's attitude.
+      // Adding it back cancels it: -(true + trim) + trim = -true.
+      // Opt-in per airframe, so the icons keep the trim they were
+      // tuned with.
+      const _iconTrim = stripIconTrim
+        ? ((window.__isr_icon_tuning?.bearingTrimDeg ?? -2) * Math.PI) / 180
+        : 0;
+      const targetHeading = -stateHolder.headingRad + _iconTrim;
 
       // Pitch — target from vertical-vs-horizontal velocity.
       let targetPitch = 0;
@@ -16079,9 +16126,17 @@ async function main() {
       _prevPosCart = Cesium.Cartesian3.clone(cart);
       _prevTime = now;
 
+      // AGL, not the cartographic height, because the cart is above the
+      // ellipsoid and the runway surface is 38 m up: a height-based fade
+      // would never reach zero on the ground. The tick publishes the
+      // waypoint altitude, which is already AGL.
+      const _agl = stateHolder.aglM;
+      const _pitchFade = (flareFadeM > 0 && typeof _agl === 'number')
+        ? Math.min(1, Math.max(0, _agl / flareFadeM))
+        : 1;
       const hpr = new Cesium.HeadingPitchRoll(
         _smoothedHeading + headingOffset,
-        (_smoothedPitch + pitchOffset) * pitchSign,
+        (_smoothedPitch + pitchOffset * _pitchFade) * pitchSign,
         _smoothedRoll * rollSign,
       );
       return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
@@ -16222,6 +16277,16 @@ async function main() {
     };
     if (_shouldSwapModel) {
       const _qT = window.__isr_quad_tuning || {};
+      // One-shot timer for the landing animation above. Per track, so
+      // two airliners would not share a clock. Real seconds rather than
+      // monoNow(), because the animation advances on viewer.clock and
+      // that is the clock it has to be measured against.
+      let _animT0 = null;
+      const _A320_ANIM_SEC = 28.1667;   // measured from the GLB sampler
+      const _airlinerAnimRunning = () => {
+        if (_animT0 === null) { _animT0 = performance.now(); return true; }
+        return (performance.now() - _animT0) / 1000 < _A320_ANIM_SEC;
+      };
       _droneEntitySpec.model = {
         uri: _modelUri,
         // Shahed uses 1:1 world scale for the ~3m wingspan. The
@@ -16231,10 +16296,34 @@ async function main() {
         // Floor derived from real metres like everything else.
         scale: isAirliner ? 1
           : (isHostileHeli ? 1.121 : (isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5))),
-        // Animations run for this one. The gear, flaps and brakes are
-        // the builder's, not ours, and they need the clock (enabled
-        // where the track is created).
-        ...(isAirliner ? { runAnimations: true } : {}),
+        // THE BUILDER'S OWN LANDING SEQUENCE, PLAYED ONCE.
+        //
+        // `runAnimations: true` is not "play it": Cesium's ModelVisualizer
+        // adds entity animations with loop: REPEAT unconditionally and
+        // offers no clamp, so a flat true LOOPS this 28.17 s sequence 11
+        // times across a 302 s approach. The gear would retract and
+        // re-extend twelve times on final and the airframe would jump
+        // 9.32 m at every loop boundary, because the clip's root node
+        // carries the descent.
+        //
+        // So it is a property, not a flag: true until the sequence has
+        // run its length, then false, which makes Cesium call
+        // removeAll() and leaves the model in its REST pose.
+        //
+        // That freeze is seamless, and it is measured rather than hoped
+        // for: of the animation's 248 channels, only 5 differ between
+        // the final frame and the bind pose, and all 5 are spinning
+        // parts (both main wheels, the nose wheel, the two fans) where
+        // the stopping angle is arbitrary. 79 channels differ at the
+        // FIRST frame, which is the gear-up airborne configuration, so
+        // the sequence does start from a genuinely different pose.
+        //
+        // The timer starts on the first evaluation, and that is exactly
+        // the right instant by construction: ModelVisualizer only reads
+        // this property inside `if (model.ready)`, which is the same
+        // frame it calls addAll(). A 97 MB load cannot desynchronise it.
+        ...(isAirliner ? { runAnimations: new Cesium.CallbackProperty(
+          () => _airlinerAnimRunning(), false) } : {}),
         // NO BAKED POSE. Applying the animation's node transforms through
         // nodeTransformations tore the aircraft to pieces: wings, flaps
         // and gear scattered around the fuselage, and the map dropped to
@@ -16254,10 +16343,27 @@ async function main() {
         // src/a320_poses.js is kept: the data is correct and the problem
         // is how it was applied. Posing a skinned model needs the joints
         // driven as a complete set, or the animation driven properly.
-        minimumPixelSize: isAirliner ? Math.round(37.57 * MODEL_PX_PER_M)
+        // TRUE SIZE FOR THE AIRLINER, no floor and no exaggeration.
+        //
+        // These two knobs exist to keep a 3 m drone readable as a map
+        // symbol, and they were applied to the airliner by reflex. On a
+        // 37.6 m aircraft they are ruinous: a 258 px floor against a 12x
+        // cap draws it 451 m long and 409 m in span out to 2.3 km, then
+        // SHRINKS it continuously to life size over the last 2.3 km.
+        //
+        // Cesium computes scale = minimumPixelSize * metresPerPixel /
+        // (2 * boundingSphereRadius), capped at maximumScale, so with
+        // this model's 26.06 m radius the cap held for the first 15.8 km
+        // of an 18 km final. A 12x aircraft whose origin is underground
+        // is also what made the datum error below so violent.
+        //
+        // 0 and 1 mean "draw it at the size it is". Beyond about 2 km it
+        // becomes a small object on screen, which is what an 18 km final
+        // actually looks like and is what the camera move is for.
+        minimumPixelSize: isAirliner ? 0
           : (isHostileHeli ? Math.round(21.5 * MODEL_PX_PER_M)
             : (isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20))),
-        maximumScale: isAirliner ? MODEL_MAX_EXAGGERATION
+        maximumScale: isAirliner ? 1
           : (isHostileHeli ? 1.121 * MODEL_MAX_EXAGGERATION : undefined),
         distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
         shadows: Cesium.ShadowMode.DISABLED,
@@ -17017,6 +17123,9 @@ async function main() {
         // track type is exempt and the rule is untouched for every
         // other.
         const _coop = !!(TEMPLATES[event.templateKey]?.cooperative);
+        // Opt-in terrain-relative altitude. See the position assignment
+        // below for why this is a template flag and not a global fix.
+        const _terrainRel = !!(TEMPLATES[event.templateKey]?.terrainRelativeAlt);
         const shouldShow = (leadDown || povSuppressed) ? false : (state.closedAt
           ? false
           : (leadInCov || beingChased || _coop));
@@ -17064,7 +17173,50 @@ async function main() {
           processDroneSiteMarkers(event, state, 'lead', leadCur, leadPrev, label);
           state._leadMarkerPrevPos = leadCur;
         }
-        state.billboard.position = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.alt);
+        // ALTITUDE DATUM. fromDegrees' third argument is a height above
+        // the WGS84 ELLIPSOID, and Cesium World Terrain reports its
+        // heights above the ellipsoid too, so a waypoint alt of 0 is not
+        // the ground. At Copenhagen 04R the runway surface sits 38.0 m up
+        // (sampled: 38.03 at the threshold, 38.74 at the rollout end),
+        // which means every track in this app is drawn 38 m below its
+        // stated altitude. At 100 m AGL nobody can see that. An airliner
+        // told to touch down at alt 0 crosses the surface 600 m short of
+        // the threshold and spends the whole rollout 38 m underground.
+        //
+        // GATED ON THE TEMPLATE, DELIBERATELY NOT FIXED GLOBALLY.
+        // Correcting this line for everything would lift every drone in
+        // every scenario by 38 m at a stroke, and those altitudes were
+        // authored and checked against what is on screen today. One
+        // template asks for the correction; the rest are untouched, and
+        // the expression below is bit-identical for them.
+        //
+        // SMOOTHED, because globe.getHeight() returns the height of the
+        // CURRENTLY LOADED tile and steps as the level of detail refines
+        // as the aircraft nears the camera. Unsmoothed, that is a visible
+        // pop mid-approach. It also returns undefined before tiles
+        // stream, which is why the sample is only taken when positive.
+        //
+        // AGL IS WHAT EVERYTHING ELSE STILL READS. The label, the
+        // recording sample, the sensor-ceiling gates and the detection
+        // test all want height above ground, so p.alt is left alone and
+        // only the rendered position is corrected.
+        if (_terrainRel) {
+          const _g = _airborneAbsAlt(p.lon, p.lat, 0);
+          if (_g > 0) {
+            state._terrOff = state._terrOff == null ? _g
+              : state._terrOff + (_g - state._terrOff) * 0.08;
+          }
+          // groundOffsetM trims the wheels onto the surface, live:
+          //   window.__isr_airliner_tuning = { groundOffsetM: 0.4 }
+          state._absAlt = p.alt + (state._terrOff || 0)
+            + ((window.__isr_airliner_tuning || {}).groundOffsetM ?? 0);
+        } else {
+          state._absAlt = p.alt;
+        }
+        // AGL for the orientation rig, which fades its pitch offset out
+        // near the ground and cannot read it off the cartographic height.
+        if (state.stateHolder) state.stateHolder.aglM = p.alt;
+        state.billboard.position = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, state._absAlt);
 
         // ── P68: dynamic contributingSensors population (real geospatial)
         // As the drone flies, add any sensor whose coverage the drone is
@@ -17159,15 +17311,20 @@ async function main() {
 
         state.shadowPositions.length = 0;
         state.shadowPositions.push(
-          Cesium.Cartesian3.fromDegrees(p.lon, p.lat, p.alt),
-          Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 0),
+          Cesium.Cartesian3.fromDegrees(p.lon, p.lat, state._absAlt),
+          // The base was a hardcoded 0, which is 38 m under the surface.
+          // Only corrected for the templates that opted in, so every
+          // other drop line keeps the length it has today.
+          Cesium.Cartesian3.fromDegrees(p.lon, p.lat,
+            _terrainRel ? (state._terrOff || 0) : 0),
         );
 
         _trailAppendCounter++;
         // Skip trail growth once the lead is dead — no ghost trendline
         // continuing along the drone's remaining waypoints.
         if (!leadDown && _trailAppendCounter % 3 === 0) {
-          state.trailPositions.push(Cesium.Cartesian3.fromDegrees(p.lon, p.lat, _safeTrailAlt(p.alt)));
+          state.trailPositions.push(Cesium.Cartesian3.fromDegrees(p.lon, p.lat,
+            _terrainRel ? state._absAlt : _safeTrailAlt(p.alt)));
           if (state.trailPositions.length > 180) state.trailPositions.shift();
         }
 

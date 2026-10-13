@@ -102,52 +102,85 @@ export const TEMPLATES = {
       { id: 'N17', confidence: 0.90 },
     ],
     evidence: { rfCarrier: '1090 MHz ADS-B', rfMatch: 'SAS743 A320neo, flight plan match', modality: 'RF + acoustic + visual', evidenceSize: '92.1 MB', note: 'Cleared commercial approach, no threat, logged for audit.' },
+    // TERRAIN-RELATIVE ALTITUDE. `alt` here is metres above the GROUND,
+    // and this is the only template that says so. The shared track code
+    // draws a waypoint altitude as a height above the WGS84 ellipsoid,
+    // which at Copenhagen is 38.0 m below the runway surface, so an
+    // airliner commanded to alt 0 touches down 38 m underground. Every
+    // other template is authored against that same convention and looks
+    // right on screen, so the correction is opt-in rather than global.
+    terrainRelativeAlt: true,
     waypoints: [
-      // A REAL APPROACH, not the dive this was. The previous profile flew
-      // final at 235 kt descending 3,347 fpm on an 8 degree slope. An
-      // A320 flies final at 136 kt, 750 fpm, 3 degrees, and the gap
-      // between those two is the difference between an airliner landing
-      // and a missile arriving.
+      // A REAL APPROACH, GENERATED FROM THE GEOMETRY. Not eyeballed, and
+      // not the dive this started as: the original profile flew final at
+      // 235 kt descending 3,347 fpm on an 8 degree slope, which is a
+      // missile arriving rather than an airliner landing.
       //
-      // Generated from the geometry rather than eyeballed: 70 m/s along
-      // the reciprocal of runway 04R's 040, altitude = range * tan(3),
-      // from 10 km out to the 55.60500 / 12.64020 touchdown zone. The
-      // last four points shallow the slope into a flare instead of
-      // flying the glideslope into the tarmac, and the rollout
-      // decelerates 70 m/s to about 12.
-      //
-      //   10 km out   524 m    t+0
-      //    4 km out   210 m    t+86
-      //    1.5 km     79 m     t+121
-      //    400 m      21 m     t+137      flare begins
-      //    threshold  0 m      t+143      touchdown
-      //    rollout                        t+187
       // ON THE RUNWAY CENTRELINE. The touchdown point inherited from the
       // old template was 836 m OFF 04R's axis, so the whole approach flew
-      // parallel to the runway rather than down it.
+      // parallel to the runway rather than down it. Derived instead from
+      // the sensor labelled "Runway 04R Central" at 55.61643 / 12.63982:
+      // the threshold is 1800 m back along the reciprocal of 040, giving
+      // 55.60404 / 12.62142 on a 3596 m runway.
       //
-      // Derived instead from the sensor labelled "Runway 04R Central"
-      // at 55.61643 / 12.63982: threshold is 1800 m back along the
-      // reciprocal of 040, giving 55.60404 / 12.62142 on a 3596 m
-      // runway. Everything else is the same 3 degree geometry.
-      { lat: 55.48017, lon: 12.43743, alt: 943, heading: 40, tSec: 0   },
-      { lat: 55.50770, lon: 12.47832, alt: 734, heading: 40, tSec: 49  },
-      { lat: 55.53523, lon: 12.51920, alt: 524, heading: 40, tSec: 101 },
-      { lat: 55.55587, lon: 12.54987, alt: 367, heading: 40, tSec: 141 },
-      { lat: 55.57307, lon: 12.57542, alt: 236, heading: 40, tSec: 175 },
-      { lat: 55.58684, lon: 12.59587, alt: 131, heading: 40, tSec: 202 },
-      { lat: 55.59372, lon: 12.60609, alt: 79,  heading: 40, tSec: 217 },
-      { lat: 55.59853, lon: 12.61324, alt: 42,  heading: 40, tSec: 226 },
-      { lat: 55.60129, lon: 12.61733, alt: 21,  heading: 40, tSec: 232 },
-      { lat: 55.60301, lon: 12.61989, alt: 5,   heading: 40, tSec: 236 },
-      { lat: 55.60404, lon: 12.62142, alt: 0,   heading: 40, tSec: 238 },
-      { lat: 55.60679, lon: 12.62551, alt: 0,   heading: 40, tSec: 244 },
-      { lat: 55.61023, lon: 12.63062, alt: 0,   heading: 40, tSec: 255 },
-      { lat: 55.61367, lon: 12.63573, alt: 0,   heading: 40, tSec: 269 },
-      { lat: 55.61711, lon: 12.64084, alt: 0,   heading: 40, tSec: 289 },
-      { lat: 55.62056, lon: 12.64595, alt: 0,   heading: 40, tSec: 331 },
+      // THE FLARE IS A CUBIC, NOT A SHALLOWER LINE. The previous "flare"
+      // STEEPENED to -3.66 degrees at 250 m out and touched down at 490
+      // fpm, which reads as being driven into the tarmac. This crosses
+      // the threshold at 50 ft and holds the glideslope rate into a cubic
+      // that cuts to 148 fpm at the wheels, touching down 450 m in, which
+      // is inside the touchdown zone markings the orthophoto shows.
+      //
+      // SPEED IS CONTINUOUS. interpolate() is piecewise-linear in lat and
+      // lon, so ground speed is piecewise-CONSTANT and steps at every
+      // waypoint. The old legs ran 62.5 then 74.8 m/s through the flare
+      // and 66.6 then 45.4 at the start of the rollout, both of which are
+      // visible lurches. Times here come from integrating one continuous
+      // speed profile, so no step exceeds 5 m/s.
+      //
+      //   18.0 km out   943 m   74.7 m/s   t+0
+      //    4.0 km out   211 m   71.2 m/s   t+194
+      //    1.0 km out    61 m   70.2 m/s   t+236
+      //   threshold      15 m   70.0 m/s   t+248   50 ft, flare begins
+      //   touchdown       0 m   70.0 m/s   t+255   450 m in, 148 fpm
+      //   rollout end     0 m   13.8 m/s   t+302   1.22 m/s2 autobrake
+      { lat: 55.48017, lon: 12.43743, alt: 943, heading: 40, tSec: 0 },
+      { lat: 55.49394, lon: 12.45788, alt: 839.9, heading: 40, tSec: 27 },
+      { lat: 55.50770, lon: 12.47832, alt: 736.8, heading: 40, tSec: 54 },
+      { lat: 55.52146, lon: 12.49876, alt: 633.7, heading: 40, tSec: 81 },
+      { lat: 55.53523, lon: 12.51920, alt: 530.6, heading: 40, tSec: 108 },
+      { lat: 55.54899, lon: 12.53965, alt: 427.4, heading: 40, tSec: 136 },
+      { lat: 55.55931, lon: 12.55498, alt: 350.1, heading: 40, tSec: 157 },
+      { lat: 55.56963, lon: 12.57031, alt: 272.8, heading: 40, tSec: 178 },
+      { lat: 55.57789, lon: 12.58258, alt: 210.9, heading: 40, tSec: 194 },
+      { lat: 55.58477, lon: 12.59280, alt: 159.4, heading: 40, tSec: 209 },
+      { lat: 55.59028, lon: 12.60098, alt: 118.1, heading: 40, tSec: 220 },
+      { lat: 55.59441, lon: 12.60711, alt: 87.2, heading: 40, tSec: 228 },
+      { lat: 55.59785, lon: 12.61222, alt: 61.4, heading: 40, tSec: 236 },
+      { lat: 55.60060, lon: 12.61631, alt: 40.8, heading: 40, tSec: 241 },
+      { lat: 55.60266, lon: 12.61938, alt: 25.3, heading: 40, tSec: 246 },
+      { lat: 55.60404, lon: 12.62142, alt: 15, heading: 40, tSec: 248 },
+      { lat: 55.60435, lon: 12.62188, alt: 12.7, heading: 40, tSec: 249 },
+      { lat: 55.60466, lon: 12.62234, alt: 10.6, heading: 40, tSec: 250 },
+      { lat: 55.60497, lon: 12.62280, alt: 8.7, heading: 40, tSec: 250 },
+      { lat: 55.60528, lon: 12.62326, alt: 6.8, heading: 40, tSec: 251 },
+      { lat: 55.60559, lon: 12.62372, alt: 5.2, heading: 40, tSec: 252 },
+      { lat: 55.60590, lon: 12.62418, alt: 3.7, heading: 40, tSec: 252 },
+      { lat: 55.60621, lon: 12.62464, alt: 2.5, heading: 40, tSec: 253 },
+      { lat: 55.60652, lon: 12.62510, alt: 1.4, heading: 40, tSec: 254 },
+      { lat: 55.60683, lon: 12.62556, alt: 0.6, heading: 40, tSec: 254 },
+      { lat: 55.60714, lon: 12.62602, alt: 0, heading: 40, tSec: 255 },
+      { lat: 55.60817, lon: 12.62755, alt: 0, heading: 40, tSec: 257 },
+      { lat: 55.60968, lon: 12.62980, alt: 0, heading: 40, tSec: 260 },
+      { lat: 55.61120, lon: 12.63205, alt: 0, heading: 40, tSec: 264 },
+      { lat: 55.61271, lon: 12.63430, alt: 0, heading: 40, tSec: 268 },
+      { lat: 55.61422, lon: 12.63655, alt: 0, heading: 40, tSec: 272 },
+      { lat: 55.61574, lon: 12.63880, alt: 0, heading: 40, tSec: 277 },
+      { lat: 55.61725, lon: 12.64105, alt: 0, heading: 40, tSec: 282 },
+      { lat: 55.61877, lon: 12.64329, alt: 0, heading: 40, tSec: 289 },
+      { lat: 55.62028, lon: 12.64554, alt: 0, heading: 40, tSec: 299 },
+      { lat: 55.62056, lon: 12.64595, alt: 0, heading: 40, tSec: 302 },
     ],
-    durationSec: 331,
+    durationSec: 302,
   },
 
   // ── Recon drone, HALE (Reaper/Global-Hawk class), high altitude circular loiter ──
