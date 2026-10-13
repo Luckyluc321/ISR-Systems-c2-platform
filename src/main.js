@@ -15919,6 +15919,48 @@ async function main() {
       Cesium.Cartesian3.normalize(fwd, fwd);
       return fwd;
     };
+    // EXACT SCREEN ROTATION FOR THE SYMBOL, because alignedAxis is wrong.
+    //
+    // Cesium's billboard vertex shader derives the rotation from the
+    // projected axis like this:
+    //
+    //   angle += sign(-axis.x) * acos( sign(axis.y) * (axis.y*axis.y) /
+    //                                  (axis.x*axis.x + axis.y*axis.y) )
+    //
+    // That is acos(cos^2 t), not acos(cos t). It is exact only when the
+    // axis is straight up the screen or straight across it, and in
+    // between it rotates the icon CLOCKWISE by up to 15.8 degrees, worst
+    // around 55. On this approach, bearing 040 seen from above, the true
+    // screen angle is 40 and Cesium draws 54: the nose sits 14 degrees
+    // right of the track, which is what Lucas has been reporting since
+    // the start and what three heading "fixes" could not touch, because
+    // the heading was never wrong.
+    //
+    // So the angle is computed here instead, by projecting the aircraft
+    // and a point ahead of it to window coordinates and taking the real
+    // screen bearing. That also picks up perspective, which the shader's
+    // eye-space approximation drops. alignedAxis goes to ZERO for these
+    // tracks so only this rotation applies.
+    //
+    // Opt-in per template: this is a per-track closure, so no other
+    // airframe's symbol changes.
+    const _iconRotation = () => {
+      const cart = _billboardRef?.position?.getValue?.(Cesium.JulianDate.now());
+      if (!cart) return 0;
+      const ahead = Cesium.Cartesian3.add(cart,
+        Cesium.Cartesian3.multiplyByScalar(_forwardVec(), 300, new Cesium.Cartesian3()),
+        new Cesium.Cartesian3());
+      const a = Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene, cart);
+      const b = Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene, ahead);
+      if (!a || !b) return 0;
+      // Window coordinates run y DOWNWARD. Cesium's rotation is counter
+      // clockwise in a y-up frame, and the image's up vector after a
+      // rotation t is (-sin t, cos t), so t = atan2(-dx, -dy).
+      const dx = b.x - a.x, dy = b.y - a.y;
+      if (!dx && !dy) return 0;
+      return Math.atan2(-dx, -dy);
+    };
+
     // Loitering-munition (Shahed class) gets a 3D GLB model that
     // swaps in when the camera is within ~500m. Billboard hides
     // reciprocally under that threshold so the reader sees the 3D
@@ -16320,8 +16362,16 @@ async function main() {
         // Rotation kept at 0 — direction is fully encoded in alignedAxis
         // (image_up aligns with the heading vector). Rotation would just
         // spin the image around image_up, producing roll not heading.
-        rotation: 0,
-        alignedAxis: new Cesium.CallbackProperty(() => _forwardVec(), false),
+        // Templates that ask for an accurate symbol drive `rotation`
+        // directly and leave alignedAxis at ZERO, because alignedAxis is
+        // drawn through the faulty shader above. Everything else keeps
+        // exactly the behaviour it has today.
+        rotation: TEMPLATES[event.templateKey]?.iconTracksFlightPath
+          ? new Cesium.CallbackProperty(() => _iconRotation(), false)
+          : 0,
+        alignedAxis: TEMPLATES[event.templateKey]?.iconTracksFlightPath
+          ? Cesium.Cartesian3.ZERO
+          : new Cesium.CallbackProperty(() => _forwardVec(), false),
         color: event.classification === 'hostile'
           ? new Cesium.CallbackProperty(() => {
               const pulse = 0.65 + 0.35 * Math.sin(performance.now() / 200);
