@@ -15845,6 +15845,29 @@ async function main() {
     // around a vertical axis doesn't change a vertical vector). Result
     // was the icon appearing vertical and non-directional.
     const stateHolder = { headingRad: 0 };
+    // ONE-SHOT TIMER for the airliner's landing animation, declared here
+    // because both the model spec and the clock enable below need it.
+    // Per track, so two airliners would not share one timer.
+    //
+    // Real seconds rather than monoNow(), because the animation advances
+    // on viewer.clock and that is the clock it has to be measured
+    // against. The consequence, accepted rather than hidden: the gear
+    // keeps extending if the simulation is paused mid-sequence.
+    let _animT0 = null;
+    let _clockWasAnimating = null;
+    const _A320_ANIM_SEC = 28.1667;   // measured from the GLB's samplers
+    const _airlinerAnimRunning = () => {
+      if (_animT0 === null) { _animT0 = performance.now(); return true; }
+      if ((performance.now() - _animT0) / 1000 < _A320_ANIM_SEC) return true;
+      // Sequence finished. Hand the clock back to whoever had it, so one
+      // landing does not leave the sun running for the rest of the
+      // session. In day mode nothing else would ever set it back.
+      if (_clockWasAnimating !== null) {
+        viewer.clock.shouldAnimate = _clockWasAnimating;
+        _clockWasAnimating = null;
+      }
+      return false;
+    };
     let _billboardRef;
     // Compute the horizontal forward direction at the drone's current
     // ECEF position. Returns a unit vector in ECEF pointing in the
@@ -16277,16 +16300,6 @@ async function main() {
     };
     if (_shouldSwapModel) {
       const _qT = window.__isr_quad_tuning || {};
-      // One-shot timer for the landing animation above. Per track, so
-      // two airliners would not share a clock. Real seconds rather than
-      // monoNow(), because the animation advances on viewer.clock and
-      // that is the clock it has to be measured against.
-      let _animT0 = null;
-      const _A320_ANIM_SEC = 28.1667;   // measured from the GLB sampler
-      const _airlinerAnimRunning = () => {
-        if (_animT0 === null) { _animT0 = performance.now(); return true; }
-        return (performance.now() - _animT0) / 1000 < _A320_ANIM_SEC;
-      };
       _droneEntitySpec.model = {
         uri: _modelUri,
         // Shahed uses 1:1 world scale for the ~3m wingspan. The
@@ -16418,7 +16431,10 @@ async function main() {
       //
       // Set here rather than in an imagery branch, so day mode's own
       // settings are untouched and the clock only runs when something
-      // needs it.
+      // needs it. The previous value is remembered and restored the
+      // moment the sequence ends, which is what _airlinerAnimRunning
+      // does: borrowed for 28 seconds, not taken.
+      _clockWasAnimating = viewer.clock.shouldAnimate;
       viewer.clock.shouldAnimate = true;
     }
     const billboard = viewer.entities.add(_droneEntitySpec);
