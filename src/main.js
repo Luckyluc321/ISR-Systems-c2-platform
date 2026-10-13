@@ -15984,7 +15984,7 @@ async function main() {
           //
           // Rebuild with scripts/optimise_glb_textures.py. The source
           // file stays in the tree, so reverting is this one line.
-          : (isAirliner ? '/aircraft/a320_opt.glb' : null)));
+          : (isAirliner ? '/aircraft/a320_hq.glb' : null)));
     const _shouldSwapModel = isLoiterMun || isQuadcopter || isHostileHeli || isAirliner;
 
     // Flight rig — closure-captured per entity so each Shahed has
@@ -16358,8 +16358,27 @@ async function main() {
         // the right instant by construction: ModelVisualizer only reads
         // this property inside `if (model.ready)`, which is the same
         // frame it calls addAll(). A 97 MB load cannot desynchronise it.
-        ...(isAirliner ? { runAnimations: new Cesium.CallbackProperty(
-          () => _airlinerAnimRunning(), false) } : {}),
+        //
+        // OPT-IN, because this is what made the map crawl. Yesterday's
+        // model was a BAKED STATIC MESH: 3 nodes, no skin, no animation.
+        // This one is 190 nodes with a 142-joint skin and 248 animation
+        // channels evaluated every frame, and the clock has to run for it,
+        // which also puts the sun in motion under enableLighting and
+        // dynamicAtmosphereLightingFromSun. Textures were identical
+        // between the two models at 1,431 MB, so they were never the
+        // regression however bad that number is.
+        //
+        // Off by default, so the platform stays fast:
+        //   window.__isr_airliner_tuning = { animate: true }
+        // then launch the scenario. The model's REST pose is already the
+        // landed configuration (gear down, flaps out), measured: only 5
+        // of 248 channels differ from the final frame, all of them
+        // spinning parts. So with the animation off the aircraft still
+        // looks correct, it simply does not move its surfaces.
+        ...((isAirliner && (window.__isr_airliner_tuning || {}).animate)
+          ? { runAnimations: new Cesium.CallbackProperty(
+              () => _airlinerAnimRunning(), false) }
+          : {}),
         // NO BAKED POSE. Applying the animation's node transforms through
         // nodeTransformations tore the aircraft to pieces: wings, flaps
         // and gear scattered around the fuselage, and the map dropped to
@@ -16457,8 +16476,10 @@ async function main() {
       // needs it. The previous value is remembered and restored the
       // moment the sequence ends, which is what _airlinerAnimRunning
       // does: borrowed for 28 seconds, not taken.
-      _clockWasAnimating = viewer.clock.shouldAnimate;
-      viewer.clock.shouldAnimate = true;
+      if ((window.__isr_airliner_tuning || {}).animate) {
+        _clockWasAnimating = viewer.clock.shouldAnimate;
+        viewer.clock.shouldAnimate = true;
+      }
     }
     const billboard = viewer.entities.add(_droneEntitySpec);
     _billboardRef = billboard;

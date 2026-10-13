@@ -3,11 +3,26 @@ import json, struct, sys, io
 from PIL import Image
 
 SRC = sys.argv[1]; DST = sys.argv[2]
-# Target edge per map role. Base colour carries the livery and is the only
-# one that needs resolution at this range; occlusion and specular are
-# low-frequency and were costing 89 MB of GPU each at 4096.
-TARGET = {'base': 2048, 'normal': 1024, 'occlusion': 512, 'specular': 512,
-          'metallicRoughness': 512, 'emissive': 512, 'other': 1024}
+PRESET = sys.argv[3] if len(sys.argv) > 3 else 'lite'
+
+# Target edge per map role, per preset.
+#
+# 'lite' is the everyday model: base colour halved, the rest cut hard.
+# 123 MB of GPU memory, which is normal for this scene.
+#
+# 'hq' is for filming. The base colour carries the livery and is left at
+# whatever the artist shipped, because that is the one map a close-up
+# actually resolves. The other three are cut: occlusion and specular are
+# low-frequency lighting data that cost 89 MB each at 4096 and contribute
+# nothing a camera can see, and a normal map at 2048 is already finer
+# than the geometry under it.
+PRESETS = {
+  'lite': {'base': 2048, 'normal': 1024, 'occlusion': 512, 'specular': 512,
+           'metallicRoughness': 512, 'emissive': 512, 'other': 1024},
+  'hq':   {'base': 99999, 'normal': 2048, 'occlusion': 512, 'specular': 512,
+           'metallicRoughness': 512, 'emissive': 1024, 'other': 1024},
+}
+TARGET = PRESETS[PRESET]
 
 raw = open(SRC,'rb').read()
 jlen = struct.unpack('<I', raw[12:16])[0]
@@ -48,6 +63,15 @@ for i, im in enumerate(gltf.get('images', [])):
         img = img.resize((max(1,int(w*sc)), max(1,int(h*sc))), Image.LANCZOS)
     nw, nh = img.size
     gpu_after += nw*nh*4*1.333
+    # UNTOUCHED WHERE THE DIMENSIONS DID NOT CHANGE. GPU memory depends
+    # only on pixel dimensions, never on the file encoding, so
+    # re-encoding a map we are keeping at full size buys nothing and can
+    # only cost quality. The original bytes go straight through.
+    if (nw, nh) == (w, h):
+        new_img[i] = data
+        print(f"  image {i:2d} {r:17s} {w}x{h} unchanged, original bytes kept "
+              f"({len(data)/1e6:.1f} MB {im.get('mimeType','?').split('/')[-1]})")
+        continue
     # JPEG where there is no meaningful alpha: shrinks the FILE too, which
     # is what the first-load stall is. Normal maps stay PNG, and so does
     # anything actually using its alpha channel.
@@ -57,7 +81,8 @@ for i, im in enumerate(gltf.get('images', [])):
         img.save(buf, format='PNG', compress_level=9)
         mime = 'image/png'
     else:
-        img.convert('RGB').save(buf, format='JPEG', quality=90, optimize=True)
+        q = 96 if (PRESET == 'hq' and r == 'base') else 90
+        img.convert('RGB').save(buf, format='JPEG', quality=q, optimize=True)
         mime = 'image/jpeg'
     new_img[i] = buf.getvalue()
     im['mimeType'] = mime
