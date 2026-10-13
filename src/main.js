@@ -17501,10 +17501,21 @@ async function main() {
             state._terrOff = state._terrOff == null ? _g
               : state._terrOff + (_g - state._terrOff) * 0.08;
           }
-          // groundOffsetM trims the wheels onto the surface, live:
-          //   window.__isr_airliner_tuning = { groundOffsetM: 0.4 }
+          // GROUND OFFSET, trimmed by eye and then written down.
+          //
+          // The model's wheels sit 0.087 m below its origin, so in theory
+          // the origin belongs 9 cm above the sampled terrain. In
+          // practice it needed 2 m, which says the visible runway surface
+          // sits about that far above the terrain this samples: the
+          // paved surface is built up over the bare height model, and
+          // globe.getHeight() returns the latter.
+          //
+          // Template first, so it is data rather than a console command,
+          // with the live knob still overriding for the next one:
+          //   window.__isr_airliner_tuning = { groundOffsetM: 2 }
           state._absAlt = p.alt + (state._terrOff || 0)
-            + ((window.__isr_airliner_tuning || {}).groundOffsetM ?? 0);
+            + ((window.__isr_airliner_tuning || {}).groundOffsetM
+               ?? TEMPLATES[event.templateKey]?.groundOffsetM ?? 0);
         } else {
           state._absAlt = p.alt;
         }

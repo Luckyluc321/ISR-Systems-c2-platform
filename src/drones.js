@@ -110,6 +110,12 @@ export const TEMPLATES = {
     // other template is authored against that same convention and looks
     // right on screen, so the correction is opt-in rather than global.
     terrainRelativeAlt: true,
+    // Metres to lift the aircraft above the sampled terrain so the wheels
+    // sit ON the runway. Dialled in on screen, not computed: the model's
+    // wheels are only 0.087 m below its origin, so this 2 m is the gap
+    // between the bare height model that globe.getHeight() reads and the
+    // built-up paved surface that is actually drawn.
+    groundOffsetM: 2,
     // NO ICON BEARING TRIM. The shared default is -2 degrees, tuned so a
     // canvas icon's drawn apex lines up with its course. The 3D rig reads
     // the same heading field, so on an airliner that trim is the nose
