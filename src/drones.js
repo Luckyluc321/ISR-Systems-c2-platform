@@ -119,6 +119,9 @@ export const TEMPLATES = {
     // Gear retracts in flight and extends on the approach. Off for every
     // other template, whose models have no gear worth driving.
     gearRetracts: true,
+    // Tyre smoke when the wheels touch. The go-around never touches
+    // down, so it deliberately does not carry this.
+    touchdownSmoke: true,
     // NO ICON BEARING TRIM. The shared default is -2 degrees, tuned so a
     // canvas icon's drawn apex lines up with its course. The 3D rig reads
     // the same heading field, so on an airliner that trim is the nose

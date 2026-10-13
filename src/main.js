@@ -797,6 +797,7 @@ import { A320_POSES } from './a320_poses.js';
 import { createWingVortices } from './airliner_vortices.js';
 import { createGearDriver } from './airliner_surfaces.js';
 import { APPROACH_WOBBLE } from './a320_wobble.js';
+import { createTouchdownSmoke } from './touchdown_smoke.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -17259,6 +17260,9 @@ async function main() {
   // declares wingVortices gets two condensation trails off its tips.
   const _wingVortices = createWingVortices(viewer, Cesium);
 
+  // Tyre smoke. One instance; it keys its puffs by birth time.
+  const _touchdownSmoke = createTouchdownSmoke(viewer, Cesium, { monoNow });
+
   function removeDroneEntities(eventId) {
     const state = droneState.get(eventId);
     if (!state) return;
@@ -17723,6 +17727,16 @@ async function main() {
             && ((window.__isr_airliner_tuning || {}).gear ?? true)) {
           state._gear.update(state.billboard, p.alt);
         }
+        // TYRE SMOKE at the moment the wheels touch. Fired once, from
+        // the aircraft's own position and heading, and then left on the
+        // runway: the aircraft rolls away from it, which is what makes
+        // it read as a tyre mark rather than an exhaust trail.
+        if (TEMPLATES[event.templateKey]?.touchdownSmoke && !state._smokeFired
+            && typeof p.alt === 'number' && p.alt <= 0.3 && state._cartNow) {
+          state._smokeFired = true;
+          _touchdownSmoke.fire(state._cartNow, -(state.stateHolder?.headingRad ?? 0));
+        }
+        _touchdownSmoke.sweep();
         // COMPUTED ONCE AND REUSED. The drop line and the trail used to
         // rebuild this from p.alt independently, which is how the trail
         // ended up drawn on the ground while the aircraft flew 40 m above
