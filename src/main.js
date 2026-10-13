@@ -16382,7 +16382,7 @@ async function main() {
         // of 248 channels differ from the final frame, all of them
         // spinning parts. So with the animation off the aircraft still
         // looks correct, it simply does not move its surfaces.
-        ...((isAirliner && ((window.__isr_airliner_tuning || {}).animate ?? true))
+        ...((isAirliner && ((window.__isr_airliner_tuning || {}).animate ?? false))
           ? { runAnimations: new Cesium.CallbackProperty(
               () => _airlinerAnimRunning(), false) }
           : {}),
@@ -16483,7 +16483,7 @@ async function main() {
       // needs it. The previous value is remembered and restored the
       // moment the sequence ends, which is what _airlinerAnimRunning
       // does: borrowed for 28 seconds, not taken.
-      if ((window.__isr_airliner_tuning || {}).animate ?? true) {
+      if ((window.__isr_airliner_tuning || {}).animate ?? false) {
         _clockWasAnimating = viewer.clock.shouldAnimate;
         viewer.clock.shouldAnimate = true;
       }
@@ -16865,6 +16865,53 @@ async function main() {
       }
     }
     return arr;
+  }
+
+  // FRAME COST CENSUS. I have now guessed at a performance problem three
+  // times and been wrong at least twice, so this measures instead.
+  //
+  //   await window.__isr_perf()
+  //
+  // Reports median and 95th-percentile frame time, the total entity count
+  // and a breakdown by id prefix. The breakdown is the point: in-memory
+  // state is NOT cleared by __isr_clearAllSimData (it says so, and says to
+  // reload), so re-running a scenario without reloading accumulates
+  // tracks, trails, drop lines and rings. That shows up here as a prefix
+  // with a count far above 1 per live event.
+  if (typeof window !== 'undefined') {
+    window.__isr_perf = (frames = 90) => new Promise((resolve) => {
+      const census = {};
+      for (const e of viewer.entities.values) {
+        const id = String(e.id || 'unnamed');
+        // Strip trailing ids so `drone-trail-<uuid>` buckets together.
+        const key = id.replace(/[0-9a-f]{8,}.*$/i, '').replace(/[-_]?\d+$/, '')
+          .replace(/[-_]+$/, '') || id;
+        census[key] = (census[key] || 0) + 1;
+      }
+      const times = [];
+      let last = performance.now();
+      const stop = viewer.scene.postRender.addEventListener(() => {
+        const now = performance.now();
+        times.push(now - last);
+        last = now;
+        if (times.length < frames) return;
+        stop();
+        const sorted = [...times].sort((a, b) => a - b);
+        const med = sorted[Math.floor(sorted.length / 2)];
+        const p95 = sorted[Math.floor(sorted.length * 0.95)];
+        const rows = Object.entries(census).sort((a, b) => b[1] - a[1])
+          .slice(0, 25).map(([prefix, count]) => ({ prefix, count }));
+        console.log(`[perf] median ${med.toFixed(1)} ms = ${(1000 / med).toFixed(1)} fps`
+          + `   p95 ${p95.toFixed(1)} ms   worst ${sorted[sorted.length - 1].toFixed(0)} ms`);
+        console.log(`[perf] entities ${viewer.entities.values.length}`
+          + `   primitives ${viewer.scene.primitives.length}`
+          + `   clock.shouldAnimate ${viewer.clock.shouldAnimate}`
+          + `   globe tiles ${viewer.scene.globe._surface?._tilesToRender?.length ?? '?'}`);
+        console.table(rows);
+        resolve({ medianMs: +med.toFixed(1), fps: +(1000 / med).toFixed(1),
+          p95Ms: +p95.toFixed(1), entities: viewer.entities.values.length, census });
+      });
+    });
   }
 
   // ICON HEADING DIAGNOSTIC. The maths says the symbol should sit within
