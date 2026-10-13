@@ -202,7 +202,13 @@ export function createGearDriver(Cesium, viewer, {
       }
       const f = t0 === null ? 0 : Math.min(1, (monoNow() - t0) / extendMs);
       // Spoilers fire on touchdown, not on height.
-      if (td === null && typeof aglM === 'number' && aglM <= 0.3) td = monoNow();
+      if (td === null && typeof aglM === 'number' && aglM <= 0.3) {
+        td = monoNow();
+        // One line, once, so a landing run says plainly whether the
+        // spoilers fired. Everything about this path checks out on
+        // paper, which is exactly when a log beats another theory.
+        console.log('[surfaces] touchdown, ground spoilers deploying');
+      }
       const bf = td === null ? 0 : Math.min(1, (monoNow() - td) / BRAKE_DEPLOY_MS);
       // Write only on a real change, and keep retrying until the model
       // finishes loading, otherwise it renders in its rest pose, which
