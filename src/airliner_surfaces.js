@@ -80,6 +80,12 @@ const BRAKE = /AirBrake/i;
 // event, not an altitude ramp. 73.3 degrees, the artist's own figure,
 // measured as the rotation relative to each panel's rest pose.
 const BRAKE_DEPLOY_MS = 1200;
+// And stowed again once the aircraft is down to taxi speed, which is
+// what the crew does on the roll: the panels are no longer doing
+// anything useful below about 15 kt, and an aircraft taxiing to its
+// stand with its spoilers still up is not a thing you see.
+const BRAKE_STOW_BELOW_MS = 8;     // metres per second
+const BRAKE_STOW_MS = 2500;        // they retract slower than they deploy
 
 const DOOR_OPEN_BY = 0.18;
 const DOOR_SHUT_FROM = 0.82;
@@ -121,6 +127,9 @@ export function createGearDriver(Cesium, viewer, {
   let model = null;
   let t0 = null;          // when gear was selected down
   let td = null;          // when the wheels touched
+  let ts = null;          // when the spoilers began to stow
+  let lastPos = null;     // for ground speed, measured not assumed
+  let lastPosMs = 0;
   let applied = null;     // last fraction written, so we only write on change
   const scratch = new Cesium.Matrix4();
 
@@ -209,7 +218,24 @@ export function createGearDriver(Cesium, viewer, {
         // paper, which is exactly when a log beats another theory.
         console.log('[surfaces] touchdown, ground spoilers deploying');
       }
-      const bf = td === null ? 0 : Math.min(1, (monoNow() - td) / BRAKE_DEPLOY_MS);
+      // Ground speed, measured from the entity's own movement rather
+      // than assumed from the waypoint table, so a change to the braking
+      // profile cannot leave this stale.
+      const now = monoNow();
+      if (td !== null && now - lastPosMs > 250) {
+        const c = entity?.position?.getValue?.(Cesium.JulianDate.now());
+        if (c) {
+          if (lastPos) {
+            const v = Cesium.Cartesian3.distance(c, lastPos)
+              / ((now - lastPosMs) / 1000);
+            if (ts === null && v > 0 && v < BRAKE_STOW_BELOW_MS) ts = now;
+          }
+          lastPos = Cesium.Cartesian3.clone(c, lastPos || new Cesium.Cartesian3());
+          lastPosMs = now;
+        }
+      }
+      let bf = td === null ? 0 : Math.min(1, (now - td) / BRAKE_DEPLOY_MS);
+      if (ts !== null) bf *= Math.max(0, 1 - (now - ts) / BRAKE_STOW_MS);
       // Write only on a real change, and keep retrying until the model
       // finishes loading, otherwise it renders in its rest pose, which
       // for this asset is gear DOWN with the bay doors hanging open.
