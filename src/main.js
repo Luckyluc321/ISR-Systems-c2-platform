@@ -17043,6 +17043,73 @@ async function main() {
     });
   }
 
+  // CLEAN WORLD, for the "without ISR" pass of the promo film.
+  //
+  // Both clips must be cut from the SAME running simulation. Two
+  // deployments drift: different spawn times, different drone positions,
+  // different light, and the clips will not align. So this hides the ISR
+  // layer and nothing else.
+  //
+  // VISIBILITY ONLY. Nothing here touches the detection lifecycle, the
+  // sensor records, the 1 km radius or any event state. The platform
+  // keeps running underneath exactly as it does with the overlay up,
+  // which is precisely what makes the two passes identical.
+  //
+  //   window.__isr_cleanWorld(true)    hide the ISR layer
+  //   window.__isr_cleanWorld(false)   put it back
+  //
+  // Cesium entities are matched by id, so anything added later with the
+  // same naming is covered without changing this.
+  if (typeof window !== 'undefined') {
+    const _CLEAN_PATTERNS = [
+      /^sensor-/,              // sensor dots
+      /^sensor-cov-/,          // coverage rings
+      /-site-boundary$/,       // the site outline
+      /-perimeter(-outline)?-\d+$/,
+      /-subline-\d+$/,
+      /^site-rollup-/,         // the rolled-up site marker
+    ];
+    // DOM panels are the operator's console, not the world.
+    const _CLEAN_DOM = ['#detail-panel', '#detail-panel-toggle'];
+    let _cleanOn = false;
+    window.__isr_cleanWorld = (on = true) => {
+      _cleanOn = !!on;
+      let hidden = 0;
+      for (const e of viewer.entities.values) {
+        const id = String(e.id || '');
+        if (!_CLEAN_PATTERNS.some(rx => rx.test(id))) continue;
+        // Remember what it was, so putting it back cannot turn on
+        // something that was legitimately hidden before.
+        if (_cleanOn) {
+          if (e._isrPrevShow === undefined) e._isrPrevShow = e.show;
+          e.show = false;
+        } else if (e._isrPrevShow !== undefined) {
+          e.show = e._isrPrevShow;
+          delete e._isrPrevShow;
+        }
+        hidden++;
+      }
+      for (const sel of _CLEAN_DOM) {
+        const el = document.querySelector(sel);
+        if (el) el.style.visibility = _cleanOn ? 'hidden' : '';
+      }
+      console.log(`[cleanWorld] ${_cleanOn ? 'ISR layer hidden' : 'ISR layer restored'}`
+        + ` - ${hidden} entities, ${_CLEAN_DOM.length} panels.`
+        + ' The simulation underneath is unchanged.');
+      return hidden;
+    };
+    // New entities arrive as a scenario runs, so keep them in step.
+    viewer.entities.collectionChanged.addEventListener((_c, added) => {
+      if (!_cleanOn) return;
+      for (const e of added) {
+        const id = String(e.id || '');
+        if (!_CLEAN_PATTERNS.some(rx => rx.test(id))) continue;
+        if (e._isrPrevShow === undefined) e._isrPrevShow = e.show;
+        e.show = false;
+      }
+    });
+  }
+
   // ICON HEADING DIAGNOSTIC. The maths says the symbol should sit within
   // 2 degrees of the true ground track, and it measures 1.93 with the
   // default trim and 0.15 without. A report of 30 to 50 degrees does not
