@@ -16275,28 +16275,10 @@ async function main() {
         }
       }
 
-      // Roll — target proportional to yaw rate.
+      // Roll is computed BELOW, after the heading has been smoothed.
+      // See the note there: deriving it here, from the raw target, is
+      // what made the aircraft rock through a turn.
       let targetRoll = 0;
-      if (_prevHeadingRad !== null) {
-        let dh = targetHeading - _prevHeadingRad;
-        while (dh >  Math.PI) dh -= 2 * Math.PI;
-        while (dh < -Math.PI) dh += 2 * Math.PI;
-        const yawRate = dh / dt;
-        // COORDINATED TURN, for an airframe that actually banks to turn.
-        // The physics is tan(bank) = v * omega / g, so the bank an
-        // aircraft holds depends on how fast it is going, not on a fixed
-        // multiplier. A constant bankFactor is fine for a drone that
-        // flies one speed; on an airliner that approaches at 70 m/s and
-        // flies its missed approach at 105 it is wrong at both ends. The
-        // go-around's 180 degree turn wants 25 degrees of bank and a
-        // fixed factor gives about 3.
-        const _spd = _prevPosCart ? (typeof _lastHoriz === 'number' ? _lastHoriz : 0) : 0;
-        targetRoll = (T.coordinatedBank && _spd > 5)
-          ? Math.atan((_spd * yawRate) / 9.81)
-          : yawRate * bankFactor;
-        if (targetRoll >  bankClamp) targetRoll =  bankClamp;
-        if (targetRoll < -bankClamp) targetRoll = -bankClamp;
-      }
 
       // Angular lerp for heading handles the ±π wraparound so the nose
       // takes the shortest arc to the target, not the long way round.
@@ -16307,10 +16289,34 @@ async function main() {
         while (dh < -Math.PI) dh += 2 * Math.PI;
         _smoothedHeading += dh * headingSmooth;
       }
+      // BANK FROM THE SMOOTHED HEADING, NOT THE RAW TARGET.
+      //
+      // stateHolder.headingRad is written by the TICK, and this runs
+      // every RENDER FRAME. Measuring the turn rate as a frame-to-frame
+      // delta of the raw target therefore reads zero on every frame
+      // between two ticks and a spike on the frame after one. The bank
+      // then decayed toward level between ticks and snapped back on
+      // each, which is the rocking Lucas saw through the go-around turn:
+      // banked, easing off, banked again, roughly twice a second.
+      //
+      // _smoothedHeading moves every frame by construction, so its rate
+      // is continuous and so is the bank derived from it.
+      if (_prevHeadingRad !== null) {
+        let dh = _smoothedHeading - _prevHeadingRad;
+        while (dh >  Math.PI) dh -= 2 * Math.PI;
+        while (dh < -Math.PI) dh += 2 * Math.PI;
+        const yawRate = dh / dt;
+        targetRoll = (T.coordinatedBank && _lastHoriz > 5)
+          ? Math.atan((_lastHoriz * yawRate) / 9.81)
+          : yawRate * bankFactor;
+        if (targetRoll >  bankClamp) targetRoll =  bankClamp;
+        if (targetRoll < -bankClamp) targetRoll = -bankClamp;
+      }
+      _prevHeadingRad = _smoothedHeading;
+
       _smoothedPitch += (targetPitch - _smoothedPitch) * pitchSmooth;
       _smoothedRoll  += (targetRoll  - _smoothedRoll)  * rollSmooth;
 
-      _prevHeadingRad = targetHeading;
       _prevPosCart = Cesium.Cartesian3.clone(cart);
       _prevTime = now;
 
