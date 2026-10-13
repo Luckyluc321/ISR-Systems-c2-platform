@@ -16060,7 +16060,14 @@ async function main() {
           //
           // Rebuild with scripts/optimise_glb_textures.py. The source
           // file stays in the tree, so reverting is this one line.
-          : (isAirliner ? '/aircraft/a320_rigid.glb' : null)));
+          // KNOWN GOOD BY DEFAULT. a320_rigid.glb is the extracted
+          // version, structurally valid but not yet confirmed on screen,
+          // and it made the aircraft disappear. Opt in to test it:
+          //   window.__isr_airliner_tuning = { rigid: true }
+          // set BEFORE launching, since the model spec is built when the
+          // track is created.
+          : (isAirliner ? ((window.__isr_airliner_tuning || {}).rigid
+              ? '/aircraft/a320_rigid.glb' : '/aircraft/a320_hq.glb') : null)));
     const _shouldSwapModel = isLoiterMun || isQuadcopter || isHostileHeli || isAirliner;
 
     // Flight rig — closure-captured per entity so each Shahed has
@@ -16495,7 +16502,10 @@ async function main() {
         //
         // Skipped entirely while the model's own animation runs, so the
         // two can never fight over the same parts.
-        ...((isAirliner && !((window.__isr_airliner_tuning || {}).animate ?? false))
+        // Only meaningful on the rigid model: these node names exist
+        // nowhere else, so they are skipped entirely otherwise.
+        ...((isAirliner && (window.__isr_airliner_tuning || {}).rigid
+             && !((window.__isr_airliner_tuning || {}).animate ?? false))
           ? { nodeTransformations: rigidTransforms(Cesium, {
               gear: () => ((window.__isr_airliner_tuning || {}).gear ?? true)
                 ? _gear.fraction() : 1,
