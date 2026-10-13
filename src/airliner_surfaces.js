@@ -229,11 +229,21 @@ export function createGearDriver(Cesium, viewer, {
   const spin = () => {
     if (!model) return;
     if (!fanNodes) {
-      fanNodes = [];
+      // getNode THROWS until the glTF has loaded, and the Model
+      // primitive exists well before that. The first version caught the
+      // throw and returned leaving fanNodes as an empty ARRAY, which is
+      // truthy, so it never rebuilt and the fans never turned. Same trap
+      // the gear fell into: finding the model is not the same as it
+      // being ready.
+      const found = [];
       for (const n of FAN_NODES) {
-        try { const nd = model.getNode(n); if (nd) fanNodes.push(nd); } catch (_) { return; }
+        let nd = null;
+        try { nd = model.getNode(n); } catch (_) { return; }   // retry next frame
+        if (nd) found.push(nd);
       }
-      if (!fanNodes.length) { fanNodes = null; return; }
+      if (!found.length) return;                                // retry next frame
+      fanNodes = found;
+      console.log(`[surfaces] engine fans engaged, ${found.length} nodes`);
     }
     const a = ((monoNow() / 1000) * FAN_REV_S * Math.PI * 2) % (Math.PI * 2);
     Cesium.Quaternion.fromAxisAngle(fanAxis, a, fanQ);
