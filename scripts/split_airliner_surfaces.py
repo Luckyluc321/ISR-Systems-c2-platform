@@ -187,11 +187,18 @@ for mi, mesh in enumerate(gltf['meshes']):
             part_nodes.setdefault(names[joints[ji]], []).append(nname)
             moved_tris += len(tris)
 
-        # rewrite the skinned primitive without the extracted triangles
+        # rewrite the skinned primitive without the extracted triangles.
+        # If NOTHING is left, mark it rather than writing a zero-count
+        # accessor: that and a zero-length bufferView are both illegal,
+        # and Cesium rejects the entire file over them.
         if len(keep) != len(idx):
-            I2 = bytearray()
-            for v in keep: I2 += struct.pack('<I', v)
-            prim['indices'] = add_acc(bytes(I2), 5125, 'SCALAR', len(keep), target=34963)
+            if keep:
+                I2 = bytearray()
+                for v in keep: I2 += struct.pack('<I', v)
+                prim['indices'] = add_acc(bytes(I2), 5125, 'SCALAR', len(keep),
+                                          target=34963)
+            else:
+                prim['_drop'] = True
 
 # ---- deltas: the joint's GLOBAL transform at DELTA_T, relative to bind.
 # Cesium does node.matrix = originalMatrix * yourTransform, and the
@@ -295,6 +302,49 @@ if MANIFEST:
     out.append("];")
     open(MANIFEST, 'w').write("\n".join(out) + "\n")
     print(f"manifest -> {MANIFEST} ({len(rows)} parts, {sum(len(r[1]) for r in rows)} nodes)")
+
+# ---- DROP ANYTHING LEFT EMPTY.
+# Eleven of these meshes are entirely gear, so after extraction their
+# primitive has no triangles left. A zero-count accessor and a zero-length
+# bufferView are both ILLEGAL in glTF, and Cesium rejects the whole file
+# rather than the one primitive: the aircraft simply does not render.
+# "Index count divides by three" does not catch it, because zero does.
+emptied = 0
+for mesh in gltf['meshes']:
+    kept = [p for p in mesh['primitives']
+            if not p.pop('_drop', False)
+            and gltf['accessors'][p['indices']]['count'] > 0]
+    emptied += len(mesh['primitives']) - len(kept)
+    mesh['primitives'] = kept
+# A mesh with no primitives is invalid too, so drop it and remap refs.
+keep_idx = [i for i, m in enumerate(gltf['meshes']) if m['primitives']]
+remap = {old: new for new, old in enumerate(keep_idx)}
+dropped = len(gltf['meshes']) - len(keep_idx)
+gltf['meshes'] = [gltf['meshes'][i] for i in keep_idx]
+for n in gltf['nodes']:
+    if 'mesh' in n:
+        if n['mesh'] in remap:
+            n['mesh'] = remap[n['mesh']]
+        else:
+            del n['mesh']        # its geometry all moved out
+print(f"emptied primitives removed: {emptied}; meshes dropped: {dropped}")
+
+# ---- self-check, so this class of fault cannot ship again
+problems = []
+for i, a in enumerate(gltf['accessors']):
+    if a['count'] == 0: problems.append(f"accessor {i} count 0")
+for i, b in enumerate(gltf['bufferViews']):
+    if b['byteLength'] == 0: problems.append(f"bufferView {i} length 0")
+for i, m in enumerate(gltf['meshes']):
+    if not m['primitives']: problems.append(f"mesh {i} has no primitives")
+for i, n in enumerate(gltf['nodes']):
+    if 'mesh' in n and n['mesh'] >= len(gltf['meshes']):
+        problems.append(f"node {i} mesh ref out of range")
+if problems:
+    print("REFUSING TO WRITE, invalid glTF:")
+    for p_ in problems[:20]: print("   ", p_)
+    sys.exit(1)
+print("self-check passed")
 
 gltf['scenes'][0]['nodes'].extend(new_nodes)
 gltf['buffers'][0]['byteLength'] = len(blob)
