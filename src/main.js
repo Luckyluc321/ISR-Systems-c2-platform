@@ -16131,6 +16131,7 @@ async function main() {
     //     wing down. Clamped and smoothed.
     let _touchdownMs = null;
     let _lastHoriz = 0;
+    let _yawRateFilt = 0;
     let _smoothedHeading = null;   // radians, compass bearing (CW from N)
     let _smoothedPitch = 0;        // radians, +up
     let _smoothedRoll = 0;         // radians, +right wing down
@@ -16190,8 +16191,15 @@ async function main() {
         // reads as the wings wallowing rather than the aircraft rolling
         // into it. Raised so the chain settles in well under a second
         // while still being far slower than a fighter.
-        rollSmoothing: 0.11,
-        headingSmoothing: 0.22,
+        rollSmoothing: 0.07,
+        headingSmoothing: 0.16,
+        // Filter the TURN RATE, not the roll. See _bankedOrientation.
+        yawRateSmoothing: 0.05,
+        // Maximum roll rate, degrees per second. A real airliner rolls
+        // at single digits in normal flight; nothing an airline would
+        // fly does 20. This is what guarantees it cannot snap however
+        // stepped the incoming heading is.
+        maxRollRateDegS: 6,
         // BOTH NEGATIVE, and this file already wrote down why. The
         // Shahed's note at the top of this section states the rule: a
         // nose on body -X needs heading +90, and "also reverses Cesium's
@@ -16241,6 +16249,8 @@ async function main() {
       const stripIconTrim  = T.stripIconTrim      ?? false;
       const flareFadeM     = T.flarePitchFadeM    ?? 0;
       const derotateMs     = T.derotateMs         ?? 3000;
+      const yawRateSmooth  = T.yawRateSmoothing   ?? 0;
+      const maxRollRate    = ((T.maxRollRateDegS  ?? 0) * Math.PI) / 180;
       const wobbleScale    = T.wobbleScale        ?? 0.55;
       const wobbleFromAglM = T.wobbleFromAglM     ?? 300;
       const headingSmooth  = T.headingSmoothing   ?? 0.18;
@@ -16313,17 +16323,35 @@ async function main() {
         let dh = _smoothedHeading - _prevHeadingRad;
         while (dh >  Math.PI) dh -= 2 * Math.PI;
         while (dh < -Math.PI) dh += 2 * Math.PI;
-        const yawRate = dh / dt;
+        // FILTER THE RATE, NOT THE RESULT. The heading arrives from the
+        // tick in steps, so dh/dt is spiky however it is measured.
+        // Smoothing the ROLL afterwards only trades a pop for a lag: fast
+        // and it snaps to every step, slow and the bank trails the turn
+        // by seconds. Smoothing the rate makes the input itself
+        // continuous, and then the roll can follow it closely.
+        const rawYaw = dh / dt;
+        _yawRateFilt = yawRateSmooth > 0
+          ? _yawRateFilt + (rawYaw - _yawRateFilt) * yawRateSmooth
+          : rawYaw;
         targetRoll = (T.coordinatedBank && _lastHoriz > 5)
-          ? Math.atan((_lastHoriz * yawRate) / 9.81)
-          : yawRate * bankFactor;
+          ? Math.atan((_lastHoriz * _yawRateFilt) / 9.81)
+          : _yawRateFilt * bankFactor;
         if (targetRoll >  bankClamp) targetRoll =  bankClamp;
         if (targetRoll < -bankClamp) targetRoll = -bankClamp;
       }
       _prevHeadingRad = _smoothedHeading;
 
       _smoothedPitch += (targetPitch - _smoothedPitch) * pitchSmooth;
-      _smoothedRoll  += (targetRoll  - _smoothedRoll)  * rollSmooth;
+      // ROLL RATE LIMIT. An airframe cannot change bank instantly, and
+      // this is the backstop that makes a visible snap impossible
+      // whatever the input does.
+      let _dRoll = (targetRoll - _smoothedRoll) * rollSmooth;
+      if (maxRollRate > 0) {
+        const cap = maxRollRate * dt;
+        if (_dRoll >  cap) _dRoll =  cap;
+        if (_dRoll < -cap) _dRoll = -cap;
+      }
+      _smoothedRoll += _dRoll;
 
       _prevPosCart = Cesium.Cartesian3.clone(cart);
       _prevTime = now;
