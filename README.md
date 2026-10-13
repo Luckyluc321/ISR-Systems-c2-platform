@@ -14,6 +14,7 @@ Command and Control platform for the ISR Systems drone-detection network. Sensor
 **Sensor + detection layer**
 - `src/nn_source.js` — pluggable `NnOutputSource` seam. Per-site adapters route to mock generator (sim) or WebSocket subscriber (live hardware). Batch contract: `{siteId, tickTs, sensors:[{sensorId, detections:[{lat, lon, alt, confidence, droneKey, modalityMix}]}]}`
 - Sensors declare `modalities: ['RF','Acoustic','Visual']` in `src/sites.js` and `src/sites_energinet.js`
+- `src/live_sensor.js` — first real sensor node. `__isr_liveSensor(lat, lon)` places the symbol, `__isr_liveDetect({ confidence })` opens a detection through the same batch fold the simulation uses; the `isr_sensor_nodes` feed in `sovereign_live_feeds.js` drives it from the inference bridge. See `docs/live-sensor-integration.md`
 
 **Agentic reasoning stack** (`src/agents/`)
 - **Agent A — site digest** (`agent_a_digest.js`): compresses partner-curated `site_context.js` into a brief under 300 words. Persistent LRU cache keyed on `(siteId, contextHash)` — cache hit = zero tokens.
@@ -65,6 +66,7 @@ npm run build     # emits static bundle to dist/
 src/
   main.js                        # Cesium bootstrap, event loop, dispatch logic, UI wiring
   nn_source.js                   # Sensor detection source abstraction (pluggable adapter)
+  live_sensor.js                 # First real sensor node: console entry points + bridge feed consumer
   preprocessing.js               # Deterministic signal extraction feeding Agent B
   mistral_client.js              # SSE streaming client + prompt-injection sanitiser
   agents/

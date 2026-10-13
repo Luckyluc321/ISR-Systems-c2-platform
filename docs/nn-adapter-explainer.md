@@ -85,6 +85,8 @@ Three concrete gains.
 
 `WebSocketNnOutputSource` exists as a class with the full contract (reconnect with backoff, site-scoped delivery, offline batch on disconnect, bearer-token auth). It is not connected to any real endpoint. The wiring happens when the first field node ships.
 
+The first field node is connected by a different, smaller route: `src/live_sensor.js` registers one HackRF node as a sensor and turns the inference bridge's per-frame classifier results into IF-1.4 batches, folded through the same `_applyDetectionBatchToEvent` the mock uses. The node side does not yet emit per-site batches, which is what `WebSocketNnOutputSource` expects. See `docs/live-sensor-integration.md`.
+
 Live Agent B narratives via Scaleway Mistral inference also not wired yet. Same pattern — a single named function is the seam. `event.narrativeCache` already drives every downstream renderer (PDF, closed panel, debrief). When we swap the deterministic fallback for a real Mistral call, everything downstream keeps working.
 
 ---

@@ -5,7 +5,8 @@
 // Companion to sovereign_layers.js (tile providers) and
 // sovereign_services.js (REST lookups). Where those two handle static tiles
 // and click-driven queries respectively, this module handles CONTINUOUS
-// streams: ship positions, NOTAM updates, live traffic incidents.
+// streams: ship positions, NOTAM updates, live traffic incidents, and
+// ISR's own sensor nodes (neural-network output via the inference bridge).
 //
 // Design principles (identical to the other two modules):
 //
@@ -46,6 +47,7 @@ export const FEED_CATEGORY = Object.freeze({
   MARITIME: 'maritime',   // AIS ships, VTS updates
   AVIATION: 'aviation',   // NOTAMs, live traffic
   ROAD: 'road',            // Vejdirektoratet incidents
+  SENSOR: 'sensor',        // ISR's own sensor nodes (neural-network output)
 });
 
 // ── Feed registry ──────────────────────────────────────────────────────
@@ -88,6 +90,29 @@ export const LIVE_FEEDS = [
       },
     },
     defaultProvider: 'websocket',
+    enabledByDefault: false,
+  },
+  {
+    id: 'isr_sensor_nodes',
+    category: FEED_CATEGORY.SENSOR,
+    provider: 'ISR sensor node via deployment/mqtt_ws_bridge.py (ISR-Labs repo)',
+    authority: 'ISR Systems',
+    name: 'ISR sensor nodes (live)',
+    description: 'Neural-network output from ISR\'s own field nodes. The Radxa publishes raw IQ over MQTT (isr/rf/samples); the inference subscriber on the laptop classifies each frame and publishes isr/rf/results; mqtt_ws_bridge.py rebroadcasts those as WebSocket JSON on /ws/detections. This feed is that WebSocket. Consumed by src/live_sensor.js, which opens detections on the registered live sensor.',
+    providers: {
+      bridge: {
+        type: 'isr-sensor-bridge',
+        description: 'deployment/mqtt_ws_bridge.py on the inference laptop. Local dev: ws://localhost:8000/ws/detections. In the room: ws://<laptop LAN ip>:8000/ws/detections, which can also be passed at runtime as __isr_live_feeds.start("isr_sensor_nodes", { url }).',
+        urlEnv: 'VITE_ISR_SENSOR_WS_URL',
+        // Message shapes (deployment/dashboard_protocol.py), forwarded unchanged:
+        //   { type: 'detection', label: 'DRONE'|'BACKGROUND', probability, node_id, frame_seq, capture_ts, infer_ms }
+        //   { type: 'heartbeat', node_id, label: 'ONLINE'|'DEGRADED'|'OFFLINE', ts, frames_sent, uptime_s }
+        //   { type: 'status', nodes: { [node_id]: { status, label, probability, ... } }, subscriber }
+        //   { type: 'spectrogram', ... }   (ignored by the C2)
+        // Plus two of this provider's own: { type: 'bridge-open', url } and { type: 'bridge-closed' }.
+      },
+    },
+    defaultProvider: 'bridge',
     enabledByDefault: false,
   },
 ];
@@ -288,10 +313,88 @@ class VejdirektoratetTrafficProvider extends BaseFeedProvider {
   }
 }
 
+// ── ISR sensor bridge WebSocket Provider ───────────────────────────────
+// Consumes deployment/mqtt_ws_bridge.py (ISR-Labs repo): the laptop-side
+// process that turns the inference subscriber's MQTT results into
+// WebSocket JSON. Forwards every message unchanged and adds its own
+// bridge-open / bridge-closed markers so the consumer can show a node as
+// degraded when the link, rather than the node, is gone.
+//
+// start() accepts a runtime URL ({ url } or a string) so the demo can
+// point at whatever address the laptop got from the room's router without
+// a rebuild. The env URL is the default.
+class IsrSensorBridgeProvider extends BaseFeedProvider {
+  constructor(config) {
+    super(config);
+    this._ws = null;
+    this._retryMs = 2000;
+    this._reconnectTimer = null;
+    this._url = config.url;
+    this._activeUrl = null;
+  }
+  get url() { return this._activeUrl || this._url || null; }
+  start(opts) {
+    const override = typeof opts === 'string' ? opts : opts?.url;
+    const url = override || this._url;
+    if (this._active && url === this._activeUrl) return;
+    if (this._active) this.stop();
+    if (!url) {
+      console.warn('[live_feed:isr_sensor_nodes] no WebSocket URL. Set VITE_ISR_SENSOR_WS_URL in .env.local, or call __isr_live_feeds.start("isr_sensor_nodes", { url: "ws://<laptop>:8000/ws/detections" }).');
+      return;
+    }
+    super.start();
+    this._activeUrl = url;
+    this._retryMs = 2000;
+    this._connect();
+  }
+  _connect() {
+    if (!this._active) return;
+    try {
+      this._ws = new WebSocket(this._activeUrl);
+      this._ws.onopen = () => {
+        console.log(`[live_feed:isr_sensor_nodes] WS connected to ${this._activeUrl}.`);
+        this._retryMs = 2000;
+        this._emit({ type: 'bridge-open', url: this._activeUrl });
+      };
+      this._ws.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          this._emit(payload);
+        } catch (err) { console.warn('[live_feed:isr_sensor_nodes] bad message:', err); }
+      };
+      this._ws.onclose = () => {
+        this._emit({ type: 'bridge-closed' });
+        if (!this._active) return;
+        console.log(`[live_feed:isr_sensor_nodes] WS closed. Reconnecting in ${this._retryMs}ms.`);
+        this._scheduleReconnect();
+      };
+      this._ws.onerror = (err) => {
+        console.warn('[live_feed:isr_sensor_nodes] WS error:', err);
+      };
+    } catch (err) {
+      console.warn('[live_feed:isr_sensor_nodes] connect failed:', err);
+      this._scheduleReconnect();
+    }
+  }
+  _scheduleReconnect() {
+    if (this._reconnectTimer) clearTimeout(this._reconnectTimer);
+    this._reconnectTimer = setTimeout(() => this._connect(), this._retryMs);
+    this._retryMs = Math.min(this._retryMs * 2, 30000);
+  }
+  stop() {
+    if (!this._active) return;
+    super.stop();
+    if (this._reconnectTimer) { clearTimeout(this._reconnectTimer); this._reconnectTimer = null; }
+    if (this._ws) { try { this._ws.close(); } catch (_) {} this._ws = null; }
+    this._activeUrl = null;
+  }
+}
+
 const _PROVIDER_CLASSES = {
   mock: AisMockProvider,
   websocket: AisWebSocketProvider,
   'vd-traffic-websocket': VejdirektoratetTrafficProvider,
+  'isr-sensor-bridge': IsrSensorBridgeProvider,
 };
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -354,7 +457,7 @@ export function initLiveFeeds(tokens = {}, envUrls = {}) {
         return rec.provider.onUpdate(cb);
       },
     };
-    console.log('[live_feeds] window.__isr_live_feeds ready. Try: __isr_live_feeds.list() / .start("ais_ships") / .subscribe("ais_ships", console.log)');
+    console.log('[live_feeds] window.__isr_live_feeds ready. Try: __isr_live_feeds.list() / .start("ais_ships") / .subscribe("ais_ships", console.log) / .start("isr_sensor_nodes", { url: "ws://<laptop>:8000/ws/detections" })');
   }
   return _instance;
 }

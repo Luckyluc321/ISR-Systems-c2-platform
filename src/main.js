@@ -712,6 +712,8 @@ import { getRenderProfile } from './render_profile.js';
 import { initSovereignLayers } from './sovereign_layers.js';
 import { initSovereignServices, DK_SERVICES, lookupBBR, reverseGeocodeDAR, findNearestWeatherStations } from './sovereign_services.js';
 import { initLiveFeeds } from './sovereign_live_feeds.js';
+// First real sensor node. Console entry points + the bridge feed consumer.
+import { createLiveSensorRuntime } from './live_sensor.js';
 import { activateManhattanDemo, deactivateManhattanDemo, setManhattanChase } from './manhattan_demo.js';
 // Cooperative-traffic adapters self-register on import. Order matters
 // only in that mock must be available for eval + sim scenarios;
@@ -1722,11 +1724,13 @@ async function main() {
   // for AIS today).
   const _aisWsUrl = (() => { try { return import.meta.env?.VITE_AIS_WS_URL || ''; } catch (_) { return ''; } })();
   const _vdTrafficWsUrl = (() => { try { return import.meta.env?.VITE_VD_TRAFFIC_WS_URL || ''; } catch (_) { return ''; } })();
+  const _isrSensorWsUrl = (() => { try { return import.meta.env?.VITE_ISR_SENSOR_WS_URL || ''; } catch (_) { return ''; } })();
   let _liveFeedsMgr = null;
   try {
     _liveFeedsMgr = initLiveFeeds({}, {
       VITE_AIS_WS_URL: _aisWsUrl,
       VITE_VD_TRAFFIC_WS_URL: _vdTrafficWsUrl,
+      VITE_ISR_SENSOR_WS_URL: _isrSensorWsUrl,
     });
   } catch (err) { console.warn('[live_feeds] init failed:', err); }
 
@@ -12516,6 +12520,27 @@ async function main() {
   // { source: 'websocket', url, auth } starts routing that site's
   // real batches into events without any other code change.
   _installPersistentWebSocketNnSubscribers();
+
+  // ── Live sensor console — the first real node. See src/live_sensor.js ──
+  // Manual first: __isr_liveSensor(lat, lon) places the symbol and
+  // __isr_liveDetect({ confidence }) opens a detection on it, so the demo
+  // works from a terminal readout even with no transport. The bridge feed
+  // (isr_sensor_nodes in sovereign_live_feeds.js) drives the same detect()
+  // once __isr_liveSensors.startFeed(url) is called. No droneState entry
+  // is ever created for a live event: _sweepUnobservedActiveEvents owns
+  // its close.
+  const _liveSensors = createLiveSensorRuntime({
+    sites: SITES, viewer, Cesium, events: EVENTS, addEvent, getEvent, mutateEvent, addNote,
+    nextEventId, applyDetectionBatch: _applyDetectionBatchToEvent, selectEvent, renderAlertStrip,
+    renderDetailPanel: renderDetailPanelThrottled, toast, ringIcon,
+    nightNow: () => !!window.__isr_nvgStage?.enabled,
+    colours: { onlineDay: _SENSOR_ONLINE_DAY, onlineNight: _SENSOR_ONLINE_NIGHT },
+    liveFeeds: _liveFeedsMgr,
+    ringHoldMs: _SWEEP_GRACE_MS,
+  });
+  window.__isr_liveSensor = (lat, lon, opts) => _liveSensors.placeSensor(lat, lon, opts);
+  window.__isr_liveDetect = (det) => _liveSensors.detect(det);
+  window.__isr_liveSensors = _liveSensors;
 
   // ═══════════════════════════════════════════════════════════════════
   // P21 · Universal per-site event lifecycle

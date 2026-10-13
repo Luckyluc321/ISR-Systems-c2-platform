@@ -23,7 +23,8 @@ import fs from 'fs';
 import { parseAst } from 'rolldown/parseAst';
 
 const FILES = process.env.SCOPE_FILES ? process.env.SCOPE_FILES.split(',') : ['src/main.js', 'src/drones.js', 'src/events.js', 'src/scene_lifecycle.js',
-               'src/track_clustering.js', 'src/post_incident_report.js', 'src/destinations.js'];
+               'src/track_clustering.js', 'src/post_incident_report.js', 'src/destinations.js',
+               'src/live_sensor.js'];
 
 // Globals a browser module may legitimately reach for. Deliberately
 // short: anything not here must be declared in the file.
