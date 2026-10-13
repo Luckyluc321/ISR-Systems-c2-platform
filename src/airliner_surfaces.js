@@ -50,6 +50,7 @@
 // longer rationed against frame rate.
 
 import { RIGID_PARTS } from './a320_rigid_gearup.js';
+import { RIGID_PARTS as BRAKES_OUT } from './a320_rigid_brakes.js';
 
 // Which extracted parts are landing gear. The manifest covers the whole
 // airframe, because the whole airframe had to come out of the skin.
@@ -72,6 +73,14 @@ const GEAR = /wheel|gear|wheeldoor/i;
 // Door fraction 0 is the RETRACTED delta, which is the door closed, so
 // ending at 0 shuts them with the gear still down.
 const DOOR = /door/i;
+const BRAKE = /AirBrake/i;
+
+// GROUND SPOILERS. Armed on approach, they fire automatically on wheel
+// spin-up and are fully out in about a second: this is a touchdown
+// event, not an altitude ramp. 73.3 degrees, the artist's own figure,
+// measured as the rotation relative to each panel's rest pose.
+const BRAKE_DEPLOY_MS = 1200;
+
 const DOOR_OPEN_BY = 0.18;
 const DOOR_SHUT_FROM = 0.82;
 
@@ -111,6 +120,7 @@ export function createGearDriver(Cesium, viewer, {
 } = {}) {
   let model = null;
   let t0 = null;          // when gear was selected down
+  let td = null;          // when the wheels touched
   let applied = null;     // last fraction written, so we only write on change
   const scratch = new Cesium.Matrix4();
 
@@ -118,22 +128,27 @@ export function createGearDriver(Cesium, viewer, {
   // -> retracted. One joint can own several nodes, because a part may
   // appear in several meshes with different materials.
   const parts = [];
-  for (const p of RIGID_PARTS) {
-    if (!GEAR.test(p.joint)) continue;
+  const add = (p, kind) => {
     for (const node of p.nodes) {
       parts.push({
-        node,
+        node, kind,
         isDoor: DOOR.test(p.joint),
         t: new Cesium.Cartesian3(p.t[0], p.t[1], p.t[2]),
         r: new Cesium.Quaternion(p.r[0], p.r[1], p.r[2], p.r[3]),
         s: new Cesium.Cartesian3(p.s[0], p.s[1], p.s[2]),
       });
     }
-  }
+  };
+  // GEAR runs FROM its delta (retracted) TO identity (down), because
+  // identity is the model as it ships, which is gear down.
+  for (const p of RIGID_PARTS) if (GEAR.test(p.joint)) add(p, 'gear');
+  // BRAKES run the other way: identity is stowed and the delta is
+  // deployed, so they go from identity out to the delta.
+  for (const p of BRAKES_OUT) if (BRAKE.test(p.joint)) add(p, 'brake');
   const ONE = new Cesium.Cartesian3(1, 1, 1);
   const IDENT = new Cesium.Quaternion(0, 0, 0, 1);
 
-  function write(entity, f) {
+  function write(entity, f, bf) {
     if (!model) model = findModelPrimitive(viewer, entity);
     if (!model) return false;               // not built yet, try next tick
     const T = new Cesium.Cartesian3();
@@ -151,11 +166,18 @@ export function createGearDriver(Cesium, viewer, {
       let node;
       try { node = model.getNode(p.node); } catch (_) { node = null; }
       if (!node) continue;
-      // Doors run their own profile: open, hold, shut.
-      const pf = p.isDoor ? doorFraction(f) : f;
-      Cesium.Cartesian3.lerp(p.t, Cesium.Cartesian3.ZERO, pf, T);
-      Cesium.Cartesian3.lerp(p.s, ONE, pf, S);
-      Cesium.Quaternion.slerp(p.r, IDENT, pf, R);
+      if (p.kind === 'brake') {
+        // identity -> deployed
+        Cesium.Cartesian3.lerp(Cesium.Cartesian3.ZERO, p.t, bf, T);
+        Cesium.Cartesian3.lerp(ONE, p.s, bf, S);
+        Cesium.Quaternion.slerp(IDENT, p.r, bf, R);
+      } else {
+        // retracted -> down, and doors run their own profile within it
+        const pf = p.isDoor ? doorFraction(f) : f;
+        Cesium.Cartesian3.lerp(p.t, Cesium.Cartesian3.ZERO, pf, T);
+        Cesium.Cartesian3.lerp(p.s, ONE, pf, S);
+        Cesium.Quaternion.slerp(p.r, IDENT, pf, R);
+      }
       // Same composition ModelVisualizer uses: the node's ORIGINAL local
       // matrix times the delta. A node transform is a delta, not a pose.
       Cesium.Matrix4.fromTranslationQuaternionRotationScale(T, R, S, scratch);
@@ -173,11 +195,15 @@ export function createGearDriver(Cesium, viewer, {
         t0 = monoNow();
       }
       const f = t0 === null ? 0 : Math.min(1, (monoNow() - t0) / extendMs);
-      // Write only on a real change, and keep retrying 0 until the model
+      // Spoilers fire on touchdown, not on height.
+      if (td === null && typeof aglM === 'number' && aglM <= 0.3) td = monoNow();
+      const bf = td === null ? 0 : Math.min(1, (monoNow() - td) / BRAKE_DEPLOY_MS);
+      // Write only on a real change, and keep retrying until the model
       // finishes loading, otherwise it renders in its rest pose, which
-      // for this asset is gear DOWN.
-      if (applied !== null && Math.abs(f - applied) < 0.002) return;
-      if (write(entity, f)) applied = f;
+      // for this asset is gear DOWN with the bay doors hanging open.
+      if (applied !== null && Math.abs(f - applied.f) < 0.002
+          && Math.abs(bf - applied.bf) < 0.002) return;
+      if (write(entity, f, bf)) applied = { f, bf };
     },
   };
 }
