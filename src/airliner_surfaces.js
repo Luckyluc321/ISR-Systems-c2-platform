@@ -107,3 +107,74 @@ export function createAirbrakeState({ monoNow, deployMs = 1200, triggerAglM = 0.
     reset() { t0 = null; },
   };
 }
+
+// ── Landing gear ──────────────────────────────────────────────────────
+//
+// This model's REST pose is the landed configuration, so with the
+// animation off the gear is permanently down, including at 500 m on
+// approach. Measured earlier: only 5 of the animation's 248 channels
+// differ between its final frame and the bind pose.
+//
+// The retracted pose is the animation's t=0, and src/a320_gear_up.js
+// holds the delta from rest to that, generated from the GLB. 48 nodes
+// carry a real delta, against 4 for the airbrakes, because the gear rig
+// is FLAT: 96 nodes across 28 roots, every hinge and door parented
+// straight to the fuselage rather than nested under a strut, so there is
+// no three-node shortcut.
+//
+// Translation and scale are interpolated as well as rotation, not just
+// rotation like the airbrakes: the nose mechanism translates 1.57 m and
+// a strut telescopes by a scale factor of 0.59.
+
+import { GEAR_UP_DELTA } from './a320_gear_up.js';
+
+/**
+ * nodeTransformations for the gear.
+ * @param extended () => number, 0 = fully retracted, 1 = down and locked
+ */
+export function gearTransforms(Cesium, extended) {
+  const out = {};
+  const ONE = new Cesium.Cartesian3(1, 1, 1);
+  const IDENT = new Cesium.Quaternion(0, 0, 0, 1);
+  for (const n of GEAR_UP_DELTA) {
+    const upT = new Cesium.Cartesian3(n.t[0], n.t[1], n.t[2]);
+    const upR = new Cesium.Quaternion(n.r[0], n.r[1], n.r[2], n.r[3]);
+    const upS = new Cesium.Cartesian3(n.s[0], n.s[1], n.s[2]);
+    const f = () => Math.min(1, Math.max(0, extended() ?? 1));
+    out[n.node] = {
+      // Interpolating TOWARD identity, because identity is the model as
+      // it ships, which is gear down.
+      translation: new Cesium.CallbackProperty(() => Cesium.Cartesian3.lerp(
+        upT, Cesium.Cartesian3.ZERO, f(), new Cesium.Cartesian3()), false),
+      scale: new Cesium.CallbackProperty(() => Cesium.Cartesian3.lerp(
+        upS, ONE, f(), new Cesium.Cartesian3()), false),
+      rotation: new Cesium.CallbackProperty(() => Cesium.Quaternion.slerp(
+        upR, IDENT, f(), new Cesium.Quaternion()), false),
+    };
+  }
+  return out;
+}
+
+/**
+ * Gear extension over time. A real A320 selects gear down passing about
+ * 2000 ft, roughly 7 to 9 km out, and it takes some seconds to travel
+ * and lock. This approach starts at 10 km and 530 m, so the default
+ * threshold puts the sequence early in the shot where it is visible
+ * rather than already finished before the camera sees anything.
+ */
+export function createGearState({ monoNow, extendBelowAglM = 450, extendMs = 9000 }) {
+  let t0 = null;
+  return {
+    update(aglM) {
+      if (t0 === null && typeof aglM === 'number'
+          && aglM > 0 && aglM <= extendBelowAglM) {
+        t0 = monoNow();
+      }
+    },
+    fraction() {
+      if (t0 === null) return 0;          // up, until the trigger
+      return Math.min(1, (monoNow() - t0) / extendMs);
+    },
+    reset() { t0 = null; },
+  };
+}

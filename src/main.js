@@ -793,7 +793,8 @@ import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from '
 import { createParkedAircraft } from './static_aircraft.js';
 import { A320_POSES } from './a320_poses.js';
 import { createWingVortices } from './airliner_vortices.js';
-import { airbrakeTransforms, createAirbrakeState } from './airliner_surfaces.js';
+import { airbrakeTransforms, createAirbrakeState,
+         gearTransforms, createGearState } from './airliner_surfaces.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -15860,6 +15861,11 @@ async function main() {
     // Airbrakes. Four nodes driven by hand instead of the whole 142-joint
     // skeleton, which is what the full animation costs. Fed from the tick.
     const _airbrakes = createAirbrakeState({ monoNow });
+    // Gear. This model ships gear DOWN, so the retraction is what has to
+    // be driven, and it is released again as the aircraft comes in.
+    const _gear = createGearState({ monoNow,
+      extendBelowAglM: (window.__isr_airliner_tuning || {}).gearBelowAglM ?? 450,
+      extendMs: (window.__isr_airliner_tuning || {}).gearExtendMs ?? 9000 });
     const _A320_ANIM_SEC = 28.1667;   // measured from the GLB's samplers
     const _airlinerAnimRunning = () => {
       if (_animT0 === null) { _animT0 = performance.now(); return true; }
@@ -16480,10 +16486,22 @@ async function main() {
         // skinned model is not the same thing as one on the Mi-24's
         // plain nodes. Kept behind a switch while that is worked out:
         //   window.__isr_airliner_tuning = { airbrakes: true }
-        ...((isAirliner && (window.__isr_airliner_tuning || {}).airbrakes
-            && !((window.__isr_airliner_tuning || {}).animate ?? false))
-          ? { nodeTransformations: airbrakeTransforms(Cesium,
-              () => _airbrakes.fraction()) }
+        //
+        // SURFACES DRIVEN BY HAND. Both are deltas onto the rest pose,
+        // and both are skipped entirely while the model's own animation
+        // is running so the two can never fight over the same nodes.
+        //
+        // Gear is 48 nodes against the airbrakes' 4, because the gear rig
+        // is flat. If the frame rate suffers, this is the first thing to
+        // turn off:
+        //   window.__isr_airliner_tuning = { gear: false }
+        ...((isAirliner && !((window.__isr_airliner_tuning || {}).animate ?? false))
+          ? { nodeTransformations: {
+              ...(((window.__isr_airliner_tuning || {}).gear ?? true)
+                ? gearTransforms(Cesium, () => _gear.fraction()) : {}),
+              ...((window.__isr_airliner_tuning || {}).airbrakes
+                ? airbrakeTransforms(Cesium, () => _airbrakes.fraction()) : {}),
+            } }
           : {}),
         // NO BAKED POSE. Applying the animation's node transforms through
         // nodeTransformations tore the aircraft to pieces: wings, flaps
@@ -16908,7 +16926,7 @@ async function main() {
       leadSwarmMember,   // formation[0] wrapper, same shape as swarmBillboards entries
       spawnMs: monoNow(),   // shared timing reference for swarm interpolation
       trailPositions, shadowPositions,
-      _airbrakes,
+      _airbrakes, _gear,
       stateHolder,      // { headingRad } — updated in tick, read by billboard rotation callback
       entryDropped: false, entryMarker: null,
       exitDropped: false, exitMarker: null, wasInCoverage: false,
@@ -17561,6 +17579,7 @@ async function main() {
         // near the ground and cannot read it off the cartographic height.
         if (state.stateHolder) state.stateHolder.aglM = p.alt;
         state._airbrakes?.update(p.alt);
+        state._gear?.update(p.alt);
         // COMPUTED ONCE AND REUSED. The drop line and the trail used to
         // rebuild this from p.alt independently, which is how the trail
         // ended up drawn on the ground while the aircraft flew 40 m above
