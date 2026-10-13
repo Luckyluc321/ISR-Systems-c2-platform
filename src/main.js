@@ -796,6 +796,7 @@ import { createParkedAircraft } from './static_aircraft.js';
 import { A320_POSES } from './a320_poses.js';
 import { createWingVortices } from './airliner_vortices.js';
 import { createGearDriver } from './airliner_surfaces.js';
+import { APPROACH_WOBBLE } from './a320_wobble.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -16230,6 +16231,8 @@ async function main() {
       const stripIconTrim  = T.stripIconTrim      ?? false;
       const flareFadeM     = T.flarePitchFadeM    ?? 0;
       const derotateMs     = T.derotateMs         ?? 3000;
+      const wobbleScale    = T.wobbleScale        ?? 0.55;
+      const wobbleFromAglM = T.wobbleFromAglM     ?? 300;
       const headingSmooth  = T.headingSmoothing   ?? 0.18;
       const pitchSmooth    = T.pitchSmoothing     ?? 0.10;
       const rollSmooth     = T.rollSmoothing      ?? 0.08;
@@ -16318,18 +16321,41 @@ async function main() {
       }
       const _pitchFade = _touchdownMs === null ? 1
         : Math.max(0, 1 - (monoNow() - _touchdownMs) / derotateMs);
+      // THE BUILDER'S OWN APPROACH ATTITUDE. A real aircraft does not fly
+      // a glideslope rigid: it rocks as the pilot corrects, and settles
+      // level for the flare. That rocking is in the file, on the clip's
+      // root, and src/a320_wobble.js is it, lifted out as roll and pitch
+      // against the rest attitude.
+      //
+      // Driven by HEIGHT rather than by a timer, so it cannot drift out
+      // of step with the approach: full curve across the last 300 m,
+      // reaching its final sample, which is exactly level, at touchdown.
+      // Scaled down because the artist's peak is 8.9 degrees of roll and
+      // a real correction on final is nearer 5.
+      let _wobRoll = 0, _wobPitch = 0;
+      if (wobbleScale > 0 && typeof _agl === 'number'
+          && _agl > 0 && _agl <= wobbleFromAglM && APPROACH_WOBBLE.length > 1) {
+        const _u = Math.min(1, Math.max(0, 1 - _agl / wobbleFromAglM));
+        const _x = _u * (APPROACH_WOBBLE.length - 1);
+        const _i = Math.min(APPROACH_WOBBLE.length - 2, Math.floor(_x));
+        const _fr = _x - _i;
+        const _a = APPROACH_WOBBLE[_i], _b = APPROACH_WOBBLE[_i + 1];
+        _wobRoll = ((_a[0] + (_b[0] - _a[0]) * _fr) * wobbleScale * Math.PI) / 180;
+        _wobPitch = ((_a[1] + (_b[1] - _a[1]) * _fr) * wobbleScale * Math.PI) / 180;
+      }
+
       // World-semantic attitude, BEFORE the asset-space sign flips, so
       // anything bolted to the airframe rotates by what the aircraft is
       // actually doing rather than by this model's axis conventions.
       stateHolder.attitude = {
         heading: _smoothedHeading,
-        pitch: _smoothedPitch + pitchOffset * _pitchFade,
-        roll: _smoothedRoll,
+        pitch: _smoothedPitch + pitchOffset * _pitchFade + _wobPitch,
+        roll: _smoothedRoll + _wobRoll,
       };
       const hpr = new Cesium.HeadingPitchRoll(
         _smoothedHeading + headingOffset,
-        (_smoothedPitch + pitchOffset * _pitchFade) * pitchSign,
-        _smoothedRoll * rollSign,
+        (_smoothedPitch + pitchOffset * _pitchFade + _wobPitch) * pitchSign,
+        (_smoothedRoll + _wobRoll) * rollSign,
       );
       return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
     };

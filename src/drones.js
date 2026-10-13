@@ -173,10 +173,16 @@ export const TEMPLATES = {
       // step exceeds 5 m/s.
       //
       //  10.0 km out   530 m   72 m/s   t+0
-      //   2.0 km out   118 m   70 m/s   t+117
       //   threshold     15 m   70 m/s   t+141  50 ft, flare begins
       //   touchdown      0 m   70 m/s   t+147  450 m in, 148 fpm
-      //   rollout end    0 m   14 m/s   t+195  1.22 m/s2 autobrake
+      //   brakes off     0 m    6 m/s   t+190  1621 m at 1.5 m/s2
+      //   taxi ends      0 m    6 m/s   t+243  2391 m in, 3552 m runway
+      //
+      // DECELERATION IS AUTOBRAKE MEDIUM, 1.5 m/s2 on a dry runway, from
+      // touchdown speed down to 6 m/s, which is about 12 kt and a normal
+      // taxi speed. It then rolls at that speed rather than stopping dead
+      // on the centreline, so it reads as an aircraft heading for its
+      // stand. 2391 m of a 3552 m runway used, which is realistic.
       { lat: 55.52460, lon: 12.49881, alt: 530, heading: 41, tSec: 0 },
       { lat: 55.53271, lon: 12.51137, alt: 468.2, heading: 41, tSec: 17 },
       { lat: 55.54015, lon: 12.52289, alt: 411.5, heading: 41, tSec: 32 },
@@ -205,18 +211,21 @@ export const TEMPLATES = {
       { lat: 55.59462, lon: 12.60729, alt: 1.4, heading: 41, tSec: 146 },
       { lat: 55.59493, lon: 12.60776, alt: 0.6, heading: 41, tSec: 147 },
       { lat: 55.59523, lon: 12.60823, alt: 0, heading: 41, tSec: 147 },
-      { lat: 55.59625, lon: 12.60980, alt: 0, heading: 41, tSec: 149 },
-      { lat: 55.59773, lon: 12.61211, alt: 0, heading: 41, tSec: 153 },
-      { lat: 55.59922, lon: 12.61441, alt: 0, heading: 41, tSec: 156 },
-      { lat: 55.60071, lon: 12.61671, alt: 0, heading: 41, tSec: 160 },
-      { lat: 55.60219, lon: 12.61902, alt: 0, heading: 41, tSec: 165 },
-      { lat: 55.60368, lon: 12.62132, alt: 0, heading: 41, tSec: 169 },
-      { lat: 55.60517, lon: 12.62362, alt: 0, heading: 41, tSec: 175 },
-      { lat: 55.60665, lon: 12.62593, alt: 0, heading: 41, tSec: 182 },
-      { lat: 55.60814, lon: 12.62823, alt: 0, heading: 41, tSec: 192 },
-      { lat: 55.60841, lon: 12.62865, alt: 0, heading: 41, tSec: 195 },
+      { lat: 55.59618, lon: 12.60970, alt: 0, heading: 41, tSec: 149 },
+      { lat: 55.59733, lon: 12.61148, alt: 0, heading: 41, tSec: 152 },
+      { lat: 55.59848, lon: 12.61326, alt: 0, heading: 41, tSec: 155 },
+      { lat: 55.59962, lon: 12.61504, alt: 0, heading: 41, tSec: 158 },
+      { lat: 55.60077, lon: 12.61682, alt: 0, heading: 41, tSec: 161 },
+      { lat: 55.60192, lon: 12.61860, alt: 0, heading: 41, tSec: 165 },
+      { lat: 55.60307, lon: 12.62038, alt: 0, heading: 41, tSec: 169 },
+      { lat: 55.60422, lon: 12.62216, alt: 0, heading: 41, tSec: 174 },
+      { lat: 55.60537, lon: 12.62394, alt: 0, heading: 41, tSec: 181 },
+      { lat: 55.60619, lon: 12.62521, alt: 0, heading: 41, tSec: 190 },
+      { lat: 55.60693, lon: 12.62636, alt: 0, heading: 41, tSec: 208 },
+      { lat: 55.60768, lon: 12.62751, alt: 0, heading: 41, tSec: 227 },
+      { lat: 55.60835, lon: 12.62856, alt: 0, heading: 41, tSec: 243 },
     ],
-    durationSec: 195,
+    durationSec: 243,
   },
 
   // ── Recon drone, HALE (Reaper/Global-Hawk class), high altitude circular loiter ──
