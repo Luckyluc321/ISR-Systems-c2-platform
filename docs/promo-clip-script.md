@@ -41,6 +41,54 @@ later. Nothing happened. That is the product.
   dispatch a response. Information sharing to the relevant authority is
   the shot; the response is theirs.
 
+## The tower captions
+
+The aircraft needs to be spoken to, and the tempting way to do it is a
+cockpit POV. Do not. The one we looked at was a 737 and this aircraft is
+an A320, which anyone in aviation spots instantly, and it loses the
+credibility the real runway geometry and the real flare just bought. It
+also makes the pilot the protagonist, and the pilot is the one person
+ISR does not talk to.
+
+Instead: a small radio-transcript caption in frame beside the aircraft.
+
+**STYLE IT AS A FILM CAPTION, NOT AS PLATFORM UI.** If it looks like part
+of the C2, the film implies the platform transmits to aircraft. It does
+not, and the entire positioning is that we detect and inform while the
+airport decides. Small, monospaced, timestamped, visibly a dramatisation
+of the tower transmission.
+
+**Use real phraseology**, for exactly the reason the wrong cockpit fails.
+"You are good to go" lands like a prop. SAS's radio callsign is
+**Scandinavian**, not SAS.
+
+### Clip 1, without ISR
+
+```
+T-04:12   "Scandinavian 743, runway 04R, cleared to land."
+
+T-00:38   "Scandinavian 743, GO AROUND. I say again, go around."
+          "Drones reported on the runway."
+```
+
+The go-around call is repeated, which is real, and carries the urgency
+with no voiceover at all.
+
+### Clip 2, with ISR
+
+```
+T-07:20   "Scandinavian 743, discontinue approach."
+          "Climb maintain 4000 feet, hold as published."
+          "Expect further clearance at 1420."
+```
+
+Calm, three parts, with an expect-further-clearance time, which is what a
+planned hold actually sounds like.
+
+**Put the countdown beside each caption.** T-07:20 against T-00:38 is the
+whole argument, and the contrast between a shouted go-around and a
+routine hold instruction is the film in two captions.
+
 ## Production method
 
 **One instance, not two.** Record both passes from the SAME running
