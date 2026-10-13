@@ -18966,7 +18966,13 @@ async function main() {
           return false;
         }, false);
         contributingRingEntities.push(viewer.entities.add({
-          position: Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 2),
+          // SAME POSITION AS THE SENSOR DOT, exactly. This sat at 2 m
+          // with RELATIVE_TO_GROUND while the dot sits at 0 clamped to
+          // the terrain, so the two coincided only when viewed from
+          // straight above. From any oblique angle the ring floated two
+          // metres over its own sensor, which read as the pulse being
+          // off its sensor rather than around it.
+          position: Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
           billboard: {
             image: ringIcon(),
             width: 26, height: 26,
@@ -18976,7 +18982,7 @@ async function main() {
               const pulse = 0.35 + 0.40 * Math.sin(performance.now() / 250);
               return Cesium.Color.WHITE.withAlpha(pulse);
             }, false),
-            heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
         }));
