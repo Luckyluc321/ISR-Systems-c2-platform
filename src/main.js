@@ -793,8 +793,8 @@ import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from '
 import { createParkedAircraft } from './static_aircraft.js';
 import { A320_POSES } from './a320_poses.js';
 import { createWingVortices } from './airliner_vortices.js';
-import { airbrakeTransforms, createAirbrakeState,
-         gearTransforms, createGearState } from './airliner_surfaces.js';
+import { rigidTransforms, createAirbrakeState,
+         createGearState } from './airliner_surfaces.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -16060,7 +16060,7 @@ async function main() {
           //
           // Rebuild with scripts/optimise_glb_textures.py. The source
           // file stays in the tree, so reverting is this one line.
-          : (isAirliner ? '/aircraft/a320_hq.glb' : null)));
+          : (isAirliner ? '/aircraft/a320_rigid.glb' : null)));
     const _shouldSwapModel = isLoiterMun || isQuadcopter || isHostileHeli || isAirliner;
 
     // Flight rig — closure-captured per entity so each Shahed has
@@ -16487,99 +16487,22 @@ async function main() {
         // plain nodes. Kept behind a switch while that is worked out:
         //   window.__isr_airliner_tuning = { airbrakes: true }
         //
-        // SURFACES DRIVEN BY HAND. Both are deltas onto the rest pose,
-        // and both are skipped entirely while the model's own animation
-        // is running so the two can never fight over the same nodes.
+        // SURFACES DRIVEN BY HAND, and they are no longer skin joints.
+        // split_airliner_surfaces.py lifted the gear and the airbrakes
+        // out of the skeleton into plain nodes, so moving them is a
+        // matrix multiply rather than a skin re-evaluation. That is the
+        // difference between 4 joints being free and 48 freezing the map.
         //
-        // Gear is 48 nodes against the airbrakes' 4, because the gear rig
-        // is flat. If the frame rate suffers, this is the first thing to
-        // turn off:
-        //   window.__isr_airliner_tuning = { gear: false }
+        // Skipped entirely while the model's own animation runs, so the
+        // two can never fight over the same parts.
         ...((isAirliner && !((window.__isr_airliner_tuning || {}).animate ?? false))
-          ? { nodeTransformations: {
-              // OFF BY DEFAULT. 48 skinned joints driven every frame put
-              // the frame rate on the floor. Shipping this on while
-              // saying its cost was unknown was the wrong call.
-              //   window.__isr_airliner_tuning = { gear: true }
-              // and it must be set BEFORE the scenario is launched,
-              // because nodeTransformations is built when the track is
-              // created, not read per frame.
-              ...(((window.__isr_airliner_tuning || {}).gear ?? false)
-                ? gearTransforms(Cesium, () => _gear.fraction()) : {}),
-              ...((window.__isr_airliner_tuning || {}).airbrakes
-                ? airbrakeTransforms(Cesium, () => _airbrakes.fraction()) : {}),
-            } }
+          ? { nodeTransformations: rigidTransforms(Cesium, {
+              gear: () => ((window.__isr_airliner_tuning || {}).gear ?? true)
+                ? _gear.fraction() : 1,
+              brakes: () => ((window.__isr_airliner_tuning || {}).airbrakes ?? true)
+                ? _airbrakes.fraction() : 0,
+            }) }
           : {}),
-        // NO BAKED POSE. Applying the animation's node transforms through
-        // nodeTransformations tore the aircraft to pieces: wings, flaps
-        // and gear scattered around the fuselage, and the map dropped to
-        // a crawl.
-        //
-        // The reason is that these are SKELETON JOINTS, not free nodes.
-        // The model has a _rootJoint and a skinned mesh, so the mesh is
-        // deformed by the joint hierarchy rather than drawn under it.
-        // Overriding 83 of those joints while leaving the other 165 at
-        // their defaults breaks the skin, and the vertices follow joints
-        // that no longer agree with each other.
-        //
-        // The helicopter's rotors work this way because they are plain
-        // nodes on an unskinned model. That difference is the whole
-        // thing, and I did not check it before reusing the pattern.
-        //
-        // src/a320_poses.js is kept: the data is correct and the problem
-        // is how it was applied. Posing a skinned model needs the joints
-        // driven as a complete set, or the animation driven properly.
-        // TRUE SIZE FOR THE AIRLINER, no floor and no exaggeration.
-        //
-        // These two knobs exist to keep a 3 m drone readable as a map
-        // symbol, and they were applied to the airliner by reflex. On a
-        // 37.6 m aircraft they are ruinous: a 258 px floor against a 12x
-        // cap draws it 451 m long and 409 m in span out to 2.3 km, then
-        // SHRINKS it continuously to life size over the last 2.3 km.
-        //
-        // Cesium computes scale = minimumPixelSize * metresPerPixel /
-        // (2 * boundingSphereRadius), capped at maximumScale, so with
-        // this model's 26.06 m radius the cap held for the first 15.8 km
-        // of an 18 km final. A 12x aircraft whose origin is underground
-        // is also what made the datum error below so violent.
-        //
-        // 0 and 1 mean "draw it at the size it is". Beyond about 2 km it
-        // becomes a small object on screen, which is what an 18 km final
-        // actually looks like and is what the camera move is for.
-        minimumPixelSize: isAirliner ? 0
-          : (isHostileHeli ? Math.round(21.5 * MODEL_PX_PER_M)
-            : (isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20))),
-        maximumScale: isAirliner ? 1
-          : (isHostileHeli ? 1.121 * MODEL_MAX_EXAGGERATION : undefined),
-        distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
-        shadows: Cesium.ShadowMode.DISABLED,
-        // Its rotors turn, by the same hand-driven route as ours. The
-        // node names come from the file itself, which already had them,
-        // which is why this one never needed splitting.
-        ...(isHostileHeli ? { runAnimations: false, nodeTransformations: {
-          Top_Rotor: {
-            translation: Cesium.Cartesian3.ZERO,
-            scale: new Cesium.Cartesian3(1, 1, 1),
-            rotation: new Cesium.CallbackProperty(
-              () => _rotorSpin(Cesium.Cartesian3.UNIT_Y, 4), false),
-          },
-          Tail_Rotor: {
-            translation: Cesium.Cartesian3.ZERO,
-            scale: new Cesium.Cartesian3(1, 1, 1),
-            rotation: new Cesium.CallbackProperty(
-              () => _rotorSpin(Cesium.Cartesian3.UNIT_X, 16), false),
-          },
-        } } : {}),
-        // A hostile quadcopter's blades turn too. Same model and same
-        // helper as our interceptors, deliberately: with the rotors split
-        // out of the airframe, anything still using the old static spec
-        // would sit next to a spinning one with frozen blades. A loitering
-        // munition is a different airframe and has no rotor nodes.
-        // Rotor spin is for the quadcopter alone. A Shahed has no rotor
-        // nodes, and neither does an airliner, whose own node transforms
-        // are its landing configuration and are set where the model is.
-        ...((isLoiterMun || isAirliner) ? {} : { nodeTransformations: _quadRotorTransforms(
-          () => (window.__isr_quad_tuning || {}).rotorRps ?? 12) }),
       };
       // THE AIRLINER FLIES THE FIXED-WING RIG, not the quadcopter one.
       //
