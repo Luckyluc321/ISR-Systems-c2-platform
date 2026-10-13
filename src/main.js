@@ -17736,6 +17736,7 @@ async function main() {
           state._smokeFired = true;
           _touchdownSmoke.fire(state._cartNow, -(state.stateHolder?.headingRad ?? 0));
         }
+        if (TEMPLATES[event.templateKey]?.touchdownSmoke) _touchdownSmoke.prime();
         _touchdownSmoke.sweep();
         // COMPUTED ONCE AND REUSED. The drop line and the trail used to
         // rebuild this from p.alt independently, which is how the trail
