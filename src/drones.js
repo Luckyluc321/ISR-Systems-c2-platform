@@ -253,10 +253,23 @@ export const TEMPLATES = {
   //     because thrust takes time to spool and the attitude has to
   //     change before anything climbs
   //   rotation, climb at roughly 2500 fpm easing off as it accelerates
-  //   straight ahead on 041, which from 04R is out over the Oresund
-  //   level at 1000 m, about 3300 ft, still accelerating
-  //   a 180 degree right turn at 25 degrees of bank, 2410 m radius
+  //   STRAIGHT AHEAD on 041 to 600 m, about 2000 ft
+  //   a 180 degree RIGHT turn at 25 degrees of bank, 1739 m radius,
+  //     still climbing through it toward 1000 m
   //   outbound over the water
+  //
+  // STRAIGHT FIRST, AND THAT IS NOT A SIMPLIFICATION. The aircraft is
+  // slow, low and still draggy with the flaps coming in, and the
+  // straight segment is what guarantees obstacle clearance. It is also
+  // what makes it SAFE with other traffic: the missed approach is a
+  // published, protected volume that ATC keeps clear, and a runway is
+  // used in one direction at a time, so there is nothing coming the
+  // other way. An aircraft improvising a turn at 185 ft is the thing
+  // that creates a conflict, because nobody expects it there.
+  //
+  // RIGHT, because off 04R that is out over the Oresund. A left turn
+  // would take it over Copenhagen, which is what missed approaches are
+  // routed to avoid.
   //
   // The gear comes up on its own: the driver retracts once the aircraft
   // has climbed 80 m back from its lowest point, which is what a real
@@ -301,56 +314,41 @@ export const TEMPLATES = {
       { lat: 55.58773, lon: 12.59661, alt: 49.2, heading: 41, tSec: 134 },   // TOGA, momentary sink
       { lat: 55.58881, lon: 12.59828, alt: 46.2, heading: 41, tSec: 136 },   // rotation, sink arrested
       { lat: 55.59074, lon: 12.60128, alt: 97, heading: 41, tSec: 140 },
-      { lat: 55.59272, lon: 12.60435, alt: 146.8, heading: 41, tSec: 144 },
-      { lat: 55.59475, lon: 12.60748, alt: 195.6, heading: 41, tSec: 148 },
-      { lat: 55.59681, lon: 12.61068, alt: 243.4, heading: 41, tSec: 152 },
-      { lat: 55.59892, lon: 12.61395, alt: 290.2, heading: 41, tSec: 156 },
-      { lat: 55.60107, lon: 12.61728, alt: 336, heading: 41, tSec: 160 },
-      { lat: 55.60327, lon: 12.62068, alt: 380.8, heading: 41, tSec: 164 },
-      { lat: 55.60551, lon: 12.62415, alt: 424.6, heading: 41, tSec: 168 },
-      { lat: 55.60779, lon: 12.62768, alt: 467.4, heading: 41, tSec: 172 },
-      { lat: 55.61011, lon: 12.63129, alt: 509.2, heading: 41, tSec: 176 },
-      { lat: 55.61248, lon: 12.63496, alt: 550, heading: 41, tSec: 180 },
-      { lat: 55.61489, lon: 12.63869, alt: 589.8, heading: 41, tSec: 184 },
-      { lat: 55.61735, lon: 12.64249, alt: 628.6, heading: 41, tSec: 188 },
-      { lat: 55.61985, lon: 12.64636, alt: 666.4, heading: 41, tSec: 192 },
-      { lat: 55.62239, lon: 12.65030, alt: 703.2, heading: 41, tSec: 196 },
-      { lat: 55.62496, lon: 12.65428, alt: 739, heading: 41, tSec: 200 },
-      { lat: 55.62752, lon: 12.65826, alt: 773.8, heading: 41, tSec: 204 },
-      { lat: 55.63009, lon: 12.66224, alt: 807.6, heading: 41, tSec: 208 },
-      { lat: 55.63266, lon: 12.66622, alt: 840.4, heading: 41, tSec: 212 },
-      { lat: 55.63523, lon: 12.67020, alt: 872.4, heading: 41, tSec: 216 },
-      { lat: 55.63780, lon: 12.67418, alt: 904.4, heading: 41, tSec: 220 },
-      { lat: 55.64037, lon: 12.67816, alt: 936.4, heading: 41, tSec: 224 },
-      { lat: 55.64293, lon: 12.68213, alt: 968.4, heading: 41, tSec: 228 },
-      { lat: 55.64550, lon: 12.68611, alt: 1000, heading: 41, tSec: 232 },
-      { lat: 55.64952, lon: 12.69233, alt: 1000, heading: 41, tSec: 238 },
-      { lat: 55.65369, lon: 12.69880, alt: 1000, heading: 41, tSec: 244 },
-      { lat: 55.65795, lon: 12.70540, alt: 1000, heading: 41, tSec: 250 },
-      { lat: 55.66056, lon: 12.71022, alt: 1000, heading: 41, tSec: 254 },
-      { lat: 55.66266, lon: 12.71577, alt: 1000, heading: 41, tSec: 258 },
-      { lat: 55.66419, lon: 12.72188, alt: 1000, heading: 41, tSec: 262 },
-      { lat: 55.66509, lon: 12.72837, alt: 1000, heading: 41, tSec: 266 },
-      { lat: 55.66534, lon: 12.73503, alt: 1000, heading: 41, tSec: 270 },
-      { lat: 55.66493, lon: 12.74167, alt: 1000, heading: 41, tSec: 274 },
-      { lat: 55.66388, lon: 12.74808, alt: 1000, heading: 41, tSec: 278 },
-      { lat: 55.66221, lon: 12.75408, alt: 1000, heading: 41, tSec: 282 },
-      { lat: 55.65998, lon: 12.75947, alt: 1000, heading: 41, tSec: 286 },
-      { lat: 55.65726, lon: 12.76409, alt: 1000, heading: 41, tSec: 290 },
-      { lat: 55.65412, lon: 12.76780, alt: 1000, heading: 41, tSec: 294 },
-      { lat: 55.65067, lon: 12.77050, alt: 1000, heading: 41, tSec: 298 },
-      { lat: 55.64700, lon: 12.77209, alt: 1000, heading: 41, tSec: 302 },
-      { lat: 55.64324, lon: 12.77253, alt: 1000, heading: 41, tSec: 306 },
-      { lat: 55.63949, lon: 12.77181, alt: 1000, heading: 41, tSec: 310 },
-      { lat: 55.63586, lon: 12.76995, alt: 1000, heading: 41, tSec: 314 },
-      { lat: 55.63248, lon: 12.76700, alt: 1000, heading: 41, tSec: 318 },
-      { lat: 55.62943, lon: 12.76306, alt: 1000, heading: 41, tSec: 322 },
-      { lat: 55.62375, lon: 12.75426, alt: 1000, heading: 41, tSec: 330 },
-      { lat: 55.61808, lon: 12.74547, alt: 1000, heading: 41, tSec: 338 },
-      { lat: 55.61240, lon: 12.73667, alt: 1000, heading: 41, tSec: 346 },
-      { lat: 55.60672, lon: 12.72787, alt: 1000, heading: 41, tSec: 354 },
+      { lat: 55.59272, lon: 12.60435, alt: 147, heading: 41, tSec: 144 },
+      { lat: 55.59475, lon: 12.60748, alt: 196.2, heading: 41, tSec: 148 },
+      { lat: 55.59681, lon: 12.61068, alt: 244.6, heading: 41, tSec: 152 },
+      { lat: 55.59892, lon: 12.61395, alt: 292.2, heading: 41, tSec: 156 },
+      { lat: 55.60107, lon: 12.61728, alt: 339, heading: 41, tSec: 160 },
+      { lat: 55.60327, lon: 12.62068, alt: 385, heading: 41, tSec: 164 },
+      { lat: 55.60551, lon: 12.62415, alt: 430.2, heading: 41, tSec: 168 },
+      { lat: 55.60779, lon: 12.62768, alt: 474.6, heading: 41, tSec: 172 },
+      { lat: 55.61011, lon: 12.63129, alt: 518.2, heading: 41, tSec: 176 },
+      { lat: 55.61248, lon: 12.63496, alt: 561, heading: 41, tSec: 180 },
+      { lat: 55.61489, lon: 12.63869, alt: 600, heading: 41, tSec: 184 },
+      { lat: 55.61678, lon: 12.64217, alt: 623.8, heading: 41, tSec: 187 },
+      { lat: 55.61829, lon: 12.64618, alt: 647.6, heading: 41, tSec: 191 },
+      { lat: 55.61939, lon: 12.65059, alt: 671.5, heading: 41, tSec: 194 },
+      { lat: 55.62004, lon: 12.65527, alt: 695.3, heading: 41, tSec: 198 },
+      { lat: 55.62022, lon: 12.66008, alt: 719.1, heading: 41, tSec: 201 },
+      { lat: 55.61993, lon: 12.66487, alt: 742.9, heading: 41, tSec: 204 },
+      { lat: 55.61917, lon: 12.66950, alt: 766.8, heading: 41, tSec: 208 },
+      { lat: 55.61797, lon: 12.67382, alt: 790.6, heading: 41, tSec: 211 },
+      { lat: 55.61636, lon: 12.67771, alt: 814.4, heading: 41, tSec: 215 },
+      { lat: 55.61439, lon: 12.68105, alt: 838.2, heading: 41, tSec: 218 },
+      { lat: 55.61213, lon: 12.68373, alt: 862.1, heading: 41, tSec: 221 },
+      { lat: 55.60964, lon: 12.68567, alt: 885.9, heading: 41, tSec: 225 },
+      { lat: 55.60699, lon: 12.68682, alt: 909.7, heading: 41, tSec: 228 },
+      { lat: 55.60427, lon: 12.68714, alt: 933.5, heading: 41, tSec: 232 },
+      { lat: 55.60157, lon: 12.68662, alt: 957.3, heading: 41, tSec: 235 },
+      { lat: 55.59895, lon: 12.68528, alt: 981.2, heading: 41, tSec: 238 },
+      { lat: 55.59651, lon: 12.68315, alt: 1000, heading: 41, tSec: 242 },
+      { lat: 55.59431, lon: 12.68030, alt: 1000, heading: 41, tSec: 245 },
+      { lat: 55.58949, lon: 12.67283, alt: 1000, heading: 41, tSec: 253 },
+      { lat: 55.58466, lon: 12.66536, alt: 1000, heading: 41, tSec: 261 },
+      { lat: 55.57984, lon: 12.65788, alt: 1000, heading: 41, tSec: 269 },
+      { lat: 55.57502, lon: 12.65041, alt: 1000, heading: 41, tSec: 277 },
     ],
-    durationSec: 354,
+    durationSec: 277,
   },
 
   // ── Recon drone, HALE (Reaper/Global-Hawk class), high altitude circular loiter ──
