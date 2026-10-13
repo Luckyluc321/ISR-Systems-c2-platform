@@ -17533,7 +17533,13 @@ async function main() {
         if (state._gear && TEMPLATES[event.templateKey]?.gearRetracts
             && ((window.__isr_airliner_tuning || {}).gear ?? true)) {
           state._gear.update(p.alt);
-          const _STEPS = 12;
+          // 30 steps over 9 s is one every 300 ms. The hold below is
+          // 60 ms, so the property is defined for about a fifth of the
+          // frames during the extension and not at all outside it: the
+          // whole sequence costs well under two seconds of per-frame
+          // work. Raise _STEPS for a smoother swing and more cost,
+          // lower it for the opposite.
+          const _STEPS = (window.__isr_airliner_tuning || {}).gearSteps ?? 30;
           const _step = Math.round(state._gear.fraction() * _STEPS);
           const _mg = state.billboard?.model;
           if (_mg && _step !== state._gearStep) {
@@ -17541,7 +17547,7 @@ async function main() {
             _mg.nodeTransformations = gearPose(Cesium, _step / _STEPS);
             state._gearHeldSince = monoNow();
           } else if (_mg && state._gearHeldSince
-                     && monoNow() - state._gearHeldSince > 200) {
+                     && monoNow() - state._gearHeldSince > 60) {
             _mg.nodeTransformations = undefined;
             state._gearHeldSince = null;
           }
