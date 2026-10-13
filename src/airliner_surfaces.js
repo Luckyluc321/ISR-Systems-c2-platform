@@ -1,6 +1,26 @@
 // Landing gear for the airliner, driven on the model primitive directly.
 //
-// THREE FAILED ATTEMPTS, and all three blamed the wrong thing. Running
+// WHY THE MODEL HAS NO SKIN. Cesium's ModelSceneGraph.update calls
+// updateJointMatrices() INSIDE its loop over every runtime node:
+//
+//     for (i = 0; i < this._runtimeNodes.length; i++) {
+//       ...
+//       if (updateForAnimations) this.updateJointMatrices();
+//
+// so a single node write costs 190 nodes x 142 joints of matrix work
+// every frame, about 27,000 operations to move one wheel. The cost is
+// not proportional to what you move, it is proportional to the model
+// having a skin at all. That is why four different approaches all
+// froze: they were all moving nodes on a skinned model.
+//
+// a320_noskin.glb has no skin. Every joint's geometry was lifted into a
+// plain node by scripts/split_airliner_surfaces.py, which is sound
+// because all 51,140 gear vertices were weighted 1.000 to exactly one
+// joint: rigid bodies wearing a rig they never needed. With
+// _skinnedNodes empty, updateJointMatrices iterates nothing and a node
+// write costs what it should.
+//
+// THREE EARLIER ATTEMPTS blamed the wrong thing. Running
 // the model's animation froze the map; 48 skinned joints through
 // nodeTransformations froze it; 118 extracted plain nodes froze it. The
 // conclusion I kept drawing was "moving parts are expensive on this
@@ -29,7 +49,11 @@
 // That makes the motion as smooth as we like, because smoothness is no
 // longer rationed against frame rate.
 
-import { GEAR_UP_LOCAL } from './a320_gear_local.js';
+import { RIGID_PARTS } from './a320_rigid_gearup.js';
+
+// Which extracted parts are landing gear. The manifest covers the whole
+// airframe, because the whole airframe had to come out of the skin.
+const GEAR = /wheel|gear|wheeldoor/i;
 
 /** Find the Model primitive Cesium built for an entity, or null while it
  *  is still loading. ModelVisualizer keeps it in _modelHash, keyed by
@@ -63,13 +87,21 @@ export function createGearDriver(Cesium, viewer, {
   let applied = null;     // last fraction written, so we only write on change
   const scratch = new Cesium.Matrix4();
 
-  // Precomputed delta per node: rest -> retracted.
-  const parts = GEAR_UP_LOCAL.map(n => ({
-    node: n.node,
-    t: new Cesium.Cartesian3(n.t[0], n.t[1], n.t[2]),
-    r: new Cesium.Quaternion(n.r[0], n.r[1], n.r[2], n.r[3]),
-    s: new Cesium.Cartesian3(n.s[0], n.s[1], n.s[2]),
-  }));
+  // Precomputed delta per node: bind (gear DOWN, the model's rest pose)
+  // -> retracted. One joint can own several nodes, because a part may
+  // appear in several meshes with different materials.
+  const parts = [];
+  for (const p of RIGID_PARTS) {
+    if (!GEAR.test(p.joint)) continue;
+    for (const node of p.nodes) {
+      parts.push({
+        node,
+        t: new Cesium.Cartesian3(p.t[0], p.t[1], p.t[2]),
+        r: new Cesium.Quaternion(p.r[0], p.r[1], p.r[2], p.r[3]),
+        s: new Cesium.Cartesian3(p.s[0], p.s[1], p.s[2]),
+      });
+    }
+  }
   const ONE = new Cesium.Cartesian3(1, 1, 1);
   const IDENT = new Cesium.Quaternion(0, 0, 0, 1);
 

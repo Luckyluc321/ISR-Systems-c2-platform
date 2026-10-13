@@ -16108,7 +16108,7 @@ async function main() {
           // is picked up again, the thing to try is setting the
           // transforms ONCE at a few discrete steps instead of through a
           // CallbackProperty every frame.
-          : (isAirliner ? '/aircraft/a320_hq.glb' : null)));
+          : (isAirliner ? '/aircraft/a320_noskin.glb' : null)));
 
     const _shouldSwapModel = isLoiterMun || isQuadcopter || isHostileHeli || isAirliner;
 
