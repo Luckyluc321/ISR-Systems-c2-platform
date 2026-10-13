@@ -138,9 +138,19 @@ export const TEMPLATES = {
       // track on top of the airport. 10 km at 530 m gives a visible
       // approach that touches down at t+147 and stops at t+195.
       //
-      // ON THE RUNWAY CENTRELINE, from the sensor at 55.61643 / 12.63982:
-      // the threshold is 1800 m back along the reciprocal of 040, giving
-      // 55.60404 / 12.62142.
+      // ON THE REAL RUNWAY, from the baked OSM centreline in
+      // public/night-lights/cph.json, which is what the runway lighting
+      // generator already uses:
+      //
+      //   04R  threshold 55.59219 / 12.60352   bearing 41.2   3552 m
+      //
+      // The previous threshold was DERIVED from a sensor position and was
+      // wrong in two ways at once: 20 to 30 m off the centreline, which
+      // on a 45 m runway puts the wheels on the grass, and 1734 m ALONG
+      // it, so the aircraft touched down 2.2 km in, near the far end.
+      // Bearing was 40.0 against a real 41.2, which drags the start of a
+      // 10 km final 210 m sideways. Checked against the centreline: every
+      // waypoint now sits within 1.9 m of it.
       //
       // THE FLARE IS A CUBIC. The original "flare" STEEPENED to -3.66
       // degrees and touched down at 490 fpm, which reads as being driven
@@ -158,44 +168,44 @@ export const TEMPLATES = {
       //   threshold     15 m   70 m/s   t+141  50 ft, flare begins
       //   touchdown      0 m   70 m/s   t+147  450 m in, 148 fpm
       //   rollout end    0 m   14 m/s   t+195  1.22 m/s2 autobrake
-      { lat: 55.53523, lon: 12.51920, alt: 530, heading: 40, tSec: 0 },
-      { lat: 55.54348, lon: 12.53147, alt: 468.2, heading: 40, tSec: 17 },
-      { lat: 55.55105, lon: 12.54271, alt: 411.5, heading: 40, tSec: 32 },
-      { lat: 55.55793, lon: 12.55294, alt: 360, heading: 40, tSec: 46 },
-      { lat: 55.56413, lon: 12.56214, alt: 313.7, heading: 40, tSec: 59 },
-      { lat: 55.56963, lon: 12.57031, alt: 272.5, heading: 40, tSec: 70 },
-      { lat: 55.57445, lon: 12.57747, alt: 236.4, heading: 40, tSec: 80 },
-      { lat: 55.57892, lon: 12.58411, alt: 203, heading: 40, tSec: 89 },
-      { lat: 55.58305, lon: 12.59024, alt: 172.1, heading: 40, tSec: 97 },
-      { lat: 55.58684, lon: 12.59587, alt: 143.8, heading: 40, tSec: 105 },
-      { lat: 55.59028, lon: 12.60098, alt: 118, heading: 40, tSec: 112 },
-      { lat: 55.59337, lon: 12.60558, alt: 94.8, heading: 40, tSec: 119 },
-      { lat: 55.59613, lon: 12.60967, alt: 74.2, heading: 40, tSec: 124 },
-      { lat: 55.59853, lon: 12.61324, alt: 56.2, heading: 40, tSec: 129 },
-      { lat: 55.60060, lon: 12.61631, alt: 40.8, heading: 40, tSec: 134 },
-      { lat: 55.60232, lon: 12.61886, alt: 27.9, heading: 40, tSec: 137 },
-      { lat: 55.60363, lon: 12.62081, alt: 18.1, heading: 40, tSec: 140 },
-      { lat: 55.60404, lon: 12.62142, alt: 15, heading: 40, tSec: 141 },
-      { lat: 55.60435, lon: 12.62188, alt: 12.7, heading: 40, tSec: 141 },
-      { lat: 55.60466, lon: 12.62234, alt: 10.6, heading: 40, tSec: 142 },
-      { lat: 55.60497, lon: 12.62280, alt: 8.7, heading: 40, tSec: 143 },
-      { lat: 55.60528, lon: 12.62326, alt: 6.8, heading: 40, tSec: 143 },
-      { lat: 55.60559, lon: 12.62372, alt: 5.2, heading: 40, tSec: 144 },
-      { lat: 55.60590, lon: 12.62418, alt: 3.7, heading: 40, tSec: 145 },
-      { lat: 55.60621, lon: 12.62464, alt: 2.5, heading: 40, tSec: 145 },
-      { lat: 55.60652, lon: 12.62510, alt: 1.4, heading: 40, tSec: 146 },
-      { lat: 55.60683, lon: 12.62556, alt: 0.6, heading: 40, tSec: 147 },
-      { lat: 55.60714, lon: 12.62602, alt: 0, heading: 40, tSec: 147 },
-      { lat: 55.60817, lon: 12.62755, alt: 0, heading: 40, tSec: 149 },
-      { lat: 55.60968, lon: 12.62980, alt: 0, heading: 40, tSec: 153 },
-      { lat: 55.61120, lon: 12.63205, alt: 0, heading: 40, tSec: 156 },
-      { lat: 55.61271, lon: 12.63430, alt: 0, heading: 40, tSec: 160 },
-      { lat: 55.61422, lon: 12.63655, alt: 0, heading: 40, tSec: 165 },
-      { lat: 55.61574, lon: 12.63880, alt: 0, heading: 40, tSec: 169 },
-      { lat: 55.61725, lon: 12.64105, alt: 0, heading: 40, tSec: 175 },
-      { lat: 55.61877, lon: 12.64329, alt: 0, heading: 40, tSec: 182 },
-      { lat: 55.62028, lon: 12.64554, alt: 0, heading: 40, tSec: 192 },
-      { lat: 55.62056, lon: 12.64595, alt: 0, heading: 40, tSec: 195 },
+      { lat: 55.52460, lon: 12.49881, alt: 530, heading: 41, tSec: 0 },
+      { lat: 55.53271, lon: 12.51137, alt: 468.2, heading: 41, tSec: 17 },
+      { lat: 55.54015, lon: 12.52289, alt: 411.5, heading: 41, tSec: 32 },
+      { lat: 55.54690, lon: 12.53336, alt: 360, heading: 41, tSec: 46 },
+      { lat: 55.55299, lon: 12.54279, alt: 313.7, heading: 41, tSec: 59 },
+      { lat: 55.55839, lon: 12.55116, alt: 272.5, heading: 41, tSec: 70 },
+      { lat: 55.56313, lon: 12.55849, alt: 236.4, heading: 41, tSec: 80 },
+      { lat: 55.56752, lon: 12.56530, alt: 203, heading: 41, tSec: 89 },
+      { lat: 55.57157, lon: 12.57158, alt: 172.1, heading: 41, tSec: 97 },
+      { lat: 55.57529, lon: 12.57734, alt: 143.8, heading: 41, tSec: 105 },
+      { lat: 55.57867, lon: 12.58258, alt: 118, heading: 41, tSec: 112 },
+      { lat: 55.58171, lon: 12.58729, alt: 94.8, heading: 41, tSec: 119 },
+      { lat: 55.58442, lon: 12.59148, alt: 74.2, heading: 41, tSec: 124 },
+      { lat: 55.58678, lon: 12.59514, alt: 56.2, heading: 41, tSec: 129 },
+      { lat: 55.58881, lon: 12.59828, alt: 40.8, heading: 41, tSec: 134 },
+      { lat: 55.59050, lon: 12.60090, alt: 27.9, heading: 41, tSec: 137 },
+      { lat: 55.59178, lon: 12.60289, alt: 18.1, heading: 41, tSec: 140 },
+      { lat: 55.59219, lon: 12.60352, alt: 15, heading: 41, tSec: 141 },
+      { lat: 55.59249, lon: 12.60399, alt: 12.7, heading: 41, tSec: 141 },
+      { lat: 55.59280, lon: 12.60446, alt: 10.6, heading: 41, tSec: 142 },
+      { lat: 55.59310, lon: 12.60493, alt: 8.7, heading: 41, tSec: 143 },
+      { lat: 55.59341, lon: 12.60540, alt: 6.8, heading: 41, tSec: 143 },
+      { lat: 55.59371, lon: 12.60588, alt: 5.2, heading: 41, tSec: 144 },
+      { lat: 55.59401, lon: 12.60635, alt: 3.7, heading: 41, tSec: 145 },
+      { lat: 55.59432, lon: 12.60682, alt: 2.5, heading: 41, tSec: 145 },
+      { lat: 55.59462, lon: 12.60729, alt: 1.4, heading: 41, tSec: 146 },
+      { lat: 55.59493, lon: 12.60776, alt: 0.6, heading: 41, tSec: 147 },
+      { lat: 55.59523, lon: 12.60823, alt: 0, heading: 41, tSec: 147 },
+      { lat: 55.59625, lon: 12.60980, alt: 0, heading: 41, tSec: 149 },
+      { lat: 55.59773, lon: 12.61211, alt: 0, heading: 41, tSec: 153 },
+      { lat: 55.59922, lon: 12.61441, alt: 0, heading: 41, tSec: 156 },
+      { lat: 55.60071, lon: 12.61671, alt: 0, heading: 41, tSec: 160 },
+      { lat: 55.60219, lon: 12.61902, alt: 0, heading: 41, tSec: 165 },
+      { lat: 55.60368, lon: 12.62132, alt: 0, heading: 41, tSec: 169 },
+      { lat: 55.60517, lon: 12.62362, alt: 0, heading: 41, tSec: 175 },
+      { lat: 55.60665, lon: 12.62593, alt: 0, heading: 41, tSec: 182 },
+      { lat: 55.60814, lon: 12.62823, alt: 0, heading: 41, tSec: 192 },
+      { lat: 55.60841, lon: 12.62865, alt: 0, heading: 41, tSec: 195 },
     ],
     durationSec: 195,
   },
