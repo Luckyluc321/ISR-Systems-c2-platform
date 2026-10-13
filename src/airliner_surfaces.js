@@ -28,29 +28,32 @@
 // spoilers are armed on approach and deploy automatically on wheel
 // spin-up, in about a second.
 
-// Rest transform and deployment axis per node, measured from the file.
-// The axis is the rotation RELATIVE to the node's rest pose, so the
-// deployed orientation is axisAngle(axis, 73.3 deg * f) * rest.
+// A NODE TRANSFORM IS A DELTA, NOT A POSE. This is what I got wrong the
+// first time, and Cesium's own code says so plainly:
+//
+//     modelNode.matrix = Matrix4.multiply(
+//         modelNode.originalMatrix,   // the node's REST transform
+//         transformationMatrix,       // what we supply here
+//         ... )
+//
+// It MULTIPLIES onto the rest transform rather than replacing it. I
+// supplied each node's own translation and rotation again, so both were
+// applied twice and the panels flew off into open air. The Mi-24 rotor
+// block in main.js passes Cartesian3.ZERO and scale (1,1,1) for exactly
+// this reason: those are the IDENTITY delta, not a claim that the node
+// has no translation of its own.
+//
+// So translation and scale stay at identity, and the only thing supplied
+// is the rotation from rest to deployed, measured straight out of the
+// GLB as rel = q_deployed * inverse(q_rest) and stored as a quaternion so
+// no axis or angle sign has to be re-derived. All four reach 73.3 degrees
+// at t=24.67s, which is 2.8 s after the clip's own touchdown.
 const AIRBRAKES = [
-  { node: 'AirBrake.L_084',
-    t: [-0.01863, -1.50380, -9.77312], s: [1, 1, 1],
-    r: [-0.663199, 0.091592, 0.725048, -0.161506],
-    axis: [0.068, 0.356, 0.932] },
-  { node: 'AirBrake2.L_085',
-    t: [0.35798, -0.22827, -5.45902], s: [1.00001, 1, 1],
-    r: [-0.666001, -0.043078, 0.743776, -0.037195],
-    axis: [-0.110, 0.002, -0.994] },
-  { node: 'AirBrake.R_086',
-    t: [-0.01863, -1.50380, 9.77312], s: [1, 1, 1],
-    r: [0.725048, 0.161505, -0.663199, -0.091592],
-    axis: [-0.068, -0.356, 0.932] },
-  { node: 'AirBrake2.R_087',
-    t: [0.35798, -0.22827, 5.45902], s: [1.00001, 1, 1],
-    r: [0.743776, 0.037196, -0.666001, 0.043078],
-    axis: [0.110, -0.002, -0.994] },
+  { node: 'AirBrake.L_084',  rel: [-0.040694, -0.212339, -0.556460, 0.802252] },
+  { node: 'AirBrake2.L_085', rel: [-0.065739,  0.001224, -0.593352, 0.802253] },
+  { node: 'AirBrake.R_086',  rel: [ 0.040694,  0.212340, -0.556460, 0.802252] },
+  { node: 'AirBrake2.R_087', rel: [ 0.065738, -0.001223, -0.593351, 0.802254] },
 ];
-
-const FULL_DEFLECTION_DEG = 73.3;
 
 /**
  * nodeTransformations for the airbrakes.
@@ -60,24 +63,20 @@ const FULL_DEFLECTION_DEG = 73.3;
  */
 export function airbrakeTransforms(Cesium, deployed) {
   const out = {};
+  const identity = new Cesium.Quaternion(0, 0, 0, 1);
   for (const b of AIRBRAKES) {
-    // TRANSLATION AND SCALE MUST BE EXPLICIT. Cesium's
-    // NodeTransformationProperty.getValue falls back to Cartesian3.ZERO
-    // for an unspecified translation, NOT to the node's own value, so a
-    // rotation-only transform would teleport the panel to the model
-    // origin and swing it in a 10 m arc.
-    const rest = new Cesium.Quaternion(b.r[0], b.r[1], b.r[2], b.r[3]);
-    const axis = new Cesium.Cartesian3(b.axis[0], b.axis[1], b.axis[2]);
-    Cesium.Cartesian3.normalize(axis, axis);
+    const full = new Cesium.Quaternion(b.rel[0], b.rel[1], b.rel[2], b.rel[3]);
     out[b.node] = {
-      translation: new Cesium.Cartesian3(b.t[0], b.t[1], b.t[2]),
-      scale: new Cesium.Cartesian3(b.s[0], b.s[1], b.s[2]),
+      // Identity delta. See the note above: NOT the node's own values.
+      translation: Cesium.Cartesian3.ZERO,
+      scale: new Cesium.Cartesian3(1, 1, 1),
       rotation: new Cesium.CallbackProperty(() => {
         const f = Math.min(1, Math.max(0, deployed() || 0));
-        if (f <= 0) return Cesium.Quaternion.clone(rest, new Cesium.Quaternion());
-        const q = Cesium.Quaternion.fromAxisAngle(
-          axis, (FULL_DEFLECTION_DEG * Math.PI / 180) * f, new Cesium.Quaternion());
-        return Cesium.Quaternion.multiply(q, rest, new Cesium.Quaternion());
+        if (f <= 0) return Cesium.Quaternion.clone(identity, new Cesium.Quaternion());
+        if (f >= 1) return Cesium.Quaternion.clone(full, new Cesium.Quaternion());
+        // Slerp from identity, so the panel sweeps through the real arc
+        // rather than through whatever a decomposed axis would give.
+        return Cesium.Quaternion.slerp(identity, full, f, new Cesium.Quaternion());
       }, false),
     };
   }
