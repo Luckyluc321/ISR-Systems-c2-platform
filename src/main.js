@@ -17550,8 +17550,14 @@ async function main() {
         if (_terrainRel) {
           const _g = _airborneAbsAlt(p.lon, p.lat, 0);
           if (_g > 0) {
+            // 0.08 per tick is a 3 to 4 second time constant. The
+            // runway surface rises along its length here, 38.0 m at the
+            // threshold to 38.9 at the far end, so a lag that slow
+            // leaves the wheels under a surface that is climbing faster
+            // than the offset follows it. On the ground, track it hard.
+            const _k = (p.alt || 0) <= 1 ? 0.45 : 0.12;
             state._terrOff = state._terrOff == null ? _g
-              : state._terrOff + (_g - state._terrOff) * 0.08;
+              : state._terrOff + (_g - state._terrOff) * _k;
           }
           // GROUND OFFSET, trimmed by eye and then written down.
           //
@@ -17577,6 +17583,14 @@ async function main() {
         // GEAR. One call. The driver writes node matrices only when the
         // pose actually changes, and keeps retrying until the model has
         // finished loading, because this asset's rest pose is gear DOWN.
+        if (state._gear && !window.__isr_surfaces) {
+          window.__isr_surfaces = (g = 1, b = 1) => {
+            let n = 0;
+            for (const [, st] of droneState) if (st._gear) n += st._gear.force(st.billboard, g, b) || 0;
+            if (!n) console.warn('[surfaces] nothing written: no live airliner, or the model is still loading');
+            return n;
+          };
+        }
         if (state._gear && TEMPLATES[event.templateKey]?.gearRetracts
             && ((window.__isr_airliner_tuning || {}).gear ?? true)) {
           state._gear.update(state.billboard, p.alt);

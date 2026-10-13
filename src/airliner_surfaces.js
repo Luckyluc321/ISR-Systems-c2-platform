@@ -148,7 +148,7 @@ export function createGearDriver(Cesium, viewer, {
   const ONE = new Cesium.Cartesian3(1, 1, 1);
   const IDENT = new Cesium.Quaternion(0, 0, 0, 1);
 
-  function write(entity, f, bf) {
+  function write(entity, f, bf, report) {
     if (!model) model = findModelPrimitive(viewer, entity);
     if (!model) return false;               // not built yet, try next tick
     const T = new Cesium.Cartesian3();
@@ -185,6 +185,12 @@ export function createGearDriver(Cesium, viewer, {
         node.originalMatrix, scratch, new Cesium.Matrix4());
       written++;
     }
+    if (report) {
+      const brakes = parts.filter(p => p.kind === 'brake').length;
+      console.log(`[surfaces] wrote ${written} of ${parts.length} nodes`
+        + ` (${brakes} are spoiler panels), gear ${f}, spoilers ${bf}`);
+      return written;
+    }
     return written > 0;
   }
 
@@ -204,6 +210,17 @@ export function createGearDriver(Cesium, viewer, {
       if (applied !== null && Math.abs(f - applied.f) < 0.002
           && Math.abs(bf - applied.bf) < 0.002) return;
       if (write(entity, f, bf)) applied = { f, bf };
+    },
+    /** Force a pose, for settling on screen what argument cannot:
+     *    window.__isr_surfaces(1, 1)   gear down, spoilers out
+     *    window.__isr_surfaces(0, 0)   gear up, spoilers stowed
+     *  Returns how many nodes were actually written, which is the
+     *  number that matters: zero means the model is not loaded or the
+     *  names do not resolve. */
+    force(entity, gearF, brakeF) {
+      const n = write(entity, gearF, brakeF, true);
+      applied = { f: gearF, bf: brakeF };
+      return n;
     },
   };
 }
