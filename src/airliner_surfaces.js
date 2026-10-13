@@ -87,6 +87,19 @@ const BRAKE_DEPLOY_MS = 1200;
 const BRAKE_STOW_BELOW_MS = 8;     // metres per second
 const BRAKE_STOW_MS = 2500;        // they retract slower than they deploy
 
+// ENGINE FANS. The model animates them at 687 rpm, which is real but
+// useless to us: with 22 blades that is 252 blade passes a second
+// against 60 frames, so the disc would strobe or appear to run
+// backwards. Without motion blur the only honest option is a rate whose
+// BLADE PASS frequency reads as rotation, and 0.5 rev/s gives 11 passes
+// a second: clearly turning, no aliasing. Avoid anything near 60/22 and
+// 30/22 rev/s, which are the strobe and half-frame cases.
+const FAN_NODES = [
+  'rigid_Engine.L_082__173', 'rigid_Engine.L_082__175',
+  'rigid_Engine.R_083__174', 'rigid_Engine.R_083__176',
+];
+const FAN_REV_S = 0.5;
+
 const DOOR_OPEN_BY = 0.18;
 const DOOR_SHUT_FROM = 0.82;
 
@@ -205,7 +218,35 @@ export function createGearDriver(Cesium, viewer, {
     return written > 0;
   }
 
+  // Fans spin every FRAME, not every tick, because a tick-rate disc
+  // steps visibly. It costs four node matrix writes: with no skin on
+  // this model, Cesium's joint-matrix loop iterates nothing, which is
+  // the whole reason any of this is affordable.
+  const fanAxis = new Cesium.Cartesian3(0, 0, 1);
+  const fanQ = new Cesium.Quaternion();
+  const fanM = new Cesium.Matrix4();
+  let fanNodes = null;
+  const spin = () => {
+    if (!model) return;
+    if (!fanNodes) {
+      fanNodes = [];
+      for (const n of FAN_NODES) {
+        try { const nd = model.getNode(n); if (nd) fanNodes.push(nd); } catch (_) { return; }
+      }
+      if (!fanNodes.length) { fanNodes = null; return; }
+    }
+    const a = ((monoNow() / 1000) * FAN_REV_S * Math.PI * 2) % (Math.PI * 2);
+    Cesium.Quaternion.fromAxisAngle(fanAxis, a, fanQ);
+    Cesium.Matrix4.fromTranslationQuaternionRotationScale(
+      Cesium.Cartesian3.ZERO, fanQ, new Cesium.Cartesian3(1, 1, 1), fanM);
+    for (const nd of fanNodes) {
+      nd.matrix = Cesium.Matrix4.multiply(nd.originalMatrix, fanM, new Cesium.Matrix4());
+    }
+  };
+  const removeSpin = viewer.scene.preRender.addEventListener(spin);
+
   return {
+    dispose() { try { removeSpin(); } catch (_) {} },
     /** Call from the tick with height above ground. */
     update(entity, aglM) {
       if (t0 === null && typeof aglM === 'number' && aglM > 0 && aglM <= extendBelowAglM) {
