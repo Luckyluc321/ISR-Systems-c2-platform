@@ -75,10 +75,18 @@ export function createGearDriver(Cesium, viewer, {
 
   function write(entity, f) {
     if (!model) model = findModelPrimitive(viewer, entity);
-    if (!model) return false;               // still loading, try next tick
+    if (!model) return false;               // not built yet, try next tick
     const T = new Cesium.Cartesian3();
     const S = new Cesium.Cartesian3();
     const R = new Cesium.Quaternion();
+    // FINDING THE MODEL IS NOT THE SAME AS IT BEING READY. Model.getNode
+    // THROWS until the glTF has loaded, and the primitive exists well
+    // before that. Counting actual writes is the difference between
+    // "applied" and "found something and wrote to nothing", and getting
+    // that wrong is why the aircraft kept starting with its wheels out:
+    // the first call found the model, silently wrote nothing, recorded
+    // success, and the change guard then blocked every retry.
+    let written = 0;
     for (const p of parts) {
       let node;
       try { node = model.getNode(p.node); } catch (_) { node = null; }
@@ -91,8 +99,9 @@ export function createGearDriver(Cesium, viewer, {
       Cesium.Matrix4.fromTranslationQuaternionRotationScale(T, R, S, scratch);
       node.matrix = Cesium.Matrix4.multiply(
         node.originalMatrix, scratch, new Cesium.Matrix4());
+      written++;
     }
-    return true;
+    return written > 0;
   }
 
   return {
@@ -105,7 +114,7 @@ export function createGearDriver(Cesium, viewer, {
       // Write only on a real change, and keep retrying 0 until the model
       // finishes loading, otherwise it renders in its rest pose, which
       // for this asset is gear DOWN.
-      if (applied !== null && Math.abs(f - applied) < 0.002 && (applied > 0 || model)) return;
+      if (applied !== null && Math.abs(f - applied) < 0.002) return;
       if (write(entity, f)) applied = f;
     },
   };
