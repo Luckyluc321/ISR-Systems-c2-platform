@@ -1,75 +1,112 @@
-// Landing gear for the airliner, applied in discrete steps.
+// Landing gear for the airliner, driven on the model primitive directly.
 //
-// THE PROBLEM, measured three times. This model's REST pose is the
-// landed configuration, so with its animation off the gear is
-// permanently down, including at 500 m on approach. Driving it costs:
-// running the model's own animation froze the map, 48 skinned joints
-// driven every frame froze it, and 118 plain nodes driven every frame
-// froze it too. The cost is not the node count and not whether they are
-// skin joints. It is that Cesium re-applies and re-dirties EVERY frame:
+// THREE FAILED ATTEMPTS, and all three blamed the wrong thing. Running
+// the model's animation froze the map; 48 skinned joints through
+// nodeTransformations froze it; 118 extracted plain nodes froze it. The
+// conclusion I kept drawing was "moving parts are expensive on this
+// model". That was wrong.
 //
-//     modelNode.matrix = Matrix4.multiply(
-//         modelNode.originalMatrix, transformationMatrix, ...)
+// Reading Cesium rather than guessing: the model side is cheap. The
+// ModelNode matrix setter only flags _userAnimationDirty, and
+// ModelMatrixUpdateStage walks a node solely when _transformDirty,
+// updating draw-command matrices. Nothing there justifies a freeze.
 //
-// THE WAY OUT is in the line above that one:
+// The cost is the ENTITY PROPERTY LAYER above it. ModelGraphics
+// nodeTransformations is a PropertyBag, and ModelVisualizer re-evaluates
+// it EVERY FRAME while it is defined, then for all 48 entries does
 //
-//     if (defined(nodeTransformations)) { ...apply... }
+//     Matrix4.fromTranslationRotationScale(...)   // allocate
+//     modelNode.matrix = Matrix4.multiply(...)    // allocate, multiply
 //
-// There is no else. When the property is undefined Cesium skips the
-// loop and does NOT restore anything, so a transform applied once stays
-// applied, for free, forever.
+// whether or not anything changed. Assigning the bag also rebuilds 48
+// properties and raises definitionChanged on each.
 //
-// So the gear moves in discrete steps. Each step assigns a plain
-// transform, holds it a few frames so the visualizer picks it up, then
-// clears the property. Across a 195 s flight that is about 2 seconds of
-// work in total instead of 195.
+// So this bypasses it. Cesium keeps the Model primitive in the
+// ModelVisualizer's own hash, and Model.getNode(name) is public, so the
+// gear is driven by setting node matrices directly, only when the pose
+// actually changes. Per-frame cost: zero. Per step: 48 matrix writes.
 //
-// It also means the extracted rigid model is not needed: this drives the
-// ordinary skinned joints of a320_hq.glb, which is the known-good asset.
+// That makes the motion as smooth as we like, because smoothness is no
+// longer rationed against frame rate.
 
 import { GEAR_UP_LOCAL } from './a320_gear_local.js';
 
-/**
- * One gear pose as PLAIN values, not CallbackProperties.
- * @param f 0 = retracted, 1 = down and locked (the model's own rest pose)
- */
-export function gearPose(Cesium, f) {
-  const out = {};
-  const ONE = new Cesium.Cartesian3(1, 1, 1);
-  const IDENT = new Cesium.Quaternion(0, 0, 0, 1);
-  const t = Math.min(1, Math.max(0, f));
-  for (const n of GEAR_UP_LOCAL) {
-    out[n.node] = {
-      translation: Cesium.Cartesian3.lerp(
-        new Cesium.Cartesian3(n.t[0], n.t[1], n.t[2]),
-        Cesium.Cartesian3.ZERO, t, new Cesium.Cartesian3()),
-      scale: Cesium.Cartesian3.lerp(
-        new Cesium.Cartesian3(n.s[0], n.s[1], n.s[2]),
-        ONE, t, new Cesium.Cartesian3()),
-      rotation: Cesium.Quaternion.slerp(
-        new Cesium.Quaternion(n.r[0], n.r[1], n.r[2], n.r[3]),
-        IDENT, t, new Cesium.Quaternion()),
-    };
-  }
-  return out;
+/** Find the Model primitive Cesium built for an entity, or null while it
+ *  is still loading. ModelVisualizer keeps it in _modelHash, keyed by
+ *  entity id. Private, so every access is guarded: if the shape of this
+ *  ever changes the gear simply stays down rather than throwing. */
+function findModelPrimitive(viewer, entity) {
+  try {
+    const ds = viewer?.dataSourceDisplay;
+    const buckets = [ds?.defaultDataSource, ...(ds?.dataSources?._dataSources || [])];
+    for (const b of buckets) {
+      for (const v of (b?._visualizers || [])) {
+        const hash = v?._modelHash;
+        const hit = hash && hash[entity.id];
+        if (hit?.modelPrimitive?.getNode) return hit.modelPrimitive;
+      }
+    }
+  } catch (_) { /* fall through: no gear rather than a broken tick */ }
+  return null;
 }
 
-/** A real A320 selects gear down passing about 2000 ft, 7 to 9 km out,
- *  and the gear takes roughly 10 to 15 seconds to travel and lock. 12 s
- *  sits in the middle of that. This approach starts at 10 km and 530 m,
- *  so the trigger puts the sequence early in the shot where it is seen.
- *
- *  The step count in main.js is about RENDERING smoothness and does not
- *  affect this pace, but the two want to move together: 40 steps over
- *  12 s keeps one change every 300 ms. */
-export function createGearState({ monoNow, extendBelowAglM = 300, extendMs = 12000 }) {
-  let t0 = null;
+/**
+ * Gear driver for one track.
+ * @param extendBelowAglM  height above ground at which gear is selected
+ * @param extendMs         travel time; a real A320 is 10 to 15 seconds
+ */
+export function createGearDriver(Cesium, viewer, {
+  monoNow, extendBelowAglM = 300, extendMs = 12000,
+} = {}) {
+  let model = null;
+  let t0 = null;          // when gear was selected down
+  let applied = null;     // last fraction written, so we only write on change
+  const scratch = new Cesium.Matrix4();
+
+  // Precomputed delta per node: rest -> retracted.
+  const parts = GEAR_UP_LOCAL.map(n => ({
+    node: n.node,
+    t: new Cesium.Cartesian3(n.t[0], n.t[1], n.t[2]),
+    r: new Cesium.Quaternion(n.r[0], n.r[1], n.r[2], n.r[3]),
+    s: new Cesium.Cartesian3(n.s[0], n.s[1], n.s[2]),
+  }));
+  const ONE = new Cesium.Cartesian3(1, 1, 1);
+  const IDENT = new Cesium.Quaternion(0, 0, 0, 1);
+
+  function write(entity, f) {
+    if (!model) model = findModelPrimitive(viewer, entity);
+    if (!model) return false;               // still loading, try next tick
+    const T = new Cesium.Cartesian3();
+    const S = new Cesium.Cartesian3();
+    const R = new Cesium.Quaternion();
+    for (const p of parts) {
+      let node;
+      try { node = model.getNode(p.node); } catch (_) { node = null; }
+      if (!node) continue;
+      Cesium.Cartesian3.lerp(p.t, Cesium.Cartesian3.ZERO, f, T);
+      Cesium.Cartesian3.lerp(p.s, ONE, f, S);
+      Cesium.Quaternion.slerp(p.r, IDENT, f, R);
+      // Same composition ModelVisualizer uses: the node's ORIGINAL local
+      // matrix times the delta. A node transform is a delta, not a pose.
+      Cesium.Matrix4.fromTranslationQuaternionRotationScale(T, R, S, scratch);
+      node.matrix = Cesium.Matrix4.multiply(
+        node.originalMatrix, scratch, new Cesium.Matrix4());
+    }
+    return true;
+  }
+
   return {
-    update(aglM) {
+    /** Call from the tick with height above ground. */
+    update(entity, aglM) {
       if (t0 === null && typeof aglM === 'number' && aglM > 0 && aglM <= extendBelowAglM) {
         t0 = monoNow();
       }
+      const f = t0 === null ? 0 : Math.min(1, (monoNow() - t0) / extendMs);
+      // Write only on a real change, and keep retrying 0 until the model
+      // finishes loading, otherwise it renders in its rest pose, which
+      // for this asset is gear DOWN.
+      if (applied !== null && Math.abs(f - applied) < 0.002 && (applied > 0 || model)) return;
+      if (write(entity, f)) applied = f;
     },
-    fraction() { return t0 === null ? 0 : Math.min(1, (monoNow() - t0) / extendMs); },
   };
 }

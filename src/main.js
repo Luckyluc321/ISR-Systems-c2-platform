@@ -793,7 +793,7 @@ import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from '
 import { createParkedAircraft } from './static_aircraft.js';
 import { A320_POSES } from './a320_poses.js';
 import { createWingVortices } from './airliner_vortices.js';
-import { gearPose, createGearState } from './airliner_surfaces.js';
+import { createGearDriver } from './airliner_surfaces.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -15855,11 +15855,13 @@ async function main() {
     // on viewer.clock and that is the clock it has to be measured
     // against. The consequence, accepted rather than hidden: the gear
     // keeps extending if the simulation is paused mid-sequence.
-    // Gear, applied in discrete steps and then released. See
-    // airliner_surfaces.js for why this is not a per-frame property.
-    const _gear = createGearState({ monoNow,
+    // Gear. Driven on the model primitive directly rather than through
+    // ModelGraphics.nodeTransformations, which is what froze the map:
+    // that property is re-evaluated and re-applied EVERY frame while it
+    // is defined. See airliner_surfaces.js.
+    const _gear = createGearDriver(Cesium, viewer, { monoNow,
       extendBelowAglM: (window.__isr_airliner_tuning || {}).gearBelowAglM ?? 300,
-      extendMs: (window.__isr_airliner_tuning || {}).gearExtendMs ?? 9000 });
+      extendMs: (window.__isr_airliner_tuning || {}).gearExtendMs ?? 12000 });
     let _animT0 = null;
     let _clockWasAnimating = null;
     // Airbrakes. Four nodes driven by hand instead of the whole 142-joint
@@ -16498,13 +16500,6 @@ async function main() {
         // Advancing it is what costs. 142 skin joints re-evaluated every
         // frame on a 75,815 vertex model, which Lucas saw as the
         // aircraft starting to pivot and bank the instant the clock ran.
-        // BORN RETRACTED. Without this the model renders gear-down for
-        // the frames between being created and the first tick, which
-        // reads as the wheels being out and then vanishing. The tick
-        // clears this property shortly after, as it does every step.
-        ...((isAirliner && TEMPLATES[event.templateKey]?.gearRetracts
-             && ((window.__isr_airliner_tuning || {}).gear ?? true))
-          ? { nodeTransformations: gearPose(Cesium, 0) } : {}),
         ...(isAirliner ? { runAnimations: ((window.__isr_airliner_tuning || {}).animate ?? false)
           ? new Cesium.CallbackProperty(() => _airlinerAnimRunning(), false)
           : false } : {}),
@@ -17539,57 +17534,13 @@ async function main() {
         // AGL for the orientation rig, which fades its pitch offset out
         // near the ground and cannot read it off the cartographic height.
         if (state.stateHolder) state.stateHolder.aglM = p.alt;
-        // GEAR, in steps. A pose is assigned only when the step CHANGES,
-        // held briefly so the model visualizer picks it up, then the
-        // property is cleared. Cesium leaves the node matrices where they
-        // were, so the gear stays put at no further cost.
+        // GEAR. One call. The driver writes node matrices only when the
+        // pose actually changes, and keeps retrying until the model has
+        // finished loading, because this asset's rest pose is gear DOWN.
         if (state._gear && TEMPLATES[event.templateKey]?.gearRetracts
             && ((window.__isr_airliner_tuning || {}).gear ?? true)) {
-          state._gear.update(p.alt);
-          // 40 steps over 12 s is one every 300 ms. The hold below is
-          // 60 ms, so the property is defined for about a fifth of the
-          // frames during the extension and not at all outside it: the
-          // whole sequence costs well under two seconds of per-frame
-          // work. Raise _STEPS for a smoother swing and more cost,
-          // lower it for the opposite.
-          // 120 steps over 12 s is one every 100 ms, which is motion
-          // rather than a march. 40 was one every 300 ms and read like a
-          // stop-motion robot. The hold below drops to 25 ms so the
-          // property is still defined for only a quarter of the frames
-          // during the extension, and none at all outside it.
-          // THIS NUMBER IS THE TRADE, and there is no way round it.
-          // Every step costs one application of 48 node transforms, and
-          // Cesium does real work for each: 120 steps looked like proper
-          // motion and froze the map, 40 ran smoothly and marched like a
-          // robot. 60 is the middle. It is a knob because only the eye
-          // can settle it:
-          //   window.__isr_airliner_tuning = { gearSteps: 100 }
-          const _STEPS = (window.__isr_airliner_tuning || {}).gearSteps ?? 60;
-          const _step = Math.round(state._gear.fraction() * _STEPS);
-          const _mg = state.billboard?.model;
-          // SETTLE PHASE. The aircraft starts with its wheels out because
-          // the model is still LOADING when the first pose is applied and
-          // cleared 25 ms later: it lands on nothing, and the model
-          // arrives in its rest pose, which is gear down. There is no
-          // readiness signal to wait on from here, so step 0 is simply
-          // re-applied every 500 ms for the first few seconds until one
-          // of them catches. 25 ms in every 500 is a 5% duty cycle.
-          if (state._gearSettleT0 == null) state._gearSettleT0 = monoNow();
-          const _settling = _step === 0
-            && monoNow() - state._gearSettleT0 < 6000
-            && monoNow() - (state._gearLastApply || 0) > 500;
-          if (_mg && (_step !== state._gearStep || _settling)) {
-            state._gearStep = _step;
-            state._gearLastApply = monoNow();
-            _mg.nodeTransformations = gearPose(Cesium, _step / _STEPS);
-            state._gearHeldSince = monoNow();
-          } else if (_mg && state._gearHeldSince
-                     && monoNow() - state._gearHeldSince > 25) {
-            _mg.nodeTransformations = undefined;
-            state._gearHeldSince = null;
-          }
+          state._gear.update(state.billboard, p.alt);
         }
-
         // COMPUTED ONCE AND REUSED. The drop line and the trail used to
         // rebuild this from p.alt independently, which is how the trail
         // ended up drawn on the ground while the aircraft flew 40 m above
