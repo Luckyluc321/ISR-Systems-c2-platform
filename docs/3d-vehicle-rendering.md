@@ -228,6 +228,49 @@ origin and swings it in an arc. Always set `translation` and `scale`
 explicitly, as the Mi-24 block does. The existing gear nodes survived
 this only because they genuinely have no translation.
 
+## 6b. Wingtip vortices
+
+`src/airliner_vortices.js`. Two condensation cores trailing the wingtips,
+which is the read that says "heavy aircraft, high angle of attack, humid
+air" in a second of footage.
+
+Built on the mechanism already here, a polyline over a ring buffer fed
+from the tick, so it freezes when the simulation freezes. It is NOT the
+sheet of vapour that forms over the wing root: that is a volume sitting on
+the wing rather than a trail behind it, only a particle system expresses
+it, and a Cesium `ParticleSystem` advances on `viewer.clock` rather than
+on `monoNow()`, so it would keep emitting while the simulation is paused.
+
+The tip offsets are measured from the model's 75,815 vertices in bind
+pose: X +/- 17.009, Y 4.298, Z 4.550, span 34.115 m against the real
+A320's 34.1 m. The nose is on model -Z, so in body terms a wingtip is
+4.55 m aft of the origin and 4.30 m above it. The body offset is rotated
+by roll, then pitch, then heading, the same order that finally made the
+helicopter's gun work, because a point 17 m outboard moves 4.4 m
+vertically through a 15 degree bank.
+
+Live: `window.__isr_vortex_tuning = { seconds, width, alpha, side, up,
+forward, fadeFromAglM }`.
+
+## 6c. A flat icon cannot always express a 3D direction
+
+The track symbol is a billboard with `alignedAxis` set to the horizontal
+heading vector. Cesium aligns the image's up direction with that vector
+**projected into the screen plane**. That projection is well conditioned
+from above and degenerate when the camera looks along the direction of
+travel, where a small perpendicular component decides the whole result
+and the nose can swing far from where it looks like it should point.
+
+The file already records the same trap for `alignedAxis = up`, which is
+degenerate from a horizontal viewpoint. It is the same failure in a
+different axis.
+
+So before tuning any constant for an icon that points the wrong way,
+establish whether the error moves when the camera orbits. If it does, it
+is this, and no constant fixes it. `window.__isr_iconDebug()` prints what
+the icon is told to do, the true ground track, the error, and the camera
+orientation.
+
 ## 7. Measurement beats eyes, and a box is not a position
 
 Carried over from the gun-muzzle placement, which took about fifteen

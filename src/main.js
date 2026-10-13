@@ -792,6 +792,7 @@ import { loadSiteLights, loadNationalLights, bucketByRadiance, LIGHT_STYLES, LIG
 import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from './runway_lighting.js';
 import { createParkedAircraft } from './static_aircraft.js';
 import { A320_POSES } from './a320_poses.js';
+import { createWingVortices } from './airliner_vortices.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -16121,9 +16122,7 @@ async function main() {
       // Adding it back cancels it: -(true + trim) + trim = -true.
       // Opt-in per airframe, so the icons keep the trim they were
       // tuned with.
-      const _iconTrim = stripIconTrim
-        ? ((window.__isr_icon_tuning?.bearingTrimDeg ?? -2) * Math.PI) / 180
-        : 0;
+      const _iconTrim = stripIconTrim ? (stateHolder.iconTrimRad ?? 0) : 0;
       const targetHeading = -stateHolder.headingRad + _iconTrim;
 
       // Pitch — target from vertical-vs-horizontal velocity.
@@ -16180,6 +16179,14 @@ async function main() {
       const _pitchFade = (flareFadeM > 0 && typeof _agl === 'number')
         ? Math.min(1, Math.max(0, _agl / flareFadeM))
         : 1;
+      // World-semantic attitude, BEFORE the asset-space sign flips, so
+      // anything bolted to the airframe rotates by what the aircraft is
+      // actually doing rather than by this model's axis conventions.
+      stateHolder.attitude = {
+        heading: _smoothedHeading,
+        pitch: _smoothedPitch + pitchOffset * _pitchFade,
+        roll: _smoothedRoll,
+      };
       const hpr = new Cesium.HeadingPitchRoll(
         _smoothedHeading + headingOffset,
         (_smoothedPitch + pitchOffset * _pitchFade) * pitchSign,
@@ -16375,7 +16382,7 @@ async function main() {
         // of 248 channels differ from the final frame, all of them
         // spinning parts. So with the animation off the aircraft still
         // looks correct, it simply does not move its surfaces.
-        ...((isAirliner && (window.__isr_airliner_tuning || {}).animate)
+        ...((isAirliner && ((window.__isr_airliner_tuning || {}).animate ?? true))
           ? { runAnimations: new Cesium.CallbackProperty(
               () => _airlinerAnimRunning(), false) }
           : {}),
@@ -16476,7 +16483,7 @@ async function main() {
       // needs it. The previous value is remembered and restored the
       // moment the sequence ends, which is what _airlinerAnimRunning
       // does: borrowed for 28 seconds, not taken.
-      if ((window.__isr_airliner_tuning || {}).animate) {
+      if ((window.__isr_airliner_tuning || {}).animate ?? true) {
         _clockWasAnimating = viewer.clock.shouldAnimate;
         viewer.clock.shouldAnimate = true;
       }
@@ -16860,12 +16867,65 @@ async function main() {
     return arr;
   }
 
+  // ICON HEADING DIAGNOSTIC. The maths says the symbol should sit within
+  // 2 degrees of the true ground track, and it measures 1.93 with the
+  // default trim and 0.15 without. A report of 30 to 50 degrees does not
+  // reproduce from the code, so rather than guessing again this prints
+  // what the icon is actually told to do next to what the track actually
+  // is, plus the camera, because an alignedAxis billboard is a FLAT
+  // sprite: it aligns its up direction with the heading vector PROJECTED
+  // into the screen, and that projection becomes ill-conditioned when the
+  // camera looks along the direction of travel.
+  //
+  //   window.__isr_iconDebug()
+  if (typeof window !== 'undefined') {
+    window.__isr_iconDebug = () => {
+      const rows = [];
+      for (const [eventId, st] of droneState) {
+        if (!st?.stateHolder || st.prevLat === undefined) continue;
+        const cart = st.billboard?.position?.getValue?.(Cesium.JulianDate.now());
+        if (!cart) continue;
+        const c = Cesium.Cartographic.fromCartesian(cart);
+        const lat = Cesium.Math.toDegrees(c.latitude);
+        const lon = Cesium.Math.toDegrees(c.longitude);
+        const dLat = lat - st.prevLat;
+        const dLon = (lon - st.prevLon) * Math.cos(lat * Math.PI / 180);
+        const trueBrg = (Cesium.Math.toDegrees(Math.atan2(dLon, dLat)) + 360) % 360;
+        const iconBrg = (Cesium.Math.toDegrees(-st.stateHolder.headingRad) + 360) % 360;
+        let err = iconBrg - trueBrg;
+        while (err > 180) err -= 360;
+        while (err < -180) err += 360;
+        rows.push({
+          event: eventId,
+          iconPointsAt: Number(iconBrg.toFixed(2)),
+          trueTrack: Number(trueBrg.toFixed(2)),
+          errorDeg: Number(err.toFixed(2)),
+          trimDeg: Number(Cesium.Math.toDegrees(st.stateHolder.iconTrimRad || 0).toFixed(2)),
+          aglM: Math.round(st.stateHolder.aglM ?? 0),
+        });
+      }
+      console.table(rows);
+      console.log('camera', {
+        headingDeg: Number(Cesium.Math.toDegrees(viewer.camera.heading).toFixed(1)),
+        pitchDeg: Number(Cesium.Math.toDegrees(viewer.camera.pitch).toFixed(1)),
+        // How close the camera is to looking ALONG the track. Near 0 or
+        // 180 is where a flat sprite cannot express the direction.
+      });
+      return rows;
+    };
+  }
+
+  // Wingtip vortices. One controller, keyed by event id, so a track that
+  // declares wingVortices gets two condensation trails off its tips.
+  const _wingVortices = createWingVortices(viewer, Cesium);
+
   function removeDroneEntities(eventId) {
     const state = droneState.get(eventId);
     if (!state) return;
     viewer.entities.remove(state.billboard);
     viewer.entities.remove(state.trail);
     viewer.entities.remove(state.shadow);
+    _wingVortices.release(eventId);
     if (state.swarmBillboards) {
       for (const sw of state.swarmBillboards) {
         viewer.entities.remove(sw.billboard);
@@ -17276,7 +17336,18 @@ async function main() {
         // AGL for the orientation rig, which fades its pitch offset out
         // near the ground and cannot read it off the cartographic height.
         if (state.stateHolder) state.stateHolder.aglM = p.alt;
-        state.billboard.position = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, state._absAlt);
+        // COMPUTED ONCE AND REUSED. The drop line and the trail used to
+        // rebuild this from p.alt independently, which is how the trail
+        // ended up drawn on the ground while the aircraft flew 40 m above
+        // it. One value, three consumers, no way for them to disagree.
+        state._cartNow = Cesium.Cartesian3.fromDegrees(p.lon, p.lat, state._absAlt);
+        state.billboard.position = state._cartNow;
+        // Two condensation cores off the wingtips, faded in as it
+        // descends. Opt-in per template; nothing else grows a pair.
+        if (TEMPLATES[event.templateKey]?.wingVortices) {
+          _wingVortices.step(event.id, state._cartNow,
+            state.stateHolder?.attitude, p.alt);
+        }
 
         // ── P68: dynamic contributingSensors population (real geospatial)
         // As the drone flies, add any sensor whose coverage the drone is
@@ -17352,7 +17423,14 @@ async function main() {
             // cannot see). Negative rotates the nose counter-clockwise.
             // Dial LIVE while watching a straight leg:
             //   window.__isr_icon_tuning.bearingTrimDeg = -4 / -2 / 0 / 2
-            const _trim = ((window.__isr_icon_tuning?.bearingTrimDeg ?? -2) * Math.PI) / 180;
+            // Per template, because -2 is an ICON art alignment and the
+            // 3D rig reads the same heading field. An airliner wants 0.
+            const _trimDeg = TEMPLATES[event.templateKey]?.iconBearingTrimDeg
+              ?? (window.__isr_icon_tuning?.bearingTrimDeg ?? -2);
+            const _trim = (_trimDeg * Math.PI) / 180;
+            // Published so _bankedOrientation strips the SAME value that
+            // was applied, rather than assuming the global default.
+            state.stateHolder.iconTrimRad = _trim;
             const target = -Math.atan2(dLon, dLat) + _trim;
             if (state.stateHolder.headingInit) {
               let delta = target - state.stateHolder.headingRad;
@@ -17371,7 +17449,7 @@ async function main() {
 
         state.shadowPositions.length = 0;
         state.shadowPositions.push(
-          Cesium.Cartesian3.fromDegrees(p.lon, p.lat, state._absAlt),
+          Cesium.Cartesian3.clone(state._cartNow),
           // The base was a hardcoded 0, which is 38 m under the surface.
           // Only corrected for the templates that opted in, so every
           // other drop line keeps the length it has today.
@@ -17383,8 +17461,7 @@ async function main() {
         // Skip trail growth once the lead is dead — no ghost trendline
         // continuing along the drone's remaining waypoints.
         if (!leadDown && _trailAppendCounter % 3 === 0) {
-          state.trailPositions.push(Cesium.Cartesian3.fromDegrees(p.lon, p.lat,
-            _terrainRel ? state._absAlt : _safeTrailAlt(p.alt)));
+          state.trailPositions.push(Cesium.Cartesian3.clone(state._cartNow));
           if (state.trailPositions.length > 180) state.trailPositions.shift();
         }
 

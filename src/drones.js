@@ -110,77 +110,83 @@ export const TEMPLATES = {
     // other template is authored against that same convention and looks
     // right on screen, so the correction is opt-in rather than global.
     terrainRelativeAlt: true,
+    // NO ICON BEARING TRIM. The shared default is -2 degrees, tuned so a
+    // canvas icon's drawn apex lines up with its course. The 3D rig reads
+    // the same heading field, so on an airliner that trim is the nose
+    // sitting 2 degrees off the runway centreline. Zero here, and the rig
+    // reads the effective value rather than the global so the two cannot
+    // double-correct each other.
+    iconBearingTrimDeg: 0,
+    // Two condensation cores off the wingtips on short final. Drawn by
+    // src/airliner_vortices.js, faded in below 400 m above ground.
+    wingVortices: true,
     waypoints: [
-      // A REAL APPROACH, GENERATED FROM THE GEOMETRY. Not eyeballed, and
-      // not the dive this started as: the original profile flew final at
-      // 235 kt descending 3,347 fpm on an 8 degree slope, which is a
-      // missile arriving rather than an airliner landing.
+      // A REAL APPROACH, GENERATED FROM THE GEOMETRY, not eyeballed.
       //
-      // ON THE RUNWAY CENTRELINE. The touchdown point inherited from the
-      // old template was 836 m OFF 04R's axis, so the whole approach flew
-      // parallel to the runway rather than down it. Derived instead from
-      // the sensor labelled "Runway 04R Central" at 55.61643 / 12.63982:
+      // FIVE KILOMETRES, NOT EIGHTEEN. The 18 km version was correct and
+      // unwatchable: 4 minutes 15 seconds of straight-and-level before
+      // anything happened, which reads as "it never lands". This starts
+      // on short final at 273 m, touches down at t+78 and is stopped by
+      // t+124. The whole thing fits in a shot.
+      //
+      // ON THE RUNWAY CENTRELINE, from the sensor at 55.61643 / 12.63982:
       // the threshold is 1800 m back along the reciprocal of 040, giving
-      // 55.60404 / 12.62142 on a 3596 m runway.
+      // 55.60404 / 12.62142.
       //
-      // THE FLARE IS A CUBIC, NOT A SHALLOWER LINE. The previous "flare"
-      // STEEPENED to -3.66 degrees at 250 m out and touched down at 490
-      // fpm, which reads as being driven into the tarmac. This crosses
-      // the threshold at 50 ft and holds the glideslope rate into a cubic
-      // that cuts to 148 fpm at the wheels, touching down 450 m in, which
-      // is inside the touchdown zone markings the orthophoto shows.
+      // THE FLARE IS A CUBIC. The original "flare" STEEPENED to -3.66
+      // degrees and touched down at 490 fpm, which reads as being driven
+      // into the tarmac. This crosses the threshold at 50 ft holding the
+      // glideslope rate, then cuts to 148 fpm at the wheels, touching
+      // down 450 m in, inside the touchdown zone markings.
       //
       // SPEED IS CONTINUOUS. interpolate() is piecewise-linear in lat and
       // lon, so ground speed is piecewise-CONSTANT and steps at every
-      // waypoint. The old legs ran 62.5 then 74.8 m/s through the flare
-      // and 66.6 then 45.4 at the start of the rollout, both of which are
-      // visible lurches. Times here come from integrating one continuous
-      // speed profile, so no step exceeds 5 m/s.
+      // waypoint. Times come from integrating one speed profile, so no
+      // step exceeds 5 m/s.
       //
-      //   18.0 km out   943 m   74.7 m/s   t+0
-      //    4.0 km out   211 m   71.2 m/s   t+194
-      //    1.0 km out    61 m   70.2 m/s   t+236
-      //   threshold      15 m   70.0 m/s   t+248   50 ft, flare begins
-      //   touchdown       0 m   70.0 m/s   t+255   450 m in, 148 fpm
-      //   rollout end     0 m   13.8 m/s   t+302   1.22 m/s2 autobrake
-      { lat: 55.48017, lon: 12.43743, alt: 943, heading: 40, tSec: 0 },
-      { lat: 55.49394, lon: 12.45788, alt: 839.9, heading: 40, tSec: 27 },
-      { lat: 55.50770, lon: 12.47832, alt: 736.8, heading: 40, tSec: 54 },
-      { lat: 55.52146, lon: 12.49876, alt: 633.7, heading: 40, tSec: 81 },
-      { lat: 55.53523, lon: 12.51920, alt: 530.6, heading: 40, tSec: 108 },
-      { lat: 55.54899, lon: 12.53965, alt: 427.4, heading: 40, tSec: 136 },
-      { lat: 55.55931, lon: 12.55498, alt: 350.1, heading: 40, tSec: 157 },
-      { lat: 55.56963, lon: 12.57031, alt: 272.8, heading: 40, tSec: 178 },
-      { lat: 55.57789, lon: 12.58258, alt: 210.9, heading: 40, tSec: 194 },
-      { lat: 55.58477, lon: 12.59280, alt: 159.4, heading: 40, tSec: 209 },
-      { lat: 55.59028, lon: 12.60098, alt: 118.1, heading: 40, tSec: 220 },
-      { lat: 55.59441, lon: 12.60711, alt: 87.2, heading: 40, tSec: 228 },
-      { lat: 55.59785, lon: 12.61222, alt: 61.4, heading: 40, tSec: 236 },
-      { lat: 55.60060, lon: 12.61631, alt: 40.8, heading: 40, tSec: 241 },
-      { lat: 55.60266, lon: 12.61938, alt: 25.3, heading: 40, tSec: 246 },
-      { lat: 55.60404, lon: 12.62142, alt: 15, heading: 40, tSec: 248 },
-      { lat: 55.60435, lon: 12.62188, alt: 12.7, heading: 40, tSec: 249 },
-      { lat: 55.60466, lon: 12.62234, alt: 10.6, heading: 40, tSec: 250 },
-      { lat: 55.60497, lon: 12.62280, alt: 8.7, heading: 40, tSec: 250 },
-      { lat: 55.60528, lon: 12.62326, alt: 6.8, heading: 40, tSec: 251 },
-      { lat: 55.60559, lon: 12.62372, alt: 5.2, heading: 40, tSec: 252 },
-      { lat: 55.60590, lon: 12.62418, alt: 3.7, heading: 40, tSec: 252 },
-      { lat: 55.60621, lon: 12.62464, alt: 2.5, heading: 40, tSec: 253 },
-      { lat: 55.60652, lon: 12.62510, alt: 1.4, heading: 40, tSec: 254 },
-      { lat: 55.60683, lon: 12.62556, alt: 0.6, heading: 40, tSec: 254 },
-      { lat: 55.60714, lon: 12.62602, alt: 0, heading: 40, tSec: 255 },
-      { lat: 55.60817, lon: 12.62755, alt: 0, heading: 40, tSec: 257 },
-      { lat: 55.60968, lon: 12.62980, alt: 0, heading: 40, tSec: 260 },
-      { lat: 55.61120, lon: 12.63205, alt: 0, heading: 40, tSec: 264 },
-      { lat: 55.61271, lon: 12.63430, alt: 0, heading: 40, tSec: 268 },
-      { lat: 55.61422, lon: 12.63655, alt: 0, heading: 40, tSec: 272 },
-      { lat: 55.61574, lon: 12.63880, alt: 0, heading: 40, tSec: 277 },
-      { lat: 55.61725, lon: 12.64105, alt: 0, heading: 40, tSec: 282 },
-      { lat: 55.61877, lon: 12.64329, alt: 0, heading: 40, tSec: 289 },
-      { lat: 55.62028, lon: 12.64554, alt: 0, heading: 40, tSec: 299 },
-      { lat: 55.62056, lon: 12.64595, alt: 0, heading: 40, tSec: 302 },
+      //   5.0 km out   273 m   72 m/s   t+0
+      //   1.0 km out    67 m   70 m/s   t+57
+      //   threshold     15 m   70 m/s   t+71   50 ft, flare begins
+      //   touchdown      0 m   70 m/s   t+78   450 m in, 148 fpm
+      //   rollout end    0 m   14 m/s   t+124  1.22 m/s2 autobrake
+      { lat: 55.56963, lon: 12.57031, alt: 273, heading: 40, tSec: 0 },
+      { lat: 55.57445, lon: 12.57747, alt: 236.9, heading: 40, tSec: 10 },
+      { lat: 55.57858, lon: 12.58360, alt: 205.9, heading: 40, tSec: 18 },
+      { lat: 55.58271, lon: 12.58973, alt: 175, heading: 40, tSec: 27 },
+      { lat: 55.58615, lon: 12.59484, alt: 149.2, heading: 40, tSec: 34 },
+      { lat: 55.58959, lon: 12.59995, alt: 123.4, heading: 40, tSec: 41 },
+      { lat: 55.59234, lon: 12.60404, alt: 102.7, heading: 40, tSec: 46 },
+      { lat: 55.59475, lon: 12.60762, alt: 84.7, heading: 40, tSec: 51 },
+      { lat: 55.59681, lon: 12.61069, alt: 69.2, heading: 40, tSec: 55 },
+      { lat: 55.59853, lon: 12.61324, alt: 56.3, heading: 40, tSec: 59 },
+      { lat: 55.59991, lon: 12.61529, alt: 46, heading: 40, tSec: 62 },
+      { lat: 55.60115, lon: 12.61713, alt: 36.7, heading: 40, tSec: 64 },
+      { lat: 55.60218, lon: 12.61866, alt: 28.9, heading: 40, tSec: 67 },
+      { lat: 55.60301, lon: 12.61989, alt: 22.7, heading: 40, tSec: 68 },
+      { lat: 55.60363, lon: 12.62081, alt: 18.1, heading: 40, tSec: 70 },
+      { lat: 55.60404, lon: 12.62142, alt: 15, heading: 40, tSec: 70 },
+      { lat: 55.60435, lon: 12.62188, alt: 12.7, heading: 40, tSec: 71 },
+      { lat: 55.60466, lon: 12.62234, alt: 10.6, heading: 40, tSec: 72 },
+      { lat: 55.60497, lon: 12.62280, alt: 8.7, heading: 40, tSec: 72 },
+      { lat: 55.60528, lon: 12.62326, alt: 6.8, heading: 40, tSec: 73 },
+      { lat: 55.60559, lon: 12.62372, alt: 5.2, heading: 40, tSec: 74 },
+      { lat: 55.60590, lon: 12.62418, alt: 3.7, heading: 40, tSec: 74 },
+      { lat: 55.60621, lon: 12.62464, alt: 2.5, heading: 40, tSec: 75 },
+      { lat: 55.60652, lon: 12.62510, alt: 1.4, heading: 40, tSec: 76 },
+      { lat: 55.60683, lon: 12.62556, alt: 0.6, heading: 40, tSec: 76 },
+      { lat: 55.60714, lon: 12.62602, alt: 0, heading: 40, tSec: 77 },
+      { lat: 55.60817, lon: 12.62755, alt: 0, heading: 40, tSec: 79 },
+      { lat: 55.60968, lon: 12.62980, alt: 0, heading: 40, tSec: 82 },
+      { lat: 55.61120, lon: 12.63205, alt: 0, heading: 40, tSec: 86 },
+      { lat: 55.61271, lon: 12.63430, alt: 0, heading: 40, tSec: 90 },
+      { lat: 55.61422, lon: 12.63655, alt: 0, heading: 40, tSec: 94 },
+      { lat: 55.61574, lon: 12.63880, alt: 0, heading: 40, tSec: 99 },
+      { lat: 55.61725, lon: 12.64105, alt: 0, heading: 40, tSec: 105 },
+      { lat: 55.61877, lon: 12.64329, alt: 0, heading: 40, tSec: 111 },
+      { lat: 55.62028, lon: 12.64554, alt: 0, heading: 40, tSec: 122 },
+      { lat: 55.62056, lon: 12.64595, alt: 0, heading: 40, tSec: 124 },
     ],
-    durationSec: 302,
+    durationSec: 124,
   },
 
   // ── Recon drone, HALE (Reaper/Global-Hawk class), high altitude circular loiter ──
