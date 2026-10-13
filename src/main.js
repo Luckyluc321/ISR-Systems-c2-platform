@@ -17344,7 +17344,14 @@ async function main() {
         state.billboard.position = state._cartNow;
         // Two condensation cores off the wingtips, faded in as it
         // descends. Opt-in per template; nothing else grows a pair.
-        if (TEMPLATES[event.templateKey]?.wingVortices) {
+        // OFF UNLESS ASKED FOR. The first version read as two big white
+        // streaks behind the aircraft rather than vapour, and it went out
+        // while the scene was already struggling, which made it look like
+        // the cause of everything. Declared by the template, enabled by
+        // hand, until it is dialled in:
+        //   window.__isr_vortex_tuning = { enabled: true }
+        if (TEMPLATES[event.templateKey]?.wingVortices
+            && ((window.__isr_vortex_tuning || {}).enabled ?? false)) {
           _wingVortices.step(event.id, state._cartNow,
             state.stateHolder?.attitude, p.alt);
         }

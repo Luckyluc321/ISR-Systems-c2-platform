@@ -31,16 +31,21 @@ import { monoNow } from './sim_clock.js';
 //   up       +ve above the model origin
 const TIP = { forward: -4.55, side: 17.009, up: 4.298 };
 
+// FAR SUBTLER THAN THE FIRST ATTEMPT. Width 7 at half alpha over 154 m,
+// starting 400 m up, did not read as condensation. It read as two big
+// white streaks, which is worse than drawing nothing. Vapour is thin,
+// short, faint, and only appears when the aircraft is low and working.
 const DEFAULTS = {
-  seconds: 2.2,       // trail length in time; 2.2 s at 70 m/s is ~154 m
-  sampleMs: 55,       // ~40 samples across the trail
-  width: 7,
-  glowPower: 0.22,
-  alpha: 0.5,
-  // Vortices are a low-level, high-angle-of-attack phenomenon. Full
-  // strength on short final, gone by the time it is a dot on the map.
-  fadeFromAglM: 400,
-  fullAglM: 150,
+  enabled: false,     // explicit opt-in; see the gate in main.js
+  seconds: 1.1,       // ~77 m at 70 m/s, about two fuselage lengths
+  sampleMs: 45,
+  width: 2.5,
+  glowPower: 0.1,
+  alpha: 0.22,
+  // Low and working, which is the last few hundred metres, not the
+  // whole approach.
+  fadeFromAglM: 120,
+  fullAglM: 25,
 };
 
 export function createWingVortices(viewer, Cesium) {
