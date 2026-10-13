@@ -793,8 +793,8 @@ import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from '
 import { createParkedAircraft } from './static_aircraft.js';
 import { A320_POSES } from './a320_poses.js';
 import { createWingVortices } from './airliner_vortices.js';
-import { rigidTransforms, createAirbrakeState,
-         createGearState } from './airliner_surfaces.js';
+// airliner_surfaces.js is dormant: see the note at the model uri.
+// import { rigidTransforms, createAirbrakeState, createGearState } from './airliner_surfaces.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -15860,12 +15860,7 @@ async function main() {
     let _clockWasAnimating = null;
     // Airbrakes. Four nodes driven by hand instead of the whole 142-joint
     // skeleton, which is what the full animation costs. Fed from the tick.
-    const _airbrakes = createAirbrakeState({ monoNow });
-    // Gear. This model ships gear DOWN, so the retraction is what has to
-    // be driven, and it is released again as the aircraft comes in.
-    const _gear = createGearState({ monoNow,
-      extendBelowAglM: (window.__isr_airliner_tuning || {}).gearBelowAglM ?? 450,
-      extendMs: (window.__isr_airliner_tuning || {}).gearExtendMs ?? 9000 });
+
     const _A320_ANIM_SEC = 28.1667;   // measured from the GLB's samplers
     const _airlinerAnimRunning = () => {
       if (_animT0 === null) { _animT0 = performance.now(); return true; }
@@ -16060,14 +16055,24 @@ async function main() {
           //
           // Rebuild with scripts/optimise_glb_textures.py. The source
           // file stays in the tree, so reverting is this one line.
-          // KNOWN GOOD BY DEFAULT. a320_rigid.glb is the extracted
-          // version, structurally valid but not yet confirmed on screen,
-          // and it made the aircraft disappear. Opt in to test it:
-          //   window.__isr_airliner_tuning = { rigid: true }
-          // set BEFORE launching, since the model spec is built when the
-          // track is created.
-          : (isAirliner ? ((window.__isr_airliner_tuning || {}).rigid
-              ? '/aircraft/a320_rigid.glb' : '/aircraft/a320_hq.glb') : null)));
+          // a320_hq.glb, full stop.
+          //
+          // a320_rigid.glb is the extracted model: gear and airbrakes
+          // lifted out of the skin into 118 plain nodes. The file is
+          // valid and the geometry is right, but driving it broke the
+          // aircraft apart on screen AND made the map unusable, so the
+          // premise that plain nodes would be cheap did not survive
+          // contact. Cesium appears to pay for a model having ANY dirty
+          // node transforms, not for how many or for whether they are
+          // joints.
+          //
+          // The model, both manifests and
+          // scripts/split_airliner_surfaces.py stay in the tree. If this
+          // is picked up again, the thing to try is setting the
+          // transforms ONCE at a few discrete steps instead of through a
+          // CallbackProperty every frame.
+          : (isAirliner ? '/aircraft/a320_hq.glb' : null)));
+
     const _shouldSwapModel = isLoiterMun || isQuadcopter || isHostileHeli || isAirliner;
 
     // Flight rig — closure-captured per entity so each Shahed has
@@ -16502,17 +16507,6 @@ async function main() {
         //
         // Skipped entirely while the model's own animation runs, so the
         // two can never fight over the same parts.
-        // Only meaningful on the rigid model: these node names exist
-        // nowhere else, so they are skipped entirely otherwise.
-        ...((isAirliner && (window.__isr_airliner_tuning || {}).rigid
-             && !((window.__isr_airliner_tuning || {}).animate ?? false))
-          ? { nodeTransformations: rigidTransforms(Cesium, {
-              gear: () => ((window.__isr_airliner_tuning || {}).gear ?? true)
-                ? _gear.fraction() : 1,
-              brakes: () => ((window.__isr_airliner_tuning || {}).airbrakes ?? true)
-                ? _airbrakes.fraction() : 0,
-            }) }
-          : {}),
       };
       // THE AIRLINER FLIES THE FIXED-WING RIG, not the quadcopter one.
       //
@@ -16866,7 +16860,6 @@ async function main() {
       leadSwarmMember,   // formation[0] wrapper, same shape as swarmBillboards entries
       spawnMs: monoNow(),   // shared timing reference for swarm interpolation
       trailPositions, shadowPositions,
-      _airbrakes, _gear,
       stateHolder,      // { headingRad } — updated in tick, read by billboard rotation callback
       entryDropped: false, entryMarker: null,
       exitDropped: false, exitMarker: null, wasInCoverage: false,
@@ -17518,8 +17511,7 @@ async function main() {
         // AGL for the orientation rig, which fades its pitch offset out
         // near the ground and cannot read it off the cartographic height.
         if (state.stateHolder) state.stateHolder.aglM = p.alt;
-        state._airbrakes?.update(p.alt);
-        state._gear?.update(p.alt);
+
         // COMPUTED ONCE AND REUSED. The drop line and the trail used to
         // rebuild this from p.alt independently, which is how the trail
         // ended up drawn on the ground while the aircraft flew 40 m above
