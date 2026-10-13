@@ -16405,10 +16405,20 @@ async function main() {
         // of 248 channels differ from the final frame, all of them
         // spinning parts. So with the animation off the aircraft still
         // looks correct, it simply does not move its surfaces.
-        ...((isAirliner && ((window.__isr_airliner_tuning || {}).animate ?? false))
-          ? { runAnimations: new Cesium.CallbackProperty(
-              () => _airlinerAnimRunning(), false) }
-          : {}),
+        //
+        // EXPLICIT false, NOT an omitted property. ModelVisualizer reads
+        // this with Property.getValueOrDefault(..., time, TRUE), so
+        // leaving it out does not mean "no animations", it means "run
+        // them". Spreading the property away was a no-op: Cesium added
+        // the 28 s sequence anyway and the only reason the map stayed
+        // fast was that the clock was frozen, so it never advanced.
+        //
+        // Advancing it is what costs. 142 skin joints re-evaluated every
+        // frame on a 75,815 vertex model, which Lucas saw as the
+        // aircraft starting to pivot and bank the instant the clock ran.
+        ...(isAirliner ? { runAnimations: ((window.__isr_airliner_tuning || {}).animate ?? false)
+          ? new Cesium.CallbackProperty(() => _airlinerAnimRunning(), false)
+          : false } : {}),
         // NO BAKED POSE. Applying the animation's node transforms through
         // nodeTransformations tore the aircraft to pieces: wings, flaps
         // and gear scattered around the fuselage, and the map dropped to
