@@ -79,7 +79,7 @@ const BRAKE = /AirBrake/i;
 // spin-up and are fully out in about a second: this is a touchdown
 // event, not an altitude ramp. 73.3 degrees, the artist's own figure,
 // measured as the rotation relative to each panel's rest pose.
-const BRAKE_DEPLOY_MS = 1200;
+const BRAKE_DEPLOY_MS = 900;
 // And stowed again once the aircraft is down to taxi speed, which is
 // what the crew does on the roll: the panels are no longer doing
 // anything useful below about 15 kt, and an aircraft taxiing to its
@@ -274,7 +274,7 @@ export function createGearDriver(Cesium, viewer, {
       let f = t0 === null ? 0 : Math.min(1, (monoNow() - t0) / extendMs);
       if (tUp !== null) f = Math.max(0, f - (monoNow() - tUp) / extendMs);
       // Spoilers fire on touchdown, not on height.
-      if (td === null && typeof aglM === 'number' && aglM <= 0.3) {
+      if (td === null && typeof aglM === 'number' && aglM <= 1.0) {
         td = monoNow();
         // One line, once, so a landing run says plainly whether the
         // spoilers fired. Everything about this path checks out on

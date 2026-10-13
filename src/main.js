@@ -16183,8 +16183,15 @@ async function main() {
         bankClampDeg: 25,
         bankFactor: 1.2,       // gentle, and it is flying straight anyway
         pitchSmoothing: 0.06,  // heavy aircraft, slow attitude changes
-        rollSmoothing: 0.05,
-        headingSmoothing: 0.10,
+        // ROLL AND HEADING WERE TOO SLOW, and the lag compounds. The
+        // tick already eases the heading toward its target, this rig
+        // eases it again, and then eases the roll derived from it. Three
+        // filters in series put the bank seconds behind the turn, which
+        // reads as the wings wallowing rather than the aircraft rolling
+        // into it. Raised so the chain settles in well under a second
+        // while still being far slower than a fighter.
+        rollSmoothing: 0.11,
+        headingSmoothing: 0.22,
         // BOTH NEGATIVE, and this file already wrote down why. The
         // Shahed's note at the top of this section states the rule: a
         // nose on body -X needs heading +90, and "also reverses Cesium's
@@ -17667,26 +17674,23 @@ async function main() {
         if (_terrainRel) {
           const _g = _airborneAbsAlt(p.lon, p.lat, 0);
           if (_g > 0) {
-            // ON THE GROUND, RIDE UP BUT NEVER SINK.
+            // ON THE GROUND, TRACK THE SURFACE EXACTLY.
             //
-            // globe.getHeight() returns the bare height model, and the
-            // drawn runway sits about 2 m above it, which groundOffsetM
-            // covers. But that gap is not constant along the runway, so
-            // tracking the sample symmetrically pulls the aircraft down
-            // wherever the gap widens: it lands correctly and then eases
-            // into the tarmac.
+            // Two wrong answers before this one. Smoothing it slowly
+            // meant the offset lagged a runway surface that rises along
+            // its length, so the wheels sank. Letting it rise but never
+            // fall fixed that and introduced a RATCHET: any upward blip
+            // in the sample, and globe.getHeight() does blip as the
+            // level of detail refines, locks in permanently and the
+            // aircraft floats for the rest of the rollout.
             //
-            // A runway only ever needs the wheels to follow the surface
-            // UP. Sinking is instantly visible, floating by a few tens
-            // of centimetres is not, so on the ground the offset rises
-            // with the terrain and is never dragged below what it has
-            // already established. In the air it tracks both ways, where
-            // nothing can see it.
+            // On the ground there is nothing to smooth. The wheels are
+            // ON the surface, so the offset IS the surface. Taken
+            // directly, it can neither lag nor ratchet. In the air it
+            // still eases, where a tile stepping cannot be seen.
             const _onGround = (p.alt || 0) <= 1;
-            if (state._terrOff == null) {
+            if (state._terrOff == null || _onGround) {
               state._terrOff = _g;
-            } else if (_onGround) {
-              if (_g > state._terrOff) state._terrOff += (_g - state._terrOff) * 0.45;
             } else {
               state._terrOff += (_g - state._terrOff) * 0.12;
             }
