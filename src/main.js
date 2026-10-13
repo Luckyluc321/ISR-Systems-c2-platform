@@ -16925,6 +16925,75 @@ async function main() {
   // camera looks along the direction of travel.
   //
   //   window.__isr_iconDebug()
+    // Isolate the animation cost from the moving-sun cost. The clock
+    // drives both: the model's own sequence, and the sun under
+    // globe.enableLighting + dynamicAtmosphereLightingFromSun.
+    //   window.__isr_clockTest(true)  -> sun moves, no model animation
+    //   window.__isr_clockTest(false) -> back to frozen
+    // Run __isr_perf() after each to see which one actually costs.
+    window.__isr_clockTest = (on) => {
+      viewer.clock.shouldAnimate = !!on;
+      console.log('[clockTest] shouldAnimate =', viewer.clock.shouldAnimate,
+        '- the model sequence only runs if __isr_airliner_tuning.animate is true');
+      return viewer.clock.shouldAnimate;
+    };
+
+    // Full track report: the icon's heading AND the altitude chain, so one
+    // paste answers both "the nose points wrong" and "the trail sits below
+    // the aircraft". Everything is read back from what is actually
+    // rendered, not from what the code intended, because the code says
+    // both faults are impossible and the screen disagrees.
+    window.__isr_trackDebug = () => {
+      const rows = [];
+      for (const [eventId, st] of droneState) {
+        if (!st?.stateHolder) continue;
+        const cart = st.billboard?.position?.getValue?.(Cesium.JulianDate.now());
+        if (!cart) continue;
+        const c = Cesium.Cartographic.fromCartesian(cart);
+        const lat = Cesium.Math.toDegrees(c.latitude);
+        const lon = Cesium.Math.toDegrees(c.longitude);
+        const ground = viewer.scene.globe.getHeight(
+          Cesium.Cartographic.fromDegrees(lon, lat));
+        const tail = st.trailPositions?.[st.trailPositions.length - 1];
+        const tailH = tail ? Cesium.Cartographic.fromCartesian(tail).height : null;
+        let iconBrg = null, trueBrg = null, err = null;
+        if (st.prevLat !== undefined) {
+          const dLat = lat - st.prevLat;
+          const dLon = (lon - st.prevLon) * Math.cos(lat * Math.PI / 180);
+          trueBrg = (Cesium.Math.toDegrees(Math.atan2(dLon, dLat)) + 360) % 360;
+          iconBrg = (Cesium.Math.toDegrees(-st.stateHolder.headingRad) + 360) % 360;
+          err = iconBrg - trueBrg;
+          while (err > 180) err -= 360;
+          while (err < -180) err += 360;
+        }
+        rows.push({
+          event: String(eventId).slice(0, 16),
+          iconPointsAt: iconBrg === null ? null : +iconBrg.toFixed(1),
+          trueTrack: trueBrg === null ? null : +trueBrg.toFixed(1),
+          headingErrDeg: err === null ? null : +err.toFixed(1),
+          trimDeg: +Cesium.Math.toDegrees(st.stateHolder.iconTrimRad || 0).toFixed(1),
+          aircraftH: +c.height.toFixed(1),
+          groundH: ground === undefined ? null : +ground.toFixed(1),
+          aboveGround: ground === undefined ? null : +(c.height - ground).toFixed(1),
+          lastTrailH: tailH === null ? null : +tailH.toFixed(1),
+          trailMinusAircraft: tailH === null ? null : +(tailH - c.height).toFixed(1),
+          trailPoints: st.trailPositions?.length ?? 0,
+          waypointAgl: +(st.stateHolder.aglM ?? 0).toFixed(1),
+          terrOff: (st._terrOff === undefined || st._terrOff === null)
+            ? 'NOT SET' : +st._terrOff.toFixed(1),
+        });
+      }
+      console.table(rows);
+      console.log('camera', {
+        headingDeg: +Cesium.Math.toDegrees(viewer.camera.heading).toFixed(1),
+        pitchDeg: +Cesium.Math.toDegrees(viewer.camera.pitch).toFixed(1),
+        heightM: +Cesium.Cartographic.fromCartesian(viewer.camera.position).height.toFixed(0),
+      });
+      if (!rows.length) console.warn('[trackDebug] no live track - run it while it is flying');
+      return rows;
+    };
+
+
   if (typeof window !== 'undefined') {
     window.__isr_iconDebug = () => {
       const rows = [];
