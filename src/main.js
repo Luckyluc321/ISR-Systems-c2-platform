@@ -15858,7 +15858,7 @@ async function main() {
     // Gear, applied in discrete steps and then released. See
     // airliner_surfaces.js for why this is not a per-frame property.
     const _gear = createGearState({ monoNow,
-      extendBelowAglM: (window.__isr_airliner_tuning || {}).gearBelowAglM ?? 450,
+      extendBelowAglM: (window.__isr_airliner_tuning || {}).gearBelowAglM ?? 300,
       extendMs: (window.__isr_airliner_tuning || {}).gearExtendMs ?? 9000 });
     let _animT0 = null;
     let _clockWasAnimating = null;
@@ -17557,11 +17557,30 @@ async function main() {
           // stop-motion robot. The hold below drops to 25 ms so the
           // property is still defined for only a quarter of the frames
           // during the extension, and none at all outside it.
-          const _STEPS = (window.__isr_airliner_tuning || {}).gearSteps ?? 120;
+          // THIS NUMBER IS THE TRADE, and there is no way round it.
+          // Every step costs one application of 48 node transforms, and
+          // Cesium does real work for each: 120 steps looked like proper
+          // motion and froze the map, 40 ran smoothly and marched like a
+          // robot. 60 is the middle. It is a knob because only the eye
+          // can settle it:
+          //   window.__isr_airliner_tuning = { gearSteps: 100 }
+          const _STEPS = (window.__isr_airliner_tuning || {}).gearSteps ?? 60;
           const _step = Math.round(state._gear.fraction() * _STEPS);
           const _mg = state.billboard?.model;
-          if (_mg && _step !== state._gearStep) {
+          // SETTLE PHASE. The aircraft starts with its wheels out because
+          // the model is still LOADING when the first pose is applied and
+          // cleared 25 ms later: it lands on nothing, and the model
+          // arrives in its rest pose, which is gear down. There is no
+          // readiness signal to wait on from here, so step 0 is simply
+          // re-applied every 500 ms for the first few seconds until one
+          // of them catches. 25 ms in every 500 is a 5% duty cycle.
+          if (state._gearSettleT0 == null) state._gearSettleT0 = monoNow();
+          const _settling = _step === 0
+            && monoNow() - state._gearSettleT0 < 6000
+            && monoNow() - (state._gearLastApply || 0) > 500;
+          if (_mg && (_step !== state._gearStep || _settling)) {
             state._gearStep = _step;
+            state._gearLastApply = monoNow();
             _mg.nodeTransformations = gearPose(Cesium, _step / _STEPS);
             state._gearHeldSince = monoNow();
           } else if (_mg && state._gearHeldSince

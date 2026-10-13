@@ -62,7 +62,7 @@ export function gearPose(Cesium, f) {
  *  The step count in main.js is about RENDERING smoothness and does not
  *  affect this pace, but the two want to move together: 40 steps over
  *  12 s keeps one change every 300 ms. */
-export function createGearState({ monoNow, extendBelowAglM = 450, extendMs = 12000 }) {
+export function createGearState({ monoNow, extendBelowAglM = 300, extendMs = 12000 }) {
   let t0 = null;
   return {
     update(aglM) {
