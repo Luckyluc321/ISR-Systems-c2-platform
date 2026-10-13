@@ -15888,11 +15888,34 @@ async function main() {
       // the compass bearing negated. Invert to get standard compass
       // bearing (CW from north, radians).
       const bearing = -stateHolder.headingRad;
-      // Forward = north * cos(bearing) + east * sin(bearing)
+      // THE ICON IS A FLAT SPRITE aligned to this vector PROJECTED into
+      // the screen. If the vector is the horizontal heading while the
+      // aircraft is descending, the symbol and the trail disagree on
+      // screen by an amount that depends entirely on the camera.
+      //
+      // Measured from Lucas's view (camera heading 15, pitch -45, track
+      // 040 on a 3 degree glideslope): the horizontal vector lands at
+      // 33.40 degrees from screen up, the real path at 34.99. A 1.59
+      // degree mismatch, which reads as the nose sitting just off the
+      // direction of travel. On a level drone it is zero, which is why
+      // nothing noticed before an aircraft flew a glideslope.
+      //
+      // Opt-in per template. _forwardVec is a per-track closure, so this
+      // cannot reach any other airframe.
+      const _fpa = TEMPLATES[event.templateKey]?.iconTracksFlightPath
+        ? (stateHolder.fpaRad || 0) : 0;
+      const cf = Math.cos(_fpa);
+      // Forward = (north * cos(bearing) + east * sin(bearing)) * cos(fpa)
+      //           + up * sin(fpa)
       const fwd = new Cesium.Cartesian3();
-      Cesium.Cartesian3.multiplyByScalar(north, Math.cos(bearing), fwd);
-      const eastComp = Cesium.Cartesian3.multiplyByScalar(east, Math.sin(bearing), new Cesium.Cartesian3());
+      Cesium.Cartesian3.multiplyByScalar(north, Math.cos(bearing) * cf, fwd);
+      const eastComp = Cesium.Cartesian3.multiplyByScalar(east, Math.sin(bearing) * cf, new Cesium.Cartesian3());
       Cesium.Cartesian3.add(fwd, eastComp, fwd);
+      if (_fpa) {
+        const upVec = new Cesium.Cartesian3(enuMat[8], enuMat[9], enuMat[10]);
+        Cesium.Cartesian3.multiplyByScalar(upVec, Math.sin(_fpa), upVec);
+        Cesium.Cartesian3.add(fwd, upVec, fwd);
+      }
       Cesium.Cartesian3.normalize(fwd, fwd);
       return fwd;
     };
@@ -16957,9 +16980,17 @@ async function main() {
         const tail = st.trailPositions?.[st.trailPositions.length - 1];
         const tailH = tail ? Cesium.Cartographic.fromCartesian(tail).height : null;
         let iconBrg = null, trueBrg = null, err = null;
-        if (st.prevLat !== undefined) {
-          const dLat = lat - st.prevLat;
-          const dLon = (lon - st.prevLon) * Math.cos(lat * Math.PI / 180);
+        // NOT st.prevLat: the tick sets that to the CURRENT position
+        // before this ever runs, so it reported a true track of 0 and an
+        // error equal to the heading. A genuine earlier sample is kept
+        // for this, taken from the trail.
+        const back = st.trailPositions?.[Math.max(0, (st.trailPositions.length || 1) - 6)];
+        const backC = back ? Cesium.Cartographic.fromCartesian(back) : null;
+        if (backC) {
+          const bLat = Cesium.Math.toDegrees(backC.latitude);
+          const bLon = Cesium.Math.toDegrees(backC.longitude);
+          const dLat = lat - bLat;
+          const dLon = (lon - bLon) * Math.cos(lat * Math.PI / 180);
           trueBrg = (Cesium.Math.toDegrees(Math.atan2(dLon, dLat)) + 360) % 360;
           iconBrg = (Cesium.Math.toDegrees(-st.stateHolder.headingRad) + 360) % 360;
           err = iconBrg - trueBrg;
@@ -17554,6 +17585,15 @@ async function main() {
             // Published so _bankedOrientation strips the SAME value that
             // was applied, rather than assuming the global default.
             state.stateHolder.iconTrimRad = _trim;
+            // FLIGHT PATH ANGLE, for icons that align to the real
+            // direction of travel rather than its horizontal shadow.
+            // Positive is climbing.
+            const _dAlt = p.alt - (state._fpaPrevAlt ?? p.alt);
+            const _dHoriz = Math.hypot(dLat * 111320, dLon * 111320);
+            if (_dHoriz > 0.5) {
+              state.stateHolder.fpaRad = Math.atan2(_dAlt, _dHoriz);
+            }
+            state._fpaPrevAlt = p.alt;
             const target = -Math.atan2(dLon, dLat) + _trim;
             if (state.stateHolder.headingInit) {
               let delta = target - state.stateHolder.headingRad;

@@ -117,6 +117,12 @@ export const TEMPLATES = {
     // reads the effective value rather than the global so the two cannot
     // double-correct each other.
     iconBearingTrimDeg: 0,
+    // The symbol aligns to the REAL direction of travel, not to its
+    // horizontal shadow. On a 3 degree glideslope seen from a pitched
+    // camera those differ on screen by about 1.6 degrees, which reads as
+    // the nose sitting just off the track. Zero for level flight, which
+    // is why only an aircraft on an approach exposes it.
+    iconTracksFlightPath: true,
     // Two condensation cores off the wingtips on short final, drawn by
     // src/airliner_vortices.js. DECLARED BUT NOT ENABLED: the first
     // version read as a pair of big white streaks rather than vapour,
