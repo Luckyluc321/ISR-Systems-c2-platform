@@ -16497,7 +16497,14 @@ async function main() {
         //   window.__isr_airliner_tuning = { gear: false }
         ...((isAirliner && !((window.__isr_airliner_tuning || {}).animate ?? false))
           ? { nodeTransformations: {
-              ...(((window.__isr_airliner_tuning || {}).gear ?? true)
+              // OFF BY DEFAULT. 48 skinned joints driven every frame put
+              // the frame rate on the floor. Shipping this on while
+              // saying its cost was unknown was the wrong call.
+              //   window.__isr_airliner_tuning = { gear: true }
+              // and it must be set BEFORE the scenario is launched,
+              // because nodeTransformations is built when the track is
+              // created, not read per frame.
+              ...(((window.__isr_airliner_tuning || {}).gear ?? false)
                 ? gearTransforms(Cesium, () => _gear.fraction()) : {}),
               ...((window.__isr_airliner_tuning || {}).airbrakes
                 ? airbrakeTransforms(Cesium, () => _airbrakes.fraction()) : {}),
