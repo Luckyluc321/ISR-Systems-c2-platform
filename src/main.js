@@ -793,6 +793,7 @@ import { runwayLightsForSite, taxiwayLightsForSite, RUNWAY_LIGHT_COLORS } from '
 import { createParkedAircraft } from './static_aircraft.js';
 import { A320_POSES } from './a320_poses.js';
 import { createWingVortices } from './airliner_vortices.js';
+import { airbrakeTransforms, createAirbrakeState } from './airliner_surfaces.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -15856,6 +15857,9 @@ async function main() {
     // keeps extending if the simulation is paused mid-sequence.
     let _animT0 = null;
     let _clockWasAnimating = null;
+    // Airbrakes. Four nodes driven by hand instead of the whole 142-joint
+    // skeleton, which is what the full animation costs. Fed from the tick.
+    const _airbrakes = createAirbrakeState({ monoNow });
     const _A320_ANIM_SEC = 28.1667;   // measured from the GLB's samplers
     const _airlinerAnimRunning = () => {
       if (_animT0 === null) { _animT0 = performance.now(); return true; }
@@ -16469,6 +16473,13 @@ async function main() {
         ...(isAirliner ? { runAnimations: ((window.__isr_airliner_tuning || {}).animate ?? false)
           ? new Cesium.CallbackProperty(() => _airlinerAnimRunning(), false)
           : false } : {}),
+        // AIRBRAKES, driven node by node rather than by running the
+        // skeleton. Only applied when the model's own animation is NOT
+        // running, so the two never fight over the same four nodes.
+        ...((isAirliner && !((window.__isr_airliner_tuning || {}).animate ?? false))
+          ? { nodeTransformations: airbrakeTransforms(Cesium,
+              () => _airbrakes.fraction()) }
+          : {}),
         // NO BAKED POSE. Applying the animation's node transforms through
         // nodeTransformations tore the aircraft to pieces: wings, flaps
         // and gear scattered around the fuselage, and the map dropped to
@@ -16892,6 +16903,7 @@ async function main() {
       leadSwarmMember,   // formation[0] wrapper, same shape as swarmBillboards entries
       spawnMs: monoNow(),   // shared timing reference for swarm interpolation
       trailPositions, shadowPositions,
+      _airbrakes,
       stateHolder,      // { headingRad } — updated in tick, read by billboard rotation callback
       entryDropped: false, entryMarker: null,
       exitDropped: false, exitMarker: null, wasInCoverage: false,
@@ -17543,6 +17555,7 @@ async function main() {
         // AGL for the orientation rig, which fades its pitch offset out
         // near the ground and cannot read it off the cartographic height.
         if (state.stateHolder) state.stateHolder.aglM = p.alt;
+        state._airbrakes?.update(p.alt);
         // COMPUTED ONCE AND REUSED. The drop line and the trail used to
         // rebuild this from p.alt independently, which is how the trail
         // ended up drawn on the ground while the aircraft flew 40 m above
