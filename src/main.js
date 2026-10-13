@@ -17550,14 +17550,29 @@ async function main() {
         if (_terrainRel) {
           const _g = _airborneAbsAlt(p.lon, p.lat, 0);
           if (_g > 0) {
-            // 0.08 per tick is a 3 to 4 second time constant. The
-            // runway surface rises along its length here, 38.0 m at the
-            // threshold to 38.9 at the far end, so a lag that slow
-            // leaves the wheels under a surface that is climbing faster
-            // than the offset follows it. On the ground, track it hard.
-            const _k = (p.alt || 0) <= 1 ? 0.45 : 0.12;
-            state._terrOff = state._terrOff == null ? _g
-              : state._terrOff + (_g - state._terrOff) * _k;
+            // ON THE GROUND, RIDE UP BUT NEVER SINK.
+            //
+            // globe.getHeight() returns the bare height model, and the
+            // drawn runway sits about 2 m above it, which groundOffsetM
+            // covers. But that gap is not constant along the runway, so
+            // tracking the sample symmetrically pulls the aircraft down
+            // wherever the gap widens: it lands correctly and then eases
+            // into the tarmac.
+            //
+            // A runway only ever needs the wheels to follow the surface
+            // UP. Sinking is instantly visible, floating by a few tens
+            // of centimetres is not, so on the ground the offset rises
+            // with the terrain and is never dragged below what it has
+            // already established. In the air it tracks both ways, where
+            // nothing can see it.
+            const _onGround = (p.alt || 0) <= 1;
+            if (state._terrOff == null) {
+              state._terrOff = _g;
+            } else if (_onGround) {
+              if (_g > state._terrOff) state._terrOff += (_g - state._terrOff) * 0.45;
+            } else {
+              state._terrOff += (_g - state._terrOff) * 0.12;
+            }
           }
           // GROUND OFFSET, trimmed by eye and then written down.
           //
