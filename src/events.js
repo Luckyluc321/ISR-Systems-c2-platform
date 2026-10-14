@@ -539,7 +539,11 @@ export function escalateEvent(id, { destinationIds, payload, message, operator =
   e.notes.push({
     timestamp: now.toISOString(),
     author: operator,
-    text: `Escalated to ${uniqueDests.length} destination(s). Payload: ${payload}.${message ? ' Message: "' + message.trim() + '"' : ''}`,
+    // The note records WHAT was sent, not a message that may differ per
+    // recipient now. Quoting one of seven different messages here would
+    // be worse than quoting none.
+    text: `Escalated to ${uniqueDests.length} destination(s). Payload: ${payload}.`
+      + (message && message.trim() ? ` Operator message: "${message.trim()}"` : ' Per-recipient default messages.'),
     type: 'escalation',
   });
   _listeners.forEach(fn => fn(id));

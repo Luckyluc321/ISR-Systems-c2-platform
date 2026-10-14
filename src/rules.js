@@ -29,7 +29,7 @@ const DEFAULT_RULES = [
     // only manual action left is Air Force clicking Dispatch F-35.
     siteId: 'all', enabled: true,
     when: { platform: 'missile', minConfidence: 0.80 },
-    then: { escalateToTiers: [1,2,3,4,5], payload: 'full', message: 'Automatic dispatch by rule. Confirmed cruise missile class signature.', delaySec: 0 },
+    then: { escalateToTiers: [1,2,3,4,5], payload: 'full', message: '', delaySec: 0 },
   },
   {
     id: 'r-hostile-high-t1',
@@ -40,27 +40,36 @@ const DEFAULT_RULES = [
     // a human to confirm before waking up PET, FE, Politi, etc.
     siteId: 'all', enabled: true,
     when: { classification: 'hostile', threat: 'high', minConfidence: 0.75 },
-    then: { escalateToTiers: [1], payload: 'summary', message: 'Automatic notification. Confirmed hostile threat, site security engaged.', delaySec: 0 },
+    // NO MESSAGE HERE, DELIBERATELY. An empty message means "use the
+    // per-recipient default" from escalation_messages.js. This used to
+    // carry one sentence that went to all seven tier 1 destinations
+    // identically, so the tower, the fire service and the camera system
+    // all received "Confirmed hostile threat, site security engaged."
+    // None of them is told what to do with it.
+    then: { escalateToTiers: [1], payload: 'summary', message: '', delaySec: 0 },
   },
   {
     id: 'r-fixed-wing-t3',
     name: 'Fixed wing hostile → loop in Tier 3 within 60 seconds',
     siteId: 'all', enabled: true,
     when: { platform: 'fixed-wing', classification: 'hostile', minConfidence: 0.70 },
-    then: { escalateToTiers: [3], payload: 'summary', message: 'Auto dispatched by rule: fixed wing platform requires national visibility.', delaySec: 60 },
+    then: { escalateToTiers: [3], payload: 'summary', message: '', delaySec: 60 },
   },
   {
     id: 'r-friendly-log-only',
     name: 'Friendly ID → log to Tier 1 only',
     siteId: 'all', enabled: true,
     when: { classification: 'friendly' },
-    then: { escalateToTiers: [1], payload: 'summary', message: 'Auto logged: friendly identification for audit record.', delaySec: 0 },
+    then: { escalateToTiers: [1], payload: 'summary', message: '', delaySec: 0 },
   },
 ];
 
 // Persistence
 // Bumped 2026-07-30 to invalidate cached rules where missile auto-fire was enabled.
-const STORAGE_KEY = 'isr_c2_rules_overrides_v3';
+// Bumped again 2026-10-14: the rules carried a hardcoded message that went
+// to every recipient identically. Without this bump a cached override
+// keeps sending it and the per-recipient defaults never appear.
+const STORAGE_KEY = 'isr_c2_rules_overrides_v4';
 function loadRules() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
