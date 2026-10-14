@@ -12383,6 +12383,41 @@ async function main() {
   // that a drone skimming the edge of a ring does not strobe.
   const _CONF_HALF_LIFE_MS = 1500;
 
+  // FUSED CONFIDENCE, DRIVEN BY OBSERVATION QUALITY.
+  //
+  // This was a sine wave: 0.75 + i*0.04 + sin(tSec*0.3 + i*1.7)*0.08.
+  // Amplitude 0.08 on a 21 second period is a peak rate of about 2.4 per
+  // cent a second, so the panel climbed roughly a point a second up to a
+  // ceiling, walked back down, and did it again forever with nothing in
+  // the world driving it. An operator who watches a number breathe on a
+  // timer learns to ignore it, which is worse than showing nothing.
+  //
+  // A fused estimate should move when the OBSERVATION moves. The thing
+  // that actually changes as a track crosses a site is how many sensors
+  // hold it, so that is what drives this. One sensor is a weak fix, six
+  // or more is a strong one, and the number rises and falls with the
+  // geometry instead of with the clock.
+  //
+  // ONE ESTIMATE FOR THE FORMATION, per the fusion contract: every member
+  // reads the same sensor count rather than scoring itself in isolation.
+  // The small per-slot offset is STATIC, so the roster does not show five
+  // identical numbers and nothing animates.
+  const _FUSION_SATURATION_SENSORS = 6;
+  function _fusedMemberConfidence(event, slotIdx, unidentified) {
+    const held = (event.contributingSensors || [])
+      .filter(c => !c.offline && (c.confidence || 0) >= 0.08).length;
+    const q = Math.min(1, held / _FUSION_SATURATION_SENSORS);
+    const jitter = ((slotIdx % 3) - 1) * 0.02;
+    // UNIDENTIFIED members stay in the weak band whatever the geometry,
+    // because the uncertainty is in the CLASSIFICATION rather than in the
+    // fix. Replay and debrief colour-code trails off this band.
+    if (unidentified) {
+      return +Math.max(0.32, Math.min(0.55, 0.38 + 0.14 * q + jitter)).toFixed(2);
+    }
+    const base = event.confidence || 0.85;
+    return +Math.max(0.40, Math.min(0.98, base * (0.72 + 0.28 * q) + jitter)).toFixed(2);
+  }
+
   function _updateContributingSensorsForPosition(event, lat, lon, altM) {
     try {
       const tickSeq = _contribTickSeq;
@@ -12443,6 +12478,41 @@ async function main() {
             .filter(c => c.offline || (c.confidence || 0) >= 0.08
                       || (c.peakConfidence || 0) > 0);
           targetEvent._contribTickSeq = tickSeq;
+        }
+        // GEOMETRY FLOOR: A NEAREST SENSOR CANNOT READ 0.00.
+        //
+        // The active panel ranks contributing sensors by distance to the
+        // threat, so the top five ARE the nearest sensors. 0.00 on one of
+        // those is the one value in that list that cannot be true: if the
+        // track is inside a sensor's cylinder then that sensor is
+        // contributing, whatever the last emitted batch happened to hold.
+        //
+        // It read 0.00 because decay runs every tick while the batch only
+        // raises the sensors it mentions, so a near sensor the source
+        // skipped for a frame walked down toward zero and stayed listed.
+        //
+        // Volatility is kept on purpose, it is realistic. The value still
+        // decays and still moves, it just cannot fall through the floor
+        // its own geometry sets: 0.18 at the edge of the radius, 0.60
+        // directly overhead.
+        //
+        // RAISES EXISTING ENTRIES ONLY, never adds one. A sensor in this
+        // list was reported by the detection source. Inventing an entry
+        // from geometry alone would make C2 the classifier, which it is
+        // not. Refusing to claim a live detection evaporated is different
+        // from asserting one that was never reported.
+        for (const _s of (SITES[sid]?.sensors || [])) {
+          if (_s.status === 'offline') continue;
+          const _d = haversineM(lat, lon, _s.lat, _s.lon);
+          if (_d > _s.coverageRadius) continue;
+          if ((altM || 0) > _sensorCeilingM(_s)) continue;
+          const _floor = +(0.18 + 0.42 * (1 - _d / _s.coverageRadius)).toFixed(2);
+          const _entry = targetEvent.contributingSensors.find(c => c.id === _s.id);
+          if (!_entry || _entry.offline) continue;
+          if ((_entry.confidence || 0) < _floor) {
+            _entry.confidence = _floor;
+            if (_floor > (_entry.peakConfidence || 0)) _entry.peakConfidence = _floor;
+          }
         }
         // One-shot capture of the source's emitted batch. Registering
         // + unregistering per call keeps the mock path free of any
@@ -16986,6 +17056,8 @@ async function main() {
           role: slot.role,
           model: slot.model || 'DJI Matrice 300',
           rfMHz: slot.rfMHz || 2412,
+          // Declared by the template, never inferred from the model name.
+          unidentified: slot.unidentified === true,
           jitter: {
             phaseE: Math.random() * Math.PI * 2,
             phaseN: Math.random() * Math.PI * 2,
@@ -18140,6 +18212,20 @@ async function main() {
           state.leadStats = {
             lat: p.lat, lon: p.lon, alt: p.alt,
             heading: leadHdgDeg, speed: p.speed || 25,
+            // THE LEAD HAD NO CONFIDENCE FIELD AT ALL, and that is the
+            // whole 94 per cent to 0 per cent flicker. The full panel
+            // render painted the lead's row from `e.confidence` (0.94)
+            // while the 250 ms live patcher painted the same row from
+            // `rowStats.confidence || 0`, which was `undefined || 0`.
+            // The two fought, so the number alternated between the right
+            // answer and zero about twice a second.
+            //
+            // The lead is a member of the formation and reads the same
+            // fused estimate as the rest of it, so there is now one
+            // source for that number instead of two disagreeing ones.
+            confidence: _fusedMemberConfidence(
+              event, 0,
+              TEMPLATES[event.templateKey]?.swarm?.formation?.[0]?.unidentified === true),
           };
           // Swarm Phase 1: sync the lead's source-of-truth member
           // track (m0), 1 Hz throttle + immediate on coverage flips.
@@ -18187,7 +18273,7 @@ async function main() {
               pos: { lat: p.lat, lon: p.lon, alt: p.alt },
               hdgDeg: leadHdgDeg,
               speedMs: p.speed || 25,
-              conf: event.confidence,
+              conf: state.leadStats?.confidence ?? event.confidence,
               rfMHz: _leadSlot.rfMHz || 2412,
               inCov: _leadInCov, tipInCov: false, tSec,
             }));
@@ -18520,21 +18606,31 @@ async function main() {
             if (sw.trailPositions) sw.trailPositions.length = 0;
           }
           sw._prevInCov = swShouldShow;
-          // Rogue-drone tag: any wingman whose model is NOT a DJI platform
-          // is treated as an unknown-provenance emitter. Its confidence is
-          // held in the WEAK band (0.35-0.55) so its trail colour-codes
-          // red/yellow in replay + debrief — surfaces the "one drone we
-          // never IDed" story exactly as a real analyst would flag it.
-          const _isRogue = sw.model && !/^DJI/i.test(sw.model);
+          // UNIDENTIFIED TAG, DECLARED BY THE SLOT, NOT GUESSED FROM THE
+          // MODEL NAME.
+          //
+          // This was `sw.model && !/^DJI/i.test(sw.model)`: anything not
+          // branded DJI was treated as unknown provenance and pinned to
+          // the weak band. That is a rule-based classifier living in C2,
+          // and classification is the neural network's job.
+          //
+          // It was also simply wrong. The regex was written for the one
+          // Autel "unknown link" member in the Billund and Amager recon
+          // swarms, and it caught all four Sibiryachok-5 airframes in the
+          // CPH runway incursion, holding the PRIMARY identified threat
+          // at 0.32 to 0.55 while the template declared 0.94.
+          //
+          // The two Autel slots now declare `unidentified: true`, so those
+          // scenarios keep their exact previous behaviour and no template
+          // depends on a brand name any more.
+          const _isRogue = sw.unidentified === true;
           sw.stats = {
             lat: pos.lat, lon: pos.lon, alt: pos.alt,
             heading: hdgDeg, speed: speedMs,
             rfCarrierMHz: sw.rfMHz || (2412 + (i % 3) * 5),
             rfPower_dBm: -68 + (i * -2),
             model: sw.model,
-            confidence: _isRogue
-              ? Math.max(0.32, Math.min(0.55, 0.44 + Math.sin(tSec * 0.4 + i * 1.7) * 0.10))
-              : Math.max(0.4, Math.min(0.98, 0.75 + (i * 0.04) + Math.sin(tSec * 0.3 + i * 1.7) * 0.08)),
+            confidence: _fusedMemberConfidence(event, i + 1, _isRogue),
           };
           // P68: dynamic contributingSensors for the WINGMAN's position too
           _updateContributingSensorsForPosition(event, pos.lat, pos.lon, pos.alt);
@@ -22956,7 +23052,12 @@ async function main() {
         if (altSpan) altSpan.textContent = `${Math.round(rowStats.alt || 0)} m`;
         if (hdgSpan) hdgSpan.textContent = `${Math.round(rowStats.heading || 0)}°`;
         if (spdSpan) spdSpan.textContent = `${(rowStats.speed || 0).toFixed(1)} m/s`;
-        if (confSpan) confSpan.textContent = `${Math.round((rowStats.confidence || 0) * 100)}%`;
+        // `?? event.confidence`, not `|| 0`. A row whose stats have no
+        // confidence must fall back to the event's, never to zero.
+        if (confSpan) {
+          const rowConf = rowStats.confidence ?? event.confidence ?? 0;
+          confSpan.textContent = `${Math.round(rowConf * 100)}%`;
+        }
       });
     }
   }

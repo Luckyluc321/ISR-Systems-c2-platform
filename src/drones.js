@@ -1200,7 +1200,7 @@ export const TEMPLATES = {
         { role: 'lead',       model: 'DJI Matrice 300 RTK',       rfMHz: 2412, offset: { forward:    0, right:    0, up:   0 } },
         { role: 'wingman-BL', model: 'DJI Matrice 350 RTK',       rfMHz: 2437, offset: { forward: -120, right:  -80, up:  -6 } },
         { role: 'wingman-BR', model: 'DJI Matrice 30T (thermal)', rfMHz: 2462, offset: { forward: -120, right:   80, up:  +5 } },
-        { role: 'overwatch',  model: 'Autel EVO II Pro (unknown link)', rfMHz: 5780, offset: { forward: -240, right: -150, up: +30 } },
+        { role: 'overwatch',  model: 'Autel EVO II Pro (unknown link)', unidentified: true, rfMHz: 5780, offset: { forward: -240, right: -150, up: +30 } },
       ],
     },
     // W-to-E axis with a dwell segment over CHBA cargo apron
@@ -1756,7 +1756,7 @@ Object.assign(TEMPLATES, {
         // stays in the weak band so the replay + debrief trail colour-codes
         // red/yellow — surfaces "the one drone we never positively identified"
         // story visually + explains WHY it flies differently.
-        { role: 'overwatch',  model: 'Autel EVO II Pro (unknown link)', rfMHz: 5780, offset: { forward: -300, right: -200, up: +25 } },
+        { role: 'overwatch',  model: 'Autel EVO II Pro (unknown link)', unidentified: true, rfMHz: 5780, offset: { forward: -300, right: -200, up: +25 } },
         { role: 'outer-BR',   model: 'DJI Matrice 350 RTK',           rfMHz: 5825, offset: { forward: -300, right:  200, up:  -6 } },
       ],
     },
