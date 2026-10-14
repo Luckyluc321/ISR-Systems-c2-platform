@@ -60,7 +60,12 @@ function _readEnv(key) {
 // which is useless when the endpoint is configurable across four
 // providers: Mistral direct, Scaleway, Foundry and the Azure proxy.
 export function inferenceHost() {
-  try { return new URL(getInferenceConfig().endpoint).host; }
+  const ep = getInferenceConfig().endpoint || '';
+  // A relative endpoint means the call goes through the dev proxy in
+  // vite.config.js, which exists because Scaleway omits CORS headers on
+  // the actual response. Same-origin, so there is no remote host to name.
+  if (ep.startsWith('/')) return `same-origin proxy (${ep})`;
+  try { return new URL(ep).host; }
   catch (_) { return 'invalid endpoint'; }
 }
 
