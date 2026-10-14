@@ -488,23 +488,40 @@ export const TEMPLATES = {
       note: 'Scheduled arrival on 04R. Broke off the approach at 398 m, 7.6 km from the threshold, after the runway incursion was passed to the tower. Standard missed approach, climbed on runway heading and turned out over the Oresund.',
     },
     waypoints: [
-      { lat: 55.38880, lon: 12.29058, alt: 1572, heading: 0, tSec: 0 },     // spawn, 30 km out on the extended 04R centreline
-      { lat: 55.42948, lon: 12.35316, alt: 1258, heading: 0, tSec: 73.2 },
-      { lat: 55.47016, lon: 12.41575, alt:  943, heading: 0, tSec: 148.2 },
-      { lat: 55.49728, lon: 12.45748, alt:  734, heading: 0, tSec: 199.5 },
-      { lat: 55.51761, lon: 12.48877, alt:  576, heading: 0, tSec: 238.9 },
-      { lat: 55.53117, lon: 12.50964, alt:  472, heading: 0, tSec: 266 },
-      { lat: 55.54066, lon: 12.52424, alt:  398, heading: 0, tSec: 285.4 },   // GO-AROUND. 398 m, 7.6 km out.
-      { lat: 55.54880, lon: 12.53676, alt:  438, heading: 0, tSec: 301.2 },   // power up, descent arrested
-      { lat: 55.55965, lon: 12.55345, alt:  588, heading: 0, tSec: 321.2 },
-      { lat: 55.57456, lon: 12.57640, alt:  818, heading: 0, tSec: 346.8 },
-      { lat: 55.59219, lon: 12.60352, alt: 1098, heading: 0, tSec: 375.7 },   // over the threshold at 1100 m, not 46
-      { lat: 55.61388, lon: 12.63690, alt: 1378, heading: 0, tSec: 410.4 },
-      { lat: 55.62462, lon: 12.68291, alt: 1648, heading: 0, tSec: 443.7 },   // right turn, clear of the field
-      { lat: 55.62303, lon: 12.73946, alt: 1918, heading: 0, tSec: 480.8 },
-      { lat: 55.61113, lon: 12.79278, alt: 2158, heading: 0, tSec: 518.4 },   // outbound over the Oresund
+      // BREAKS OFF ON SHORT FINAL, NOT SEVEN KILOMETRES OUT.
+      //
+      // The first version pivoted at 398 m and 7.6 km, which is a
+      // correct missed approach and useless on camera: the aircraft was
+      // never near the runway while the formation was on it, so it read
+      // as arriving after everything was over.
+      //
+      // Now it stays on the glideslope down to 131 m at 2.5 km, which is
+      // visibly short final, and breaks off there. Still a deliberate
+      // go-around with room to spare, not the 46 m last-second save of
+      // cph_jet_goaround, and above the roughly 60 m minima a Cat I
+      // approach flies to.
+      //
+      // Real extended 04R centreline, 3 degree slope, 26 km out at
+      // 1363 m. Speeds 70 to 96 m/s. Decision point is its own
+      // t = 302.5 s, which is what sets the combined trigger.
+      { lat: 55.41592, lon: 12.33230, alt: 1363, heading: 0, tSec: 0 },   // spawn, 26 km out on the extended 04R centreline
+      { lat: 55.45660, lon: 12.39489, alt: 1048, heading: 0, tSec: 73.2 },
+      { lat: 55.49050, lon: 12.44705, alt:  786, heading: 0, tSec: 135.7 },
+      { lat: 55.51761, lon: 12.48877, alt:  576, heading: 0, tSec: 187 },
+      { lat: 55.53795, lon: 12.52007, alt:  419, heading: 0, tSec: 226.4 },
+      { lat: 55.55490, lon: 12.54615, alt:  288, heading: 0, tSec: 260.2 },
+      { lat: 55.56507, lon: 12.56179, alt:  210, heading: 0, tSec: 281 },
+      { lat: 55.57050, lon: 12.57014, alt:  168, heading: 0, tSec: 292.5 },   // short final
+      { lat: 55.57524, lon: 12.57744, alt:  131, heading: 0, tSec: 302.5 },   // GO-AROUND. 131 m, 2.5 km out.
+      { lat: 55.57863, lon: 12.58266, alt:  156, heading: 0, tSec: 309.2 },   // power up, descent arrested
+      { lat: 55.58405, lon: 12.59100, alt:  226, heading: 0, tSec: 319.5 },   // climbing
+      { lat: 55.59219, lon: 12.60352, alt:  381, heading: 0, tSec: 333.8 },   // over the threshold
+      { lat: 55.60575, lon: 12.62438, alt:  581, heading: 0, tSec: 356.5 },
+      { lat: 55.61680, lon: 12.66246, alt:  831, heading: 0, tSec: 385.8 },   // turning right, clear of the field
+      { lat: 55.61708, lon: 12.71765, alt: 1111, heading: 0, tSec: 422.7 },
+      { lat: 55.60517, lon: 12.77097, alt: 1371, heading: 0, tSec: 460.3 },   // outbound over the Oresund
     ],
-    durationSec: 518,
+    durationSec: 460,
   },
 
   cph_swarm_runway_incursion: {
