@@ -12449,19 +12449,25 @@ async function main() {
   // point on it. A member still has to have been detected before it can
   // be named.
   //
-  // The shape asked for: lead at 8, second at 10.5, third and fourth
-  // around 11.5, fifth out at 15.
+  // Lead at 8, second at 12, third and fourth around 15, fifth at 20.
   //
-  // Three and four are 11.3 and 11.8 rather than both 11.5. Identical
+  // Three and four are 14.8 and 15.4 rather than both 15.0. Identical
   // values would put two airframes on the same frame, which is the
   // precise thing that was wrong before. Half a second apart still reads
-  // as "around 11.5" and still resolves one at a time.
-  const _IDENT_SCHEDULE_S = [8.0, 10.5, 11.3, 11.8, 15.0];
-  // Signal evidence waits for the whole formation to resolve, plus a
-  // little. It is the analysis OUTPUT, so publishing it while airframes
-  // are still unnamed claims a conclusion the pipeline has not reached.
-  // Tracks the last slot above rather than standing on its own number.
-  const _SIGNAL_EVIDENCE_S = 17.0;
+  // as "around 15" and still resolves one at a time.
+  const _IDENT_SCHEDULE_S = [8.0, 12.0, 14.8, 15.4, 20.0];
+  // SIGNAL EVIDENCE NEEDS INPUT FROM SEVERAL SENSORS, FOR A WHILE.
+  //
+  // It is the analysis OUTPUT, and the thing being published is a fused
+  // conclusion rather than a reading. A carrier, a modulation family and
+  // a written assessment cannot come off one sensor for one moment.
+  //
+  // So it is gated on both: at least 30 seconds of observation AND at
+  // least three sensors having contributed to it. A track held by one
+  // sensor for thirty seconds has not earned this section any more than
+  // a track held by six for one second has.
+  const _SIGNAL_EVIDENCE_S = 30.0;
+  const _SIGNAL_EVIDENCE_MIN_SENSORS = 3;
   const _IDENT_PENDING = 'No identification registered';
   const _SIGNAL_PENDING = 'Analysing';
 
@@ -12479,9 +12485,15 @@ async function main() {
   function _identifiedModel(state, memberDetectedMs, model, slotIdx) {
     return _identResolved(state, memberDetectedMs, slotIdx) ? (model || _IDENT_PENDING) : _IDENT_PENDING;
   }
-  function _signalEvidenceReady(state) {
+  function _signalEvidenceReady(event, state) {
     const el = _analysisElapsedS(state);
-    return el != null && el >= _SIGNAL_EVIDENCE_S;
+    if (el == null || el < _SIGNAL_EVIDENCE_S) return false;
+    // Counts sensors that have EVER contributed, not just this tick, so
+    // the section does not blink out when the formation crosses a thin
+    // patch of coverage after it has already published.
+    const contributed = (event.contributingSensors || [])
+      .filter(c => !c.offline && ((c.peakConfidence || 0) > 0 || (c.confidence || 0) > 0)).length;
+    return contributed >= _SIGNAL_EVIDENCE_MIN_SENSORS;
   }
   function _fusedMemberConfidence(event, slotIdx, unidentified) {
     const mass = (event.contributingSensors || [])
@@ -23924,11 +23936,11 @@ async function main() {
     // assessment from one observation. The section now says it is working
     // until the formation has resolved.
     const _sigState = droneState.get(e.id);
-    const _sigReady = !_sigState?._firstDetectedMs || _signalEvidenceReady(_sigState);
+    const _sigReady = !_sigState?._firstDetectedMs || _signalEvidenceReady(e, _sigState);
     const evidence = e.evidence ? (!_sigReady ? `
       <div class="dp-section">
         <div class="dp-section-title">Signal Evidence · analysing</div>
-        <div class="dp-note dp-dim">Classifying emitters. Carrier, bandwidth and modulation are published once the formation resolves.</div>
+        <div class="dp-note dp-dim">Accumulating signal across contributing sensors. Carrier, bandwidth and modulation are published once there is enough observation to fuse, not before.</div>
       </div>` : `
       <div class="dp-section">
         <div class="dp-section-title">Signal Evidence · ${e.evidence.modality || ''}</div>

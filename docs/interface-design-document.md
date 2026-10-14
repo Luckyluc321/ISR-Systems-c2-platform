@@ -458,11 +458,17 @@ formation on top of the classifier delay.
 | slot | named at |
 |---|---|
 | 1 (lead) | 8.0 s |
-| 2 | 10.5 s |
-| 3 | 11.3 s |
-| 4 | 11.8 s |
-| 5 | 15.0 s |
-| Signal Evidence section | 17.0 s |
+| 2 | 12.0 s |
+| 3 | 14.8 s |
+| 4 | 15.4 s |
+| 5 | 20.0 s |
+
+The Signal Evidence section is gated differently, on **both** 30 seconds of
+observation and at least 3 sensors having contributed. It publishes a fused
+conclusion rather than a reading, and that cannot come off one sensor for one
+moment. The sensor count is of sensors that have ever contributed, so the
+section does not blink out when the track later crosses a thin patch of
+coverage.
 
 No two slots share a value, so no two airframes resolve on the same
 frame. The name and the signal column are patched at 4 Hz with the rest
