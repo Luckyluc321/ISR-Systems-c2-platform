@@ -556,43 +556,41 @@ export const TEMPLATES = {
       ],
     },
     waypoints: [
-      // REBUILT. THE INLAND LEG IS GONE.
+      // EGRESS REBUILT. THEY NO LONGER DOUBLE BACK UP THE RUNWAY.
       //
-      // The previous version ran PAST the threshold onto the approach,
-      // southwest and inland, then turned around and came back. It was
-      // built that way to manufacture a perimeter re-entry, and it was
-      // wrong on its own terms: a reconnaissance flight heading home does
-      // not stop over farmland on the far side of the airport and loiter
-      // there. The sea is east, their ingress was from the Oresund, and
-      // east is where they go.
+      // The previous version climbed out along the 04R centreline before
+      // turning east. On screen that reads as the formation turning round
+      // and flying back into the airport, which is exactly what it looks
+      // like, and it was only there to dodge a perimeter dip at the
+      // threshold. Wrong trade: marker tidiness over what the operator
+      // sees.
       //
-      // Now: tower orbit, down the 04R centreline, over the threshold,
-      // climb out along the runway and straight out east to open water.
-      // Nothing points inland at any stage.
+      // Now they cross the threshold, sweep LEFT through south and settle
+      // on 070, then run straight out. Heading goes 212, 193, 174, 155,
+      // 136, 117, 098, 079, 070. At no point does it point back up the
+      // runway.
       //
-      // THE RE-ENTRY STILL HAPPENS, and it costs nothing, because the
-      // site's eastern boundary is irregular and the egress clips it.
-      // Measured against the polygon, exactly four events: ENTRY on
-      // ingress, EXIT at 645 s, ENTRY #2 at 668 s, EXIT at 687 s. That
-      // is the real shape of the fence, not a detour invented to produce
-      // a marker.
+      // 070 was measured, not picked. Across outbound bearings from the
+      // threshold it is the only one that both leaves the perimeter
+      // exactly once and stays in sensor coverage furthest: bearing 060
+      // flips the boundary five times, 090 and beyond goes dark inside
+      // two kilometres.
       //
-      // Why the climb-out goes back up the runway before turning east:
-      // the perimeter is narrow at the threshold, so a direct turn east
-      // from there dips straight out and back in and produced six
-      // perimeter events instead of four.
+      // Egress speed 35 m/s, up from 30. The turn is flown at 22 because
+      // a 150 degree sweep at 35 would whip the trailing member past 50
+      // m/s, and the formation offsets rotate with the lead's heading.
+      // Worst member speed anywhere is 36 m/s.
       //
-      // Why not due east from the threshold: measured, that line leaves
-      // the site after 800 m and is unobserved for the remaining four
-      // kilometres to the water. The route north of it stays inside
-      // sensor coverage almost to the coast, so the track stays
-      // CONFIRMED rather than guessed on the way out.
+      // Scenario ends 16 seconds after the last contact rather than
+      // running on for another two minutes unobserved. The turn carries
+      // them south of the field where coverage is thin, so they go dark
+      // at t = 590 and the dashed breadcrumb is a short tail, not a
+      // second journey.
       //
-      // Turn rate capped at 0.062 rad/s throughout. Worst member speed
-      // including the formation whip is 38 m/s.
+      // One perimeter EXIT at 522 s, down from the three-and-four-event
+      // versions. Verified against the polygon.
       //
-      // GO-AROUND CUE: t = 480.6 s, directly over the 04R threshold at
-      // 55.59219, 12.60352, 43 m altitude.
+      // GO-AROUND CUE: t = 489 s, directly over the 04R threshold.
       { lat: 55.63700, lon: 12.67900, alt: 115, heading: 0, tSec: 0 },
       { lat: 55.63300, lon: 12.66900, alt: 108, heading: 0, tSec: 30.8 },
       { lat: 55.62870, lon: 12.65550, alt:  92, heading: 0, tSec: 69.8 },
@@ -600,45 +598,45 @@ export const TEMPLATES = {
       { lat: 55.61643, lon: 12.65258, alt:  72, heading: 0, tSec: 125.1 },
       { lat: 55.61302, lon: 12.65949, alt:  62, heading: 0, tSec: 148.2 },
       { lat: 55.61258, lon: 12.66011, alt:  62, heading: 0, tSec: 151.7 },
-      { lat: 55.61205, lon: 12.66043, alt:  62, heading: 0, tSec: 157.3 },
-      { lat: 55.61149, lon: 12.66041, alt:  62, heading: 0, tSec: 162.9 },
-      { lat: 55.61097, lon: 12.66006, alt:  62, heading: 0, tSec: 168.5 },
-      { lat: 55.61055, lon: 12.65941, alt:  62, heading: 0, tSec: 174.1 },
-      { lat: 55.61028, lon: 12.65855, alt:  62, heading: 0, tSec: 179.7 },
-      { lat: 55.61018, lon: 12.65758, alt:  62, heading: 0, tSec: 185.3 },
-      { lat: 55.61028, lon: 12.65660, alt:  62, heading: 0, tSec: 190.9 },
-      { lat: 55.61057, lon: 12.65575, alt:  62, heading: 0, tSec: 196.5 },
-      { lat: 55.61100, lon: 12.65512, alt:  62, heading: 0, tSec: 202.1 },
-      { lat: 55.61152, lon: 12.65478, alt:  62, heading: 0, tSec: 207.7 },
-      { lat: 55.61208, lon: 12.65478, alt:  62, heading: 0, tSec: 213.3 },
-      { lat: 55.61260, lon: 12.65512, alt:  62, heading: 0, tSec: 218.9 },
-      { lat: 55.61303, lon: 12.65575, alt:  62, heading: 0, tSec: 224.5 },
-      { lat: 55.61332, lon: 12.65660, alt:  62, heading: 0, tSec: 230.1 },
-      { lat: 55.61342, lon: 12.65758, alt:  62, heading: 0, tSec: 235.7 },
-      { lat: 55.61332, lon: 12.65855, alt:  62, heading: 0, tSec: 241.3 },
-      { lat: 55.61305, lon: 12.65941, alt:  62, heading: 0, tSec: 246.9 },
-      { lat: 55.61263, lon: 12.66006, alt:  62, heading: 0, tSec: 252.5 },
-      { lat: 55.61211, lon: 12.66041, alt:  62, heading: 0, tSec: 258.1 },
-      { lat: 55.61155, lon: 12.66043, alt:  62, heading: 0, tSec: 263.7 },
-      { lat: 55.61102, lon: 12.66011, alt:  62, heading: 0, tSec: 269.3 },
-      { lat: 55.61058, lon: 12.65948, alt:  62, heading: 0, tSec: 274.9 },
-      { lat: 55.61029, lon: 12.65864, alt:  62, heading: 0, tSec: 280.5 },
-      { lat: 55.61018, lon: 12.65767, alt:  62, heading: 0, tSec: 286.1 },
-      { lat: 55.60982, lon: 12.63064, alt:  58, heading: 0, tSec: 380.6 },
-      { lat: 55.60439, lon: 12.62230, alt:  54, heading: 0, tSec: 411.4 },
-      { lat: 55.59897, lon: 12.61395, alt:  50, heading: 0, tSec: 442.2 },
-      { lat: 55.59422, lon: 12.60665, alt:  45, heading: 0, tSec: 469.1 },
-      { lat: 55.59219, lon: 12.60352, alt:  43, heading: 0, tSec: 480.6 },
-      { lat: 55.59829, lon: 12.61291, alt:  50, heading: 0, tSec: 531.3 },
-      { lat: 55.60439, lon: 12.62230, alt:  60, heading: 0, tSec: 561.3 },
-      { lat: 55.60500, lon: 12.64900, alt:  75, heading: 0, tSec: 617.3 },
-      { lat: 55.60650, lon: 12.66200, alt:  90, heading: 0, tSec: 645.1 },
-      { lat: 55.60700, lon: 12.67300, alt: 105, heading: 0, tSec: 668.2 },
-      { lat: 55.60600, lon: 12.68200, alt: 118, heading: 0, tSec: 687.4 },
-      { lat: 55.60450, lon: 12.69200, alt: 130, heading: 0, tSec: 709.1 },
-      { lat: 55.60300, lon: 12.70200, alt: 140, heading: 0, tSec: 730.8 },
+      { lat: 55.61204, lon: 12.66043, alt:  62, heading: 0, tSec: 157.4 },
+      { lat: 55.61148, lon: 12.66040, alt:  62, heading: 0, tSec: 163.1 },
+      { lat: 55.61095, lon: 12.66004, alt:  62, heading: 0, tSec: 168.8 },
+      { lat: 55.61053, lon: 12.65937, alt:  62, heading: 0, tSec: 174.5 },
+      { lat: 55.61026, lon: 12.65849, alt:  62, heading: 0, tSec: 180.2 },
+      { lat: 55.61018, lon: 12.65750, alt:  62, heading: 0, tSec: 185.9 },
+      { lat: 55.61030, lon: 12.65652, alt:  62, heading: 0, tSec: 191.6 },
+      { lat: 55.61060, lon: 12.65568, alt:  62, heading: 0, tSec: 197.3 },
+      { lat: 55.61105, lon: 12.65506, alt:  62, heading: 0, tSec: 203 },
+      { lat: 55.61159, lon: 12.65476, alt:  62, heading: 0, tSec: 208.7 },
+      { lat: 55.61215, lon: 12.65481, alt:  62, heading: 0, tSec: 214.4 },
+      { lat: 55.61267, lon: 12.65519, alt:  62, heading: 0, tSec: 220.1 },
+      { lat: 55.61309, lon: 12.65587, alt:  62, heading: 0, tSec: 225.8 },
+      { lat: 55.61335, lon: 12.65676, alt:  62, heading: 0, tSec: 231.5 },
+      { lat: 55.61341, lon: 12.65775, alt:  62, heading: 0, tSec: 237.2 },
+      { lat: 55.61329, lon: 12.65873, alt:  62, heading: 0, tSec: 242.9 },
+      { lat: 55.61298, lon: 12.65956, alt:  62, heading: 0, tSec: 248.6 },
+      { lat: 55.61252, lon: 12.66016, alt:  62, heading: 0, tSec: 254.3 },
+      { lat: 55.61198, lon: 12.66044, alt:  62, heading: 0, tSec: 260 },
+      { lat: 55.61142, lon: 12.66038, alt:  62, heading: 0, tSec: 265.7 },
+      { lat: 55.61090, lon: 12.65998, alt:  62, heading: 0, tSec: 271.4 },
+      { lat: 55.61049, lon: 12.65929, alt:  62, heading: 0, tSec: 277.1 },
+      { lat: 55.61025, lon: 12.65839, alt:  62, heading: 0, tSec: 282.8 },
+      { lat: 55.60439, lon: 12.62230, alt:  58, heading: 0, tSec: 414 },
+      { lat: 55.59897, lon: 12.61395, alt:  50, heading: 0, tSec: 447.3 },
+      { lat: 55.59422, lon: 12.60665, alt:  45, heading: 0, tSec: 476.5 },
+      { lat: 55.59219, lon: 12.60352, alt:  43, heading: 0, tSec: 489 },
+      { lat: 55.59078, lon: 12.60199, alt:  48, heading: 0, tSec: 497.3 },
+      { lat: 55.58917, lon: 12.60135, alt:  51, heading: 0, tSec: 505.6 },
+      { lat: 55.58753, lon: 12.60166, alt:  54, heading: 0, tSec: 513.9 },
+      { lat: 55.58604, lon: 12.60290, alt:  57, heading: 0, tSec: 522.2 },
+      { lat: 55.58485, lon: 12.60493, alt:  60, heading: 0, tSec: 530.5 },
+      { lat: 55.58410, lon: 12.60753, alt:  63, heading: 0, tSec: 538.8 },
+      { lat: 55.58386, lon: 12.61041, alt:  66, heading: 0, tSec: 547.1 },
+      { lat: 55.58416, lon: 12.61329, alt:  69, heading: 0, tSec: 555.4 },
+      { lat: 55.58785, lon: 12.63122, alt:  72, heading: 0, tSec: 589.7 },
+      { lat: 55.58954, lon: 12.63943, alt:  80, heading: 0, tSec: 605.4 },
     ],
-    durationSec: 731,
+    durationSec: 605,
   },
 
   // ── Recon drone, HALE (Reaper/Global-Hawk class), high altitude circular loiter ──

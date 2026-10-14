@@ -20891,7 +20891,7 @@ async function main() {
       { key: '__combo_cph_incursion', label: 'COMBINED · Swarm on 04R + SAS 743 early go-around', cls: 'critical',
         combo: [
           { key: 'cph_swarm_runway_incursion', delayMs: 0 },
-          { key: 'cph_jet_goaround_early',     delayMs: 210000 },
+          { key: 'cph_jet_goaround_early',     delayMs: 216000 },
         ] },
       { key: 'cph_unknown_contact', label: 'Non-identifiable contact (N perimeter)', cls: 'recon' },
       { key: 'cph_shahed_amalienborg', label: 'Shahed-136 attack (Øresund → CPH → Amalienborg)', cls: 'critical' },
