@@ -19029,19 +19029,25 @@ async function main() {
           // right in front of the camera (disableDepthTestDistance =
           // INFINITY, always on top). Coverage-driven visibility still
           // applies to all other drones normally.
-          // ONCE THE CASE IS CLOSED, THE MEMBERS GO TOO.
+          // COVERAGE DECIDES WHILE THE TRACK IS STILL PLAYING.
           //
-          // The lead has carried `state.closedAt ? false : ...` in its
-          // own visibility since forever. The members never had it, so
-          // their only route to hidden was losing coverage. If anything
-          // stops that loop reaching them on the frame where coverage
-          // drops, or the event closes first, the billboard simply stays
-          // wherever it last was.
+          // Each member has its own coverage test, so the formation
+          // should thin out as each airframe crosses the edge rather
+          // than blinking off together. With 162 m of formation depth at
+          // 35 m/s the rear airframe is about 4.6 s behind the lead, and
+          // that is what should be on screen.
           //
-          // That is the freeze: not drones that keep flying, drones that
-          // stopped being updated while still shown. The lead vanishes
-          // correctly because it has this gate. Now they match.
-          const _swVisible = swShouldShow && !state.closedAt;
+          // It was not, because state.closedAt is set the moment the
+          // LEAD's out-of-range marker drops, and gating purely on that
+          // hid all five on the same frame whatever their own geometry
+          // said. The backstop was firing before the thing it backs up.
+          //
+          // So: visible if in coverage, AND either the track is still
+          // playing or the case has not closed. While it plays, coverage
+          // alone decides and the stagger comes through. Once the track
+          // stops AND the case is closed there is nothing left to
+          // update, which is the freeze this guards against.
+          const _swVisible = swShouldShow && (isTrackLive(event.id) || !state.closedAt);
           sw.billboard.show = _swVisible && !sw._povActive;
           // Trail visibility mirrors the drone billboard — as soon as
           // the drone drops out of coverage (billboard hides), its
