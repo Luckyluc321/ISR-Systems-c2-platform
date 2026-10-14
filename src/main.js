@@ -18395,14 +18395,39 @@ async function main() {
         // this block — spawn on real sensor entry, close on real sensor exit,
         // scenario-agnostic. See P21.
 
-        // Lead heading estimate — for leadStats display only
+        // Lead heading estimate — for leadStats display only.
+        //
+        // THIS READ A FIELD THAT HAD ALREADY BEEN OVERWRITTEN. It used
+        // state.prevLat / state.prevLon, which are assigned the CURRENT
+        // position about two hundred lines above this block, in the same
+        // tick. So dLat and dLon were exactly zero every frame, the
+        // `> 1e-9` guard never passed, and leadHdgDeg kept its initial
+        // value forever. That is why the roster showed DRONE-1 on 0
+        // degrees while every wingman showed a real bearing: the wingmen
+        // keep their own prevPos and were never affected.
+        //
+        // Its own reference pair, updated at the end of this block, so
+        // nothing upstream can consume it first.
+        //
+        // Re-based only after a couple of metres of travel. At 60 Hz and
+        // 25 m/s one tick is 0.4 m, which is close enough to the
+        // six-decimal coordinate quantisation to make the bearing jitter
+        // several degrees a frame.
         let leadHdgDeg = state._lastLeadHdg || 0;
-        if (state.prevLat !== undefined && p) {
-          const M_PER_DEG_LON_L = 111320 * Math.cos(p.lat * Math.PI / 180);
-          const dLat = p.lat - state.prevLat, dLon = p.lon - state.prevLon;
-          if (Math.abs(dLat) > 1e-9 || Math.abs(dLon) > 1e-9) {
-            leadHdgDeg = ((Math.atan2(dLon * M_PER_DEG_LON_L, dLat * M_PER_DEG_LAT) * 180 / Math.PI) + 360) % 360;
-            state._lastLeadHdg = leadHdgDeg;
+        if (p) {
+          if (state._hdgRefLat !== undefined) {
+            const M_PER_DEG_LON_L = 111320 * Math.cos(p.lat * Math.PI / 180);
+            const dNorth = (p.lat - state._hdgRefLat) * M_PER_DEG_LAT;
+            const dEast = (p.lon - state._hdgRefLon) * M_PER_DEG_LON_L;
+            if (Math.hypot(dNorth, dEast) >= 2) {
+              leadHdgDeg = ((Math.atan2(dEast, dNorth) * 180 / Math.PI) + 360) % 360;
+              state._lastLeadHdg = leadHdgDeg;
+              state._hdgRefLat = p.lat;
+              state._hdgRefLon = p.lon;
+            }
+          } else {
+            state._hdgRefLat = p.lat;
+            state._hdgRefLon = p.lon;
           }
         }
         if (p) {
