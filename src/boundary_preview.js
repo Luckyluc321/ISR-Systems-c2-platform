@@ -67,5 +67,79 @@ window.addEventListener('keydown', (ev) => {
   console.log(`[boundary] ${l.name}: ${l.e.show ? 'shown' : 'hidden'}`);
 });
 
+// ── CLICK TO TRACE ──────────────────────────────────────────────────
+//
+// Some edges are not in any dataset: a moat, a ditch, a field boundary
+// you can see in the imagery and nothing else knows about. Rather than
+// guess at coordinates for a line nobody can query, click along it.
+//
+//   left click   drop a point
+//   z            undo the last one
+//   x            clear them all
+//   c            print the run, ready to paste back
+//
+// Points are drawn as they go, joined by a cyan line, so the shape being
+// traced is visible while it is being traced.
+const capture = [];
+const capEntities = [];
+let capLine = null;
+
+function redrawCapture() {
+  if (capLine) { viewer.entities.remove(capLine); capLine = null; }
+  if (capture.length < 2) return;
+  const flat = [];
+  for (const p of capture) flat.push(p.lon, p.lat);
+  capLine = viewer.entities.add({
+    polyline: {
+      positions: Cesium.Cartesian3.fromDegreesArray(flat),
+      width: 4, clampToGround: true,
+      material: Cesium.Color.fromCssColorString('#22d3ee'),
+    },
+  });
+}
+
+const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
+handler.setInputAction((click) => {
+  const ray = viewer.camera.getPickRay(click.position);
+  const cart = ray && viewer.scene.globe.pick(ray, viewer.scene);
+  if (!cart) return;
+  const c = Cesium.Cartographic.fromCartesian(cart);
+  const lat = +Cesium.Math.toDegrees(c.latitude).toFixed(6);
+  const lon = +Cesium.Math.toDegrees(c.longitude).toFixed(6);
+  capture.push({ lat, lon });
+  capEntities.push(viewer.entities.add({
+    position: Cesium.Cartesian3.fromDegrees(lon, lat),
+    point: { pixelSize: 9, color: Cesium.Color.fromCssColorString('#22d3ee'),
+             outlineColor: Cesium.Color.BLACK, outlineWidth: 2,
+             heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+             disableDepthTestDistance: Number.POSITIVE_INFINITY },
+  }));
+  redrawCapture();
+  console.log(`[trace] ${capture.length}: ${lat}, ${lon}`);
+}, Cesium.ScreenSpaceEventType.LEFT_CLICK);
+
+window.addEventListener('keydown', (ev) => {
+  if (ev.key === 'z' && capture.length) {
+    capture.pop();
+    viewer.entities.remove(capEntities.pop());
+    redrawCapture();
+    console.log(`[trace] undo, ${capture.length} left`);
+  }
+  if (ev.key === 'x') {
+    capture.length = 0;
+    capEntities.forEach(e => viewer.entities.remove(e));
+    capEntities.length = 0;
+    redrawCapture();
+    console.log('[trace] cleared');
+  }
+  if (ev.key === 'c') {
+    const out = capture.map(p => `  [${p.lon.toFixed(6)}, ${p.lat.toFixed(6)}],`).join('\n');
+    console.log(`[trace] ${capture.length} points, lon/lat, paste this back:\n[\n${out}\n]`);
+    try { navigator.clipboard.writeText(`[\n${out}\n]`); console.log('[trace] copied to clipboard'); }
+    catch (_) { console.log('[trace] clipboard blocked, copy from above'); }
+  }
+});
+
 console.log(`[boundary] raw ${TRACED_RAW.length}, cleaned ${TRACED_CLEAN.length},`
   + ` platform ${PLATFORM_CURRENT.length} vertices. This page writes nothing.`);
+console.log('[trace] click to drop points, z undo, x clear, c copy the run.');
