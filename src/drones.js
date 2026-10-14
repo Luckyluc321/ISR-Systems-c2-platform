@@ -464,16 +464,16 @@ export const TEMPLATES = {
       { id: 'N07', confidence: 0.89 },   // SW Runway Approach
     ],
     evidence: {
-      rfCarrier: '847 MHz instantaneous, pseudo-random hopping across 720 to 1020 MHz on four emitters. Fifth emitter fixed at 5780 MHz.',
-      rfBandwidth: 'FHSS on four of five emitters, hop pattern coherent across all four. Fifth emitter holds a fixed OcuSync link.',
+      rfCarrier: '847 MHz right now, hopping between 720 and 1020 MHz on four of the emitters. The fifth is fixed at 5780 MHz.',
+      rfBandwidth: 'Frequency hopping (FHSS) on four of the five. All four hop in step. The fifth holds a steady OcuSync link.',
       rfMatch: 'Four-airframe formation link + one OcuSync emitter, 94%',
-      modality: 'Fused. RF, acoustic and visual into one estimate.',
+      modality: 'Fused. Radio, sound and camera combined into one estimate.',
       evidenceSize: '412 MB',
       // Short enough to read in three seconds. The reasoning sits in
       // noteDetail behind a Show more, because an operator scanning a
       // live panel needs the finding, not the argument for it.
-      note: 'Five airframes holding formation from the Oresund to the 04R threshold, by way of the ATC core. Four hop across 720 to 1020 MHz on a coherent pattern. The fifth holds a fixed link at 5780 MHz. All five are hostile.',
-      noteDetail: 'Band is the tell. Purpose built military links hop down in UHF. Bought airframes sit in licensed ISM at 2.4 and 5.8 GHz, so a detector built for those bands hears one of these five. We hold all five because we listen broadband.\n\nNo library match on the hopping waveform, so four are seen clearly and named poorly. The fifth is a Chinese quadcopter flown for reconnaissance. It was bought rather than built, so it carries a stock link that classifies in seconds. The difference is procurement, not intent.\n\nOne fused estimate, not three scores. Airport noise wrecks the acoustic channel and it still contributes. Visual is intermittent at range and strong over the tower. Nothing here stands on its own.',
+      note: 'Five drones flying in formation from the Oresund to the 04R threshold, past the control tower. Four of them are hopping between 720 and 1020 MHz, all four in step. The fifth sits on one fixed frequency, 5780 MHz. All five are hostile.',
+      noteDetail: 'The frequency is what gives them away. Military drones are built to hop, and they do it low, between 700 and 1000 MHz. Drones you can buy sit at 2.4 and 5.8 GHz. A system that only listens there would hear one of these five. We hear all five because we listen across the whole spectrum.\n\nNothing in our library matches the hopping signal. We can see all four clearly. We cannot say what they are. The fifth is a Chinese quadcopter being flown for reconnaissance. It was bought rather than built, so it carries a stock radio we recognise in seconds. The difference is where they got the drone, not what they are doing with it.\n\nThis is one estimate, not three. Airport noise wrecks the sound channel and we still use it. The cameras lose them at range and pick them up again over the tower. None of the three would be enough on its own.',
     },
     swarm: {
       size: 5,
