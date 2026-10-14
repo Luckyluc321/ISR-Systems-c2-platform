@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CPH boundary preview</title>
+<style>
+  html,body,#c { margin:0; height:100%; background:#0f1620; }
+  #legend {
+    position:absolute; top:14px; left:14px; z-index:10;
+    font:13px/1.6 "IBM Plex Mono", ui-monospace, monospace;
+    color:#dfe5ec; background:rgba(12,18,26,.86);
+    border:1px solid #243244; border-radius:10px; padding:12px 14px;
+  }
+  #legend b { font-weight:600; }
+  .sw { display:inline-block; width:22px; height:3px; vertical-align:middle; margin-right:8px; }
+  .k { color:#8aa0b8; }
+  #legend div { white-space:nowrap; }
+</style>
+</head>
+<body>
+<div id="c"></div>
+<div id="legend">
+  <div><b>CPH boundary preview</b></div>
+  <div><span class="sw" style="background:#4ade80"></span>traced, cleaned <span class="k">[1]</span></div>
+  <div><span class="sw" style="background:#fbbf24"></span>traced, raw <span class="k">[2]</span></div>
+  <div><span class="sw" style="background:#ef4444"></span>in the platform today <span class="k">[3]</span></div>
+  <div class="k" style="margin-top:6px">press 1 2 3 to toggle &nbsp; 0 = recentre</div>
+</div>
+<script type="module" src="/src/boundary_preview.js"></script>
+</body>
+</html>
