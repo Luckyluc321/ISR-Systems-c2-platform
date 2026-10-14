@@ -20969,8 +20969,10 @@ async function main() {
       // after the formation arrives over the runway.
       { key: '__combo_cph_incursion', label: 'COMBINED · Swarm on 04R + SAS 743 early go-around', cls: 'critical',
         combo: [
-          { key: 'cph_swarm_runway_incursion', delayMs: 0 },
-          { key: 'cph_jet_goaround_early',     delayMs: 216000 },
+          { key: 'cph_swarm_runway_incursion' },
+          // Spawned when the swarm's OWN clock reads 216 s, so the two
+          // meet over the runway however the wall clock behaves.
+          { key: 'cph_jet_goaround_early', atTSec: 216 },
         ] },
       { key: 'cph_unknown_contact', label: 'Non-identifiable contact (N perimeter)', cls: 'recon' },
       { key: 'cph_shahed_amalienborg', label: 'Shahed-136 attack (Øresund → CPH → Amalienborg)', cls: 'critical' },
@@ -21096,28 +21098,51 @@ async function main() {
       // holds the second spawn too rather than firing it into a frozen
       // scene.
       if (Array.isArray(selEntry.combo)) {
-        // SAY WHEN EACH ONE ARRIVES.
+        // THE SECOND TRACK TRIGGERS OFF THE FIRST TRACK'S OWN CLOCK.
         //
-        // The aircraft spawns 216 s in, 30 km out on the extended
-        // centreline, which at that range is a small symbol a long way
-        // off screen. Indistinguishable from not spawning at all if you
-        // are watching the airport, which is exactly where you are
-        // watching. So it reports, and it reports a failure too rather
-        // than returning quietly like everything else in this file has
-        // been caught doing today.
+        // It used to be a parallel simAfter timer: spawn the aircraft
+        // 216 s of wall time after the swarm. That drifts. The two
+        // clocks are only equal if nothing ever pauses, stalls or drops
+        // frames between them, and in practice the aircraft arrived long
+        // after the formation had finished at the runway.
+        //
+        // Now it waits for the swarm to report tSec >= atTSec on its own
+        // elapsed clock, which is the same clock its waypoints are
+        // interpolated against. Pause the simulation for ten minutes and
+        // the rendezvous still lands on the same frame of the swarm's
+        // path.
+        //
+        // 216 s is arithmetic, not taste: the swarm is over the threshold
+        // at its t = 489, the aircraft needs 285.4 s to reach its
+        // decision point, and the aircraft should break off 12.4 s after
+        // the formation arrives. 489 + 12.4 - 285.4 = 216.
         toast(`Combined scenario: ${selEntry.combo.length} tracks queued`, 'info');
-        selEntry.combo.forEach((c, i) => simAfter(() => {
-          const before = droneState.size;
-          window.__spawnDrone(c.key, { allowConcurrent: i > 0 });
-          const ok = droneState.size > before;
-          console.log(`[combo] ${ok ? 'spawned' : 'FAILED to spawn'} ${c.key} at +${Math.round((c.delayMs || 0) / 1000)}s`);
-          if (ok) {
-            const t = TEMPLATES[c.key];
-            toast(`${t?.droneType || c.key} on the board`, 'info');
-          } else {
-            toast(`Combined scenario: ${c.key} failed to spawn`, 'err');
-          }
-        }, 1500 + (c.delayMs || 0)));
+        const _first = selEntry.combo[0];
+        const _rest = selEntry.combo.slice(1).filter(c => c.atTSec != null);
+        simAfter(() => {
+          const _before = new Set(droneState.keys());
+          window.__spawnDrone(_first.key);
+          const _leadId = [...droneState.keys()].find(k => !_before.has(k)) || null;
+          console.log(`[combo] lead ${_leadId ? 'spawned' : 'FAILED'} ${_first.key}`);
+          if (!_leadId) { toast(`Combined scenario: ${_first.key} failed to spawn`, 'err'); return; }
+          if (!_rest.length) return;
+          const _waiting = new Set(_rest);
+          const _stop = onDroneUpdate((ups) => {
+            const lead = ups.find(u => u.eventId === _leadId);
+            if (!lead) return;
+            for (const c of [..._waiting]) {
+              if (lead.tSec < c.atTSec) continue;
+              _waiting.delete(c);
+              const n0 = droneState.size;
+              window.__spawnDrone(c.key, { allowConcurrent: true });
+              const ok = droneState.size > n0;
+              console.log(`[combo] ${ok ? 'spawned' : 'FAILED to spawn'} ${c.key} at lead tSec ${Math.round(lead.tSec)}`);
+              toast(ok ? `${TEMPLATES[c.key]?.droneType || c.key} on the board`
+                       : `Combined scenario: ${c.key} failed to spawn`, ok ? 'info' : 'err');
+            }
+            if (!_waiting.size) _stop();
+          });
+        }, 1500);
         return;
       }
       // An unknown key used to fail in silence. Say so instead.
