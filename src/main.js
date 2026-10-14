@@ -12524,27 +12524,65 @@ async function main() {
   // Time-based, not per-tick, for the same reason the sensor decay is:
   // the tick is requestAnimationFrame, so a per-frame factor is not a
   // duration and would mean something different on a slower machine.
-  const _CONF_SMOOTH_TAU_MS = 400;
+  // A THIN ESTIMATE IS AN UNCERTAIN ESTIMATE, AND THAT BELONGS ON SCREEN.
+  //
+  // One fixed time constant was wrong. It flattened the thin phase and
+  // the dense phase equally, so a track held by two sensors read as
+  // steadily as one held by eight. With less to work from the estimate
+  // genuinely moves more, and hiding that is its own kind of lie.
+  //
+  // Two parts, both scaled by how much evidence there is:
+  //
+  //   TAU  how fast it chases a change. Short when thin, because with
+  //        little data each new observation moves the estimate a lot.
+  //        Long when dense, because by then it takes real evidence to
+  //        shift a well-held track.
+  //
+  //   BAND how far it wanders around that value. This is the estimate's
+  //        own uncertainty. Wide when thin, closing to nothing once the
+  //        track is properly held.
+  //
+  // THIS IS NOT THE SINE WAVE COMING BACK. That one had a fixed
+  // amplitude whatever the evidence, and it was the only thing moving
+  // the number. Here the value is driven by sensor mass and the band is
+  // driven by how thin that mass is, so it shuts itself off exactly when
+  // the network can see properly. Two periods rather than one, so it
+  // does not read as a metronome.
+  const _CONF_TAU_MIN_MS = 120;   // thin, responsive
+  const _CONF_TAU_MAX_MS = 800;   // well held, steady
+  const _CONF_BAND_MAX = 0.085;   // widest uncertainty, at no evidence
   function _fusedMemberConfidence(event, state, slotIdx, unidentified) {
-    const target = _fusedTarget(event, slotIdx, unidentified);
-    if (!state) return target;
-    if (!state._confFilt) state._confFilt = [];
+    const q = _evidenceQ(event);
     const now = monoNow();
+    const secs = now / 1000;
+    const phase = slotIdx * 2.3;
+    const band = _CONF_BAND_MAX * (1 - q);
+    const wander = band * (0.6 * Math.sin(secs * 0.9 + phase)
+                         + 0.4 * Math.sin(secs * 0.37 + phase * 1.7));
+    const target = _fusedTarget(event, slotIdx, unidentified) + (unidentified ? 0 : wander);
+    if (!state) return +Math.max(0.30, Math.min(0.98, target)).toFixed(2);
+    if (!state._confFilt) state._confFilt = [];
     const prev = state._confFilt[slotIdx];
-    if (!prev) { state._confFilt[slotIdx] = { v: target, t: now }; return target; }
+    if (!prev) { state._confFilt[slotIdx] = { v: target, t: now }; return +target.toFixed(2); }
+    const tau = _CONF_TAU_MIN_MS + (_CONF_TAU_MAX_MS - _CONF_TAU_MIN_MS) * q;
     const dt = Math.min(1000, Math.max(0, now - prev.t));
-    const alpha = 1 - Math.exp(-dt / _CONF_SMOOTH_TAU_MS);
-    const v = prev.v + (target - prev.v) * alpha;
+    const v = prev.v + (target - prev.v) * (1 - Math.exp(-dt / tau));
     state._confFilt[slotIdx] = { v, t: now };
-    return +v.toFixed(2);
+    return +Math.max(0.30, Math.min(0.98, v)).toFixed(2);
+  }
+
+  // How much observation there is, 0 to 1. Drives the value, the
+  // response speed and the width of the uncertainty band.
+  function _evidenceQ(event) {
+    const mass = (event.contributingSensors || [])
+      .filter(c => !c.offline)
+      .reduce((acc, c) => acc + (c.confidence || 0), 0);
+    return Math.min(1, mass / _FUSION_SATURATION_MASS);
   }
 
   // The unsmoothed value, straight off the current sensor set.
   function _fusedTarget(event, slotIdx, unidentified) {
-    const mass = (event.contributingSensors || [])
-      .filter(c => !c.offline)
-      .reduce((acc, c) => acc + (c.confidence || 0), 0);
-    const q = Math.min(1, mass / _FUSION_SATURATION_MASS);
+    const q = _evidenceQ(event);
     const jitter = ((slotIdx % 3) - 1) * 0.02;
     // UNIDENTIFIED members stay in the weak band whatever the geometry,
     // because the uncertainty is in the CLASSIFICATION rather than in the
