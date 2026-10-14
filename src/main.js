@@ -12449,14 +12449,19 @@ async function main() {
   // point on it. A member still has to have been detected before it can
   // be named.
   //
-  // The shape asked for: 1 first, 2 and 3 close behind it, 4 shortly
-  // after those, 5 taking noticeably longer. The last one is the hardest
-  // because it is furthest back and quietest.
-  const _IDENT_SCHEDULE_S = [8.0, 9.0, 9.6, 11.0, 13.0];
+  // The shape asked for: lead at 8, second at 10.5, third and fourth
+  // around 11.5, fifth out at 15.
+  //
+  // Three and four are 11.3 and 11.8 rather than both 11.5. Identical
+  // values would put two airframes on the same frame, which is the
+  // precise thing that was wrong before. Half a second apart still reads
+  // as "around 11.5" and still resolves one at a time.
+  const _IDENT_SCHEDULE_S = [8.0, 10.5, 11.3, 11.8, 15.0];
   // Signal evidence waits for the whole formation to resolve, plus a
   // little. It is the analysis OUTPUT, so publishing it while airframes
   // are still unnamed claims a conclusion the pipeline has not reached.
-  const _SIGNAL_EVIDENCE_S = 15.0;
+  // Tracks the last slot above rather than standing on its own number.
+  const _SIGNAL_EVIDENCE_S = 17.0;
   const _IDENT_PENDING = 'No identification registered';
   const _SIGNAL_PENDING = 'Analysing';
 

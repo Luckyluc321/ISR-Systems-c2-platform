@@ -443,10 +443,31 @@ off that band. It is declared by the template and never inferred from the
 model name.
 
 **Identification lags detection.** A member is detected first and named
-second. The roster shows `No identification registered` until roughly 8
-seconds after that member's first detection, staggered per slot so five
-airframes do not all resolve on the same frame. Naming a model from one
-observation claims a classification the network has not made yet.
+second. The roster shows `No identification registered` until that slot's
+point on the analysis schedule, and the signal column reads `Analysing`
+until the same moment, because a band label is a classification rather
+than a raw measurement. Naming a model from one observation claims a
+classification the network has not made.
+
+The schedule is measured from the first detection of ANY airframe in the
+formation, not from each airframe's own. One analysis pipeline works
+through the group; it does not restart per member. Anchoring per member
+stacked the 3 to 9 second gap between the lead and the rear of the
+formation on top of the classifier delay.
+
+| slot | named at |
+|---|---|
+| 1 (lead) | 8.0 s |
+| 2 | 10.5 s |
+| 3 | 11.3 s |
+| 4 | 11.8 s |
+| 5 | 15.0 s |
+| Signal Evidence section | 17.0 s |
+
+No two slots share a value, so no two airframes resolve on the same
+frame. The name and the signal column are patched at 4 Hz with the rest
+of the live telemetry; leaving them to the full re-render made every
+threshold crossed between two renders appear simultaneously.
 
 **Track ids are slot numbers, not brands.** `DRONE-1` through `DRONE-n`.
 Nothing parses them.
