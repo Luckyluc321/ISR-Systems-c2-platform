@@ -21096,9 +21096,28 @@ async function main() {
       // holds the second spawn too rather than firing it into a frozen
       // scene.
       if (Array.isArray(selEntry.combo)) {
-        selEntry.combo.forEach((c, i) => simAfter(
-          () => window.__spawnDrone(c.key, { allowConcurrent: i > 0 }),
-          1500 + (c.delayMs || 0)));
+        // SAY WHEN EACH ONE ARRIVES.
+        //
+        // The aircraft spawns 216 s in, 30 km out on the extended
+        // centreline, which at that range is a small symbol a long way
+        // off screen. Indistinguishable from not spawning at all if you
+        // are watching the airport, which is exactly where you are
+        // watching. So it reports, and it reports a failure too rather
+        // than returning quietly like everything else in this file has
+        // been caught doing today.
+        toast(`Combined scenario: ${selEntry.combo.length} tracks queued`, 'info');
+        selEntry.combo.forEach((c, i) => simAfter(() => {
+          const before = droneState.size;
+          window.__spawnDrone(c.key, { allowConcurrent: i > 0 });
+          const ok = droneState.size > before;
+          console.log(`[combo] ${ok ? 'spawned' : 'FAILED to spawn'} ${c.key} at +${Math.round((c.delayMs || 0) / 1000)}s`);
+          if (ok) {
+            const t = TEMPLATES[c.key];
+            toast(`${t?.droneType || c.key} on the board`, 'info');
+          } else {
+            toast(`Combined scenario: ${c.key} failed to spawn`, 'err');
+          }
+        }, 1500 + (c.delayMs || 0)));
         return;
       }
       // An unknown key used to fail in silence. Say so instead.
