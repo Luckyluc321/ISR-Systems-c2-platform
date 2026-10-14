@@ -12409,8 +12409,25 @@ async function main() {
         if (targetEvent._contribTickSeq !== tickSeq) {
           for (const existing of targetEvent.contributingSensors) {
             if (existing.offline) continue;
-            existing.confidence = 0;
+            // DECAY, NOT A RESET.
+            //
+            // This snapped to 0 every tick and let the drones put their
+            // values back. Pure geometry, no memory, so a drone orbiting
+            // near the edge of a ring flickered its sensor between 0.94
+            // and 0.00 several times a second, and any sensor that saw
+            // the target a moment ago read 0.00 in the panel rather than
+            // fading out of it.
+            //
+            // A detection does not evaporate the instant geometry says
+            // so. The track is still there, the estimate is just ageing.
+            // So confidence falls off instead: about a 2 second
+            // half-life, and anything that drops below a floor is
+            // dropped rather than left sitting at 0.00.
+            existing.confidence = +((existing.confidence || 0) * 0.78).toFixed(2);
           }
+          targetEvent.contributingSensors = targetEvent.contributingSensors
+            .filter(c => c.offline || (c.confidence || 0) >= 0.08
+                      || (c.peakConfidence || 0) > 0);
           targetEvent._contribTickSeq = tickSeq;
         }
         // One-shot capture of the source's emitted batch. Registering
