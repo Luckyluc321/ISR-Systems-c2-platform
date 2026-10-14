@@ -1680,6 +1680,33 @@ body.details-collapsed #control-panel {
   flex: 0 0 auto;
 }
 .escp-section:nth-of-type(3) { flex: 1 1 auto; min-height: 0; }
+
+/* Collapsed section: the header stays, its body goes, and the padding
+   tightens so a folded section costs one row instead of four. The
+   destination list above is flex: 1, so everything freed here lands
+   there, which is the point. */
+.escp-section.is-collapsed { padding-bottom: 8px; }
+.escp-section.is-collapsed > .escp-section-hdr { margin-bottom: 0; }
+.escp-section.is-collapsed > *:not(.escp-section-hdr) { display: none; }
+.escp-hdr-right {
+  display: flex; align-items: center; gap: 10px;
+}
+.escp-collapse {
+  width: 22px; height: 22px; line-height: 1;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.escp-collapse:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.3);
+}
 .escp-section-hdr {
   display: flex;
   justify-content: space-between;

@@ -24796,6 +24796,10 @@ async function main() {
   // Per-destination selected channels state, keyed by dest ID
   let _selectedChannels = {}; // { destId: Set([...methods]) }
   let _expanded = new Set(); // dest IDs currently expanded
+  // Which fixed-height sections the operator has folded away to give the
+  // destination list room. Module scope, not per-render, because every
+  // checkbox click rebuilds the modal.
+  const _escCollapsed = new Set();
   // legacy _escView removed with the P19 Palantir redesign (list-view only)
   const TIER_LABELS = {
     1: 'Tier 1  ·  First responders on site',
@@ -24958,10 +24962,13 @@ async function main() {
             </div>
           </div>
 
-          <div class="escp-section">
+          <div class="escp-section${_escCollapsed.has('rec') ? ' is-collapsed' : ''}">
             <div class="escp-section-hdr">
               <span class="escp-section-title">Recommendation</span>
-              <button class="escp-inline-btn" data-esc="apply-rec">Apply recommended</button>
+              <span class="escp-hdr-right">
+                <button class="escp-inline-btn" data-esc="apply-rec">Apply recommended</button>
+                <button class="escp-collapse" data-esc-collapse="rec" title="${_escCollapsed.has('rec') ? 'Expand' : 'Collapse'}" aria-label="Toggle section">${_escCollapsed.has('rec') ? '+' : '−'}</button>
+              </span>
             </div>
             <div class="escp-rec escp-rec-${rec.urgency}">${rec.text}</div>
           </div>
@@ -24974,10 +24981,13 @@ async function main() {
             ${tierBlocks}
           </div>
 
-          <div class="escp-section">
+          <div class="escp-section${_escCollapsed.has('payload') ? ' is-collapsed' : ''}">
             <div class="escp-section-hdr">
               <span class="escp-section-title">Payload</span>
-              <button class="escp-inline-btn" data-esc="preview-brief">Preview brief</button>
+              <span class="escp-hdr-right">
+                <button class="escp-inline-btn" data-esc="preview-brief">Preview brief</button>
+                <button class="escp-collapse" data-esc-collapse="payload" title="${_escCollapsed.has('payload') ? 'Expand' : 'Collapse'}" aria-label="Toggle section">${_escCollapsed.has('payload') ? '+' : '−'}</button>
+              </span>
             </div>
             <div class="escp-radio-group">
               <label class="escp-radio"><input type="radio" name="payload" value="summary" checked /><span class="escp-radio-lbl">Detection brief PDF</span></label>
@@ -24986,10 +24996,13 @@ async function main() {
             </div>
           </div>
 
-          <div class="escp-section">
+          <div class="escp-section${_escCollapsed.has('message') ? ' is-collapsed' : ''}">
             <div class="escp-section-hdr">
               <span class="escp-section-title">Operator message</span>
-              <span class="escp-section-hint">Optional</span>
+              <span class="escp-hdr-right">
+                <span class="escp-section-hint">Optional</span>
+                <button class="escp-collapse" data-esc-collapse="message" title="${_escCollapsed.has('message') ? 'Expand' : 'Collapse'}" aria-label="Toggle section">${_escCollapsed.has('message') ? '+' : '−'}</button>
+              </span>
             </div>
             <textarea id="esc-message" class="escp-textarea" rows="3" placeholder="Context for the recipient"></textarea>
           </div>
@@ -25019,6 +25032,25 @@ async function main() {
 
       // Wire interactions
       modalCard.querySelectorAll('[data-modal="cancel"]').forEach(el => el.addEventListener('click', closeEscalateModal));
+      // COLLAPSE, SO THE DESTINATION LIST CAN HAVE THE ROOM.
+      //
+      // Only the Destinations section flexes; Recommendation, Payload and
+      // Operator message are fixed height and take their space off the
+      // top. On a laptop that left the list of 27 recipients a few rows
+      // tall, which is the one part of this modal an operator actually
+      // works in.
+      //
+      // Collapsing a section leaves its header, so nothing disappears and
+      // the control to bring it back is where it went. State is held
+      // across re-renders because every checkbox click rebuilds this
+      // modal, and a section that sprang open on each tick would be
+      // worse than no control at all.
+      modalCard.querySelectorAll('[data-esc-collapse]').forEach(el => el.addEventListener('click', (ev) => {
+        ev.preventDefault(); ev.stopPropagation();
+        const key = el.dataset.escCollapse;
+        if (_escCollapsed.has(key)) _escCollapsed.delete(key); else _escCollapsed.add(key);
+        renderModal();
+      }));
       modalCard.querySelectorAll('[data-esc="toggle"]').forEach(el => el.addEventListener('click', (ev) => {
         ev.preventDefault(); ev.stopPropagation();
         const id = el.dataset.id;
