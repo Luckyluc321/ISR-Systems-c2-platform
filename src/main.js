@@ -12500,7 +12500,47 @@ async function main() {
       .filter(c => !c.offline && ((c.peakConfidence || 0) > 0 || (c.confidence || 0) > 0)).length;
     return contributed >= _SIGNAL_EVIDENCE_MIN_SENSORS;
   }
-  function _fusedMemberConfidence(event, slotIdx, unidentified) {
+  // THE ESTIMATE HAS MEMORY. IT IS NOT RECOMPUTED FROM SCRATCH EACH FRAME.
+  //
+  // Near the edge of a sensor ring the geometry flips in and out every
+  // frame, so sensors appear and vanish from the contributing list. Early
+  // in a track the total is small, so one sensor flipping is a large
+  // slice of it, and the headline jumped between two values about four
+  // times a second: 0.79 and 0.94, which is roughly two sensors' worth of
+  // confidence toggling.
+  //
+  // Fast response is right. A fifteen point jump inside one frame is not,
+  // because the thing being measured cannot change that much in sixteen
+  // milliseconds. A number that teleports between two values teaches an
+  // operator to ignore it, which is the same failure as the sine wave in
+  // a noisier costume.
+  //
+  // So the raw value becomes a target and the displayed value chases it
+  // on a 400 ms time constant: about two thirds of any step in 400 ms and
+  // settled inside about a second and a half. Still visibly quick, and it
+  // can no longer teleport. It also removes the repeating pair, because
+  // the output is now a continuum rather than two states.
+  //
+  // Time-based, not per-tick, for the same reason the sensor decay is:
+  // the tick is requestAnimationFrame, so a per-frame factor is not a
+  // duration and would mean something different on a slower machine.
+  const _CONF_SMOOTH_TAU_MS = 400;
+  function _fusedMemberConfidence(event, state, slotIdx, unidentified) {
+    const target = _fusedTarget(event, slotIdx, unidentified);
+    if (!state) return target;
+    if (!state._confFilt) state._confFilt = [];
+    const now = monoNow();
+    const prev = state._confFilt[slotIdx];
+    if (!prev) { state._confFilt[slotIdx] = { v: target, t: now }; return target; }
+    const dt = Math.min(1000, Math.max(0, now - prev.t));
+    const alpha = 1 - Math.exp(-dt / _CONF_SMOOTH_TAU_MS);
+    const v = prev.v + (target - prev.v) * alpha;
+    state._confFilt[slotIdx] = { v, t: now };
+    return +v.toFixed(2);
+  }
+
+  // The unsmoothed value, straight off the current sensor set.
+  function _fusedTarget(event, slotIdx, unidentified) {
     const mass = (event.contributingSensors || [])
       .filter(c => !c.offline)
       .reduce((acc, c) => acc + (c.confidence || 0), 0);
@@ -18463,7 +18503,7 @@ async function main() {
             // fused estimate as the rest of it, so there is now one
             // source for that number instead of two disagreeing ones.
             confidence: _fusedMemberConfidence(
-              event, 0,
+              event, state, 0,
               TEMPLATES[event.templateKey]?.swarm?.formation?.[0]?.unidentified === true),
             // AND THE CARRIER, for the same reason. The roster read "No
             // radio-frequency data" on the lead while every wingman showed
@@ -18885,7 +18925,7 @@ async function main() {
             rfCarrierMHz: sw.rfMHz || (2412 + (i % 3) * 5),
             rfPower_dBm: -68 + (i * -2),
             model: sw.model,
-            confidence: _fusedMemberConfidence(event, i + 1, _isRogue),
+            confidence: _fusedMemberConfidence(event, state, i + 1, _isRogue),
           };
           // P68: dynamic contributingSensors for the WINGMAN's position too
           _updateContributingSensorsForPosition(event, pos.lat, pos.lon, pos.alt);
