@@ -17738,7 +17738,37 @@ async function main() {
         // test all want height above ground, so p.alt is left alone and
         // only the rendered position is corrected.
         if (_terrainRel) {
-          const _g = _airborneAbsAlt(p.lon, p.lat, 0);
+          // SAMPLE WHAT IS DRAWN, NOT WHAT THE TERRAIN SAYS.
+          //
+          // This scene renders Google Photorealistic 3D Tiles, so the
+          // runway you see is a photogrammetry MESH. globe.getHeight()
+          // returns the terrain underneath that mesh, which sits metres
+          // below it by a varying amount. That gap is what groundOffsetM
+          // was papering over, and it is why a fixed 2 m looked right in
+          // one place and buried the wheels in another.
+          //
+          // scene.sampleHeight samples the rendered scene, tiles
+          // included, so it returns the surface the aircraft is actually
+          // seen to land on. It is a GPU readback, so it is only used
+          // near the ground and at a limited rate, with the terrain as
+          // the fallback everywhere else.
+          let _g = 0;
+          const _lowEnough = (p.alt || 0) < 80;
+          if (_lowEnough && viewer.scene.sampleHeightSupported) {
+            const _nowMs = monoNow();
+            if (!state._surfAt || _nowMs - state._surfAt > 150) {
+              state._surfAt = _nowMs;
+              try {
+                const _h = viewer.scene.sampleHeight(
+                  Cesium.Cartographic.fromDegrees(p.lon, p.lat),
+                  // Exclude our own track, or it samples the aircraft.
+                  [state.billboard, state.trail, state.shadow]);
+                if (typeof _h === 'number' && isFinite(_h)) state._surfH = _h;
+              } catch (_) { /* fall through to terrain */ }
+            }
+            if (typeof state._surfH === 'number') _g = state._surfH;
+          }
+          if (!_g) _g = _airborneAbsAlt(p.lon, p.lat, 0);
           if (_g > 0) {
             // ON THE GROUND, TRACK THE SURFACE EXACTLY.
             //

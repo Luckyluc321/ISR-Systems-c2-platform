@@ -115,7 +115,12 @@ export const TEMPLATES = {
     // wheels are only 0.087 m below its origin, so this 2 m is the gap
     // between the bare height model that globe.getHeight() reads and the
     // built-up paved surface that is actually drawn.
-    groundOffsetM: 2,
+    // 0.1, not 2. The 2 m compensated for globe.getHeight() returning
+    // the terrain under the photogrammetry mesh. Near the ground the
+    // rendered surface is now sampled directly, so all that is left is
+    // the model's own wheel offset: its wheels sit 0.087 m below its
+    // origin.
+    groundOffsetM: 0.1,
     // Gear retracts in flight and extends on the approach. Off for every
     // other template, whose models have no gear worth driving.
     gearRetracts: true,
@@ -295,7 +300,12 @@ export const TEMPLATES = {
     ],
     evidence: { rfCarrier: '1090 MHz ADS-B', rfMatch: 'SAS743 A320neo, flight plan match', modality: 'RF + acoustic + visual', evidenceSize: '92.1 MB', note: 'Cleared commercial approach, go-around flown at 185 ft. Logged for audit.' },
     terrainRelativeAlt: true,
-    groundOffsetM: 2,
+    // 0.1, not 2. The 2 m compensated for globe.getHeight() returning
+    // the terrain under the photogrammetry mesh. Near the ground the
+    // rendered surface is now sampled directly, so all that is left is
+    // the model's own wheel offset: its wheels sit 0.087 m below its
+    // origin.
+    groundOffsetM: 0.1,
     iconBearingTrimDeg: 0,
     iconTracksFlightPath: true,
     gearRetracts: true,
