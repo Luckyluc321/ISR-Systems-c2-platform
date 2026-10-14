@@ -19675,8 +19675,21 @@ async function main() {
   }
 
   // ── Spawn API — button click hooks into this ──
-  function spawnFromTemplate(templateKey) {
-    if (anyTrackLive()) return; // one at a time
+  function spawnFromTemplate(templateKey, opts = {}) {
+    // ONE AT A TIME, UNLESS A COMBINED SCENARIO ASKS FOR TWO.
+    //
+    // This guard is why the combined swarm-plus-airliner run silently
+    // did nothing: the launcher spawns the aircraft 216 s in, by which
+    // point the swarm is live, so the second call returned here without
+    // a word. Opt-in rather than removed, because the guard is right for
+    // every other caller: launching a second scenario by accident while
+    // one is playing is a mess nobody wants.
+    //
+    // Checked before allowing it: _findGroupEventForSite resolves
+    // sensors from the event being ticked plus ITS linked events only,
+    // so two unlinked tracks at one site cannot steal each other's
+    // contributing sensors.
+    if (anyTrackLive() && !opts.allowConcurrent) return;
     const template = TEMPLATES[templateKey];
     if (!template) return;
     const eventId = nextEventId();
@@ -21077,7 +21090,9 @@ async function main() {
       // holds the second spawn too rather than firing it into a frozen
       // scene.
       if (Array.isArray(selEntry.combo)) {
-        selEntry.combo.forEach(c => simAfter(() => window.__spawnDrone(c.key), 1500 + (c.delayMs || 0)));
+        selEntry.combo.forEach((c, i) => simAfter(
+          () => window.__spawnDrone(c.key, { allowConcurrent: i > 0 }),
+          1500 + (c.delayMs || 0)));
         return;
       }
       simAfter(() => window.__spawnDrone(selEntry.key), 1500);

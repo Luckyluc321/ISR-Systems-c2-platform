@@ -460,7 +460,26 @@ export const TEMPLATES = {
     confidence: 0.99,
     confidenceTrend: 'ADS-B correlated, flight plan match',
     siteId: 'cph',
-    multiSite: false,
+    // EVERY FLAG THE WORKING GO-AROUND CARRIES. Mirrored deliberately
+    // rather than reinvented: this template was first written with none
+    // of them, and `cooperative` alone would have sunk it, because an
+    // aircraft that spawns 30 km out is nowhere near a sensor and would
+    // have stayed invisible for most of the approach. Cooperative
+    // traffic is tracked by transponder, not by our sensors, which is
+    // the whole reason the flag exists.
+    cooperative: true,
+    terrainRelativeAlt: true,
+    groundOffsetM: 0.1,
+    iconBearingTrimDeg: 0,
+    iconTracksFlightPath: true,
+    gearRetracts: true,
+    contributingSensors: [
+      { id: 'N07', confidence: 0.98 },
+      { id: 'N08', confidence: 0.96 },
+      { id: 'N09', confidence: 0.94 },
+      { id: 'N15', confidence: 0.92 },
+      { id: 'N17', confidence: 0.90 },
+    ],
     evidence: {
       rfCarrier: '1090 MHz ADS-B',
       rfMatch: 'SAS743 A320neo, flight plan match',
