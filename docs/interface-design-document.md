@@ -442,6 +442,48 @@ classification rather than in the fix. Replay and debrief colour-code trails
 off that band. It is declared by the template and never inferred from the
 model name.
 
+### IF-1.4b Perimeter crossings
+
+`event.entry` and `event.exit` are single fields, each written once behind a
+one-shot latch. One entry and one exit for the life of the event. A track
+that left and came back produced no re-entry row, and a second departure
+produced no second exit row, because there was nowhere to put either.
+
+`event.crossings` is the ordered log that replaces that for display. The two
+legacy fields keep their behaviour unchanged, because `closeEvent`, the
+cordon dispatch and the post-incident report read them.
+
+```
+crossings: Array<{
+  kind: 'ENTRY' | 'EXIT' | 'RE-ENTRY'
+  lat, lon, alt, heading
+  timestamp                        // ISO-8601, stamped at qualification
+}>
+```
+
+**Polygon only.** The legacy EXIT also fires on loss of sensor coverage. A
+log where EXIT sometimes means "left the site" and sometimes means "we
+stopped hearing it" cannot be read, so coverage transitions keep their own
+markers (OUT OF RANGE, REACQUIRED) and stay out of this one.
+
+**Qualifying window, 1.5 s.** A track skimming the boundary crosses it many
+times a second and every one of those is real geometry. A transition is
+logged only once the new state has persisted for 1.5 s, measured on the
+simulation clock so freezing or scrubbing cannot qualify a crossing that
+never held.
+
+**The coordinate is the boundary cut**, captured when the pending transition
+starts, not when the window expires. Stamping it on qualification put the
+point about 37 m past the perimeter at 25 m/s. An operator reading an EXIT
+coordinate is reading where the track left, not where it got to afterwards.
+
+**Markers.** The legacy path drops the map pin for the first ENTRY and the
+first EXIT. The log drops pins for everything that path will never emit:
+every RE-ENTRY, and every crossing after the first of its kind.
+
+Multi-site tracks are excluded, since the per-site marker path already owns
+their crossings.
+
 ### IF-1.5 Configuration surface
 
 **Global override (env / bootstrap):**

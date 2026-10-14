@@ -532,8 +532,25 @@ export const TEMPLATES = {
       { lat: 55.59371, lon: 12.60447, alt: 42, heading: 0, tSec: 428.7 },
       { lat: 55.59405, lon: 12.60490, alt: 42, heading: 0, tSec: 431.8 },
       { lat: 55.59417, lon: 12.60560, alt: 42, heading: 0, tSec: 434.9 },   // lap closes, holding on the threshold
+      // EGRESS, OUT TO SEA. The path used to stop dead over the runway
+      // threshold, so the formation never left coverage, the event never
+      // closed on its own, and the dashed breadcrumb hung on the map with
+      // nothing to resolve it.
+      //
+      // East-southeast into the Oresund rather than due east, which would
+      // put five hostile airframes directly over Dragoer town. This track
+      // clears the town by 1.4 km at its closest.
+      //
+      // Coverage ends between the first and second waypoints below: 914 m
+      // from N33 at the first, 1612 m from N09 at the second. The detection
+      // summary fires there, on real geometry, and the lifecycle teardown
+      // then removes the billboards and the projection lines.
+      { lat: 55.59100, lon: 12.62200, alt:  55, heading: 0, tSec: 471 },   // running, still held by N33 at 914 m
+      { lat: 55.58800, lon: 12.63900, alt:  75, heading: 0, tSec: 508 },   // outside every ring, summary fires
+      { lat: 55.58400, lon: 12.66000, alt: 100, heading: 0, tSec: 554 },   // over water, south of Dragoer
+      { lat: 55.58000, lon: 12.68000, alt: 120, heading: 0, tSec: 598 },   // gone
     ],
-    durationSec: 435,
+    durationSec: 598,
   },
 
   // ── Recon drone, HALE (Reaper/Global-Hawk class), high altitude circular loiter ──

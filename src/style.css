@@ -1560,6 +1560,9 @@ body.details-collapsed #control-panel {
 }
 .pc-entry .pc-tag { background: rgba(77, 210, 255, 0.15); color: var(--accent); border: 1px solid rgba(77, 210, 255, 0.4); }
 .pc-exit  .pc-tag { background: rgba(255, 184, 77, 0.12); color: var(--friendly); border: 1px solid rgba(255, 184, 77, 0.4); }
+/* RE-ENTRY is neither of the other two: a track that came back is its
+   own finding, so it does not borrow the ENTRY colour. */
+.pc-reentry .pc-tag { background: rgba(184, 77, 255, 0.14); color: #c88dff; border: 1px solid rgba(184, 77, 255, 0.45); }
 .pc-time  { color: var(--text-dim); }
 .pc-coord { color: var(--text-dim); font-size: 9px; }
 

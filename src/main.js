@@ -12402,11 +12402,28 @@ async function main() {
   // reads the same sensor count rather than scoring itself in isolation.
   // The small per-slot offset is STATIC, so the roster does not show five
   // identical numbers and nothing animates.
-  const _FUSION_SATURATION_SENSORS = 6;
+  // MASS, NOT HEADCOUNT.
+  //
+  // The first version counted sensors above a floor, which meant a sensor
+  // at 0.08 carried exactly as much weight as one at 0.89. Eight weak
+  // sensors saturated the estimate as fast as eight strong ones, so a
+  // panel showing 0.89 / 0.59 / 0.55 / 0.55 / 0.08 still reported 0.92.
+  //
+  // The geometry floor made it bite harder rather than softer: it props
+  // every in-range sensor up to between 0.18 and 0.60, and under a
+  // headcount each propped sensor then counted a whole unit. The floor is
+  // right and the headcount was wrong.
+  //
+  // Summing the confidences instead asks how much observation there
+  // actually is. Five sensors' worth of full confidence saturates; eight
+  // weak ones do not. On the frame above that sum is about 2.9, which
+  // lands the headline in the low 80s where it belongs.
+  const _FUSION_SATURATION_MASS = 5;
   function _fusedMemberConfidence(event, slotIdx, unidentified) {
-    const held = (event.contributingSensors || [])
-      .filter(c => !c.offline && (c.confidence || 0) >= 0.08).length;
-    const q = Math.min(1, held / _FUSION_SATURATION_SENSORS);
+    const mass = (event.contributingSensors || [])
+      .filter(c => !c.offline)
+      .reduce((acc, c) => acc + (c.confidence || 0), 0);
+    const q = Math.min(1, mass / _FUSION_SATURATION_MASS);
     const jitter = ((slotIdx % 3) - 1) * 0.02;
     // UNIDENTIFIED members stay in the weak band whatever the geometry,
     // because the uncertainty is in the CLASSIFICATION rather than in the
@@ -17401,6 +17418,72 @@ async function main() {
   // Tyre smoke. One instance; it keys its puffs by birth time.
   const _touchdownSmoke = createTouchdownSmoke(viewer, Cesium, { monoNow });
 
+  // A track skimming the boundary crosses it many times a second and
+  // every one of those is real geometry. 1.5 seconds of persistence is
+  // what separates a departure from a wobble, and it is the figure Lucas
+  // asked for after seeing a millisecond clip logged as an exit.
+  const _PERIM_QUALIFY_MS = 1500;
+
+  function _appendCrossing(event, state, kind, p) {
+    const row = {
+      kind,
+      lat: p.lat, lon: p.lon, alt: Math.round(p.alt || 0),
+      heading: Math.round(p.heading || 0),
+      timestamp: new Date().toISOString(),
+    };
+    // Via mutateEvent, never a direct push. events.js owns event fields
+    // and scripts/check-event-mutations.mjs enforces it.
+    mutateEvent(event.id, { crossings: [...(event.crossings || []), row] });
+    // The legacy block drops the map marker for the FIRST entry and the
+    // FIRST exit. Marking those again here would stack two pins on one
+    // spot. Everything it will never emit is ours: every RE-ENTRY, and
+    // every crossing after the first of its kind.
+    const legacyWillHandle = (kind === 'ENTRY' && !state.entryDropped)
+                          || (kind === 'EXIT' && !state.exitDropped);
+    if (legacyWillHandle) return;
+    const colour = kind === 'EXIT' ? '#ffb84d' : (kind === 'RE-ENTRY' ? '#b84dff' : '#4dd2ff');
+    _dropMarker(p.lat, p.lon, colour, `${kind} ${row.timestamp.slice(11, 19)}Z`, event.id);
+  }
+
+  function _updatePerimeterCrossings(event, state, isInside, p) {
+    // monoNow, not Date.now and not a caller-supplied stamp: the qualifying
+    // window must be measured on the simulation clock, so freezing or
+    // scrubbing the sim cannot qualify a crossing that never persisted.
+    const nowMs = monoNow();
+    // Multi-site tracks have their own per-site marker path; logging here
+    // too would double every crossing they make.
+    if (event.multiSiteTrack) return;
+    const want = isInside ? 'inside' : 'outside';
+    if (!state._perimState) {
+      // Seed from the first observation. A track that spawns outside the
+      // perimeter has not exited anything, so nothing is logged for it.
+      state._perimState = want;
+      state._perimPending = null;
+      if (want === 'inside') _appendCrossing(event, state, 'ENTRY', p);
+      return;
+    }
+    if (want === state._perimState) { state._perimPending = null; return; }
+    if (state._perimPending !== want) {
+      state._perimPending = want;
+      state._perimPendingMs = nowMs;
+      // THE CROSSING POINT IS WHERE THE BOUNDARY WAS CUT, not where the
+      // track happened to be 1.5 seconds later when the window expired.
+      // Stamping it on qualification put the coordinate about 37 m past
+      // the perimeter at 25 m/s, and an operator reading an EXIT
+      // coordinate is reading where it left, not where it then got to.
+      state._perimPendingAt = { lat: p.lat, lon: p.lon, alt: p.alt, heading: p.heading };
+      return;
+    }
+    if (nowMs - state._perimPendingMs < _PERIM_QUALIFY_MS) return;
+    state._perimState = want;
+    state._perimPending = null;
+    const kind = want === 'outside'
+      ? 'EXIT'
+      : ((event.crossings || []).some(c => c.kind === 'ENTRY') ? 'RE-ENTRY' : 'ENTRY');
+    _appendCrossing(event, state, kind, state._perimPendingAt || p);
+    state._perimPendingAt = null;
+  }
+
   function removeDroneEntities(eventId) {
     const state = droneState.get(eventId);
     if (!state) return;
@@ -18089,6 +18172,28 @@ async function main() {
         }
 
 
+        // ── PERIMETER CROSSING LOG ──
+        //
+        // `event.entry` and `event.exit` are single fields, each written
+        // once behind a one-shot latch (`entryDropped`, `exitDropped`).
+        // One entry and one exit for the whole life of the event. So a
+        // formation that left and came back produced no RE-ENTRY row, and
+        // a second departure produced no second EXIT row: there was
+        // nowhere to put either. No trigger was broken. There was no
+        // trigger.
+        //
+        // `event.crossings` is an ordered log of every qualifying
+        // transition. The two legacy fields keep their exact behaviour,
+        // because closeEvent, the cordon dispatch and the post-incident
+        // report all read them. This is additive, not a migration.
+        //
+        // POLYGON ONLY. The legacy EXIT below also fires on loss of sensor
+        // coverage, which folds two different things into one word. A log
+        // where EXIT sometimes means "left the site" and sometimes means
+        // "we stopped hearing it" cannot be read. Coverage transitions
+        // keep their own markers (OUT OF RANGE, REACQUIRED).
+        _updatePerimeterCrossings(event, state, isInside, p);
+
         // ENTRY marker on first inside crossing. Multi-site tracks use
         // processPerSiteMarkers for all sites (including origin) so this
         // legacy origin-only path is skipped for them to avoid duplicates.
@@ -18226,6 +18331,12 @@ async function main() {
             confidence: _fusedMemberConfidence(
               event, 0,
               TEMPLATES[event.templateKey]?.swarm?.formation?.[0]?.unidentified === true),
+            // AND THE CARRIER, for the same reason. The roster read "No
+            // radio-frequency data" on the lead while every wingman showed
+            // its frequency, because this object never carried rfCarrierMHz
+            // either. Same missing-field defect as the confidence above, in
+            // the same object, found in the same screenshot.
+            rfCarrierMHz: TEMPLATES[event.templateKey]?.swarm?.formation?.[0]?.rfMHz ?? null,
           };
           // Swarm Phase 1: sync the lead's source-of-truth member
           // track (m0), 1 Hz throttle + immediate on coverage flips.
@@ -23456,11 +23567,23 @@ async function main() {
         </div>`;
     }
 
-    const perimeter = (e.entry || e.exit) ? `
+    // Walks the crossing log when there is one, so a track that left and
+    // came back shows ENTRY, EXIT, RE-ENTRY in the order it happened.
+    // Falls back to the two legacy fields for events recorded before the
+    // log existed, which is why both branches stay.
+    const _pcCls = { ENTRY: 'pc-entry', EXIT: 'pc-exit', 'RE-ENTRY': 'pc-reentry' };
+    const _pcRow = (kind, c) => `<div class="pc-row ${_pcCls[kind] || 'pc-entry'}">`
+      + `<span class="pc-tag">${kind}</span>`
+      + `<span class="pc-time">${c.timestamp.slice(11, 19)}Z</span>`
+      + `<span class="pc-coord">${c.lat.toFixed(4)}°N ${c.lon.toFixed(4)}°E</span></div>`;
+    const _pcLog = e.crossings || [];
+    const _pcHtml = _pcLog.length
+      ? _pcLog.map(c => _pcRow(c.kind, c)).join('')
+      : `${e.entry ? _pcRow('ENTRY', e.entry) : ''}${e.exit ? _pcRow('EXIT', e.exit) : ''}`;
+    const perimeter = _pcHtml ? `
       <div class="dp-section">
-        <div class="dp-section-title">Perimeter Crossings</div>
-        ${e.entry ? `<div class="pc-row pc-entry"><span class="pc-tag">ENTRY</span><span class="pc-time">${e.entry.timestamp.slice(11,19)}Z</span><span class="pc-coord">${e.entry.lat.toFixed(4)}°N ${e.entry.lon.toFixed(4)}°E</span></div>` : ''}
-        ${e.exit ? `<div class="pc-row pc-exit"><span class="pc-tag">EXIT</span><span class="pc-time">${e.exit.timestamp.slice(11,19)}Z</span><span class="pc-coord">${e.exit.lat.toFixed(4)}°N ${e.exit.lon.toFixed(4)}°E</span></div>` : ''}
+        <div class="dp-section-title">Perimeter Crossings${_pcLog.length > 2 ? ` · ${_pcLog.length}` : ''}</div>
+        ${_pcHtml}
       </div>` : '';
 
     // Mission Console — Agent B narrative (mock; Mistral post-demo).
