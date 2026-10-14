@@ -17756,6 +17756,31 @@ async function main() {
     state._perimPendingAt = null;
   }
 
+  // WHAT IS STILL ON SCREEN, AND WHY.
+  //
+  //   window.__isr_swarmVis()
+  //
+  // Prints every swarm member's visibility and the three things that
+  // decide it. Added because this freeze was diagnosed three times from
+  // screenshots and guessed wrong twice.
+  if (typeof window !== 'undefined') {
+    window.__isr_swarmVis = () => {
+      const rows = [];
+      for (const [eid, st] of droneState) {
+        const ev = EVENTS.find(e => e.id === eid);
+        rows.push({ who: 'LEAD', event: eid, status: ev?.status,
+          shown: !!st.billboard?.show, closedAt: !!st.closedAt, trackLive: isTrackLive(eid) });
+        (st.swarmBillboards || []).forEach((sw, i) => rows.push({
+          who: `member ${i + 1}`, event: eid, status: ev?.status,
+          shown: !!sw.billboard?.show, closedAt: !!st.closedAt, trackLive: isTrackLive(eid),
+          lastWpT: sw.waypoints?.[sw.waypoints.length - 1]?.tSec,
+        }));
+      }
+      console.table(rows);
+      return rows;
+    };
+  }
+
   function removeDroneEntities(eventId) {
     const state = droneState.get(eventId);
     if (!state) return;
@@ -19004,13 +19029,26 @@ async function main() {
           // right in front of the camera (disableDepthTestDistance =
           // INFINITY, always on top). Coverage-driven visibility still
           // applies to all other drones normally.
-          sw.billboard.show = swShouldShow && !sw._povActive;
+          // ONCE THE CASE IS CLOSED, THE MEMBERS GO TOO.
+          //
+          // The lead has carried `state.closedAt ? false : ...` in its
+          // own visibility since forever. The members never had it, so
+          // their only route to hidden was losing coverage. If anything
+          // stops that loop reaching them on the frame where coverage
+          // drops, or the event closes first, the billboard simply stays
+          // wherever it last was.
+          //
+          // That is the freeze: not drones that keep flying, drones that
+          // stopped being updated while still shown. The lead vanishes
+          // correctly because it has this gate. Now they match.
+          const _swVisible = swShouldShow && !state.closedAt;
+          sw.billboard.show = _swVisible && !sw._povActive;
           // Trail visibility mirrors the drone billboard — as soon as
           // the drone drops out of coverage (billboard hides), its
           // trendline also hides. Prevents the "overwatch trail
           // staying visible over Øresund" ghost effect after signal
           // loss. Reappears when the drone re-enters coverage.
-          if (sw.trailLine) sw.trailLine.show = swShouldShow;
+          if (sw.trailLine) sw.trailLine.show = _swVisible;
           // Track coverage transitions so we can drop indexed
           // out-of-range / reacquisition markers below.
           //
