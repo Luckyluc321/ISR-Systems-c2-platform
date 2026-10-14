@@ -12764,7 +12764,21 @@ async function main() {
         if (d.confidence > maxConf) maxConf = d.confidence;
       }
       if (maxConf <= 0) continue;
-      const rounded = +maxConf.toFixed(2);
+      // THE WOBBLE BELONGS HERE, NOT ONLY ON THE GEOMETRY FLOOR.
+      //
+      // It was applied to the floor, but this merge takes the MAX of the
+      // floor and the emitted value, and the emitted value is higher for
+      // anything inside half its radius. So the floor's variation was
+      // discarded for exactly the sensors holding the track best, and
+      // several of them at similar ranges reported the same frozen 0.55.
+      //
+      // Kept small on purpose. Range still sets the level, this only
+      // stops a reading sitting perfectly still.
+      let _sh = 0;
+      for (let _k = 0; _k < sEntry.sensorId.length; _k++) _sh = (_sh * 31 + sEntry.sensorId.charCodeAt(_k)) % 997;
+      const _sp = (_sh / 997) * Math.PI * 2, _st = monoNow() / 1000;
+      const _sw = 0.05 * (0.6 * Math.sin(_st * 0.47 + _sp) + 0.4 * Math.sin(_st * 0.19 + _sp * 1.7));
+      const rounded = +Math.max(0.10, Math.min(0.98, maxConf + _sw)).toFixed(2);
       const existing = targetEvent.contributingSensors.find(s => s.id === sEntry.sensorId);
       if (!existing) {
         targetEvent.contributingSensors.push({ id: sEntry.sensorId, confidence: rounded, peakConfidence: rounded });
@@ -26088,8 +26102,40 @@ async function main() {
     applyImageryMode();
   }
 
+  // THE CONTEXT LABEL IN THE TOP BAR WAS A HARDCODED STRING.
+  //
+  // index.html ships `site-name-display` reading "Denmark, All Sites"
+  // and nothing in main.js has ever referenced that element, so every
+  // account saw it, including operators who own one site. An operator
+  // reading "All Sites" on a tenant-isolated account is the one label
+  // that must never be wrong.
+  //
+  // Same defect class as the hardcoded 25 m/s speeds: static markup that
+  // looks live because everything around it is.
+  function _renderContextLabel() {
+    const r = getActiveRole();
+    const nameEl = document.getElementById('site-name-display');
+    const codeEl = document.getElementById('site-code-display');
+    if (!nameEl) return;
+    const ids = _visibleSiteIds(r);
+    if (r.kind === 'operator' && ids.length === 1) {
+      const s = SITES[ids[0]];
+      nameEl.textContent = s?.name || r.org;
+      if (codeEl) codeEl.textContent = `${(s?.code || ids[0]).toUpperCase()} · ${r.org}`;
+    } else if (r.kind === 'operator') {
+      nameEl.textContent = `${r.org}, ${ids.length} sites`;
+      if (codeEl) codeEl.textContent = ids.map(i => (SITES[i]?.code || i).toUpperCase()).join(' · ');
+    } else {
+      // Admin is ISR internal and genuinely does span every site.
+      // Receivers are national agencies and see the national picture.
+      nameEl.textContent = 'Denmark, All Sites';
+      if (codeEl) codeEl.textContent = 'DK · 55.6180°N 012.6470°E';
+    }
+  }
+
   function updateOperatorChip() {
     const r = getActiveRole();
+    _renderContextLabel();
     // If the account has a brand logo, render it in the chip. Otherwise fall
     // back to initials.
     if (r.logo) {
