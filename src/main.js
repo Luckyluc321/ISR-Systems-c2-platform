@@ -783,7 +783,7 @@ import { TARGETS as TARGETS_CORE } from './targets.js';
 import { HV_SUBSTATION_TARGETS } from './targets_hv.js';
 const TARGETS = [...TARGETS_CORE, ...HV_SUBSTATION_TARGETS];
 import { getRules, onRulesChange, toggleRule, removeRule, upsertRule, resetRulesToDefault, ruleSummaryText } from './rules.js';
-import { isMistralConfigured, inferenceHost, streamCaseFileNarrative, streamDebriefNarrative, ensureSiteContextDigest, invalidateSiteContextDigest, writeNarrativeCache, readNarrativeCache, readNarrativeCacheIfSignalMatch, invalidateNarrativeCache } from './mistral.js';
+import { isMistralConfigured, inferenceHost, inferenceCheck, streamCaseFileNarrative, streamDebriefNarrative, ensureSiteContextDigest, invalidateSiteContextDigest, writeNarrativeCache, readNarrativeCache, readNarrativeCacheIfSignalMatch, invalidateNarrativeCache } from './mistral.js';
 import { resolveHighlightsAsync, extractAndRankSignals, buildAgentBPromptBlock, writePreprocessed, rehydratePreprocessed, invalidatePreprocessed } from './preprocessing.js';
 import { invalidateFallbackHighlights } from './agents/agent_a2_highlights.js';
 import { streamNarrativeLens, knownArchetypes as _lensKnownArchetypes, writeLens as _lensWriteCache, readLens as _lensReadCache } from './agents/agent_b_lens.js';
@@ -26153,6 +26153,11 @@ async function main() {
       nameEl.textContent = 'Denmark, All Sites';
       if (codeEl) codeEl.textContent = 'DK · 55.6180°N 012.6470°E';
     }
+  }
+
+  // Credential self-test, see mistral_client.js. Console only.
+  if (typeof window !== 'undefined') {
+    window.__isr_inferenceCheck = async () => { const r = await inferenceCheck(); console.table(r); return r; };
   }
 
   function updateOperatorChip() {

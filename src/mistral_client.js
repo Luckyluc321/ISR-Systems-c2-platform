@@ -69,6 +69,56 @@ export function inferenceHost() {
   catch (_) { return 'invalid endpoint'; }
 }
 
+// SELF-TEST FOR THE INFERENCE CREDENTIALS.
+//
+// Scaleway returns one 403, "insufficient permissions to access the
+// resource", for three different causes: a bad key, a key whose IAM
+// identity lacks GenerativeApisModelAccess, or the wrong project in the
+// URL. The chat endpoint cannot tell them apart. /v1/models can.
+//
+// Runs through whatever endpoint is configured, using the token already
+// in the bundle, so nothing has to be pasted anywhere.
+//
+//   window.__isr_inferenceCheck()
+export async function inferenceCheck() {
+  const cfg = getInferenceConfig();
+  const base = String(cfg.endpoint || '').replace(/\/chat\/completions\/?$/, '');
+  const out = {
+    endpoint: cfg.endpoint,
+    model: cfg.model,
+    tokenPresent: !!cfg.token,
+    tokenLength: cfg.token ? cfg.token.length : 0,
+    projectScopedPath: /\/[0-9a-f-]{36}\/v1/i.test(String(cfg.endpoint || '')),
+  };
+  if (!cfg.token) { out.verdict = 'No token. Set VITE_MISTRAL_API_TOKEN and restart the dev server.'; return out; }
+  try {
+    const r = await fetch(`${base}/models`, { headers: { Authorization: `Bearer ${cfg.token}` } });
+    out.modelsStatus = r.status;
+    const body = await r.text();
+    out.modelsBody = body.slice(0, 300);
+    if (r.ok) {
+      try {
+        const ids = (JSON.parse(body).data || []).map(m => m.id);
+        out.modelCount = ids.length;
+        out.configuredModelAvailable = ids.includes(cfg.model);
+        out.sampleModels = ids.slice(0, 8);
+        out.verdict = out.configuredModelAvailable
+          ? 'Key and project are fine. The configured model is available.'
+          : `Key is fine, but "${cfg.model}" is not in this project. Set VITE_MISTRAL_MODEL to one of sampleModels.`;
+      } catch (_) { out.verdict = 'Key works, model list could not be parsed.'; }
+    } else if (r.status === 403 || r.status === 401) {
+      out.verdict = out.projectScopedPath
+        ? 'Rejected on a project-scoped URL. Either the project id is wrong or the key has no access to that project.'
+        : 'Rejected on the default project. Check the key is valid and that its IAM identity has GenerativeApisModelAccess, GenerativeApisFullAccess or AllProductsFullAccess.';
+    } else {
+      out.verdict = `Unexpected status ${r.status}.`;
+    }
+  } catch (err) {
+    out.verdict = `Transport failed: ${err.message}. If this says "Failed to fetch" the dev proxy is not routing.`;
+  }
+  return out;
+}
+
 export function getInferenceConfig() {
   return {
     endpoint: _readEnv('VITE_MISTRAL_ENDPOINT') || DEFAULTS.endpoint,
