@@ -84,7 +84,12 @@ const BRAKE_DEPLOY_MS = 900;
 // what the crew does on the roll: the panels are no longer doing
 // anything useful below about 15 kt, and an aircraft taxiing to its
 // stand with its spoilers still up is not a thing you see.
-const BRAKE_STOW_BELOW_MS = 8;     // metres per second
+// Retracted at about 55 kt, not at taxi speed. Spoiler drag falls with
+// the square of the speed, so by this point the panels have stopped
+// doing anything useful and the crew stows them during the roll. 8 m/s,
+// which is 15 kt, left them standing up almost to the point of stopping,
+// which is not something you see.
+const BRAKE_STOW_BELOW_MS = 28;    // metres per second, about 55 kt
 const BRAKE_STOW_MS = 2500;        // they retract slower than they deploy
 
 // ENGINE FANS. The model animates them at 687 rpm, which is real but
