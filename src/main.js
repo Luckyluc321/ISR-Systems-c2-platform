@@ -23350,6 +23350,9 @@ async function main() {
   const _dpCollapsed = new Set();
   // Per-event "sensors expanded" state — false = top 5, true = full list.
   const _dpSensorsExpanded = new Set();
+  // Per-event "signal evidence expanded" state. The note is the finding;
+  // the reasoning behind it is opt-in.
+  const _dpEvidenceExpanded = new Set();
   function _dpSectionKey(titleEl) {
     // Strip counts/dots so "Contributing Sensors · 6 / 8" and
     // "Contributing Sensors · 7 / 8" both key on "contributing-sensors".
@@ -23961,6 +23964,7 @@ async function main() {
     // assessment from one observation. The section now says it is working
     // until the formation has resolved.
     const _sigState = droneState.get(e.id);
+    const _evExpanded = _dpEvidenceExpanded.has(e.id);
     const _sigReady = !_sigState?._firstDetectedMs || _signalEvidenceReady(e, _sigState);
     const evidence = e.evidence ? (!_sigReady ? `
       <div class="dp-section">
@@ -23976,6 +23980,10 @@ async function main() {
           ${e.evidence.evidenceSize ? `<div class="kv"><div class="kv-k">Evidence Pack</div><div class="kv-v">${e.evidence.evidenceSize}</div></div>` : ''}
         </div>
         ${e.evidence.note ? `<div class="dp-note">${e.evidence.note}</div>` : ''}
+        ${e.evidence.noteDetail ? (_evExpanded
+          ? `<div class="dp-note dp-note-detail">${e.evidence.noteDetail.split('\n\n').map(para => `<p>${para}</p>`).join('')}</div>
+             <button class="dp-sensor-toggle" data-dp-evidence-toggle="${e.id}">Show less</button>`
+          : `<button class="dp-sensor-toggle" data-dp-evidence-toggle="${e.id}">Show more</button>`) : ''}
       </div>`) : '';
 
     const notes = (e.notes && e.notes.length) ? `
@@ -24235,6 +24243,17 @@ async function main() {
         const evId = btn.dataset.dpSensorToggle;
         if (_dpSensorsExpanded.has(evId)) _dpSensorsExpanded.delete(evId);
         else _dpSensorsExpanded.add(evId);
+        renderDetailPanel();
+      });
+    });
+
+    // Wire signal-evidence "Show more / Show less" toggle
+    detailBodyEl.querySelectorAll('[data-dp-evidence-toggle]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        btn.blur();
+        const evId = btn.dataset.dpEvidenceToggle;
+        if (_dpEvidenceExpanded.has(evId)) _dpEvidenceExpanded.delete(evId);
+        else _dpEvidenceExpanded.add(evId);
         renderDetailPanel();
       });
     });

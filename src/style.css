@@ -9870,3 +9870,8 @@ body.workspace-map-active #receiver-view {
 /* Pending state for a panel section whose analysis has not finished.
    Reads as working rather than as missing. */
 .dp-note.dp-dim { opacity: 0.62; font-style: italic; }
+
+/* Expanded signal-evidence reasoning. Paragraphs, because it is
+   read rather than scanned. */
+.dp-note-detail p { margin: 0 0 0.6em; }
+.dp-note-detail p:last-child { margin-bottom: 0; }
