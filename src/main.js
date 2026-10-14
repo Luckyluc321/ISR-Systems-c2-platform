@@ -12378,6 +12378,11 @@ async function main() {
   // that will be registered when the first WS site is wired.
   //
   // See docs/interface-design-document.md IF-1 for the source contract.
+  // How long a sensor's confidence takes to halve once it stops seeing
+  // the target. Short enough that the panel tracks reality, long enough
+  // that a drone skimming the edge of a ring does not strobe.
+  const _CONF_HALF_LIFE_MS = 1500;
+
   function _updateContributingSensorsForPosition(event, lat, lon, altM) {
     try {
       const tickSeq = _contribTickSeq;
@@ -12407,6 +12412,9 @@ async function main() {
         // in the swarm) skip the reset and just apply MAX. Between-tick
         // residue never survives, so confidence tracks live geometry.
         if (targetEvent._contribTickSeq !== tickSeq) {
+          const _nowMs = monoNow();
+          const _dtMs = Math.min(500, Math.max(0, _nowMs - (targetEvent._contribTickMs || _nowMs)));
+          targetEvent._contribTickMs = _nowMs;
           for (const existing of targetEvent.contributingSensors) {
             if (existing.offline) continue;
             // DECAY, NOT A RESET.
@@ -12420,10 +12428,16 @@ async function main() {
             //
             // A detection does not evaporate the instant geometry says
             // so. The track is still there, the estimate is just ageing.
-            // So confidence falls off instead: about a 2 second
-            // half-life, and anything that drops below a floor is
-            // dropped rather than left sitting at 0.00.
-            existing.confidence = +((existing.confidence || 0) * 0.78).toFixed(2);
+            //
+            // DECAY BY TIME, NOT BY TICK. The tick runs on
+            // requestAnimationFrame, so it is roughly 60 Hz and varies
+            // with the frame rate. A per-tick factor is therefore not a
+            // duration at all: 0.78 a tick sounds gentle and is a 47
+            // millisecond half-life at 60 fps, which is indistinguishable
+            // from the reset it replaced, and it would mean something
+            // different again on a slower machine.
+            existing.confidence = +((existing.confidence || 0)
+              * Math.pow(0.5, _dtMs / _CONF_HALF_LIFE_MS)).toFixed(2);
           }
           targetEvent.contributingSensors = targetEvent.contributingSensors
             .filter(c => c.offline || (c.confidence || 0) >= 0.08
