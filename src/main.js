@@ -12419,6 +12419,28 @@ async function main() {
   // weak ones do not. On the frame above that sum is about 2.9, which
   // lands the headline in the low 80s where it belongs.
   const _FUSION_SATURATION_MASS = 5;
+
+  // IDENTIFICATION IS NOT INSTANT.
+  //
+  // The roster named every airframe on the first frame it was detected,
+  // which claims the network classified a model from one observation. It
+  // does not. A classifier needs a few seconds of signal before it will
+  // commit to a model, and asserting one immediately is the kind of
+  // detail an operator notices and stops trusting the panel over.
+  //
+  // So a member is detected first and named second. Until it is named the
+  // roster shows the track with no model, which is an honest state rather
+  // than a gap.
+  //
+  // Staggered per slot, because five airframes resolving on the same
+  // frame is its own tell.
+  const _IDENT_DELAY_MS = 8000;
+  const _IDENT_PENDING = 'No identification registered';
+  function _identifiedModel(firstDetectedMs, model, slotIdx) {
+    if (!firstDetectedMs) return _IDENT_PENDING;
+    const delay = _IDENT_DELAY_MS + (slotIdx % 5) * 600;
+    return (monoNow() - firstDetectedMs) >= delay ? (model || _IDENT_PENDING) : _IDENT_PENDING;
+  }
   function _fusedMemberConfidence(event, slotIdx, unidentified) {
     const mass = (event.contributingSensors || [])
       .filter(c => !c.offline)
@@ -12432,7 +12454,12 @@ async function main() {
       return +Math.max(0.32, Math.min(0.55, 0.38 + 0.14 * q + jitter)).toFixed(2);
     }
     const base = event.confidence || 0.85;
-    return +Math.max(0.40, Math.min(0.98, base * (0.72 + 0.28 * q) + jitter)).toFixed(2);
+    // 0.68 to 1.00 of the declared confidence rather than 0.72 to 1.00.
+    // The narrower span held the late phase in a flat 76 to 82 band where
+    // nothing read as movement. Widening it makes a thin hold visibly
+    // thin: with the CPH manifest the track now runs roughly 73 per cent
+    // where three sensors hold it up to 94 where eight do.
+    return +Math.max(0.40, Math.min(0.98, base * (0.68 + 0.32 * q) + jitter)).toFixed(2);
   }
 
   function _updateContributingSensorsForPosition(event, lat, lon, altM) {
@@ -13509,9 +13536,14 @@ async function main() {
   }
 
   function _initRecording(event, state, template) {
-    const drones = [{ id: 'DJI-1', model: template.swarm.formation[0]?.model || 'DJI Matrice 300 RTK', role: 'lead' }];
+    // DRONE-n, not DJI-n. The track label is a slot number, not a brand.
+    // The old ids asserted DJI on four Russian military airframes in the
+    // CPH roster, which is the same mistake as the model-name regex that
+    // used to set their confidence. Nothing parses these ids, they are
+    // minted here and displayed, so the rename is label-only.
+    const drones = [{ id: 'DRONE-1', model: template.swarm.formation[0]?.model || 'DJI Matrice 300 RTK', role: 'lead' }];
     template.swarm.formation.slice(1).forEach((slot, idx) => {
-      drones.push({ id: `DJI-${idx + 2}`, model: slot.model || 'DJI Matrice 300', role: slot.role });
+      drones.push({ id: `DRONE-${idx + 2}`, model: slot.model || 'DJI Matrice 300', role: slot.role });
     });
     state.recording = {
       meta: {
@@ -17817,7 +17849,7 @@ async function main() {
         state.billboard.show = shouldShow;
         state.shadow.show = shouldShow && !povSuppressed;
         // Also hide the lead's trail polyline once the lead is dead —
-        // without this the DJI-1 trendline kept growing all the way
+        // without this the DRONE-1 trendline kept growing all the way
         // out over Øresund after the drone was neutralised at AMK.
         // Also hide when POV'd inside this drone: the past-track polyline
         // ends AT the drone position, so from POV the last segment
@@ -18376,9 +18408,12 @@ async function main() {
             // Sticky ever-detected flag on the lead wrapper (matches
             // wingmen). Roster filter reads this to show only drones
             // that have been detected at least once.
-            if (_leadInCov && state.leadSwarmMember) state.leadSwarmMember._everDetected = true;
+            if (_leadInCov && state.leadSwarmMember) {
+              state.leadSwarmMember._everDetected = true;
+              if (!state.leadSwarmMember._firstDetectedMs) state.leadSwarmMember._firstDetectedMs = monoNow();
+            }
             state.recording.timeseries.push(_buildDroneSample({
-              event, droneId: 'DJI-1', droneIdx: 0,
+              event, droneId: 'DRONE-1', droneIdx: 0,
               model: _leadSlot.model || 'DJI Matrice 300 RTK',
               role: 'lead',
               pos: { lat: p.lat, lon: p.lon, alt: p.alt },
@@ -18639,7 +18674,10 @@ async function main() {
           // sensor coverage, it stays in the swarm roster even after it
           // leaves coverage. Roster hides drones that have never been
           // detected so operator sees the count grow as detection ramps.
-          if (inCov) sw._everDetected = true;
+          if (inCov) {
+            sw._everDetected = true;
+            if (!sw._firstDetectedMs) sw._firstDetectedMs = monoNow();
+          }
           // Lucas's rule: symbol visible IFF drone inside ANY sensor cov
           // at ANY site. Uniform. Every event type. Every drone.
           const swShouldShow = inCov;
@@ -18840,7 +18878,7 @@ async function main() {
           // P5A: adaptive sample capture (interval decided ONCE per event by platform)
           if (state.recording && (!sw._lastSampleMs || (nowMs - sw._lastSampleMs) >= _sampleIntervalForEvent(event))) {
             state.recording.timeseries.push(_buildDroneSample({
-              event, droneId: `DJI-${i + 2}`, droneIdx: i + 1,
+              event, droneId: `DRONE-${i + 2}`, droneIdx: i + 1,
               model: sw.model, role: sw.role,
               pos, hdgDeg, speedMs,
               conf: sw.stats.confidence,
@@ -18852,7 +18890,7 @@ async function main() {
           // DIAGNOSTIC — expose live per-drone snapshot on window so we can
           // verify from browser console: `console.table(window.__swarmDebug)`
           if (!window.__swarmDebug) window.__swarmDebug = {};
-          window.__swarmDebug[`DJI-${i + 2}`] = {
+          window.__swarmDebug[`DRONE-${i + 2}`] = {
             model: sw.model,
             lat: pos.lat.toFixed(6), lon: pos.lon.toFixed(6),
             alt: pos.alt.toFixed(1),
@@ -23111,10 +23149,10 @@ async function main() {
     if (template?.swarm && state?.swarmBillboards) {
       if (_selectedSwarmIndex === 0) {
         stats = state.leadStats;
-        focusedId = 'DJI-1';
+        focusedId = 'DRONE-1';
       } else if (state.swarmBillboards[_selectedSwarmIndex - 1]) {
         stats = state.swarmBillboards[_selectedSwarmIndex - 1].stats;
-        focusedId = `DJI-${_selectedSwarmIndex + 1}`;
+        focusedId = `DRONE-${_selectedSwarmIndex + 1}`;
       }
     }
     if (!stats && event.lastPosition) stats = event.lastPosition;
@@ -23269,8 +23307,9 @@ async function main() {
       const _leadSlotEarly = _templateEarly.swarm.formation[0] || {};
       const _earlyList = [];
       _earlyList.push({
-        id: 'DJI-1',
-        model: _leadSlotEarly.model || 'DJI Matrice 300 RTK',
+        id: 'DRONE-1',
+        model: _identifiedModel(_swarmStateEarly.leadSwarmMember?._firstDetectedMs,
+                                _leadSlotEarly.model || 'DJI Matrice 300 RTK', 0),
         role: 'lead',
         stats: _swarmStateEarly.leadStats,
         conf: e.confidence,
@@ -23278,8 +23317,8 @@ async function main() {
       });
       _swarmStateEarly.swarmBillboards.forEach((sw, idx) => {
         _earlyList.push({
-          id: `DJI-${idx + 2}`,
-          model: sw.model || 'DJI Matrice 300',
+          id: `DRONE-${idx + 2}`,
+          model: _identifiedModel(sw._firstDetectedMs, sw.model, idx + 1),
           role: sw.role,
           stats: sw.stats,
           conf: sw.stats?.confidence || 0,
@@ -23428,7 +23467,7 @@ async function main() {
 
     // Swarm roster + primary-drone focus.
     // _selectedSwarmIndex picks which drone is the "primary" — its stats
-    // override the header line so the panel reads as "DJI-3 · wingman-BR"
+    // override the header line so the panel reads as "DRONE-3 · wingman-BR"
     // when a wingman is focused. Roster rows are clickable to swap focus.
     let swarmRoster = '';
     // NOTE: swarmPrimaryOverride is declared + populated earlier in the
@@ -23455,8 +23494,9 @@ async function main() {
       const leadSlot = _template.swarm.formation[0] || {};
       if (_swarmState.leadSwarmMember?._everDetected) {
         droneList.push({
-          id: 'DJI-1',
-          model: leadSlot.model || 'DJI Matrice 300 RTK',
+          id: 'DRONE-1',
+          model: _identifiedModel(_swarmState.leadSwarmMember?._firstDetectedMs,
+                                  leadSlot.model || 'DJI Matrice 300 RTK', 0),
           role: 'lead',
           stats: _swarmState.leadStats || { lat: 0, lon: 0, alt: 0, heading: 0, speed: 0, rfCarrierMHz: leadSlot.rfMHz || 2412 },
           conf: e.confidence,
@@ -23467,8 +23507,8 @@ async function main() {
       _swarmState.swarmBillboards.forEach((sw, idx) => {
         if (!sw._everDetected) return;
         droneList.push({
-          id: `DJI-${idx + 2}`,
-          model: sw.model || 'DJI Matrice 300',
+          id: `DRONE-${idx + 2}`,
+          model: _identifiedModel(sw._firstDetectedMs, sw.model, idx + 1),
           role: sw.role,
           stats: sw.stats || { lat: 0, lon: 0, alt: 0, heading: 0, speed: 0, rfCarrierMHz: sw.rfMHz || 2412 },
           conf: sw.stats?.confidence || 0,

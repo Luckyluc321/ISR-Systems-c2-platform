@@ -442,6 +442,15 @@ classification rather than in the fix. Replay and debrief colour-code trails
 off that band. It is declared by the template and never inferred from the
 model name.
 
+**Identification lags detection.** A member is detected first and named
+second. The roster shows `No identification registered` until roughly 8
+seconds after that member's first detection, staggered per slot so five
+airframes do not all resolve on the same frame. Naming a model from one
+observation claims a classification the network has not made yet.
+
+**Track ids are slot numbers, not brands.** `DRONE-1` through `DRONE-n`.
+Nothing parses them.
+
 ### IF-1.4b Perimeter crossings
 
 `event.entry` and `event.exit` are single fields, each written once behind a
