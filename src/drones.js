@@ -448,14 +448,14 @@ export const TEMPLATES = {
     classification: 'hostile',
     threat: 'high',
     platform: 'quadcopter',
-    droneType: '5x DJI Matrice formation (runway incursion)',
+    droneType: '4x Sibiryachok-5 + 1x DJI Mavic 3 (recon formation)',
     // HIGH, and deliberately so. A swarm reporting 14 to 17 per cent
     // says the network has no idea what it is looking at, which is the
     // opposite of the story. Five airframes holding a formation on a
     // deliberate track is one of the most legible things an RF mesh
     // ever sees.
     confidence: 0.94,
-    confidenceTrend: 'Immediate 0.78 to 0.94 (formation geometry + five distinct OcuSync emitters)',
+    confidenceTrend: 'Immediate 0.78 to 0.94 (formation geometry + five distinct emitters, four sharing one link type)',
     contributingSensors: [
       { id: 'N24', confidence: 0.88 },   // NE Perimeter Corner, first contact
       { id: 'N21', confidence: 0.86 },   // NE Perimeter
@@ -466,19 +466,32 @@ export const TEMPLATES = {
     evidence: {
       rfCarrier: '2.412 GHz + 5.745 GHz',
       rfBandwidth: 'OFDM formation link, DJI OcuSync signature',
-      rfMatch: 'DJI Matrice formation 94%',
+      rfMatch: 'Four-airframe formation link + one OcuSync emitter, 94%',
       modality: 'RF + acoustic + visual',
       evidenceSize: '412 MB',
-      note: 'CRITICAL. Five-airframe formation entering from the Oresund, transiting the northern piers and holding over the ATC core before repositioning onto the 04R threshold. Formation geometry held throughout. Pattern is deliberate rather than opportunistic.',
+      note: 'CRITICAL. Five-airframe formation entering from the Oresund, transiting the northern piers and holding over the ATC core before repositioning onto the 04R threshold. Four emitters share a link type, the fifth is a commercial OcuSync airframe. Formation geometry held throughout. Pattern is deliberate rather than opportunistic.',
     },
     swarm: {
       size: 5,
       formation: [
-        { role: 'lead',       model: 'DJI Matrice 300 RTK',       rfMHz: 2412, offset: { forward:    0, right:    0, up:   0 } },
-        { role: 'wingman-BL', model: 'DJI Matrice 350 RTK',       rfMHz: 2437, offset: { forward:  -90, right:  -60, up:  -5 } },
-        { role: 'wingman-BR', model: 'DJI Matrice 30T (thermal)', rfMHz: 2462, offset: { forward:  -90, right:   60, up:  +4 } },
-        { role: 'wingman-L',  model: 'DJI Matrice 350 RTK',       rfMHz: 2427, offset: { forward: -170, right: -120, up:  +8 } },
-        { role: 'overwatch',  model: 'Autel EVO II Pro (unknown link)', rfMHz: 5780, offset: { forward: -230, right:  140, up: +28 } },
+        // FOUR MILITARY AIRFRAMES AND ONE COMMERCIAL, which is what a
+        // real unit flies. Sibiryachok-5 is a Rostec reconnaissance
+        // quadcopter: 90 minutes endurance, 28 km control range, 1000 m
+        // ceiling, laser rangefinder and 160x zoom, and it returns on
+        // visual odometry when its link is jammed. The fifth is a DJI
+        // Mavic 3, because Russian forces procure commercial airframes
+        // in quantity for exactly this kind of low-altitude work.
+        //
+        // The mix is also the honest reason one airframe reads
+        // differently: a commercial OcuSync link is not the same emitter
+        // as a military datalink, so the network sees four of a kind and
+        // one outlier. That is a detection characteristic, not a label
+        // the platform is asserting.
+        { role: 'lead',       model: 'Sibiryachok-5',  rfMHz: 2412, offset: { forward:    0, right:    0, up:   0 } },
+        { role: 'wingman-BL', model: 'Sibiryachok-5',  rfMHz: 2437, offset: { forward:  -90, right:  -60, up:  -5 } },
+        { role: 'wingman-BR', model: 'Sibiryachok-5',  rfMHz: 2462, offset: { forward:  -90, right:   60, up:  +4 } },
+        { role: 'wingman-L',  model: 'Sibiryachok-5',  rfMHz: 2427, offset: { forward: -170, right: -120, up:  +8 } },
+        { role: 'overwatch',  model: 'DJI Mavic 3 (commercial airframe)', rfMHz: 5780, offset: { forward: -230, right:  140, up: +28 } },
       ],
     },
     waypoints: [
