@@ -23540,7 +23540,16 @@ async function main() {
                                 _leadSlotEarly.model || 'DJI Matrice 300 RTK', 0),
         role: 'lead',
         stats: _swarmStateEarly.leadStats,
-        conf: e.confidence,
+        // THE SAME SOURCE THE 4 Hz PATCHER USES, not the raw template
+        // constant. e.confidence is the scenario's declared 0.94 and it
+        // never moves. This value feeds swarmPrimaryOverride.conf, which
+        // sets the Detection Confidence bar and text on every FULL
+        // re-render, while _patchLiveTelemetry wrote the fused value
+        // between renders. Two writers, one stuck on 0.94 and one on the
+        // real number, so the headline bounced between them forever and
+        // the bar snapped to the 0.94 mark every time. Same class of
+        // defect as the DRONE-1 flicker, in a different place.
+        conf: _swarmStateEarly.leadStats?.confidence ?? e.confidence,
         hasLiveTelemetry: !!_swarmStateEarly.leadStats,
       });
       _swarmStateEarly.swarmBillboards.forEach((sw, idx) => {
@@ -23728,7 +23737,7 @@ async function main() {
           identified: _identResolved(_swarmState, _swarmState.leadSwarmMember?._firstDetectedMs, 0),
           role: 'lead',
           stats: _swarmState.leadStats || { lat: 0, lon: 0, alt: 0, heading: 0, speed: 0, rfCarrierMHz: leadSlot.rfMHz || 2412 },
-          conf: e.confidence,
+          conf: _swarmState.leadStats?.confidence ?? e.confidence,
           hasLiveTelemetry: !!_swarmState.leadStats,
           status: _trackById.get(_swarmState.leadSwarmMember?.memberId)?.status || 'tracked',
         });
