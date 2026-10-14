@@ -21041,6 +21041,12 @@ async function main() {
     const meta = k => _SIM_COMPOSER_META[k] || null;
     const entries = menu.map(t => ({
       key: t.key, cls: t.cls || '',
+      // CARRY combo THROUGH. This rebuild dropped it, so a combined
+      // entry arrived at the launch handler with combo undefined, fell
+      // through to the single-template branch, and tried to spawn a key
+      // that is not a template. spawnFromTemplate returns on an unknown
+      // key, so Launch did nothing and said nothing.
+      combo: t.combo || null,
       threat: meta(t.key)?.threat || t.label,
       pathLabel: meta(t.key)?.pathLabel || 'Authored route',
     }));
@@ -21093,6 +21099,11 @@ async function main() {
         selEntry.combo.forEach((c, i) => simAfter(
           () => window.__spawnDrone(c.key, { allowConcurrent: i > 0 }),
           1500 + (c.delayMs || 0)));
+        return;
+      }
+      // An unknown key used to fail in silence. Say so instead.
+      if (!TEMPLATES[selEntry.key]) {
+        toast(`No template authored for "${selEntry.key}"`, 'err');
         return;
       }
       simAfter(() => window.__spawnDrone(selEntry.key), 1500);
