@@ -23388,6 +23388,24 @@ async function main() {
 
     // Patch swarm roster rows (all rows update, not just focused)
     if (template?.swarm && state?.swarmBillboards) {
+      // A NEW DRONE IS NEW INFORMATION, SO IT BEATS THE HOVER GATE.
+      //
+      // renderDetailPanelThrottled() returns early while the pointer is
+      // over the detail panel, and only flushes on mouseleave. That gate
+      // is right for value churn: nobody wants the panel re-rendering
+      // under a click. But the roster LIST is only built in the full
+      // render, so while the operator watched the panel it could never
+      // grow. The patcher kept the existing rows live the whole time,
+      // which made it look like the panel was updating while airframes
+      // 2 and 3 simply never appeared.
+      //
+      // Membership changes force a render. Value changes still do not.
+      // Guarded on growth only, so a count that can never match downward
+      // cannot spin this into a render every 250 ms.
+      const _detectedNow = (state.leadSwarmMember?._everDetected ? 1 : 0)
+        + state.swarmBillboards.filter(sw => sw._everDetected).length;
+      const _rowsNow = document.querySelectorAll('.dp-swarm-row').length;
+      if (_detectedNow > _rowsNow) { renderDetailPanel(); return; }
       document.querySelectorAll('.dp-swarm-row').forEach((row, idx) => {
         let rowStats;
         if (idx === 0) rowStats = state.leadStats;
