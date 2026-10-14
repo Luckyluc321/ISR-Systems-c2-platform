@@ -12696,7 +12696,23 @@ async function main() {
           const _d = haversineM(lat, lon, _s.lat, _s.lon);
           if (_d > _s.coverageRadius) continue;
           if ((altM || 0) > _sensorCeilingM(_s)) continue;
-          const _floor = +(0.18 + 0.42 * (1 - _d / _s.coverageRadius)).toFixed(2);
+          // A SENSOR'S OWN READING IS NOT A CONSTANT.
+          //
+          // The floor is pure geometry, so a sensor holding station at a
+          // steady range reported the same number indefinitely, and
+          // several at similar ranges reported the SAME same number.
+          // Three sensors frozen on 0.55 is not a measurement, it is a
+          // formula showing through.
+          //
+          // Each one gets its own slow wander, phased off its id so no
+          // two move together, at about 7 per cent of the reading. Range
+          // still sets the level. This only stops it being static.
+          let _h = 0; for (let _k = 0; _k < _s.id.length; _k++) _h = (_h * 31 + _s.id.charCodeAt(_k)) % 997;
+          const _ph = (_h / 997) * Math.PI * 2;
+          const _tS = monoNow() / 1000;
+          const _wob = 0.07 * (0.6 * Math.sin(_tS * 0.55 + _ph) + 0.4 * Math.sin(_tS * 0.23 + _ph * 1.9));
+          const _floor = +Math.max(0.12, Math.min(0.95,
+            (0.18 + 0.42 * (1 - _d / _s.coverageRadius)) + _wob)).toFixed(2);
           const _entry = targetEvent.contributingSensors.find(c => c.id === _s.id);
           if (!_entry || _entry.offline) continue;
           if ((_entry.confidence || 0) < _floor) {
@@ -17602,6 +17618,49 @@ async function main() {
   // asked for after seeing a millisecond clip logged as an exit.
   const _PERIM_QUALIFY_MS = 1500;
 
+  // SPEED, MEASURED RATHER THAN ASSUMED.
+  //
+  // Every speed on the roster was the literal 25 it was initialised
+  // with. The member branch guarded on `dt > 0.02`, which is false at
+  // any frame rate above 50 fps, so it never ran. The lead read
+  // `p.speed || 25` and _interpolateWaypoints returns lat, lon and alt
+  // only, so p.speed was always undefined. Five drones, one hardcoded
+  // number, no variation possible.
+  //
+  // Anchored over 400 ms, the same shape as the dead-reckoning anchor
+  // further down, which is wide enough to survive per-tick coordinate
+  // quantisation and short enough to track a real change.
+  const _SPEED_WINDOW_MS = 400;
+  function _measuredSpeed(holder, lat, lon, nowMs, fallback) {
+    const a = holder._spdAnchor;
+    if (!a) { holder._spdAnchor = { lat, lon, ts: nowMs }; return holder._spdLast ?? fallback; }
+    const dt = nowMs - a.ts;
+    if (dt < _SPEED_WINDOW_MS) return holder._spdLast ?? fallback;
+    holder._spdLast = haversineM(a.lat, a.lon, lat, lon) / (dt / 1000);
+    holder._spdAnchor = { lat, lon, ts: nowMs };
+    return holder._spdLast;
+  }
+
+  // FORMATION BREATHING.
+  //
+  // Each member already carried a `jitter` block with three phases and
+  // three frequencies, built when the billboard was created. Nothing
+  // ever read it, so the formation was geometrically perfect: five
+  // drones locked to the metre, which no real flight looks like.
+  //
+  // Small and slow on purpose. 8 m across, 4 m vertically, on a period
+  // of roughly fourteen seconds, which is under 4 m/s of speed
+  // variation. They stay in formation. They just are not welded to it.
+  const _JITTER_M = 8, _JITTER_UP_M = 4, _JITTER_W = 2 * Math.PI / 14;
+  function _formationJitter(j, tSec) {
+    if (!j) return { dN: 0, dE: 0, dU: 0 };
+    return {
+      dN: _JITTER_M * Math.sin(tSec * _JITTER_W + j.phaseN),
+      dE: _JITTER_M * Math.sin(tSec * _JITTER_W * 0.83 + j.phaseE),
+      dU: _JITTER_UP_M * Math.sin(tSec * _JITTER_W * 0.61 + j.phaseZ),
+    };
+  }
+
   // How long the dashed breadcrumb stays on screen after a track's
   // scripted path has ended. Long enough to read as "that is where they
   // went", short enough that it is not still there when the summary
@@ -18548,7 +18607,7 @@ async function main() {
         if (p) {
           state.leadStats = {
             lat: p.lat, lon: p.lon, alt: p.alt,
-            heading: leadHdgDeg, speed: p.speed || 25,
+            heading: leadHdgDeg, speed: _measuredSpeed(state, p.lat, p.lon, monoNow(), 25),
             // THE LEAD HAD NO CONFIDENCE FIELD AT ALL, and that is the
             // whole 94 per cent to 0 per cent flicker. The full panel
             // render painted the lead's row from `e.confidence` (0.94)
@@ -18857,15 +18916,23 @@ async function main() {
           const M_PER_DEG_LON = 111320 * Math.cos(pos.lat * Math.PI / 180);
           // Heading + speed from this drone's own motion
           let hdgDeg = state._lastLeadHdg || 0;
-          let speedMs = 25;
+          // Breathe the member off its exact slot before anything reads
+          // the position, so the trail, the roster and the recording all
+          // agree on where it actually was.
+          const _jit = _formationJitter(sw.jitter, tSec);
+          pos = { lat: pos.lat + _jit.dN / M_PER_DEG_LAT,
+                  lon: pos.lon + _jit.dE / M_PER_DEG_LON,
+                  alt: Math.max(5, (pos.alt || 0) + _jit.dU) };
+          // Speed is measured over a window now. The heading still comes
+          // from the per-tick delta, which works because it only needs a
+          // direction, not a magnitude.
+          const speedMs = _measuredSpeed(sw, pos.lat, pos.lon, nowMs, 25);
           if (sw.prevPos && sw.prevTs) {
             const dEast = (pos.lon - sw.prevPos.lon) * M_PER_DEG_LON;
             const dNorth = (pos.lat - sw.prevPos.lat) * M_PER_DEG_LAT;
             if (Math.abs(dEast) > 0.05 || Math.abs(dNorth) > 0.05) {
               hdgDeg = ((Math.atan2(dEast, dNorth) * 180 / Math.PI) + 360) % 360;
             }
-            const dt = (nowMs - sw.prevTs) / 1000;
-            if (dt > 0.02) speedMs = Math.hypot(dEast, dNorth) / dt;
           }
           // Per-drone coverage check. Pre-detection dashed line now TRAILS
           // the drone (points to where it CAME from), not forward. The
