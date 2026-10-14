@@ -13495,36 +13495,36 @@ async function main() {
       flags.push(`Cross-linked to ${event.linkedEventIds.length} event(s) · ${scoreStr}`);
     }
     if (event.platform === 'non-identifiable') {
-      flags.push('RF signature unmatched against known threat library');
+      flags.push('Radio signature does not match anything in the threat library');
     }
     if (event.platform === 'missile') {
-      flags.push('Missile signature — kinetic targeting profile');
+      flags.push('Missile signature. Targeting profile.');
     }
     if (event.classification === 'hostile' && event.threat === 'high') {
-      flags.push('High-threat classification confirmed by sensor fusion');
+      flags.push('High threat, confirmed by combining the sensors');
     }
     // Behavioural pattern classification
     let pattern, confidence;
     if (event.platform === 'missile') {
-      pattern = 'Targeting profile. Direct trajectory toward high-value asset. Kinetic engagement authorised per doctrine.';
+      pattern = 'Targeting profile. Flying a straight line at a high-value asset. Doctrine permits engagement.';
       confidence = 'HIGH';
     } else if (event.linkedEventIds?.length && (event.correlationScore || 0) >= 0.75) {
-      pattern = 'Continuation surveillance. Same threat re-emerged at this site after prior detection. Signature and kinematic continuity consistent with peer-competitor / state-actor reconnaissance doctrine.';
+      pattern = 'Repeat visit. The same track has come back to this site after an earlier detection. Its signature and the way it flies match both times, which is how a state actor runs reconnaissance.';
       confidence = 'HIGH';
     } else if (dwellRanked.length >= 2) {
-      pattern = 'Reconnaissance profile. Multiple critical zones observed within single loiter. Behaviour consistent with intelligence-gathering rather than opportunistic overflight.';
+      pattern = 'Reconnaissance profile. It stayed over several critical areas in a single pass. That is deliberate information gathering, not a drone that happened to fly over.';
       confidence = 'MEDIUM';
     } else if (event.platform === 'non-identifiable') {
-      pattern = 'Unclear pattern. Contact registered but platform not identified. Analyst review required before intent assessment.';
+      pattern = 'Unclear. We have the contact but we cannot say what the platform is. An analyst should look at this before anyone judges intent.';
       confidence = 'LOW';
     } else if (dwellRanked.length === 1 && dwellRanked[0].pct >= 40) {
-      pattern = `Focused observation of ${dwellRanked[0].name}. Behaviour consistent with pre-planned reconnaissance of a specific asset.`;
+      pattern = `Focused on ${dwellRanked[0].name}. It went there and stayed, which points to reconnaissance planned in advance against that one asset.`;
       confidence = 'MEDIUM';
     } else if (nearest) {
-      pattern = `Track passing within ${nearest.dist.toFixed(2)} km of ${nearest.area.name}. Insufficient trajectory data for behavioural classification.`;
+      pattern = `Track passed within ${nearest.dist.toFixed(2)} km of ${nearest.area.name}. Not enough of its path yet to say what it is doing.`;
       confidence = 'LOW';
     } else {
-      pattern = 'Insufficient data for behavioural classification.';
+      pattern = 'Not enough data yet to say what it is doing.';
       confidence = 'LOW';
     }
     return { siteContext, nearest, dwellRanked, flags, pattern, confidence, hasTimeseries, detectedSamples };
