@@ -12468,7 +12468,12 @@ async function main() {
   // a track held by six for one second has.
   const _SIGNAL_EVIDENCE_S = 30.0;
   const _SIGNAL_EVIDENCE_MIN_SENSORS = 3;
-  const _IDENT_PENDING = 'No identification registered';
+  // "Classifying", not "No identification registered". The track IS
+  // detected and IS in the roster. Only the model is still being worked
+  // out. The old wording read as a failed detection, which is the
+  // opposite of what is happening, and on the three airframes with the
+  // longest delays it made a working roster look broken.
+  const _IDENT_PENDING = 'Classifying';
   const _SIGNAL_PENDING = 'Analysing';
 
   function _identSchedule(slotIdx) {
@@ -12508,12 +12513,21 @@ async function main() {
       return +Math.max(0.32, Math.min(0.55, 0.38 + 0.14 * q + jitter)).toFixed(2);
     }
     const base = event.confidence || 0.85;
-    // 0.68 to 1.00 of the declared confidence rather than 0.72 to 1.00.
-    // The narrower span held the late phase in a flat 76 to 82 band where
-    // nothing read as movement. Widening it makes a thin hold visibly
-    // thin: with the CPH manifest the track now runs roughly 73 per cent
-    // where three sensors hold it up to 94 where eight do.
-    return +Math.max(0.40, Math.min(0.98, base * (0.68 + 0.32 * q) + jitter)).toFixed(2);
+    // THE FLOOR WAS FAR TOO HIGH AND BROKE THE CORRELATION.
+    //
+    // At 0.68 + 0.32q the output never fell below 0.64 of the declared
+    // confidence no matter how little was holding the track. Two sensors
+    // reading 0.55 and 0.14 produced 0.69, which is a headline confidence
+    // higher than either sensor that fed it. That is not a fusion, it is
+    // a constant with a wobble.
+    //
+    // Square root, so the climb is steep where the evidence is thin and
+    // flattens once the track is genuinely well held. Two weak sensors
+    // now read about 0.55, which sits just below them rather than above.
+    // It climbs through the 60s and 70s as more sensors pick it up and
+    // reaches the low 90s only when six sensors' worth of confidence is
+    // on it.
+    return +Math.max(0.30, Math.min(0.98, base * (0.35 + 0.64 * Math.sqrt(q)) + jitter)).toFixed(2);
   }
 
   function _updateContributingSensorsForPosition(event, lat, lon, altM) {
@@ -17526,15 +17540,18 @@ async function main() {
     // Via mutateEvent, never a direct push. events.js owns event fields
     // and scripts/check-event-mutations.mjs enforces it.
     mutateEvent(event.id, { crossings: [...(event.crossings || []), row] });
-    // The legacy block drops the map marker for the FIRST entry and the
-    // FIRST exit. Marking those again here would stack two pins on one
-    // spot. Everything it will never emit is ours: every RE-ENTRY, and
-    // every crossing after the first of its kind.
-    const legacyWillHandle = (kind === 'ENTRY' && !state.entryDropped)
-                          || (kind === 'EXIT' && !state.exitDropped);
-    if (legacyWillHandle) return;
-    const colour = kind === 'EXIT' ? '#ffb84d' : (kind === 'RE-ENTRY' ? '#b84dff' : '#4dd2ff');
-    _dropMarker(p.lat, p.lon, colour, `${kind} ${row.timestamp.slice(11, 19)}Z`, event.id);
+    // THIS DROPS NO MAP MARKERS. IT MUST NOT.
+    //
+    // It used to, guarded against the legacy ENTRY block only. There are
+    // THREE writers of entry pins, not two: processPerSiteMarkers, the
+    // legacy origin-only block, and this. A swarm runs the per-site path
+    // as well as the legacy one, so adding a third produced three entry
+    // symbols stacked on one crossing.
+    //
+    // Map markers are existing, working infrastructure with their own
+    // owners. The ask here was re-entry in the PANEL, and that is all
+    // this does: it writes the ordered log the Perimeter Crossings
+    // section reads. Nothing on the map.
   }
 
   function _updatePerimeterCrossings(event, state, isInside, p) {
