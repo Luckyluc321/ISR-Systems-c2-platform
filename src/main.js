@@ -798,6 +798,7 @@ import { createWingVortices } from './airliner_vortices.js';
 import { createGearDriver } from './airliner_surfaces.js';
 import { APPROACH_WOBBLE } from './a320_wobble.js';
 import { createTouchdownSmoke } from './touchdown_smoke.js';
+import { CPH_BOUNDARY_PROPOSED } from './cph_boundary_proposed.js';
 
 Cesium.Ion.defaultAccessToken = import.meta.env.VITE_CESIUM_ION_TOKEN || '';
 
@@ -17097,6 +17098,43 @@ async function main() {
           p95Ms: +p95.toFixed(1), entities: viewer.entities.values.length, census });
       });
     });
+  }
+
+  // BOUNDARY PREVIEW. Non-destructive A/B of a proposed site boundary.
+  //
+  // Running a second dev server on another port does NOT isolate this:
+  // every instance reads the same sites/*.yaml, so editing the file
+  // changes them all. This writes nothing. It draws the proposal over
+  // the live boundary so the two can be compared in the instance
+  // already running, and removes it again on request.
+  //
+  //   window.__isr_boundaryPreview(true)    draw the proposal in green
+  //   window.__isr_boundaryPreview(false)   remove it
+  //
+  // Nothing in the site data, the perimeter logic or any crossing test
+  // is touched. It is a line on the map.
+  if (typeof window !== 'undefined') {
+    let _bPreview = null;
+    window.__isr_boundaryPreview = (on = true) => {
+      if (_bPreview) { viewer.entities.remove(_bPreview); _bPreview = null; }
+      if (!on) { console.log('[boundary] preview removed'); return 0; }
+      const flat = [];
+      for (const [lon, lat] of CPH_BOUNDARY_PROPOSED) flat.push(lon, lat);
+      flat.push(CPH_BOUNDARY_PROPOSED[0][0], CPH_BOUNDARY_PROPOSED[0][1]);
+      _bPreview = viewer.entities.add({
+        id: 'cph-boundary-proposed',
+        polyline: {
+          positions: Cesium.Cartesian3.fromDegreesArray(flat),
+          width: 4,
+          clampToGround: true,
+          material: Cesium.Color.fromCssColorString('#4ade80').withAlpha(0.95),
+        },
+      });
+      console.log(`[boundary] proposal drawn in GREEN, ${CPH_BOUNDARY_PROPOSED.length}`
+        + ' vertices. The existing boundary is unchanged and still drawn.'
+        + ' Nothing has been written to sites/cph.yaml.');
+      return CPH_BOUNDARY_PROPOSED.length;
+    };
   }
 
   // CLEAN WORLD, for the "without ISR" pass of the promo film.
