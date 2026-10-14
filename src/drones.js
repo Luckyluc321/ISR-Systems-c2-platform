@@ -518,6 +518,7 @@ export const TEMPLATES = {
       { lat: 55.61154, lon: 12.65616, alt: 62, heading: 0, tSec: 216.4 },
       { lat: 55.61206, lon: 12.65616, alt: 62, heading: 0, tSec: 220 },
       { lat: 55.61249, lon: 12.65671, alt: 62, heading: 0, tSec: 223.7 },
+      { lat: 55.61265, lon: 12.65760, alt: 62, heading: 0, tSec: 227.4 },   // lap closes on the point it started, exactly one orbit
       { lat: 55.60300, lon: 12.63000, alt: 60, heading: 0, tSec: 313.9 },   // breaks off southwest
       { lat: 55.59500, lon: 12.60800, alt: 48, heading: 0, tSec: 392.2 },
       { lat: 55.59417, lon: 12.60560, alt: 42, heading: 0, tSec: 404 },   // on the runway threshold
@@ -530,13 +531,9 @@ export const TEMPLATES = {
       { lat: 55.59329, lon: 12.60447, alt: 42, heading: 0, tSec: 425.6 },
       { lat: 55.59371, lon: 12.60447, alt: 42, heading: 0, tSec: 428.7 },
       { lat: 55.59405, lon: 12.60490, alt: 42, heading: 0, tSec: 431.8 },
-      { lat: 55.59417, lon: 12.60560, alt: 42, heading: 0, tSec: 434.9 },
-      { lat: 55.59405, lon: 12.60630, alt: 42, heading: 0, tSec: 438 },
-      { lat: 55.59371, lon: 12.60673, alt: 42, heading: 0, tSec: 441.1 },
-      { lat: 55.59329, lon: 12.60673, alt: 42, heading: 0, tSec: 444.2 },
-      { lat: 55.59295, lon: 12.60630, alt: 42, heading: 0, tSec: 447.3 },
+      { lat: 55.59417, lon: 12.60560, alt: 42, heading: 0, tSec: 434.9 },   // lap closes, holding on the threshold
     ],
-    durationSec: 447,
+    durationSec: 435,
   },
 
   // ── Recon drone, HALE (Reaper/Global-Hawk class), high altitude circular loiter ──
