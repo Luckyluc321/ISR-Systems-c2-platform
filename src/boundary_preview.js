@@ -35,8 +35,8 @@ const draw = (pts, css, width) => {
 };
 
 const layers = {
-  1: { e: draw(TRACED_CLEAN, '#4ade80', 5), name: 'traced, cleaned' },
-  2: { e: draw(TRACED_RAW, '#fbbf24', 3), name: 'traced, raw' },
+  1: { e: draw(TRACED_CLEAN, '#4ade80', 5), name: 'working outline' },
+  2: { e: draw(TRACED_RAW, '#fbbf24', 3), name: 'before this correction' },
   3: { e: draw(PLATFORM_CURRENT, '#ef4444', 3), name: 'platform today' },
 };
 layers[2].e.show = false;                    // raw off by default
