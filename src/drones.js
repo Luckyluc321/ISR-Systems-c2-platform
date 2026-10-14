@@ -402,6 +402,123 @@ export const TEMPLATES = {
     durationSec: 254,
   },
 
+  // ═══════════════════════════════════════════════════════════════
+  // RUNWAY INCURSION SWARM. The threat half of the promo film.
+  //
+  // THE ROUTE IS BUILT AROUND WHO CAN SEE THEM. Measured against the
+  // site manifest and the aerodrome polygon:
+  //
+  //   Tower Syd, ATC core     581 m inside the boundary, deep airside
+  //   SAS Hangar 141          682 m inside
+  //   Terminal 2, Pier A       63 m and 32 m from the public edge
+  //
+  // So the piers are a PASS, not a loiter: anyone on the landside road
+  // could see a drone sitting over them, and the story needs nobody to
+  // know until the aircraft is on short final. The dwell happens deep
+  // airside over the control tower, where nothing overlooks them. The
+  // swarm works inward, away from witnesses, toward the asset that
+  // matters, which is also the better escalation to narrate.
+  //
+  //   t+0     ingress from the Oresund, outside every ring
+  //   t+35    crosses into coverage: this is where detection opens
+  //   t+81    Hangar 3 and Pier E, passing rather than loitering
+  //   t+149   inward to the Central Apron
+  //   t+182   SAS Hangar 141
+  //   t+191   holding over Tower Syd, the ATC core. Voiceover window.
+  //   t+314   breaks off southwest
+  //   t+404   on the 04R threshold, holding
+  //
+  // SEVEN MINUTES IS THE FLOOR, not a choice. The tower and the 04R
+  // threshold are 3,843 m apart, and 22 m/s is the top of what a
+  // Matrice-class airframe does, so that leg alone is 175 s. Cutting
+  // the scenario shorter would mean flying them at speeds the type
+  // cannot reach.
+  //
+  // It does not need to be shorter. The transit IS the story: they work
+  // toward the far corner of the field, away from the terminals and the
+  // landside road, which is exactly where nobody is looking. The film
+  // uses the parts it needs and the voiceover carries the rest.
+  cph_swarm_runway_incursion: {
+    siteId: 'cph',
+    // Spawns over the Oresund, outside every sensor ring, so it is
+    // invisible until it crosses in and the detection opens on entry.
+    // Without this the operator gets a report for something no sensor
+    // can hear.
+    coverageGated: true,
+    classification: 'hostile',
+    threat: 'high',
+    platform: 'quadcopter',
+    droneType: '5x DJI Matrice formation (runway incursion)',
+    // HIGH, and deliberately so. A swarm reporting 14 to 17 per cent
+    // says the network has no idea what it is looking at, which is the
+    // opposite of the story. Five airframes holding a formation on a
+    // deliberate track is one of the most legible things an RF mesh
+    // ever sees.
+    confidence: 0.94,
+    confidenceTrend: 'Immediate 0.78 to 0.94 (formation geometry + five distinct OcuSync emitters)',
+    contributingSensors: [
+      { id: 'N24', confidence: 0.88 },   // NE Perimeter Corner, first contact
+      { id: 'N21', confidence: 0.86 },   // NE Perimeter
+      { id: 'N03', confidence: 0.93 },   // Tower Syd, ATC core
+      { id: 'N16', confidence: 0.91 },   // Central Apron
+      { id: 'N07', confidence: 0.89 },   // SW Runway Approach
+    ],
+    evidence: {
+      rfCarrier: '2.412 GHz + 5.745 GHz',
+      rfBandwidth: 'OFDM formation link, DJI OcuSync signature',
+      rfMatch: 'DJI Matrice formation 94%',
+      modality: 'RF + acoustic + visual',
+      evidenceSize: '412 MB',
+      note: 'CRITICAL. Five-airframe formation entering from the Oresund, transiting the northern piers and holding over the ATC core before repositioning onto the 04R threshold. Formation geometry held throughout. Pattern is deliberate rather than opportunistic.',
+    },
+    swarm: {
+      size: 5,
+      formation: [
+        { role: 'lead',       model: 'DJI Matrice 300 RTK',       rfMHz: 2412, offset: { forward:    0, right:    0, up:   0 } },
+        { role: 'wingman-BL', model: 'DJI Matrice 350 RTK',       rfMHz: 2437, offset: { forward:  -90, right:  -60, up:  -5 } },
+        { role: 'wingman-BR', model: 'DJI Matrice 30T (thermal)', rfMHz: 2462, offset: { forward:  -90, right:   60, up:  +4 } },
+        { role: 'wingman-L',  model: 'DJI Matrice 350 RTK',       rfMHz: 2427, offset: { forward: -170, right: -120, up:  +8 } },
+        { role: 'overwatch',  model: 'Autel EVO II Pro (unknown link)', rfMHz: 5780, offset: { forward: -230, right:  140, up: +28 } },
+      ],
+    },
+    waypoints: [
+      { lat: 55.63700, lon: 12.67900, alt: 115, heading: 0, tSec: 0 },   // ingress, outside coverage
+      { lat: 55.63300, lon: 12.66900, alt: 108, heading: 0, tSec: 35 },   // crosses into coverage, detection opens
+      { lat: 55.62870, lon: 12.65550, alt: 92, heading: 0, tSec: 81.4 },   // Hangar 3 and Pier E, passing
+      { lat: 55.62100, lon: 12.65450, alt: 80, heading: 0, tSec: 122.3 },
+      { lat: 55.61643, lon: 12.65258, alt: 72, heading: 0, tSec: 148.5 },   // Central Apron
+      { lat: 55.61289, lon: 12.65980, alt: 66, heading: 0, tSec: 181.9 },   // SAS Hangar 141
+      { lat: 55.61265, lon: 12.65760, alt: 62, heading: 0, tSec: 190.7 },   // holding over Tower Syd, ATC core
+      { lat: 55.61249, lon: 12.65849, alt: 62, heading: 0, tSec: 194.4 },
+      { lat: 55.61206, lon: 12.65904, alt: 62, heading: 0, tSec: 198 },
+      { lat: 55.61154, lon: 12.65904, alt: 62, heading: 0, tSec: 201.7 },
+      { lat: 55.61111, lon: 12.65849, alt: 62, heading: 0, tSec: 205.4 },
+      { lat: 55.61095, lon: 12.65760, alt: 62, heading: 0, tSec: 209 },
+      { lat: 55.61111, lon: 12.65671, alt: 62, heading: 0, tSec: 212.7 },
+      { lat: 55.61154, lon: 12.65616, alt: 62, heading: 0, tSec: 216.4 },
+      { lat: 55.61206, lon: 12.65616, alt: 62, heading: 0, tSec: 220 },
+      { lat: 55.61249, lon: 12.65671, alt: 62, heading: 0, tSec: 223.7 },
+      { lat: 55.60300, lon: 12.63000, alt: 60, heading: 0, tSec: 313.9 },   // breaks off southwest
+      { lat: 55.59500, lon: 12.60800, alt: 48, heading: 0, tSec: 392.2 },
+      { lat: 55.59417, lon: 12.60560, alt: 42, heading: 0, tSec: 404 },   // on the runway threshold
+      { lat: 55.59405, lon: 12.60630, alt: 42, heading: 0, tSec: 407.1 },
+      { lat: 55.59371, lon: 12.60673, alt: 42, heading: 0, tSec: 410.2 },
+      { lat: 55.59329, lon: 12.60673, alt: 42, heading: 0, tSec: 413.3 },
+      { lat: 55.59295, lon: 12.60630, alt: 42, heading: 0, tSec: 416.4 },
+      { lat: 55.59283, lon: 12.60560, alt: 42, heading: 0, tSec: 419.5 },
+      { lat: 55.59295, lon: 12.60490, alt: 42, heading: 0, tSec: 422.5 },
+      { lat: 55.59329, lon: 12.60447, alt: 42, heading: 0, tSec: 425.6 },
+      { lat: 55.59371, lon: 12.60447, alt: 42, heading: 0, tSec: 428.7 },
+      { lat: 55.59405, lon: 12.60490, alt: 42, heading: 0, tSec: 431.8 },
+      { lat: 55.59417, lon: 12.60560, alt: 42, heading: 0, tSec: 434.9 },
+      { lat: 55.59405, lon: 12.60630, alt: 42, heading: 0, tSec: 438 },
+      { lat: 55.59371, lon: 12.60673, alt: 42, heading: 0, tSec: 441.1 },
+      { lat: 55.59329, lon: 12.60673, alt: 42, heading: 0, tSec: 444.2 },
+      { lat: 55.59295, lon: 12.60630, alt: 42, heading: 0, tSec: 447.3 },
+    ],
+    durationSec: 447,
+  },
+
   // ── Recon drone, HALE (Reaper/Global-Hawk class), high altitude circular loiter ──
   // Detected by passive coherent location (PCL): our RF mesh triangulates reflections
   // of civil broadcast signals (DVB-T, FM) bouncing off the target. Backed by
