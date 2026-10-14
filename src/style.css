@@ -9866,3 +9866,7 @@ body.workspace-map-active #receiver-view {
   width: auto;
   padding-bottom: 8px;
 }
+
+/* Pending state for a panel section whose analysis has not finished.
+   Reads as working rather than as missing. */
+.dp-note.dp-dim { opacity: 0.62; font-style: italic; }

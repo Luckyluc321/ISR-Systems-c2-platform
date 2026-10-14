@@ -12434,12 +12434,49 @@ async function main() {
   //
   // Staggered per slot, because five airframes resolving on the same
   // frame is its own tell.
-  const _IDENT_DELAY_MS = 8000;
+  // ONE CLOCK FOR THE WHOLE FORMATION, not one per airframe.
+  //
+  // The first version anchored each member's delay to its OWN first
+  // detection. The wingmen sit 90 to 230 m behind the lead, so at 25 m/s
+  // they cross into coverage three to nine seconds later, and that gap
+  // stacked on top of the classifier delay. The lead resolved while the
+  // rest were still eight to twelve seconds out, which is the gap Lucas
+  // called too long.
+  //
+  // The analysis does not restart per airframe. One pipeline works
+  // through the formation, so the schedule is measured from the moment
+  // the formation was first detected and each slot resolves at its own
+  // point on it. A member still has to have been detected before it can
+  // be named.
+  //
+  // The shape asked for: 1 first, 2 and 3 close behind it, 4 shortly
+  // after those, 5 taking noticeably longer. The last one is the hardest
+  // because it is furthest back and quietest.
+  const _IDENT_SCHEDULE_S = [8.0, 9.0, 9.6, 11.0, 13.0];
+  // Signal evidence waits for the whole formation to resolve, plus a
+  // little. It is the analysis OUTPUT, so publishing it while airframes
+  // are still unnamed claims a conclusion the pipeline has not reached.
+  const _SIGNAL_EVIDENCE_S = 15.0;
   const _IDENT_PENDING = 'No identification registered';
-  function _identifiedModel(firstDetectedMs, model, slotIdx) {
-    if (!firstDetectedMs) return _IDENT_PENDING;
-    const delay = _IDENT_DELAY_MS + (slotIdx % 5) * 600;
-    return (monoNow() - firstDetectedMs) >= delay ? (model || _IDENT_PENDING) : _IDENT_PENDING;
+  const _SIGNAL_PENDING = 'Analysing';
+
+  function _identSchedule(slotIdx) {
+    return _IDENT_SCHEDULE_S[slotIdx] ?? (_IDENT_SCHEDULE_S[_IDENT_SCHEDULE_S.length - 1] + slotIdx);
+  }
+  function _analysisElapsedS(state) {
+    return state?._firstDetectedMs ? (monoNow() - state._firstDetectedMs) / 1000 : null;
+  }
+  function _identResolved(state, memberDetectedMs, slotIdx) {
+    if (!memberDetectedMs) return false;
+    const el = _analysisElapsedS(state);
+    return el != null && el >= _identSchedule(slotIdx);
+  }
+  function _identifiedModel(state, memberDetectedMs, model, slotIdx) {
+    return _identResolved(state, memberDetectedMs, slotIdx) ? (model || _IDENT_PENDING) : _IDENT_PENDING;
+  }
+  function _signalEvidenceReady(state) {
+    const el = _analysisElapsedS(state);
+    return el != null && el >= _SIGNAL_EVIDENCE_S;
   }
   function _fusedMemberConfidence(event, slotIdx, unidentified) {
     const mass = (event.contributingSensors || [])
@@ -18417,6 +18454,9 @@ async function main() {
             if (_leadInCov && state.leadSwarmMember) {
               state.leadSwarmMember._everDetected = true;
               if (!state.leadSwarmMember._firstDetectedMs) state.leadSwarmMember._firstDetectedMs = monoNow();
+              // The formation's analysis clock starts at the first
+              // detection of ANY of its airframes, whichever that is.
+              if (!state._firstDetectedMs) state._firstDetectedMs = monoNow();
             }
             state.recording.timeseries.push(_buildDroneSample({
               event, droneId: 'DRONE-1', droneIdx: 0,
@@ -18683,6 +18723,7 @@ async function main() {
           if (inCov) {
             sw._everDetected = true;
             if (!sw._firstDetectedMs) sw._firstDetectedMs = monoNow();
+            if (!state._firstDetectedMs) state._firstDetectedMs = monoNow();
           }
           // Lucas's rule: symbol visible IFF drone inside ANY sensor cov
           // at ANY site. Uniform. Every event type. Every drone.
@@ -23230,6 +23271,30 @@ async function main() {
           const rowConf = rowStats.confidence ?? event.confidence ?? 0;
           confSpan.textContent = `${Math.round(rowConf * 100)}%`;
         }
+        // THE NAME AND THE SIGNAL RESOLVE ON THEIR OWN SCHEDULE, so they
+        // are patched here at 4 Hz with everything else.
+        //
+        // This is why airframes 2 to 5 appeared to resolve on the same
+        // millisecond: the model name existed only in the FULL re-render,
+        // and the patcher below it ran four times a second without ever
+        // touching it. Every schedule threshold crossed between two full
+        // renders therefore landed on screen at the same instant. The
+        // stagger was real in the data and invisible on the panel.
+        const _slot = template.swarm.formation[idx] || {};
+        const _memberMs = idx === 0
+          ? state.leadSwarmMember?._firstDetectedMs
+          : state.swarmBillboards[idx - 1]?._firstDetectedMs;
+        const _named = _identResolved(state, _memberMs, idx);
+        const modelSpan = row.querySelector('.dp-swarm-model');
+        if (modelSpan) {
+          const _txt = _named ? (_slot.model || _IDENT_PENDING) : _IDENT_PENDING;
+          if (modelSpan.textContent !== _txt) modelSpan.textContent = _txt;
+        }
+        const rfSpan = row.querySelector('.dp-swarm-rf');
+        if (rfSpan) {
+          const _txt = _named ? _tierSummary(rowStats) : _SIGNAL_PENDING;
+          if (rfSpan.textContent !== _txt) rfSpan.textContent = _txt;
+        }
       });
     }
   }
@@ -23331,7 +23396,7 @@ async function main() {
       const _earlyList = [];
       _earlyList.push({
         id: 'DRONE-1',
-        model: _identifiedModel(_swarmStateEarly.leadSwarmMember?._firstDetectedMs,
+        model: _identifiedModel(_swarmStateEarly, _swarmStateEarly.leadSwarmMember?._firstDetectedMs,
                                 _leadSlotEarly.model || 'DJI Matrice 300 RTK', 0),
         role: 'lead',
         stats: _swarmStateEarly.leadStats,
@@ -23341,7 +23406,7 @@ async function main() {
       _swarmStateEarly.swarmBillboards.forEach((sw, idx) => {
         _earlyList.push({
           id: `DRONE-${idx + 2}`,
-          model: _identifiedModel(sw._firstDetectedMs, sw.model, idx + 1),
+          model: _identifiedModel(_swarmStateEarly, sw._firstDetectedMs, sw.model, idx + 1),
           role: sw.role,
           stats: sw.stats,
           conf: sw.stats?.confidence || 0,
@@ -23518,8 +23583,9 @@ async function main() {
       if (_swarmState.leadSwarmMember?._everDetected) {
         droneList.push({
           id: 'DRONE-1',
-          model: _identifiedModel(_swarmState.leadSwarmMember?._firstDetectedMs,
+          model: _identifiedModel(_swarmState, _swarmState.leadSwarmMember?._firstDetectedMs,
                                   leadSlot.model || 'DJI Matrice 300 RTK', 0),
+          identified: _identResolved(_swarmState, _swarmState.leadSwarmMember?._firstDetectedMs, 0),
           role: 'lead',
           stats: _swarmState.leadStats || { lat: 0, lon: 0, alt: 0, heading: 0, speed: 0, rfCarrierMHz: leadSlot.rfMHz || 2412 },
           conf: e.confidence,
@@ -23531,7 +23597,8 @@ async function main() {
         if (!sw._everDetected) return;
         droneList.push({
           id: `DRONE-${idx + 2}`,
-          model: _identifiedModel(sw._firstDetectedMs, sw.model, idx + 1),
+          model: _identifiedModel(_swarmState, sw._firstDetectedMs, sw.model, idx + 1),
+          identified: _identResolved(_swarmState, sw._firstDetectedMs, idx + 1),
           role: sw.role,
           stats: sw.stats || { lat: 0, lon: 0, alt: 0, heading: 0, speed: 0, rfCarrierMHz: sw.rfMHz || 2412 },
           conf: sw.stats?.confidence || 0,
@@ -23846,7 +23913,18 @@ async function main() {
         </div>
       </div>` : '';
 
-    const evidence = e.evidence ? `
+    // SIGNAL EVIDENCE IS THE OUTPUT OF THE ANALYSIS, NOT ITS INPUT.
+    // It used to render complete on the first frame of detection, which
+    // claims a carrier, a bandwidth, a modulation family and a written
+    // assessment from one observation. The section now says it is working
+    // until the formation has resolved.
+    const _sigState = droneState.get(e.id);
+    const _sigReady = !_sigState?._firstDetectedMs || _signalEvidenceReady(_sigState);
+    const evidence = e.evidence ? (!_sigReady ? `
+      <div class="dp-section">
+        <div class="dp-section-title">Signal Evidence · analysing</div>
+        <div class="dp-note dp-dim">Classifying emitters. Carrier, bandwidth and modulation are published once the formation resolves.</div>
+      </div>` : `
       <div class="dp-section">
         <div class="dp-section-title">Signal Evidence · ${e.evidence.modality || ''}</div>
         <div class="kv-grid">
@@ -23856,7 +23934,7 @@ async function main() {
           ${e.evidence.evidenceSize ? `<div class="kv"><div class="kv-k">Evidence Pack</div><div class="kv-v">${e.evidence.evidenceSize}</div></div>` : ''}
         </div>
         ${e.evidence.note ? `<div class="dp-note">${e.evidence.note}</div>` : ''}
-      </div>` : '';
+      </div>`) : '';
 
     const notes = (e.notes && e.notes.length) ? `
       <div class="dp-section">
