@@ -428,13 +428,30 @@ to claim a live detection evaporated is a different act from asserting one
 that was never reported.
 
 **Fused track confidence** answers "how well do we hold this track". It is
-one estimate for the whole formation rather than a per-airframe self-score,
-and it is a function of how many sensors currently hold the track,
-saturating at six. It rises as a track crosses into denser coverage and falls
-as sensors drop, including when they are jammed or taken offline.
+one estimate for the whole formation rather than a per-airframe self-score.
+Its VALUE is a function of the summed confidence of the sensors holding the
+track, saturating at 5. It rises as a track crosses into denser coverage and
+falls as sensors drop, including when they are jammed or taken offline.
 
-It is never a function of elapsed time. A confidence that ramps on a clock
-teaches an operator to ignore it.
+Two further properties, both scaled by that same evidence:
+
+- **Response speed.** 120 ms when the evidence is thin, because each new
+  observation moves a thin estimate a lot. 800 ms when it is dense, because
+  by then it takes real evidence to shift a well-held track.
+- **Uncertainty band.** How far the displayed value wanders around the
+  evidence-driven value. 8.5 points wide at no evidence, closing to zero once
+  the track is properly held.
+
+The band is a modelled term, not a measurement, and it is the one invented
+number in this section. It is kept because what it expresses is true: less
+data means less certainty, and a perfectly steady number on two weak sensors
+would overstate what the network knows.
+
+It is NOT a confidence that ramps on a clock. The earlier version was a sine
+of fixed amplitude that moved the number with nothing real behind it. The
+distinction is that the band's amplitude is set by the evidence and reaches
+zero when the network can see properly, so time never drives the value, only
+the width of the doubt around it.
 
 A member slot may declare `unidentified: true`, which holds that member in a
 weak band whatever the geometry, because the uncertainty is in the
