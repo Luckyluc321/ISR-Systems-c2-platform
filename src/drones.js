@@ -464,12 +464,12 @@ export const TEMPLATES = {
       { id: 'N07', confidence: 0.89 },   // SW Runway Approach
     ],
     evidence: {
-      rfCarrier: '2.437 GHz instantaneous, hopping across the 2.4 GHz band. 5.8 GHz fixed on one emitter.',
-      rfBandwidth: 'FREQUENCY HOPPING on four of five emitters. Hop pattern coherent across the four, holding station relative to each other. Fifth emitter is a fixed OFDM OcuSync link.',
+      rfCarrier: '847 MHz instantaneous, pseudo-random hopping across 720 to 1020 MHz. Commercial airframe fixed at 5780 MHz.',
+      rfBandwidth: 'FHSS on four of five emitters, hop pattern coherent across all four. Fifth emitter holds a fixed OcuSync link.',
       rfMatch: 'Four-airframe formation link + one OcuSync emitter, 94%',
       modality: 'Fused. RF, acoustic and visual into one estimate.',
       evidenceSize: '412 MB',
-      note: 'CRITICAL. Five airframes entering from the Oresund, crossing the northern piers, holding over the ATC core, then repositioning onto the 04R threshold. Formation geometry held throughout. The pattern is deliberate. ONE ESTIMATE, NOT THREE. RF, acoustic and visual are fused into a single confidence rather than scored separately. RF carries the detection at range. FREQUENCY HOPPING DETECTED on four of the five emitters, with a hop pattern coherent across all four. That is a coordinated military grade link rather than a consumer controller, and it defeats a fixed channel listener. No library match on the waveform, so these four are seen clearly and named poorly. The fifth holds a fixed commercial link and classifies cleanly. Acoustic input is heavily degraded by airport ambient noise and still contributes. A system that thresholds each channel would discard it. Visual is intermittent at range and becomes strong over the tower and the threshold where the formation comes low. No single input is sufficient here. The estimate comes from all of them.',
+      note: 'CRITICAL. Five airframes entering from the Oresund, crossing the northern piers, holding over the ATC core, then repositioning onto the 04R threshold. Formation geometry held throughout. The pattern is deliberate. ONE ESTIMATE, NOT THREE. RF, acoustic and visual are fused into a single confidence rather than scored separately. RF carries the detection at range. FREQUENCY HOPPING DETECTED on four of the five emitters, in UHF around 847 MHz and hopping pseudo-randomly across 720 to 1020 MHz, with a hop pattern coherent across all four. That band is the tell. Consumer airframes sit in licensed ISM at 2.4 and 5.8 GHz, so a detector built for the consumer bands is deaf to these four entirely. We hold them because we listen broadband. No library match on the waveform, so they are seen clearly and named poorly. The fifth emitter is fixed at 5780 MHz on a commercial link and classifies cleanly, which is why one airframe in this formation has a name and four do not. Acoustic input is heavily degraded by airport ambient noise and still contributes. A system that thresholds each channel would discard it. Visual is intermittent at range and becomes strong over the tower and the threshold where the formation comes low. No single input is sufficient here. The estimate comes from all of them.',
     },
     swarm: {
       size: 5,
@@ -487,10 +487,10 @@ export const TEMPLATES = {
         // as a military datalink, so the network sees four of a kind and
         // one outlier. That is a detection characteristic, not a label
         // the platform is asserting.
-        { role: 'lead',       model: 'Sibiryachok-5',  rfMHz: 2412, offset: { forward:    0, right:    0, up:   0 } },
-        { role: 'wingman-BL', model: 'Sibiryachok-5',  rfMHz: 2437, offset: { forward:  -90, right:  -60, up:  -5 } },
-        { role: 'wingman-BR', model: 'Sibiryachok-5',  rfMHz: 2462, offset: { forward:  -90, right:   60, up:  +4 } },
-        { role: 'wingman-L',  model: 'Sibiryachok-5',  rfMHz: 2427, offset: { forward: -170, right: -120, up:  +8 } },
+        { role: 'lead',       model: 'Sibiryachok-5',  rfMHz:  847, offset: { forward:    0, right:    0, up:   0 } },
+        { role: 'wingman-BL', model: 'Sibiryachok-5',  rfMHz:  764, offset: { forward:  -90, right:  -60, up:  -5 } },
+        { role: 'wingman-BR', model: 'Sibiryachok-5',  rfMHz:  905, offset: { forward:  -90, right:   60, up:  +4 } },
+        { role: 'wingman-L',  model: 'Sibiryachok-5',  rfMHz:  977, offset: { forward: -170, right: -120, up:  +8 } },
         { role: 'overwatch',  model: 'DJI Mavic 3 (commercial airframe)', rfMHz: 5780, offset: { forward: -230, right:  140, up: +28 } },
       ],
     },
