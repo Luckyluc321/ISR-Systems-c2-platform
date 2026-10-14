@@ -438,6 +438,56 @@ export const TEMPLATES = {
   // toward the far corner of the field, away from the terminals and the
   // landside road, which is exactly where nobody is looking. The film
   // uses the parts it needs and the voiceover carries the rest.
+  // EARLY GO-AROUND. The other one pivots at 46 m, which is the aircraft's
+  // own sensors catching it on short final: the WITHOUT-ISR story. This
+  // is the WITH-ISR story. The warning arrives while there is still room,
+  // so the aircraft breaks off at 398 m and 7.6 km out, which is a
+  // routine missed approach rather than a near miss.
+  //
+  // Flown on the real extended 04R centreline on a 3 degree glideslope,
+  // from 30 km out at 1572 m. Speeds 72 to 96 m/s, which is an A320 on
+  // approach and then climbing away. It crosses the threshold at 1100 m
+  // on the way up, so the shot has the aircraft passing over the swarm
+  // with daylight between them.
+  //
+  // Decision point is its own t = 285.4 s. The combined launcher offsets
+  // the spawn so that lands just after the swarm reaches the threshold.
+  cph_jet_goaround_early: {
+    droneType: 'Commercial airliner (SAS 743, A320neo)',
+    platform: 'jet',
+    classification: 'friendly',
+    threat: null,
+    confidence: 0.99,
+    confidenceTrend: 'ADS-B correlated, flight plan match',
+    siteId: 'cph',
+    multiSite: false,
+    evidence: {
+      rfCarrier: '1090 MHz ADS-B',
+      rfMatch: 'SAS743 A320neo, flight plan match',
+      modality: 'Cooperative transponder',
+      evidenceSize: '1.2 MB',
+      note: 'Scheduled arrival on 04R. Broke off the approach at 398 m, 7.6 km from the threshold, after the runway incursion was passed to the tower. Standard missed approach, climbed on runway heading and turned out over the Oresund.',
+    },
+    waypoints: [
+      { lat: 55.38880, lon: 12.29058, alt: 1572, heading: 0, tSec: 0 },     // spawn, 30 km out on the extended 04R centreline
+      { lat: 55.42948, lon: 12.35316, alt: 1258, heading: 0, tSec: 73.2 },
+      { lat: 55.47016, lon: 12.41575, alt:  943, heading: 0, tSec: 148.2 },
+      { lat: 55.49728, lon: 12.45748, alt:  734, heading: 0, tSec: 199.5 },
+      { lat: 55.51761, lon: 12.48877, alt:  576, heading: 0, tSec: 238.9 },
+      { lat: 55.53117, lon: 12.50964, alt:  472, heading: 0, tSec: 266 },
+      { lat: 55.54066, lon: 12.52424, alt:  398, heading: 0, tSec: 285.4 },   // GO-AROUND. 398 m, 7.6 km out.
+      { lat: 55.54880, lon: 12.53676, alt:  438, heading: 0, tSec: 301.2 },   // power up, descent arrested
+      { lat: 55.55965, lon: 12.55345, alt:  588, heading: 0, tSec: 321.2 },
+      { lat: 55.57456, lon: 12.57640, alt:  818, heading: 0, tSec: 346.8 },
+      { lat: 55.59219, lon: 12.60352, alt: 1098, heading: 0, tSec: 375.7 },   // over the threshold at 1100 m, not 46
+      { lat: 55.61388, lon: 12.63690, alt: 1378, heading: 0, tSec: 410.4 },
+      { lat: 55.62462, lon: 12.68291, alt: 1648, heading: 0, tSec: 443.7 },   // right turn, clear of the field
+      { lat: 55.62303, lon: 12.73946, alt: 1918, heading: 0, tSec: 480.8 },
+      { lat: 55.61113, lon: 12.79278, alt: 2158, heading: 0, tSec: 518.4 },   // outbound over the Oresund
+    ],
+    durationSec: 518,
+  },
+
   cph_swarm_runway_incursion: {
     siteId: 'cph',
     // Spawns over the Oresund, outside every sensor ring, so it is

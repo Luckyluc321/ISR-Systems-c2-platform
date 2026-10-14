@@ -20878,10 +20878,21 @@ async function main() {
       { key: 'cph_recon_hostile', label: 'Reconnaissance drone (HALE), hostile', cls: 'recon' },
       { key: 'cph_jet_friendly', label: 'Jet (SAS 743), friendly', cls: 'friendly' },
       { key: 'cph_jet_goaround', label: 'Jet (SAS 743), go-around at 185 ft', cls: 'friendly' },
+      { key: 'cph_jet_goaround_early', label: 'Jet (SAS 743), EARLY go-around at 398 m', cls: 'friendly' },
       { key: 'cph_missile_hostile', label: 'Cruise missile, critical', cls: 'critical' },
       { key: 'cph_missile_inbound_sw', label: 'Cruise missile inbound from SW (continuation)', cls: 'critical' },
       { key: 'swarm_recon_cph_amk', label: 'SWARM · 5-drone recon (CPH → Amager)', cls: 'critical' },
       { key: 'cph_swarm_runway_incursion', label: 'SWARM · 5-drone runway incursion (04R)', cls: 'critical' },
+      // COMBINED. Not a template, a pair with an offset. The swarm reaches
+      // the 04R threshold at its own t = 480.6 s and the airliner's
+      // decision point is its own t = 285.4 s, so the aircraft spawns 210 s
+      // in and breaks off at about t = 495 on the swarm's clock, moments
+      // after the formation arrives over the runway.
+      { key: '__combo_cph_incursion', label: 'COMBINED · Swarm on 04R + SAS 743 early go-around', cls: 'critical',
+        combo: [
+          { key: 'cph_swarm_runway_incursion', delayMs: 0 },
+          { key: 'cph_jet_goaround_early',     delayMs: 210000 },
+        ] },
       { key: 'cph_unknown_contact', label: 'Non-identifiable contact (N perimeter)', cls: 'recon' },
       { key: 'cph_shahed_amalienborg', label: 'Shahed-136 attack (Øresund → CPH → Amalienborg)', cls: 'critical' },
       { key: 'cph_geran3_amalienborg', label: 'Geran-3 jet attack, same route at 2x speed', cls: 'critical' },
@@ -20993,6 +21004,16 @@ async function main() {
     if (launchBtn && selEntry) launchBtn.addEventListener('click', () => {
       if (anyTrackLive()) return;
       flyTo(site);
+      // A COMBINED ENTRY IS A PAIR, NOT A TEMPLATE. Two tracks on one
+      // clock with an offset between them, so the aircraft arrives on
+      // final exactly as the formation reaches the runway. Spawned
+      // through simAfter like everything else, so pausing the simulation
+      // holds the second spawn too rather than firing it into a frozen
+      // scene.
+      if (Array.isArray(selEntry.combo)) {
+        selEntry.combo.forEach(c => simAfter(() => window.__spawnDrone(c.key), 1500 + (c.delayMs || 0)));
+        return;
+      }
       simAfter(() => window.__spawnDrone(selEntry.key), 1500);
     });
   }
@@ -21092,6 +21113,8 @@ async function main() {
     cph_recon_hostile:         { threat: 'HALE reconnaissance',    pathLabel: 'High-altitude loiter' },
     cph_jet_friendly:          { threat: 'Jet (SAS 743), friendly',pathLabel: 'Filed airliner route' },
     cph_jet_goaround:          { threat: 'Jet (SAS 743), friendly',pathLabel: 'Missed approach, 04R' },
+    cph_jet_goaround_early:    { threat: 'Jet (SAS 743), friendly',pathLabel: 'Early missed approach, 398 m at 7.6 km' },
+    __combo_cph_incursion:     { threat: '5-drone swarm + SAS 743', pathLabel: 'Incursion on 04R, aircraft breaks off' },
     cph_missile_hostile:       { threat: 'Cruise missile',         pathLabel: 'Baltic sea ingress' },
     cph_missile_inbound_sw:    { threat: 'Cruise missile',         pathLabel: 'SW continuation ingress' },
     swarm_recon_cph_amk:       { threat: '5-drone recon swarm',    pathLabel: 'CPH → Amager transit' },
