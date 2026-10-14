@@ -464,12 +464,12 @@ export const TEMPLATES = {
       { id: 'N07', confidence: 0.89 },   // SW Runway Approach
     ],
     evidence: {
-      rfCarrier: '847 MHz instantaneous, pseudo-random hopping across 720 to 1020 MHz. Commercial airframe fixed at 5780 MHz.',
+      rfCarrier: '847 MHz instantaneous, pseudo-random hopping across 720 to 1020 MHz on four emitters. Fifth emitter fixed at 5780 MHz.',
       rfBandwidth: 'FHSS on four of five emitters, hop pattern coherent across all four. Fifth emitter holds a fixed OcuSync link.',
       rfMatch: 'Four-airframe formation link + one OcuSync emitter, 94%',
       modality: 'Fused. RF, acoustic and visual into one estimate.',
       evidenceSize: '412 MB',
-      note: 'CRITICAL. Five airframes entering from the Oresund, crossing the northern piers, holding over the ATC core, then repositioning onto the 04R threshold. Formation geometry held throughout. The pattern is deliberate. ONE ESTIMATE, NOT THREE. RF, acoustic and visual are fused into a single confidence rather than scored separately. RF carries the detection at range. FREQUENCY HOPPING DETECTED on four of the five emitters, in UHF around 847 MHz and hopping pseudo-randomly across 720 to 1020 MHz, with a hop pattern coherent across all four. That band is the tell. Consumer airframes sit in licensed ISM at 2.4 and 5.8 GHz, so a detector built for the consumer bands is deaf to these four entirely. We hold them because we listen broadband. No library match on the waveform, so they are seen clearly and named poorly. The fifth emitter is fixed at 5780 MHz on a commercial link and classifies cleanly, which is why one airframe in this formation has a name and four do not. Acoustic input is heavily degraded by airport ambient noise and still contributes. A system that thresholds each channel would discard it. Visual is intermittent at range and becomes strong over the tower and the threshold where the formation comes low. No single input is sufficient here. The estimate comes from all of them.',
+      note: 'CRITICAL. Five airframes entering from the Oresund, crossing the northern piers, holding over the ATC core, then repositioning onto the 04R threshold. Formation geometry held throughout. The pattern is deliberate. ONE ESTIMATE, NOT THREE. RF, acoustic and visual are fused into a single confidence rather than scored separately. RF carries the detection at range. FREQUENCY HOPPING DETECTED on four of the five emitters, in UHF around 847 MHz and hopping pseudo-randomly across 720 to 1020 MHz, with a hop pattern coherent across all four. That band is the tell. Purpose built military links hop down here. Commercially procured airframes sit in licensed ISM at 2.4 and 5.8 GHz, so a detector built for the ISM bands is deaf to these four entirely. We hold them because we listen broadband. No library match on the waveform, so they are seen clearly and named poorly. ALL FIVE ARE HOSTILE. The fifth is a Chinese built quadcopter flown in the reconnaissance role, and because it was bought rather than purpose built it carries a stock OcuSync link fixed at 5780 MHz. That is why one airframe in this formation names cleanly and four do not. The difference is the procurement path, not the intent. Acoustic input is heavily degraded by airport ambient noise and still contributes. A system that thresholds each channel would discard it. Visual is intermittent at range and becomes strong over the tower and the threshold where the formation comes low. No single input is sufficient here. The estimate comes from all of them.',
     },
     swarm: {
       size: 5,
@@ -482,16 +482,23 @@ export const TEMPLATES = {
         // Mavic 3, because Russian forces procure commercial airframes
         // in quantity for exactly this kind of low-altitude work.
         //
-        // The mix is also the honest reason one airframe reads
-        // differently: a commercial OcuSync link is not the same emitter
-        // as a military datalink, so the network sees four of a kind and
-        // one outlier. That is a detection characteristic, not a label
-        // the platform is asserting.
+        // ALL FIVE ARE HOSTILE. The Mavic is not a civilian track that
+        // wandered into the formation, it is a reconnaissance asset that
+        // happens to be bought off a Chinese shelf rather than built for
+        // the role.
+        //
+        // What differs is the procurement path, and that is what the
+        // network actually sees. A bought DJI inherits DJI's licensed,
+        // documented OcuSync link in ISM, so it names cleanly. A purpose
+        // built military datalink hops in UHF and matches nothing. Same
+        // mission, four of a kind and one outlier, and the outlier is
+        // the one we can name. That is a detection characteristic, not a
+        // label the platform is asserting.
         { role: 'lead',       model: 'Sibiryachok-5',  rfMHz:  847, offset: { forward:    0, right:    0, up:   0 } },
         { role: 'wingman-BL', model: 'Sibiryachok-5',  rfMHz:  764, offset: { forward:  -90, right:  -60, up:  -5 } },
         { role: 'wingman-BR', model: 'Sibiryachok-5',  rfMHz:  905, offset: { forward:  -90, right:   60, up:  +4 } },
         { role: 'wingman-L',  model: 'Sibiryachok-5',  rfMHz:  977, offset: { forward: -170, right: -120, up:  +8 } },
-        { role: 'overwatch',  model: 'DJI Mavic 3 (commercial airframe)', rfMHz: 5780, offset: { forward: -230, right:  140, up: +28 } },
+        { role: 'overwatch',  model: 'DJI Mavic 3 (Chinese-built, military recon use)', rfMHz: 5780, offset: { forward: -230, right:  140, up: +28 } },
       ],
     },
     waypoints: [
