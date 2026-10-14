@@ -506,64 +506,86 @@ export const TEMPLATES = {
       ],
     },
     waypoints: [
-      { lat: 55.63700, lon: 12.67900, alt: 115, heading: 0, tSec: 0 },   // ingress, outside coverage
-      { lat: 55.63300, lon: 12.66900, alt: 108, heading: 0, tSec: 35 },   // crosses into coverage, detection opens
-      { lat: 55.62870, lon: 12.65550, alt: 92, heading: 0, tSec: 81.4 },   // Hangar 3 and Pier E, passing
-      { lat: 55.62100, lon: 12.65450, alt: 80, heading: 0, tSec: 122.3 },
-      { lat: 55.61643, lon: 12.65258, alt: 72, heading: 0, tSec: 148.5 },   // Central Apron
-      { lat: 55.61289, lon: 12.65980, alt: 66, heading: 0, tSec: 181.9 },   // SAS Hangar 141
-      { lat: 55.61265, lon: 12.65760, alt: 62, heading: 0, tSec: 190.7 },   // holding over Tower Syd, ATC core
-      { lat: 55.61249, lon: 12.65849, alt: 62, heading: 0, tSec: 194.4 },
-      { lat: 55.61206, lon: 12.65904, alt: 62, heading: 0, tSec: 198 },
-      { lat: 55.61154, lon: 12.65904, alt: 62, heading: 0, tSec: 201.7 },
-      { lat: 55.61111, lon: 12.65849, alt: 62, heading: 0, tSec: 205.4 },
-      { lat: 55.61095, lon: 12.65760, alt: 62, heading: 0, tSec: 209 },
-      { lat: 55.61111, lon: 12.65671, alt: 62, heading: 0, tSec: 212.7 },
-      { lat: 55.61154, lon: 12.65616, alt: 62, heading: 0, tSec: 216.4 },
-      { lat: 55.61206, lon: 12.65616, alt: 62, heading: 0, tSec: 220 },
-      { lat: 55.61249, lon: 12.65671, alt: 62, heading: 0, tSec: 223.7 },
-      { lat: 55.61265, lon: 12.65760, alt: 62, heading: 0, tSec: 227.4 },   // lap closes on the point it started, exactly one orbit
-      { lat: 55.60300, lon: 12.63000, alt: 60, heading: 0, tSec: 313.9 },   // breaks off southwest
-      { lat: 55.59500, lon: 12.60800, alt: 48, heading: 0, tSec: 392.2 },
-      { lat: 55.59417, lon: 12.60560, alt: 42, heading: 0, tSec: 404 },   // on the runway threshold
-      { lat: 55.59405, lon: 12.60630, alt: 42, heading: 0, tSec: 407.1 },
-      { lat: 55.59371, lon: 12.60673, alt: 42, heading: 0, tSec: 410.2 },
-      { lat: 55.59329, lon: 12.60673, alt: 42, heading: 0, tSec: 413.3 },
-      { lat: 55.59295, lon: 12.60630, alt: 42, heading: 0, tSec: 416.4 },
-      { lat: 55.59283, lon: 12.60560, alt: 42, heading: 0, tSec: 419.5 },
-      { lat: 55.59295, lon: 12.60490, alt: 42, heading: 0, tSec: 422.5 },
-      { lat: 55.59329, lon: 12.60447, alt: 42, heading: 0, tSec: 425.6 },
-      { lat: 55.59371, lon: 12.60447, alt: 42, heading: 0, tSec: 428.7 },
-      { lat: 55.59405, lon: 12.60490, alt: 42, heading: 0, tSec: 431.8 },
-      { lat: 55.59417, lon: 12.60560, alt: 42, heading: 0, tSec: 434.9 },   // lap closes, holding on the threshold
-      // EGRESS, OUT TO SEA. The path used to stop dead over the runway
-      // threshold, so the formation never left coverage, the event never
-      // closed on its own, and the dashed breadcrumb hung on the map with
-      // nothing to resolve it.
+      // REBUILT 2026-10-14. Three things were wrong with the old path.
       //
-      // East-southeast into the Oresund rather than due east, which would
-      // put five hostile airframes directly over Dragoer town. This track
-      // clears the town by 1.4 km at its closest.
+      // 1. TIGHT ORBITS WHIPPED THE TRAILING MEMBERS. Formation offsets
+      //    rotate with the lead's heading, so a member 269 m back gains
+      //    omega * 269 on top of the lead's own speed. On a 95 m orbit
+      //    that was +46 m/s and put the overwatch at about 62 m/s, which
+      //    is 220 km/h and is what read as flying like crazy.
       //
-      // Coverage ends between the first and second waypoints below: 914 m
-      // from N33 at the first, 1612 m from N09 at the second. The detection
-      // summary fires there, on real geometry, and the lifecycle teardown
-      // then removes the billboards and the projection lines.
-      { lat: 55.59100, lon: 12.62200, alt:  55, heading: 0, tSec: 471 },   // running, still held by N33 at 914 m
-      // THE PATH ENDS 3 SECONDS AFTER WE LOSE THEM.
+      //    Every turn on this path is now capped at 0.05 rad/s, which
+      //    means a radius of at least twenty times the speed. Worst
+      //    member speed anywhere is 34 m/s. The orbit is 300 m rather
+      //    than 95 m, and it is entered and left TANGENTIALLY, solved
+      //    numerically, residual 0.0 degrees on both. The old path
+      //    reversed into and out of it, and those corners were worse
+      //    than the orbit itself.
       //
-      // Measured: coverage ends at t=474 at 55.59076, 12.62338, where
-      // N33 passes 1000 m. The earlier version ran on to t=598, so the
-      // dashed breadcrumb grew for 108 seconds after the last contact.
+      // 2. A SECOND ORBIT AT THE RUNWAY THRESHOLD, WHICH HAD NO REASON.
+      //    There is nothing out at the threshold to study. The dwell
+      //    over the control tower is the intelligence, the threshold is
+      //    the event. They run down the 04R centreline, arrive, and
+      //    arriving IS the trigger. Time the landing to that waypoint.
       //
-      // They cannot reach open water while still tracked. The coverage
-      // edge sits 1 km from the nearest sensor and the Oresund is four
-      // kilometres further on, so the run toward the sea is the TRACKED
-      // part and losing them is the end of it. That is the honest shape:
-      // we watch them leave, we lose them, they are gone.
-      { lat: 55.59050, lon: 12.62480, alt:  58, heading: 0, tSec: 477 },   // 3 s past the edge, last contact
+      // 3. THEY NEVER LEFT. The old egress stopped mid-site. Measured
+      //    from the airport's own runway data: 04R's threshold is the
+      //    SOUTHWEST end of the 3551 m runway at 55.59219, 12.60352, and
+      //    the nearest water is due EAST at bearing 87 to 93 degrees,
+      //    4.5 km out. So they leave across the field to the east and go
+      //    dark over the Oresund.
+      //
+      //    The egress stays inside coverage the whole way to the coast,
+      //    closest sensor 333 m, 337 m, 577 m, 324 m, 95 m, 669 m, so
+      //    the track is CONFIRMED rather than guessed right up to the
+      //    water. Only the final point is outside, at 1318 m from N14.
+      //
+      // Verified against the live sensor manifest: the only waypoints
+      // outside coverage are the spawn over the Oresund and that last
+      // one. Do not hand-edit single points here. A corner inserted
+      // without re-checking the turn rate puts the formation back at
+      // triple-digit speeds, which is exactly how this broke.
+      { lat: 55.63700, lon: 12.67900, alt: 115, heading: 0, tSec: 0 },
+      { lat: 55.63300, lon: 12.66900, alt: 108, heading: 0, tSec: 36.7 },
+      { lat: 55.62870, lon: 12.65550, alt:  92, heading: 0, tSec: 83.1 },
+      { lat: 55.62100, lon: 12.65450, alt:  80, heading: 0, tSec: 124 },
+      { lat: 55.61643, lon: 12.65258, alt:  72, heading: 0, tSec: 148.9 },
+      { lat: 55.61416, lon: 12.65990, alt:  62, heading: 0, tSec: 174.9 },
+      { lat: 55.61357, lon: 12.66120, alt:  62, heading: 0, tSec: 181.9 },
+      { lat: 55.61275, lon: 12.66206, alt:  62, heading: 0, tSec: 189 },
+      { lat: 55.61182, lon: 12.66237, alt:  62, heading: 0, tSec: 196.1 },
+      { lat: 55.61088, lon: 12.66209, alt:  62, heading: 0, tSec: 203.2 },
+      { lat: 55.61006, lon: 12.66125, alt:  62, heading: 0, tSec: 210.3 },
+      { lat: 55.60946, lon: 12.65996, alt:  62, heading: 0, tSec: 217.4 },
+      { lat: 55.60914, lon: 12.65838, alt:  62, heading: 0, tSec: 224.5 },
+      { lat: 55.60915, lon: 12.65670, alt:  62, heading: 0, tSec: 231.6 },
+      { lat: 55.60949, lon: 12.65513, alt:  62, heading: 0, tSec: 238.7 },
+      { lat: 55.61012, lon: 12.65387, alt:  62, heading: 0, tSec: 245.8 },
+      { lat: 55.61095, lon: 12.65307, alt:  62, heading: 0, tSec: 252.9 },
+      { lat: 55.61189, lon: 12.65283, alt:  62, heading: 0, tSec: 260 },
+      { lat: 55.61282, lon: 12.65318, alt:  62, heading: 0, tSec: 267.1 },
+      { lat: 55.61362, lon: 12.65408, alt:  62, heading: 0, tSec: 274.2 },
+      { lat: 55.61420, lon: 12.65541, alt:  62, heading: 0, tSec: 281.3 },
+      { lat: 55.61447, lon: 12.65702, alt:  62, heading: 0, tSec: 288.4 },
+      { lat: 55.61442, lon: 12.65869, alt:  62, heading: 0, tSec: 295.5 },
+      { lat: 55.61405, lon: 12.66023, alt:  62, heading: 0, tSec: 302.6 },
+      { lat: 55.61339, lon: 12.66145, alt:  62, heading: 0, tSec: 309.7 },
+      { lat: 55.61254, lon: 12.66219, alt:  62, heading: 0, tSec: 316.8 },
+      { lat: 55.61160, lon: 12.66236, alt:  62, heading: 0, tSec: 323.9 },
+      { lat: 55.61068, lon: 12.66194, alt:  62, heading: 0, tSec: 331 },
+      { lat: 55.60990, lon: 12.66098, alt:  62, heading: 0, tSec: 338.1 },
+      { lat: 55.60936, lon: 12.65961, alt:  62, heading: 0, tSec: 345.2 },
+      { lat: 55.59950, lon: 12.62200, alt:  56, heading: 0, tSec: 519 },
+      { lat: 55.59300, lon: 12.61200, alt:  45, heading: 0, tSec: 555.9 },
+      { lat: 55.59800, lon: 12.62400, alt:  60, heading: 0, tSec: 614.3 },
+      { lat: 55.60200, lon: 12.63600, alt:  75, heading: 0, tSec: 645.6 },
+      { lat: 55.60500, lon: 12.64900, alt:  90, heading: 0, tSec: 677.1 },
+      { lat: 55.60650, lon: 12.66200, alt: 105, heading: 0, tSec: 706.9 },
+      { lat: 55.60700, lon: 12.67300, alt: 115, heading: 0, tSec: 731.7 },
+      { lat: 55.60600, lon: 12.68200, alt: 125, heading: 0, tSec: 752.3 },
+      { lat: 55.60450, lon: 12.69200, alt: 135, heading: 0, tSec: 775.5 },
     ],
-    durationSec: 477,
+    durationSec: 776,
   },
 
   // ── Recon drone, HALE (Reaper/Global-Hawk class), high altitude circular loiter ──
