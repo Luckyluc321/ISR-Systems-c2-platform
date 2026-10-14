@@ -13,6 +13,7 @@
 export {
   getInferenceConfig,
   isMistralConfigured,
+  inferenceHost,
   siteVersionStamp,
   invalidateSiteVersionStamp,
   sanitizePartnerString,

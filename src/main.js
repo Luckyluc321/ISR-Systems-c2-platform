@@ -783,7 +783,7 @@ import { TARGETS as TARGETS_CORE } from './targets.js';
 import { HV_SUBSTATION_TARGETS } from './targets_hv.js';
 const TARGETS = [...TARGETS_CORE, ...HV_SUBSTATION_TARGETS];
 import { getRules, onRulesChange, toggleRule, removeRule, upsertRule, resetRulesToDefault, ruleSummaryText } from './rules.js';
-import { isMistralConfigured, streamCaseFileNarrative, streamDebriefNarrative, ensureSiteContextDigest, invalidateSiteContextDigest, writeNarrativeCache, readNarrativeCache, readNarrativeCacheIfSignalMatch, invalidateNarrativeCache } from './mistral.js';
+import { isMistralConfigured, inferenceHost, streamCaseFileNarrative, streamDebriefNarrative, ensureSiteContextDigest, invalidateSiteContextDigest, writeNarrativeCache, readNarrativeCache, readNarrativeCacheIfSignalMatch, invalidateNarrativeCache } from './mistral.js';
 import { resolveHighlightsAsync, extractAndRankSignals, buildAgentBPromptBlock, writePreprocessed, rehydratePreprocessed, invalidatePreprocessed } from './preprocessing.js';
 import { invalidateFallbackHighlights } from './agents/agent_a2_highlights.js';
 import { streamNarrativeLens, knownArchetypes as _lensKnownArchetypes, writeLens as _lensWriteCache, readLens as _lensReadCache } from './agents/agent_b_lens.js';
@@ -15623,7 +15623,7 @@ async function main() {
       onError: (err) => {
         if (gen !== _mistralDebriefGen) return;
         console.warn('[mistral debrief] falling back to deterministic:', err.message);
-        if (footEl) footEl.textContent = `Mistral unreachable · showing deterministic synthesis · ${err.message.slice(0, 80)}`;
+        if (footEl) footEl.textContent = `Inference unreachable at ${inferenceHost()} · showing deterministic synthesis · ${err.message.slice(0, 80)}`;
       },
     }, {
       siteDigest,
@@ -28792,7 +28792,13 @@ async function main() {
           _mistralCooldownUntil.set(event.id, Date.now() + MISTRAL_COOLDOWN_MS);
           if (footEl) footEl.textContent = `Mistral rate-limited. Showing mock synthesis. Retry available in ${Math.round(MISTRAL_COOLDOWN_MS / 1000)}s or click regenerate.`;
         } else {
-          if (footEl) footEl.textContent = `Mistral unreachable · showing mock synthesis · ${err.message.slice(0, 80)}`;
+          // NAME THE HOST. "Failed to fetch" is all a browser gives you
+          // for any transport failure, and the endpoint is configurable
+          // across four providers, so without the host there is no way to
+          // tell a dead proxy from a blocked request from a typo in the
+          // env var.
+          if (footEl) footEl.textContent = `Inference unreachable at ${inferenceHost()} · showing mock synthesis · ${err.message.slice(0, 80)}`;
+          console.warn('[inference] unreachable', { host: inferenceHost(), error: err.message });
         }
       },
     }, siteDigest, cooperativeCheckBlock);

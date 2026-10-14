@@ -54,6 +54,16 @@ function _readEnv(key) {
   } catch (_) { return ''; }
 }
 
+// The host being called, for diagnostics. NEVER the token, and never the
+// full URL with its query, just enough to answer "what did it try to
+// reach". A fetch that fails at transport reports only "Failed to fetch",
+// which is useless when the endpoint is configurable across four
+// providers: Mistral direct, Scaleway, Foundry and the Azure proxy.
+export function inferenceHost() {
+  try { return new URL(getInferenceConfig().endpoint).host; }
+  catch (_) { return 'invalid endpoint'; }
+}
+
 export function getInferenceConfig() {
   return {
     endpoint: _readEnv('VITE_MISTRAL_ENDPOINT') || DEFAULTS.endpoint,
