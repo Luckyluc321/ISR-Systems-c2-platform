@@ -506,28 +506,40 @@ export const TEMPLATES = {
       ],
     },
     waypoints: [
-      // RETUNED 2026-10-14 for pace and for how tight the circle is.
+      // REBUILT. THE INLAND LEG IS GONE.
       //
-      // ORBIT 300 m -> 180 m, at 18 m/s instead of 15. The wide circle
-      // took them 600 m across and read as flying away and coming back
-      // rather than holding a position. The tighter one keeps them over
-      // the area they are there to look at.
+      // The previous version ran PAST the threshold onto the approach,
+      // southwest and inland, then turned around and came back. It was
+      // built that way to manufacture a perimeter re-entry, and it was
+      // wrong on its own terms: a reconnaissance flight heading home does
+      // not stop over farmland on the far side of the airport and loiter
+      // there. The sea is east, their ingress was from the Oresund, and
+      // east is where they go.
       //
-      // That only works because the FORMATION came in with it, to 60 per
-      // cent of its old spread. Offsets rotate with the lead's heading,
-      // so the rear member's extra speed is omega times its distance
-      // back. Pulling the overwatch from 269 m to 162 m takes a third
-      // off that, which is what buys the tighter circle. Worst member
-      // speed anywhere is 43 m/s, against 62 before any of this and 117
-      // at the old corners.
+      // Now: tower orbit, down the 04R centreline, over the threshold,
+      // climb out along the runway and straight out east to open water.
+      // Nothing points inland at any stage.
       //
-      // Legs are faster across the board: ingress 25, orbit 18, runway
-      // and approach 26, egress 31. Turn cap relaxed from 0.05 to 0.062
-      // rad/s to match.
+      // THE RE-ENTRY STILL HAPPENS, and it costs nothing, because the
+      // site's eastern boundary is irregular and the egress clips it.
+      // Measured against the polygon, exactly four events: ENTRY on
+      // ingress, EXIT at 645 s, ENTRY #2 at 668 s, EXIT at 687 s. That
+      // is the real shape of the fence, not a detour invented to produce
+      // a marker.
       //
-      // Perimeter events are unchanged and still exactly four: ENTRY,
-      // EXIT onto the approach, ENTRY #2 coming back in, EXIT east.
-      // Verified against the polygon, not assumed.
+      // Why the climb-out goes back up the runway before turning east:
+      // the perimeter is narrow at the threshold, so a direct turn east
+      // from there dips straight out and back in and produced six
+      // perimeter events instead of four.
+      //
+      // Why not due east from the threshold: measured, that line leaves
+      // the site after 800 m and is unobserved for the remaining four
+      // kilometres to the water. The route north of it stays inside
+      // sensor coverage almost to the coast, so the track stays
+      // CONFIRMED rather than guessed on the way out.
+      //
+      // Turn rate capped at 0.062 rad/s throughout. Worst member speed
+      // including the formation whip is 38 m/s.
       //
       // GO-AROUND CUE: t = 480.6 s, directly over the 04R threshold at
       // 55.59219, 12.60352, 43 m altitude.
@@ -567,25 +579,16 @@ export const TEMPLATES = {
       { lat: 55.59897, lon: 12.61395, alt:  50, heading: 0, tSec: 442.2 },
       { lat: 55.59422, lon: 12.60665, alt:  45, heading: 0, tSec: 469.1 },
       { lat: 55.59219, lon: 12.60352, alt:  43, heading: 0, tSec: 480.6 },
-      { lat: 55.59016, lon: 12.60039, alt:  42, heading: 0, tSec: 492.1 },
-      { lat: 55.58609, lon: 12.59413, alt:  42, heading: 0, tSec: 515.2 },
-      { lat: 55.58338, lon: 12.58996, alt:  45, heading: 0, tSec: 530.6 },
-      { lat: 55.58055, lon: 12.59087, alt:  50, heading: 0, tSec: 545.1 },
-      { lat: 55.57929, lon: 12.59463, alt:  55, heading: 0, tSec: 558.9 },
-      { lat: 55.58027, lon: 12.59992, alt:  58, heading: 0, tSec: 572.6 },
-      { lat: 55.58400, lon: 12.60566, alt:  60, heading: 0, tSec: 590.3 },
-      { lat: 55.58806, lon: 12.61192, alt:  62, heading: 0, tSec: 609.7 },
-      { lat: 55.59281, lon: 12.61922, alt:  70, heading: 0, tSec: 632.3 },
-      { lat: 55.60200, lon: 12.63600, alt:  85, heading: 0, tSec: 679.7 },
-      { lat: 55.60500, lon: 12.64900, alt:  95, heading: 0, tSec: 708.2 },
-      { lat: 55.60800, lon: 12.66000, alt: 105, heading: 0, tSec: 733 },
-      { lat: 55.61000, lon: 12.66900, alt: 112, heading: 0, tSec: 752.6 },
-      { lat: 55.61100, lon: 12.67500, alt: 118, heading: 0, tSec: 765.3 },
-      { lat: 55.61000, lon: 12.68100, alt: 125, heading: 0, tSec: 778 },
-      { lat: 55.60800, lon: 12.68700, alt: 130, heading: 0, tSec: 792.1 },
-      { lat: 55.60600, lon: 12.69500, alt: 135, heading: 0, tSec: 809.8 },
+      { lat: 55.59829, lon: 12.61291, alt:  50, heading: 0, tSec: 531.3 },
+      { lat: 55.60439, lon: 12.62230, alt:  60, heading: 0, tSec: 561.3 },
+      { lat: 55.60500, lon: 12.64900, alt:  75, heading: 0, tSec: 617.3 },
+      { lat: 55.60650, lon: 12.66200, alt:  90, heading: 0, tSec: 645.1 },
+      { lat: 55.60700, lon: 12.67300, alt: 105, heading: 0, tSec: 668.2 },
+      { lat: 55.60600, lon: 12.68200, alt: 118, heading: 0, tSec: 687.4 },
+      { lat: 55.60450, lon: 12.69200, alt: 130, heading: 0, tSec: 709.1 },
+      { lat: 55.60300, lon: 12.70200, alt: 140, heading: 0, tSec: 730.8 },
     ],
-    durationSec: 810,
+    durationSec: 731,
   },
 
   // ── Recon drone, HALE (Reaper/Global-Hawk class), high altitude circular loiter ──

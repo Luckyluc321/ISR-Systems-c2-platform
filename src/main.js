@@ -18491,7 +18491,27 @@ async function main() {
           const lastSensor = cov?.nearest?.id || (event.contributingSensors[0]?.id) || '';
           const exitLabel = coverageExit && lastSensor ? `EXIT ${exitTime}Z · cleared ${lastSensor}` : `EXIT ${exitTime}Z`;
           const exitPoint = { lat: p.lat, lon: p.lon, alt: Math.round(p.alt), timestamp: new Date().toISOString(), heading: Math.round(p.heading), leftCoverageOf: coverageExit ? lastSensor : null };
-          state.exitMarker = _dropMarker(p.lat, p.lon, '#ffb84d', exitLabel, event.id);
+          // ONLY MARK A COVERAGE EXIT HERE. THE PERIMETER ONE IS NOT OURS.
+          //
+          // processDroneSiteMarkers already drops a pin for a perimeter
+          // crossing, labelled with the site code. This block fires on
+          // perimeter OR coverage loss, so on a perimeter crossing both
+          // ran and stacked two pins seconds apart: "EXIT 15:17:40Z · CPH"
+          // from there and "EXIT 15:17:35Z" from here. Same defect as the
+          // doubled ENTRY, which was fixed without noticing the exit had
+          // it too.
+          //
+          // The coverage case stays, because nothing else covers it. A
+          // track that fades out without crossing the fence still needs
+          // its marker, and that is the one labelled "cleared Nxx".
+          //
+          // The DATA write below is untouched and still fires for both.
+          // closeEvent, the cordon dispatch and the post-incident report
+          // read event.exit, and this is a duplicate pin, not a duplicate
+          // record.
+          if (coverageExit && !perimeterExit) {
+            state.exitMarker = _dropMarker(p.lat, p.lon, '#ffb84d', exitLabel, event.id);
+          }
           mutateEvent(event.id, { exit: exitPoint });
           // If intercept is pending, don't force-close on coverage exit — let
           // the missile keep playing until QRA neutralizes it.
