@@ -12764,21 +12764,11 @@ async function main() {
         if (d.confidence > maxConf) maxConf = d.confidence;
       }
       if (maxConf <= 0) continue;
-      // THE WOBBLE BELONGS HERE, NOT ONLY ON THE GEOMETRY FLOOR.
-      //
-      // It was applied to the floor, but this merge takes the MAX of the
-      // floor and the emitted value, and the emitted value is higher for
-      // anything inside half its radius. So the floor's variation was
-      // discarded for exactly the sensors holding the track best, and
-      // several of them at similar ranges reported the same frozen 0.55.
-      //
-      // Kept small on purpose. Range still sets the level, this only
-      // stops a reading sitting perfectly still.
-      let _sh = 0;
-      for (let _k = 0; _k < sEntry.sensorId.length; _k++) _sh = (_sh * 31 + sEntry.sensorId.charCodeAt(_k)) % 997;
-      const _sp = (_sh / 997) * Math.PI * 2, _st = monoNow() / 1000;
-      const _sw = 0.05 * (0.6 * Math.sin(_st * 0.47 + _sp) + 0.4 * Math.sin(_st * 0.19 + _sp * 1.7));
-      const rounded = +Math.max(0.10, Math.min(0.98, maxConf + _sw)).toFixed(2);
+      // No wobble here. The sensor's own reading varies at the source
+      // now (nn_source.js), which is the only place that knows what a
+      // sensor is doing. Two wobbles in two layers was how the frozen
+      // 0.55 survived both of them.
+      const rounded = +maxConf.toFixed(2);
       const existing = targetEvent.contributingSensors.find(s => s.id === sEntry.sensorId);
       if (!existing) {
         targetEvent.contributingSensors.push({ id: sEntry.sensorId, confidence: rounded, peakConfidence: rounded });

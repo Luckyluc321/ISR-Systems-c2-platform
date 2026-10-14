@@ -50,12 +50,45 @@ function _haversineM(lat1, lon1, lat2, lon2) {
 // own reconnection lifecycle inside start()/stop().
 // ─────────────────────────────────────────────────────────────────────
 
-// Confidence math shared with the current inline implementation in
-// _updateContributingSensorsForPosition. Extracted here so both the mock
-// source and any adapter that maps a customer feed to our schema uses
-// the same clamp bounds.
-function _sensorConfidenceForDistance(distM, coverageRadiusM) {
-  return Math.min(0.98, Math.max(0.55, 1 - distM / coverageRadiusM));
+// Confidence math shared with any adapter that maps a customer feed to
+// our schema, so a real source and the mock agree on what the number
+// means.
+//
+// THE OLD CLAMP WAS THE WHOLE PROBLEM:
+//
+//   Math.min(0.98, Math.max(0.55, 1 - distM / coverageRadiusM))
+//
+// The lower bound meant every sensor past 45 per cent of its radius
+// returned EXACTLY 0.55. Not approximately. The same float, from every
+// sensor, every tick. Downstream they then decayed in lockstep from the
+// same starting value, so four or five sensors showed 0.25, then 0.32,
+// then whatever, perfectly in step for the whole early phase.
+//
+// Two wobbles were added downstream trying to fix this and neither could
+// work, because the merge that consumes this only ever RAISES a sensor's
+// value. Once every sensor is pinned at the same ceiling there is no tie
+// left to break. The fix has to be here, at the reading.
+//
+// Now it falls off properly with range: 0.98 overhead down to 0.12 at
+// the edge of the radius, so distance actually separates sensors.
+//
+// PER-SENSOR VARIATION, PHASED OFF THE SENSOR ID. A real receiver's
+// confidence moves with multipath, antenna orientation and noise, and no
+// two units move together. Deterministic, so a replay of the same second
+// reproduces the same reading.
+const _CONF_EDGE = 0.12, _CONF_PEAK = 0.98, _CONF_WANDER = 0.05;
+function _idPhase(id) {
+  let h = 0;
+  for (let i = 0; i < String(id).length; i++) h = (h * 31 + String(id).charCodeAt(i)) % 997;
+  return (h / 997) * Math.PI * 2;
+}
+function _sensorConfidenceForDistance(distM, coverageRadiusM, sensorId, tSec) {
+  const q = Math.max(0, Math.min(1, 1 - distM / coverageRadiusM));
+  const base = _CONF_EDGE + (_CONF_PEAK - _CONF_EDGE) * q;
+  if (sensorId == null || tSec == null) return base;
+  const ph = _idPhase(sensorId);
+  const w = _CONF_WANDER * (0.6 * Math.sin(tSec * 0.51 + ph) + 0.4 * Math.sin(tSec * 0.21 + ph * 1.7));
+  return Math.max(0.08, Math.min(_CONF_PEAK, base + w));
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -107,7 +140,7 @@ export class MockNnOutputSource {
             lat: p.lat,
             lon: p.lon,
             alt: p.alt,
-            confidence: +_sensorConfidenceForDistance(dist, sensor.coverageRadius).toFixed(2),
+            confidence: +_sensorConfidenceForDistance(dist, sensor.coverageRadius, sensor.id, Date.now() / 1000).toFixed(2),
             droneKey: p.droneKey,
             modalityMix: p.modalityMix || sensor.modalities,
           });
