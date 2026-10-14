@@ -11,6 +11,10 @@
 // own pace. New agents MUST read event.subject.
 import { syncEventSubject, applyNnTickToSubject } from './detection_subject.js';
 import { SITES } from './sites_registry.js';
+import { defaultEscalationMessage } from './escalation_messages.js';
+// destinations.js imports nothing from here, so this is a leaf
+// dependency and not a cycle. Checked rather than assumed.
+import { getDestination as _getDestinationForMessage } from './destinations.js';
 import { registerEvent as _resyncPrecedent } from './precedent_index.js';
 
 // Schema version stamps. Every escalation record + assessment package
@@ -462,7 +466,18 @@ export function escalateEvent(id, { destinationIds, payload, message, operator =
       initiatedByRoleId: operatorRoleId,
       initiatedAt: now.toISOString(),
       payload, // 'summary' | 'full' | 'live-link'
-      message: (message || '').trim(),
+      // The operator's own words win. When the box was left empty the
+      // recipient used to get a notification with no message at all, so
+      // a duty manager had to reconstruct what was being asked of them
+      // from an evidence pack. This fills that gap with a line written
+      // for THAT recipient: the tower is asked to hold traffic,
+      // intelligence is told what the emitters look like, the NOTAM
+      // system gets an airspace advisory.
+      message: (message || '').trim()
+        || defaultEscalationMessage(
+             _getDestinationForMessage(destId),
+             e,
+             SITES[e.siteId]?.name || e.siteId || 'the site'),
       status: 'sent',
       statusHistory: [{ timestamp: now.toISOString(), status: 'sent' }],
       response: null,

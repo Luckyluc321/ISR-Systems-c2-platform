@@ -154,7 +154,7 @@ const DESTINATIONS = [
     name: 'Københavns Politi',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
   { id: 'cph-t2-pet', siteId: 'cph', tier: 2, type: 'agency',
-    name: 'PET, Politiets Efterretningstjeneste',
+    name: 'PET · Operations, Politiets Efterretningstjeneste',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
   { id: 'cph-sys-eurocontrol', siteId: 'cph', tier: 2, type: 'system',
     name: 'Eurocontrol NOTAM System',
@@ -223,7 +223,7 @@ const DESTINATIONS = [
     name: 'Syd- og Sønderjyllands Politi',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
   { id: 'esb-t2-pet', siteId: 'esbjerg', tier: 2, type: 'agency',
-    name: 'PET, Politiets Efterretningstjeneste',
+    name: 'PET · Operations, Politiets Efterretningstjeneste',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
   { id: 'esb-sys-vts', siteId: 'esbjerg', tier: 2, type: 'system',
     name: 'Vessel Traffic Services',
@@ -289,7 +289,7 @@ const DESTINATIONS = [
     name: 'Nordsjællands Politi',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
   { id: 'hvg-t2-pet', siteId: 'energinet_hovegaard', tier: 2, type: 'agency',
-    name: 'PET, Politiets Efterretningstjeneste',
+    name: 'PET · Operations, Politiets Efterretningstjeneste',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
 
   // Tier 3, national authorities
@@ -344,7 +344,7 @@ const DESTINATIONS = [
     name: 'Midt- og Vestsjællands Politi',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
   { id: 'bjk-t2-pet', siteId: 'energinet_bjaeverskov', tier: 2, type: 'agency',
-    name: 'PET, Politiets Efterretningstjeneste',
+    name: 'PET · Operations, Politiets Efterretningstjeneste',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
 
   // Tier 3, national authorities
@@ -394,7 +394,7 @@ const DESTINATIONS = [
     name: 'Sydøstjyllands Politi',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
   { id: 'ldg-t2-pet', siteId: 'energinet_landerupgaard', tier: 2, type: 'agency',
-    name: 'PET, Politiets Efterretningstjeneste',
+    name: 'PET · Operations, Politiets Efterretningstjeneste',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
 
   // Tier 3, national authorities
@@ -444,7 +444,7 @@ const DESTINATIONS = [
     name: 'Syd- og Sønderjyllands Politi',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
   { id: 'kas-t2-pet', siteId: 'energinet_kassoe', tier: 2, type: 'agency',
-    name: 'PET, Politiets Efterretningstjeneste',
+    name: 'PET · Operations, Politiets Efterretningstjeneste',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
 
   // Tier 3, national authorities
@@ -494,7 +494,7 @@ const DESTINATIONS = [
     name: 'Nordjyllands Politi',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
   { id: 'frv-t2-pet', siteId: 'energinet_ferslev', tier: 2, type: 'agency',
-    name: 'PET, Politiets Efterretningstjeneste',
+    name: 'PET · Operations, Politiets Efterretningstjeneste',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
 
   // Tier 3, national authorities
@@ -560,7 +560,7 @@ const DESTINATIONS = [
     name: 'Sydøstjyllands Politi',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
   { id: 'bll-t2-pet', siteId: 'billund', tier: 2, type: 'agency',
-    name: 'PET, Politiets Efterretningstjeneste',
+    name: 'PET · Operations, Politiets Efterretningstjeneste',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
   { id: 'bll-t2-trekantbrand', siteId: 'billund', tier: 2, type: 'agency',
     name: 'Trekantområdets Brandvæsen',
@@ -640,7 +640,7 @@ const DESTINATIONS = [
     name: 'Fyns Politi',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
   { id: 'ode-t2-pet', siteId: 'odense', tier: 2, type: 'agency',
-    name: 'PET, Politiets Efterretningstjeneste',
+    name: 'PET · Operations, Politiets Efterretningstjeneste',
     contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
   { id: 'ode-t2-beredskab-fyn', siteId: 'odense', tier: 2, type: 'agency',
     name: 'Beredskab Fyn',
