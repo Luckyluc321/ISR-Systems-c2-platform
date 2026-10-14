@@ -44,7 +44,7 @@ export const TEMPLATES = {
       { lat: 55.60000, lon: 12.67000, alt: 115, heading: 95,  tSec: 82  },
       { lat: 55.59900, lon: 12.67400, alt: 125, heading: 90,  tSec: 90  },
     ],
-    durationSec: 90,
+    durationSec: 958,
   },
 
   // ── Fixed-wing, hostile (ScanEagle-class recon, high altitude straight pass) ──
@@ -506,84 +506,102 @@ export const TEMPLATES = {
       ],
     },
     waypoints: [
-      // REBUILT 2026-10-14. Three things were wrong with the old path.
+      // REBUILT AGAIN 2026-10-14, against the airport's own runway data
+      // and the site perimeter polygon. Three faults, all measured.
       //
-      // 1. TIGHT ORBITS WHIPPED THE TRAILING MEMBERS. Formation offsets
-      //    rotate with the lead's heading, so a member 269 m back gains
-      //    omega * 269 on top of the lead's own speed. On a 95 m orbit
-      //    that was +46 m/s and put the overwatch at about 62 m/s, which
-      //    is 220 km/h and is what read as flying like crazy.
+      // 1. THE RUN WAS 343 m OFF THE CENTRELINE. The path flew parallel
+      //    to 04R, out over the perimeter grass, and never crossed the
+      //    landing surface. Nothing about it would trouble a pilot on
+      //    short final, which was the entire point of the scenario.
+      //    It now flies the centreline itself, through the threshold at
+      //    55.59219, 12.60352, and on out onto the approach where a
+      //    landing aircraft actually is.
       //
-      //    Every turn on this path is now capped at 0.05 rad/s, which
-      //    means a radius of at least twenty times the speed. Worst
-      //    member speed anywhere is 34 m/s. The orbit is 300 m rather
-      //    than 95 m, and it is entered and left TANGENTIALLY, solved
-      //    numerically, residual 0.0 degrees on both. The old path
-      //    reversed into and out of it, and those corners were worse
-      //    than the orbit itself.
+      // 2. NO RE-ENTRY, BECAUSE THE PATH NEVER RE-ENTERED. The platform
+      //    has always logged repeat entries: processDroneSiteMarkers
+      //    counts them per site and labels them ENTRY #2, ENTRY #3.
+      //    Nothing was removed. The old path crossed the fence once in
+      //    and once out, so there was no second entry to label.
       //
-      // 2. A SECOND ORBIT AT THE RUNWAY THRESHOLD, WHICH HAD NO REASON.
-      //    There is nothing out at the threshold to study. The dwell
-      //    over the control tower is the intelligence, the threshold is
-      //    the event. They run down the 04R centreline, arrive, and
-      //    arriving IS the trigger. Time the landing to that waypoint.
+      //    It now does the thing that produces one. Down the centreline,
+      //    over the threshold, out onto the approach, which leaves the
+      //    perimeter at about d = -450 m while STILL being tracked (N35
+      //    at 191 to 623 m, so sensors see past the fence). Wide turn,
+      //    back in over the field, which is the re-entry. Then east and
+      //    out for the final exit.
       //
-      // 3. THEY NEVER LEFT. The old egress stopped mid-site. Measured
-      //    from the airport's own runway data: 04R's threshold is the
-      //    SOUTHWEST end of the 3551 m runway at 55.59219, 12.60352, and
-      //    the nearest water is due EAST at bearing 87 to 93 degrees,
-      //    4.5 km out. So they leave across the field to the east and go
-      //    dark over the Oresund.
+      //    Verified against the polygon: exactly four perimeter events,
+      //    ENTRY, EXIT, ENTRY #2, EXIT. The earlier east route clipped
+      //    the irregular eastern boundary twice more and produced six.
       //
-      //    The egress stays inside coverage the whole way to the coast,
-      //    closest sensor 333 m, 337 m, 577 m, 324 m, 95 m, 669 m, so
-      //    the track is CONFIRMED rather than guessed right up to the
-      //    water. Only the final point is outside, at 1318 m from N14.
+      // 3. TURN RATE. Every turn is capped at 0.05 rad/s, radius at
+      //    least twenty times the speed. Formation offsets rotate with
+      //    the lead's heading, so a member 269 m back gains omega * 269:
+      //    on the old 95 m orbit that was +46 m/s and put the overwatch
+      //    at 62 m/s, and the near-180 degree corners were worse still
+      //    at 117 m/s. Worst anywhere on this path is 39 m/s.
       //
-      // Verified against the live sensor manifest: the only waypoints
-      // outside coverage are the spawn over the Oresund and that last
-      // one. Do not hand-edit single points here. A corner inserted
-      // without re-checking the turn rate puts the formation back at
-      // triple-digit speeds, which is exactly how this broke.
+      // The tower orbit is 300 m and is entered and left tangentially,
+      // solved numerically, residual 0.0 degrees on both.
+      //
+      // Do not hand-edit single points. A corner inserted without
+      // re-checking the turn rate puts the formation back into triple
+      // digits, and a point nudged near the fence changes how many
+      // perimeter events the operator sees.
       { lat: 55.63700, lon: 12.67900, alt: 115, heading: 0, tSec: 0 },
       { lat: 55.63300, lon: 12.66900, alt: 108, heading: 0, tSec: 36.7 },
       { lat: 55.62870, lon: 12.65550, alt:  92, heading: 0, tSec: 83.1 },
       { lat: 55.62100, lon: 12.65450, alt:  80, heading: 0, tSec: 124 },
       { lat: 55.61643, lon: 12.65258, alt:  72, heading: 0, tSec: 148.9 },
       { lat: 55.61416, lon: 12.65990, alt:  62, heading: 0, tSec: 174.9 },
-      { lat: 55.61357, lon: 12.66120, alt:  62, heading: 0, tSec: 181.9 },
-      { lat: 55.61275, lon: 12.66206, alt:  62, heading: 0, tSec: 189 },
-      { lat: 55.61182, lon: 12.66237, alt:  62, heading: 0, tSec: 196.1 },
-      { lat: 55.61088, lon: 12.66209, alt:  62, heading: 0, tSec: 203.2 },
-      { lat: 55.61006, lon: 12.66125, alt:  62, heading: 0, tSec: 210.3 },
-      { lat: 55.60946, lon: 12.65996, alt:  62, heading: 0, tSec: 217.4 },
-      { lat: 55.60914, lon: 12.65838, alt:  62, heading: 0, tSec: 224.5 },
-      { lat: 55.60915, lon: 12.65670, alt:  62, heading: 0, tSec: 231.6 },
-      { lat: 55.60949, lon: 12.65513, alt:  62, heading: 0, tSec: 238.7 },
-      { lat: 55.61012, lon: 12.65387, alt:  62, heading: 0, tSec: 245.8 },
-      { lat: 55.61095, lon: 12.65307, alt:  62, heading: 0, tSec: 252.9 },
-      { lat: 55.61189, lon: 12.65283, alt:  62, heading: 0, tSec: 260 },
-      { lat: 55.61282, lon: 12.65318, alt:  62, heading: 0, tSec: 267.1 },
-      { lat: 55.61362, lon: 12.65408, alt:  62, heading: 0, tSec: 274.2 },
-      { lat: 55.61420, lon: 12.65541, alt:  62, heading: 0, tSec: 281.3 },
-      { lat: 55.61447, lon: 12.65702, alt:  62, heading: 0, tSec: 288.4 },
-      { lat: 55.61442, lon: 12.65869, alt:  62, heading: 0, tSec: 295.5 },
-      { lat: 55.61405, lon: 12.66023, alt:  62, heading: 0, tSec: 302.6 },
-      { lat: 55.61339, lon: 12.66145, alt:  62, heading: 0, tSec: 309.7 },
-      { lat: 55.61254, lon: 12.66219, alt:  62, heading: 0, tSec: 316.8 },
-      { lat: 55.61160, lon: 12.66236, alt:  62, heading: 0, tSec: 323.9 },
-      { lat: 55.61068, lon: 12.66194, alt:  62, heading: 0, tSec: 331 },
-      { lat: 55.60990, lon: 12.66098, alt:  62, heading: 0, tSec: 338.1 },
-      { lat: 55.60936, lon: 12.65961, alt:  62, heading: 0, tSec: 345.2 },
-      { lat: 55.59950, lon: 12.62200, alt:  56, heading: 0, tSec: 519 },
-      { lat: 55.59300, lon: 12.61200, alt:  45, heading: 0, tSec: 555.9 },
-      { lat: 55.59800, lon: 12.62400, alt:  60, heading: 0, tSec: 614.3 },
-      { lat: 55.60200, lon: 12.63600, alt:  75, heading: 0, tSec: 645.6 },
-      { lat: 55.60500, lon: 12.64900, alt:  90, heading: 0, tSec: 677.1 },
-      { lat: 55.60650, lon: 12.66200, alt: 105, heading: 0, tSec: 706.9 },
-      { lat: 55.60700, lon: 12.67300, alt: 115, heading: 0, tSec: 731.7 },
-      { lat: 55.60600, lon: 12.68200, alt: 125, heading: 0, tSec: 752.3 },
-      { lat: 55.60450, lon: 12.69200, alt: 135, heading: 0, tSec: 775.5 },
+      { lat: 55.61358, lon: 12.66118, alt:  62, heading: 0, tSec: 181.8 },
+      { lat: 55.61280, lon: 12.66203, alt:  62, heading: 0, tSec: 188.7 },
+      { lat: 55.61189, lon: 12.66237, alt:  62, heading: 0, tSec: 195.6 },
+      { lat: 55.61097, lon: 12.66214, alt:  62, heading: 0, tSec: 202.5 },
+      { lat: 55.61015, lon: 12.66138, alt:  62, heading: 0, tSec: 209.4 },
+      { lat: 55.60953, lon: 12.66017, alt:  62, heading: 0, tSec: 216.3 },
+      { lat: 55.60917, lon: 12.65866, alt:  62, heading: 0, tSec: 223.2 },
+      { lat: 55.60912, lon: 12.65703, alt:  62, heading: 0, tSec: 230.1 },
+      { lat: 55.60939, lon: 12.65546, alt:  62, heading: 0, tSec: 237 },
+      { lat: 55.60994, lon: 12.65414, alt:  62, heading: 0, tSec: 243.9 },
+      { lat: 55.61071, lon: 12.65323, alt:  62, heading: 0, tSec: 250.8 },
+      { lat: 55.61161, lon: 12.65284, alt:  62, heading: 0, tSec: 257.7 },
+      { lat: 55.61253, lon: 12.65301, alt:  62, heading: 0, tSec: 264.6 },
+      { lat: 55.61337, lon: 12.65372, alt:  62, heading: 0, tSec: 271.5 },
+      { lat: 55.61402, lon: 12.65488, alt:  62, heading: 0, tSec: 278.4 },
+      { lat: 55.61440, lon: 12.65637, alt:  62, heading: 0, tSec: 285.3 },
+      { lat: 55.61449, lon: 12.65800, alt:  62, heading: 0, tSec: 292.2 },
+      { lat: 55.61425, lon: 12.65958, alt:  62, heading: 0, tSec: 299.1 },
+      { lat: 55.61373, lon: 12.66093, alt:  62, heading: 0, tSec: 306 },
+      { lat: 55.61298, lon: 12.66189, alt:  62, heading: 0, tSec: 312.9 },
+      { lat: 55.61209, lon: 12.66234, alt:  62, heading: 0, tSec: 319.8 },
+      { lat: 55.61116, lon: 12.66224, alt:  62, heading: 0, tSec: 326.7 },
+      { lat: 55.61032, lon: 12.66158, alt:  62, heading: 0, tSec: 333.6 },
+      { lat: 55.60964, lon: 12.66046, alt:  62, heading: 0, tSec: 340.5 },
+      { lat: 55.60922, lon: 12.65900, alt:  62, heading: 0, tSec: 347.4 },
+      { lat: 55.60911, lon: 12.65738, alt:  62, heading: 0, tSec: 354.3 },
+      { lat: 55.60982, lon: 12.63064, alt:  58, heading: 0, tSec: 466.5 },
+      { lat: 55.60439, lon: 12.62230, alt:  54, heading: 0, tSec: 502.9 },
+      { lat: 55.59897, lon: 12.61395, alt:  50, heading: 0, tSec: 539.3 },
+      { lat: 55.59422, lon: 12.60665, alt:  45, heading: 0, tSec: 571.1 },
+      { lat: 55.59219, lon: 12.60352, alt:  43, heading: 0, tSec: 584.7 },
+      { lat: 55.59016, lon: 12.60039, alt:  42, heading: 0, tSec: 598.3 },
+      { lat: 55.58609, lon: 12.59413, alt:  42, heading: 0, tSec: 625.6 },
+      { lat: 55.58338, lon: 12.58996, alt:  45, heading: 0, tSec: 643.8 },
+      { lat: 55.58055, lon: 12.59087, alt:  50, heading: 0, tSec: 661.7 },
+      { lat: 55.57929, lon: 12.59463, alt:  55, heading: 0, tSec: 678.9 },
+      { lat: 55.58027, lon: 12.59992, alt:  58, heading: 0, tSec: 695.8 },
+      { lat: 55.58400, lon: 12.60566, alt:  60, heading: 0, tSec: 715.4 },
+      { lat: 55.58806, lon: 12.61192, alt:  62, heading: 0, tSec: 736.8 },
+      { lat: 55.59281, lon: 12.61922, alt:  70, heading: 0, tSec: 761.8 },
+      { lat: 55.60200, lon: 12.63600, alt:  85, heading: 0, tSec: 814.3 },
+      { lat: 55.60500, lon: 12.64900, alt:  95, heading: 0, tSec: 845.8 },
+      { lat: 55.60800, lon: 12.66000, alt: 105, heading: 0, tSec: 873.2 },
+      { lat: 55.61000, lon: 12.66900, alt: 112, heading: 0, tSec: 894.9 },
+      { lat: 55.61100, lon: 12.67500, alt: 118, heading: 0, tSec: 909 },
+      { lat: 55.61000, lon: 12.68100, alt: 125, heading: 0, tSec: 923.1 },
+      { lat: 55.60800, lon: 12.68700, alt: 130, heading: 0, tSec: 938.7 },
+      { lat: 55.60600, lon: 12.69500, alt: 135, heading: 0, tSec: 958.3 },
     ],
     durationSec: 776,
   },

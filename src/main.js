@@ -18389,9 +18389,29 @@ async function main() {
           state.wasInside = true;
           const entryTime = new Date().toISOString().slice(11, 19);
           mutateEvent(event.id, { entry: { lat: p.lat, lon: p.lon, alt: Math.round(p.alt), timestamp: new Date().toISOString(), heading: Math.round(p.heading), sensorIds: event.contributingSensors.map(s => s.id) } });
-          // Route via _dropMarker so it lands in _perEventMarkers for
-          // selection-driven hide/show (matches multi-site marker path).
-          state.entryMarker = _dropMarker(p.lat, p.lon, '#4dd2ff', `ENTRY ${entryTime}Z`, event.id);
+          // NO MARKER HERE. THIS IS THE SECOND ONE.
+          //
+          // processDroneSiteMarkers is called for this event's lead
+          // unconditionally a couple of hundred lines above, and it
+          // already drops an ENTRY pin. This block dropped another, so
+          // every first crossing produced two stacked markers with the
+          // same timestamp: one reading "ENTRY 14:14:47Z" from here and
+          // one reading "ENTRY 14:14:47Z · CPH" from there.
+          //
+          // The per-site one is the better of the two. It carries the
+          // site code, and it carries the repeat counter that renders
+          // ENTRY #2 and ENTRY #3 on re-entry, which this block has no
+          // concept of.
+          //
+          // The DATA write above stays exactly as it was. closeEvent,
+          // the cordon dispatch and the post-incident report all read
+          // event.entry, and this is a duplicate pin, not a duplicate
+          // record.
+          //
+          // The EXIT branch below is deliberately untouched. It fires on
+          // perimeter crossing OR loss of coverage, which the per-site
+          // path does not cover, and Lucas confirmed exits render
+          // correctly today.
         }
 
         // Coverage-based tracking: nearest sensor + whether threat is inside its coverage
