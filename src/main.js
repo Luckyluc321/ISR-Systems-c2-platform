@@ -13200,7 +13200,21 @@ async function main() {
       const noiseE = (Math.random() - 0.5) * 40;   // ±20 m E-W jitter
       const noiseN = (Math.random() - 0.5) * 40;   // ±20 m N-S jitter
       const noiseAlt = (Math.random() - 0.5) * 10; // ±5 m altitude noise
-      const noiseTSec = (Math.random() - 0.5) * 4; // ±2 s timing skew
+      // TIMING SKEW, BUT NEVER ON THE FIRST OR LAST WAYPOINT.
+      //
+      // This is why the wingmen froze on screen while the lead went out
+      // of range cleanly. The skew was applied to every waypoint
+      // including the final one, so a member's path could end up to two
+      // seconds AFTER the lead's. The track closes on the lead's
+      // duration, the engine stops ticking, and the member is left
+      // wherever it was with its billboard still shown. It never reaches
+      // the end of its own path, so the branch that hides it never runs.
+      //
+      // Pinning both ends means every member starts and finishes on the
+      // same frame as the lead. The formation still has its skew in
+      // between, which is the whole point of it.
+      const _isEnd = (i === 0 || i === masterWaypoints.length - 1);
+      const noiseTSec = _isEnd ? 0 : (Math.random() - 0.5) * 4; // ±2 s timing skew
       // Overwatch-only altitude climb: periodic +40-70m spikes above the
       // base offset so this one drone visibly hangs 50-100% higher than
       // the pack "at times" (Lucas's ask). Pure sine over tSec so it
@@ -13219,6 +13233,14 @@ async function main() {
     }
     // Ensure monotonic time (sort by tSec) so interpolation is well-defined
     wps.sort((a, b) => a.tSec - b.tSec);
+    // Belt and braces: the sort cannot move an interior waypoint past the
+    // pinned last one, but a template authored with sub-four-second gaps
+    // at the end could still produce a tie. Clamp so nothing outlives the
+    // lead whatever the spacing.
+    const _lastT = masterWaypoints[masterWaypoints.length - 1]?.tSec;
+    if (typeof _lastT === 'number') {
+      for (const w of wps) if (w.tSec > _lastT) w.tSec = _lastT;
+    }
     return wps;
   }
 
