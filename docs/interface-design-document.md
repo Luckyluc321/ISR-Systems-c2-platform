@@ -384,6 +384,64 @@ type NnDetectionBatch = {
 
 Same shape from mock and real sources. Downstream code aggregates by (siteId, sensorId) with per-tick MAX across drones (the same monotonic-tick reset behaviour landed in `_updateContributingSensorsForPosition`).
 
+### IF-1.4a Confidence lifecycle inside C2
+
+A batch states what each sensor saw on one tick. Two numbers are derived from
+that stream and they answer different questions, so they are computed
+differently.
+
+```mermaid
+flowchart TD
+  A[NnDetectionBatch arrives] --> B[Per-sensor MAX merge<br/>across drones in the batch]
+  B --> C[Time-based decay on sensors<br/>the batch did not mention<br/>1.5 s half-life]
+  C --> D{Track inside this<br/>sensor's cylinder?}
+  D -- yes --> E[Geometry floor<br/>0.18 at the edge, 0.60 overhead]
+  D -- no --> F[Keeps decaying, drops out<br/>below 0.08 unless it has a peak]
+  E --> G[contributingSensors]
+  F --> G
+  G --> H[Count of sensors holding the track]
+  H --> I[Fused track confidence<br/>one estimate for the formation]
+```
+
+**Per-sensor confidence** answers "what is this sensor contributing right
+now". It MAX-merges across every detection in the batch, decays on a 1.5 s
+half-life when a tick does not mention the sensor, and keeps a
+`peakConfidence` for the audit trail that the closed-event summary and the
+PDF read.
+
+It is deliberately volatile. A sensor on the edge of its own range genuinely
+does come and go.
+
+**The geometry floor.** A sensor whose cylinder currently contains the track
+cannot report 0.00, because the active panel ranks contributing sensors by
+distance to the threat, which means the visible top five are the nearest
+sensors. The floor runs from 0.18 at the edge of the radius to 0.60 directly
+overhead.
+
+Decay still runs underneath it. The floor only prevents the value falling
+through what the sensor's own geometry already implies.
+
+The floor **raises existing entries and never creates one.** A sensor in
+`contributingSensors` was reported by the detection source. Adding an entry
+from geometry alone would make C2 the classifier, which it is not. Declining
+to claim a live detection evaporated is a different act from asserting one
+that was never reported.
+
+**Fused track confidence** answers "how well do we hold this track". It is
+one estimate for the whole formation rather than a per-airframe self-score,
+and it is a function of how many sensors currently hold the track,
+saturating at six. It rises as a track crosses into denser coverage and falls
+as sensors drop, including when they are jammed or taken offline.
+
+It is never a function of elapsed time. A confidence that ramps on a clock
+teaches an operator to ignore it.
+
+A member slot may declare `unidentified: true`, which holds that member in a
+weak band whatever the geometry, because the uncertainty is in the
+classification rather than in the fix. Replay and debrief colour-code trails
+off that band. It is declared by the template and never inferred from the
+model name.
+
 ### IF-1.5 Configuration surface
 
 **Global override (env / bootstrap):**
