@@ -17456,6 +17456,12 @@ async function main() {
   // asked for after seeing a millisecond clip logged as an exit.
   const _PERIM_QUALIFY_MS = 1500;
 
+  // How long the dashed breadcrumb stays on screen after a track's
+  // scripted path has ended. Long enough to read as "that is where they
+  // went", short enough that it is not still there when the summary
+  // opens.
+  const _BREADCRUMB_LINGER_S = 3;
+
   function _appendCrossing(event, state, kind, p) {
     const row = {
       kind,
@@ -18927,6 +18933,23 @@ async function main() {
           // dotted line is the only thing on the map showing where an
           // escapee went, and suppressing it is the exact failure this
           // simulation spent a day chasing.
+          } else if (tSec > (TEMPLATES[event.templateKey]?.durationSec ?? Infinity) + _BREADCRUMB_LINGER_S) {
+            // PATH FINISHED, SO THE BREADCRUMB HAS NOTHING LEFT TO SAY.
+            //
+            // The warning above still holds: a LIVE track that has gone
+            // dark must keep its dotted line, because it is the only
+            // thing showing where the object went, and suppressing that
+            // cost a day. This is the other case. The scripted path has
+            // run out, so there is no object still going anywhere.
+            //
+            // Without this the line sat on the map for about 45 seconds
+            // after last contact, which is the 30 second 'fled' grace
+            // plus the 15 second ghost period before teardown. Both of
+            // those are correct for the CASE and neither is touched
+            // here. This only stops drawing a line for a track whose
+            // path has ended.
+            if (sw.projPositions.length) sw.projPositions.length = 0;
+            sw.projLine.show = false;
           } else {
             sw.projPositions.push(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, pos.alt));
             if (sw.projPositions.length > 300) sw.projPositions.shift();

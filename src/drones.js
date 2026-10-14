@@ -546,11 +546,20 @@ export const TEMPLATES = {
       // summary fires there, on real geometry, and the lifecycle teardown
       // then removes the billboards and the projection lines.
       { lat: 55.59100, lon: 12.62200, alt:  55, heading: 0, tSec: 471 },   // running, still held by N33 at 914 m
-      { lat: 55.58800, lon: 12.63900, alt:  75, heading: 0, tSec: 508 },   // outside every ring, summary fires
-      { lat: 55.58400, lon: 12.66000, alt: 100, heading: 0, tSec: 554 },   // over water, south of Dragoer
-      { lat: 55.58000, lon: 12.68000, alt: 120, heading: 0, tSec: 598 },   // gone
+      // THE PATH ENDS 3 SECONDS AFTER WE LOSE THEM.
+      //
+      // Measured: coverage ends at t=474 at 55.59076, 12.62338, where
+      // N33 passes 1000 m. The earlier version ran on to t=598, so the
+      // dashed breadcrumb grew for 108 seconds after the last contact.
+      //
+      // They cannot reach open water while still tracked. The coverage
+      // edge sits 1 km from the nearest sensor and the Oresund is four
+      // kilometres further on, so the run toward the sea is the TRACKED
+      // part and losing them is the end of it. That is the honest shape:
+      // we watch them leave, we lose them, they are gone.
+      { lat: 55.59050, lon: 12.62480, alt:  58, heading: 0, tSec: 477 },   // 3 s past the edge, last contact
     ],
-    durationSec: 598,
+    durationSec: 477,
   },
 
   // ── Recon drone, HALE (Reaper/Global-Hawk class), high altitude circular loiter ──
