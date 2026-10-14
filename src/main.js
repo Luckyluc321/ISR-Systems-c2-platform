@@ -30799,10 +30799,28 @@ async function main() {
         renderReceiverView();
       }
       else if (action === 'ai-refresh') {
-        if (!isMistralConfigured()) { toast('Mistral API key not configured (set VITE_MISTRAL_API_TOKEN)', 'warn'); }
-        else {
-          const ev = EVENTS.find(e => e.id === _workspaceEventId);
-          if (ev) { _fireMistralCaseFile(ev, { force: true }); toast('Regenerating synthesis via Mistral Large 2', 'info'); }
+        // THIS BUTTON COULD DO NOTHING AND SAY NOTHING.
+        //
+        // It looked the event up with a bare EVENTS.find, while every
+        // other branch in this handler uses _lookupWorkspaceEvent, which
+        // checks the receiver's own inbox FIRST and only then falls back
+        // to the global ledger. A receiver reading a case out of its
+        // inbox therefore resolved to undefined here, and the whole
+        // branch was wrapped in `if (ev)` with no else, so the click was
+        // swallowed in silence. No toast, no log, no change on screen.
+        //
+        // That is the same failure the comment at the bottom of this
+        // chain was written about: a button indistinguishable from a
+        // working one.
+        const ev = _lookupWorkspaceEvent(_workspaceEventId)
+                || _lookupWorkspaceEvent(_selectedReceiverEventId);
+        if (!isMistralConfigured()) {
+          toast('Mistral API key not configured (set VITE_MISTRAL_API_TOKEN)', 'warn');
+        } else if (!ev) {
+          toast('No case open to regenerate. Open a case first.', 'warn');
+        } else {
+          _fireMistralCaseFile(ev, { force: true });
+          toast('Regenerating synthesis via Mistral Large 2', 'info');
         }
       }
       else if (action === 'map-layer-locked') { toast('3D layer is disabled for this demo. See project map architecture for the sovereign rollout plan.', 'info'); }
