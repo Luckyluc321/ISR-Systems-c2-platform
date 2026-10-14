@@ -1,6 +1,13 @@
-// Boundary sets for the standalone preview page. DATA ONLY: nothing
-// in the platform imports this, and sites/cph.yaml is untouched.
-// Working outline, 162 points: traced, cleaned, both corrected runs spliced in.
+// Boundary sets for the standalone preview page at /boundary.html.
+//
+// DATA ONLY. Nothing in the platform imports this. The page exists so a
+// traced outline can be judged on its own, against what is live and
+// against the imagery, before it is written to a site manifest. It is
+// kept because that job recurs: COP02 is queued and Billund is built.
+//
+// The first set below is now what sites/cph.yaml carries. The others are
+// the record of what it replaced.
+// LIVE: this is what sites/cph.yaml now carries. 162 points: traced, cleaned, both corrected runs spliced in.
 export const TRACED_CLEAN = [
   [12.617326, 55.605045],
   [12.618328, 55.603865],
@@ -166,7 +173,7 @@ export const TRACED_CLEAN = [
   [12.617090, 55.605049],
 ];
 
-// Before the second correction, 156 points.
+// The previous working version, 156 points.
 export const TRACED_RAW = [
   [12.604049, 55.586715],
   [12.604031, 55.586394],
@@ -326,7 +333,7 @@ export const TRACED_RAW = [
   [12.604093, 55.587462],
 ];
 
-// What the platform uses today, 74 points.
+// The old OSM simplification this replaced, 74 points.
 export const PLATFORM_CURRENT = [
   [12.674900, 55.624470],
   [12.674120, 55.626340],
