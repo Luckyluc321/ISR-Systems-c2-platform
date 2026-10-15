@@ -64,21 +64,27 @@ from mathutils import Quaternion, Vector
 G = 9.81                      # m/s^2, the model is assumed to be in metres
 PROP_NAME = re.compile(r"(prop|rotor|blade|elic|helic)", re.I)
 
-# The flight plan: (label, body-frame target velocity in m/s, seconds).
-# Body frame is (forward, right, up). Speeds are modest so the tilt stays
-# in a readable range; a Mavic 3 will do 21 m/s, which is not the point.
+# The flight plan: (label, body-frame target velocity in m/s, yaw rate in
+# deg/s, seconds). Body frame is (forward, right, up) and turns with the
+# heading, so a TURN is forward speed plus a yaw rate, and the roll into
+# it is not scripted: it falls out of the centripetal acceleration the
+# same way the pitch falls out of the linear one. Speeds are modest so
+# the tilt stays readable; an Air 3 will do 21 m/s, which is not the
+# point.
 PLAN = [
-    ("HOVER",          (0.0,  0.0,  0.0), 1.5),
-    ("FORWARD",        (6.0,  0.0,  0.0), 3.5),
-    ("BRAKE",          (0.0,  0.0,  0.0), 2.0),
-    ("BACKWARD",       (-4.0, 0.0,  0.0), 3.0),
-    ("STOP",           (0.0,  0.0,  0.0), 1.5),
-    ("SLIDE RIGHT",    (0.0,  4.0,  0.0), 2.5),
-    ("SLIDE LEFT",     (0.0, -4.0,  0.0), 3.0),
-    ("STOP",           (0.0,  0.0,  0.0), 1.5),
-    ("DESCEND",        (0.0,  0.0, -2.5), 2.5),
-    ("CLIMB",          (0.0,  0.0,  3.0), 2.5),
-    ("HOVER",          (0.0,  0.0,  0.0), 1.5),
+    ("HOVER",          (0.0,  0.0,  0.0),   0.0, 1.5),
+    ("FORWARD",        (6.0,  0.0,  0.0),   0.0, 3.0),
+    ("TURN",           (5.0,  0.0,  0.0),  60.0, 3.0),
+    ("FORWARD",        (6.0,  0.0,  0.0),   0.0, 1.5),
+    ("BRAKE",          (0.0,  0.0,  0.0),   0.0, 2.0),
+    ("BACKWARD",       (-4.0, 0.0,  0.0),   0.0, 3.0),
+    ("STOP",           (0.0,  0.0,  0.0),   0.0, 1.5),
+    ("SLIDE RIGHT",    (0.0,  4.0,  0.0),   0.0, 2.5),
+    ("SLIDE LEFT",     (0.0, -4.0,  0.0),   0.0, 3.0),
+    ("STOP",           (0.0,  0.0,  0.0),   0.0, 1.5),
+    ("DESCEND",        (0.0,  0.0, -2.5),   0.0, 2.5),
+    ("CLIMB",          (0.0,  0.0,  3.0),   0.0, 2.5),
+    ("HOVER",          (0.0,  0.0,  0.0),   0.0, 1.5),
 ]
 TAU_S = 1.2          # velocity time constant: how quickly it reaches target
 DRAG = 0.30          # 1/s. c_d * v is the steady tilt at cruise: 6 m/s -> 10 deg
@@ -125,26 +131,68 @@ def scene_bbox(objs):
 # ----------------------------------------------------------------------------
 # Propellers
 # ----------------------------------------------------------------------------
-def looks_like_blade(obj, airframe_size):
+def looks_like_blade(obj, airframe_size, centre):
+    """A blade: a sheet, a fifth to a third of the airframe long, out at a
+    corner. Measured on the DJI Air 3 (polyman): blades 0.96 x 0.76 x 0.19
+    at ~1500 tris, flatness 4.4-5.4 because the blade is pitched so its
+    box is not flat; the arm beside it is 1.51 long (0.38 of the
+    airframe) and the body is 1.66. On assault_drone_concept the blades
+    are 0.93 long at flatness 10.5 and the arms 0.93 at 5.1 but sit
+    inboard. Length band plus flatness separates all of them."""
     lo, hi = world_bbox(obj)
     d = sorted([hi.x - lo.x, hi.y - lo.y, hi.z - lo.z])
     thin, mid, long = d
-    if long < 0.08 * airframe_size:            # a screw, a rivet, a lens
+    if not (0.15 * airframe_size <= long <= 0.35 * airframe_size):
         return False
-    if long > 0.75 * airframe_size:            # an arm pair or the body
+    if thin <= 0 or long / thin < 4.0:         # not a sheet
         return False
-    if thin <= 0 or long / thin < 6.0:         # not a sheet
+    c = (lo + hi) / 2
+    if (c - centre).xy.length < 0.2 * airframe_size:   # on the body
+        return False
+    if len(obj.data.polygons) < 100:
         return False
     return True
 
 
-def find_props(centre, airframe_size):
-    named = [o for o in meshes() if PROP_NAME.search(o.name)]
+def blade_length(obj):
+    lo, hi = world_bbox(obj)
+    return max(hi.x - lo.x, hi.y - lo.y, hi.z - lo.z)
+
+
+def majority_size(cands):
+    """The blades are the largest set of near-identical sheets. On the Air 3
+    the shape test also passes the two rear arms (1.51 long against the
+    blades' 0.96 to 1.05); eight of one length beats two of another."""
+    groups = []
+    for o in sorted(cands, key=blade_length):
+        L = blade_length(o)
+        for g in groups:
+            if abs(g["L"] - L) <= 0.15 * g["L"]:
+                g["objs"].append(o)
+                break
+        else:
+            groups.append({"L": L, "objs": [o]})
+    best = max(groups, key=lambda g: len(g["objs"]), default={"objs": []})
+    dropped = [o.name for g in groups if g is not best for o in g["objs"]]
+    if dropped:
+        print(f"dropped as not blade-sized: {dropped}")
+    return best["objs"]
+
+
+def find_props(centre, airframe_size, name_re):
+    named = [o for o in meshes() if name_re.search(o.name)
+             or (o.parent is not None and name_re.search(o.parent.name))]
     if len(named) >= 2:
         print(f"props by name: {[o.name for o in named]}")
         return named
 
-    print("no propeller names found, splitting meshes into loose parts")
+    # Many exports already have one object per part; test those first.
+    blades = majority_size([o for o in meshes() if looks_like_blade(o, airframe_size, centre)])
+    if len(blades) >= 2:
+        print(f"props by geometry (separate objects): {[o.name for o in blades]}")
+        return blades
+
+    print("no propeller objects found, splitting meshes into loose parts")
     bpy.ops.object.select_all(action="DESELECT")
     for o in meshes():
         o.select_set(True)
@@ -154,27 +202,23 @@ def find_props(centre, airframe_size):
     bpy.ops.mesh.separate(type="LOOSE")
     bpy.ops.object.mode_set(mode="OBJECT")
 
-    blades = []
-    for o in meshes():
-        if not looks_like_blade(o, airframe_size):
-            continue
-        lo, hi = world_bbox(o)
-        c = (lo + hi) / 2
-        if (c - centre).xy.length < 0.15 * airframe_size:   # on the body axis
-            continue
-        blades.append(o)
-    print(f"props by geometry: {[o.name for o in blades]}")
+    blades = majority_size([o for o in meshes() if looks_like_blade(o, airframe_size, centre)])
+    print(f"props by geometry (loose parts): {[o.name for o in blades]}")
     return blades
 
 
 def cluster_by_hub(blades, airframe_size):
-    """Blades that share a hub spin together. Group by XY proximity."""
+    """Blades that share a hub spin together. Two blades of one rotor sit
+    about one blade-length apart, centre to centre; neighbouring rotors sit
+    more than two apart. 1.6 blade lengths splits them."""
+    Ls = sorted(blade_length(b) for b in blades)
+    radius = 1.6 * Ls[len(Ls) // 2]
     groups = []
     for b in blades:
         lo, hi = world_bbox(b)
         c = (lo + hi) / 2
         for g in groups:
-            if (g["centre"] - c).xy.length < 0.12 * airframe_size:
+            if (g["centre"] - c).xy.length < radius:
                 g["objs"].append(b)
                 n = len(g["objs"])
                 g["centre"] = (g["centre"] * (n - 1) + c) / n
@@ -252,10 +296,13 @@ def fly(root, fwd, right, fps):
     max_tilt = math.radians(MAX_TILT_DEG)
     frame = 1
     phase_frames = []
-    for label, body_v, secs in PLAN:
-        target = fwd * body_v[0] + right * body_v[1] + up * body_v[2]
+    yaw = 0.0
+    for label, body_v, yaw_dps, secs in PLAN:
         start = frame
         for _ in range(int(round(secs * fps))):
+            yaw += math.radians(yaw_dps) * dt
+            yaw_q = Quaternion(up, yaw)
+            target = (yaw_q @ fwd) * body_v[0] + (yaw_q @ right) * body_v[1] + up * body_v[2]
             v_new = v + (target - v) * (1 - math.exp(-dt / TAU_S))
             a = (v_new - v) / dt
             v = v_new
@@ -265,11 +312,14 @@ def fly(root, fwd, right, fps):
             eff = Vector((a.x + DRAG * v.x, a.y + DRAG * v.y, 0.0))
             if eff.length > 1e-6:
                 angle = min(max_tilt, math.atan(eff.length / G))
-                q = Quaternion(up.cross(eff).normalized(), angle)
+                tilt_q = Quaternion(up.cross(eff).normalized(), angle)
             else:
-                q = Quaternion((1, 0, 0, 0))
+                tilt_q = Quaternion((1, 0, 0, 0))
+            # Yaw in the body first, then tilt about a world-horizontal
+            # axis, so the thrust leans toward where it is going whatever
+            # way the nose points.
             root.location = pos
-            root.rotation_quaternion = q
+            root.rotation_quaternion = tilt_q @ yaw_q
             root.keyframe_insert("location", frame=frame)
             root.keyframe_insert("rotation_quaternion", frame=frame)
             frame += 1
@@ -286,7 +336,11 @@ def stage(root, size, phase_frames, res):
 
     # Ground: a checker so translation is visible even though the camera
     # follows the aircraft.
-    bpy.ops.mesh.primitive_plane_add(size=size * 60, location=(0, 0, root.location.z - size * 1.2))
+    # Big enough that forty metres of travel never reaches an edge, and
+    # far enough below that four metres of descent never reaches it. A
+    # quadcopter in a demo flies at a few metres, not at arm's length.
+    floor = root.location.z - max(1.5 * size, 6.0)
+    bpy.ops.mesh.primitive_plane_add(size=max(size * 600, 400.0), location=(0, 0, floor))
     ground = bpy.context.active_object
     ground.name = "Ground"
     mat = bpy.data.materials.new("GroundChecker")
@@ -314,6 +368,7 @@ def stage(root, size, phase_frames, res):
     c.target = root
     cam_data = bpy.data.cameras.new("Cam")
     cam_data.lens = 50
+    cam_data.clip_end = 2000.0
     cam = bpy.data.objects.new("Camera", cam_data)
     coll.objects.link(cam)
     cam.parent = pivot
@@ -385,6 +440,11 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--forward", default="-Y", help="nose axis in Blender space: +X -X +Y -Y")
     ap.add_argument("--prop-rps", type=float, default=92.0, help="Mavic 3 hover is ~5500 rpm")
+    ap.add_argument("--size-m", type=float, default=None,
+                    help="real length of the airframe's longest extent in metres; the file is "
+                         "scaled to it so m/s and g mean what they say")
+    ap.add_argument("--props", default=PROP_NAME.pattern,
+                    help="regex for propeller object or parent names, overrides the shape test")
     ap.add_argument("--fps", type=int, default=30)
     ap.add_argument("--resolution", default="1280x720")
     ap.add_argument("--render", action="store_true", help="also render the MP4")
@@ -428,17 +488,25 @@ def main():
         o.matrix_world = mw
 
     bpy.context.view_layer.update()
-    blades = find_props(centre, size)
+    blades = find_props(centre, size, re.compile(args.props, re.I))
     if not blades:
         sys.exit("no propellers found: name them, or check the geometry heuristics")
     groups = cluster_by_hub(blades, size)
     print(f"{len(blades)} blade(s) in {len(groups)} rotor(s)")
 
-    total_s = sum(p[2] for p in PLAN)
+    total_s = sum(p[3] for p in PLAN)
     frame_end = int(round(total_s * args.fps))
     scene.frame_start = 1
     scene.frame_end = frame_end
     rig_props(groups, root, centre, fwd, right, args.prop_rps, args.fps, frame_end)
+    bpy.context.view_layer.update()
+
+    if args.size_m:
+        k = args.size_m / size
+        root.scale = (k, k, k)
+        root.location = centre * k
+        size = args.size_m
+        print(f"scaled by {k:.4f} to {size} m")
     bpy.context.view_layer.update()
 
     frame_end, phase_frames = fly(root, fwd, right, args.fps)

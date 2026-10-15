@@ -309,32 +309,46 @@ orthophoto shows.
 `scripts/blender_drone_flight_demo.py` runs inside Blender headless and
 turns any drone file (`.blend`, `.glb`, `.fbx`, `.obj`) into an animated
 `.blend` plus an MP4: props spinning about their own hubs at a hover rate
-(92 rps, diagonals counter-rotating in DJI sense) and the airframe flying
-hover, forward, brake, backward, slide right, slide left, descend, climb.
+(92 rps, diagonals counter-rotating in DJI sense, front-right and
+rear-left anticlockwise from above) and the airframe flying hover,
+forward, a banked 180 degree turn, brake, backward, slide right, slide
+left, descend, climb.
 
 The attitude is not keyframed by hand. A quadcopter moves only by tilting
 its thrust, so each frame tilts the body toward `a + c_d v` by
-`atan(|a + c_d v| / g)`, clamped at 32 degrees. That single rule produces
-nose-down to go forward, nose-up to brake or fly backward, roll into a
-slide, and a level body on vertical legs, which is the behaviour the
-in-map rig in `main.js` (`_quadOrientation`, `_rotorcraftStep` disc tilt)
-approximates per frame from measured velocity. Verified on
-`assault_drone_concept.glb` by reading vertex heights at each phase
-midpoint, not by looking at one still.
+`atan(|a + c_d v| / g)`, clamped at 32 degrees, after yawing it to its
+heading. That single rule produces nose-down to go forward, nose-up to
+brake or fly backward, roll into a slide, roll into a turn (the
+centripetal term), and a level body on vertical legs. It is the same
+physics the in-map rig in `main.js` (`_quadOrientation`, the
+`_rotorcraftStep` disc tilt) approximates per frame from measured
+velocity.
 
 ```
 /Applications/Blender.app/Contents/MacOS/Blender -b \
   --python scripts/blender_drone_flight_demo.py -- IN.glb --out OUT_DIR \
-  --render --stills [--forward -Y] [--prop-rps 92]
+  --forward +Y --size-m 0.5 --render --stills [--prop-rps 92] [--props REGEX]
 ```
 
-Props are found by name (`prop|rotor|blade`) first, then by splitting
-meshes into loose parts and taking the thin off-centre sheets. The pick is
-printed. `--forward` is the nose axis in Blender space; glTF's +Z nose
-imports as -Y, which is the default. If the nose leads on the BACKWARD
-leg, the axis is reversed.
+- `--forward` is the nose axis in Blender space. glTF's +Z nose imports
+  as -Y, which is the default; the DJI Air 3 export has its nose on +Y.
+  If the nose leads on the BACKWARD leg, the axis is reversed.
+- `--size-m` is the real length of the longest extent. The file is scaled
+  to it so that m/s and g mean what they say; without it a 4.7 unit Air 3
+  would fly like a 4.7 m aircraft.
+- Props are found by name (`prop|rotor|blade`) first, then by shape: a
+  sheet, 15 to 35 percent of the airframe long, off the body axis, and
+  then the largest set of near-identical such sheets, which is what
+  separates eight blades from two arms of the same flatness. Whatever is
+  chosen is printed, with what was dropped. `--props` overrides it with a
+  regex against object or parent names.
 
-The DJI Mavic 3 Pro listing by ikad2023/dika3d (Sketchfab, now Fab) is a
-paid Standard-licence asset and is not downloadable without buying it, so
-until it is bought the assault drone stands in. The command is the same
-once the file lands.
+Verified on `assault_drone_concept.glb` (named rotors) and on
+`dji_air_3.glb` (polyman, Sketchfab, CC-BY-4.0, 341 unnamed meshes) by
+reading rotor hub heights at each phase midpoint, not by looking at one
+still. The Air 3's eight blades are found at the four motor positions to
+within a millimetre of the model's own motor nodes.
+
+The DJI Mavic 3 Pro listing by ikad2023/dika3d (Sketchfab, now Fab and
+Superhive) is a paid asset at USD 60 and is not downloadable without
+buying it. The Air 3 is the free stand-in.
