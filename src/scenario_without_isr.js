@@ -51,6 +51,11 @@ import { SITES } from './sites_registry.js';
 import { onDroneUpdate } from './drones.js';
 import { EVENTS } from './events.js';
 import { getActiveRole } from './roles.js';
+// ESM, not window.Cesium. That global is only set in the built bundle,
+// never under `npm run dev`, which is the environment the demo runs in.
+// src/sovereign_layers.js and src/sovereign_renderers.js both record
+// having been caught by exactly this, and both fixed it the same way.
+import * as Cesium from 'cesium';
 
 const SITE_ID = 'cph';
 const SWARM_KEY = 'cph_swarm_runway_incursion';
@@ -58,9 +63,11 @@ const JET_KEY = 'cph_jet_goaround_early';
 
 // The aircraft spawns when the swarm's OWN clock reads this. Derived, not
 // taste: the swarm is over the 04R threshold at its t = 409.9, the
-// aircraft needs 371 s to reach its decision point, and the crew should
-// commit about 8 s before the formation arrives so the break-off lands at
-// 480 m of separation. 409.9 + 8 - 371 = 38, give or take the rounding.
+// aircraft needs 378.7 s to reach its decision point. Spawning at 38
+// puts that decision at swarm t = 416.7, which is 6.8 s after the
+// formation reaches the threshold and leaves 479 m of separation at the
+// moment the crew commits. Measured against both paths, not derived by
+// the arithmetic that used to be written here, which was wrong.
 const JET_AT_SWARM_TSEC = 38;
 
 // From the cockpit the drones must read as objects, not map symbols. The
@@ -137,8 +144,8 @@ function _isSwarmEntity(id, eventId) {
 // property and not a per-tick decision.
 function _suppressSymbols(eventId) {
   const v = _viewer();
-  if (!v || !window.Cesium) return;
-  const C = window.Cesium;
+  if (!v) return;
+  const C = Cesium;
   for (const e of v.entities.values) {
     if (!_isSwarmEntity(e.id, eventId)) continue;
     if (e._wiOverridden) continue;
@@ -226,7 +233,13 @@ export function startWithoutIsr() {
       stopWithoutIsr();
       return;
     }
-      console.log(`[without-isr] swarm ${_leadEventId} running, aircraft at swarm t=${JET_AT_SWARM_TSEC}s`);
+      // WITHOUT THIS THE WHOLE FILE IS INERT. Dropped when the spawn check
+    // was rewritten: _isSwarmEntity(id, null) is false for everything, so
+    // symbols are never suppressed, the drones are never re-shown, and
+    // the aircraft never spawns. The scenario did nothing but turn the
+    // sensors off.
+    _leadEventId = ev.id;
+    console.log(`[without-isr] swarm ${_leadEventId} running, aircraft at swarm t=${JET_AT_SWARM_TSEC}s`);
 
     _unsub = onDroneUpdate((ups) => {
       if (!_active) return;

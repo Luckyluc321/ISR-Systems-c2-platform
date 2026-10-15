@@ -139,7 +139,12 @@ function fireRule(rule, event) {
     escalateEvent(event.id, {
       destinationIds: destIds,
       payload: rule.then.payload || 'summary',
-      message: rule.then.message || `Auto-dispatched by rule: ${rule.name}`,
+      // ?? NOT ||. An empty message is a DELIBERATE value meaning "use the
+      // per-recipient default in escalation_messages.js", which is what
+      // all four rules now carry. With || the empty string was falsy, this
+      // uniform sentence won every time, and defaultEscalationMessage was
+      // never reached on the auto-rule path at all.
+      message: rule.then.message ?? `Auto-dispatched by rule: ${rule.name}`,
       operator: 'Auto-Rule Engine',
     });
   };

@@ -12661,8 +12661,32 @@ async function main() {
             // millisecond half-life at 60 fps, which is indistinguishable
             // from the reset it replaced, and it would mean something
             // different again on a slower machine.
-            existing.confidence = +((existing.confidence || 0)
-              * Math.pow(0.5, _dtMs / _CONF_HALF_LIFE_MS)).toFixed(2);
+            // NO toFixed HERE. THIS IS THE BUG THAT FROZE THE PANEL.
+            //
+            // Rounding the result and writing it back into the same field
+            // it was read from puts the rounding INSIDE the state. Each
+            // tick loses v * (1 - 0.5^(dt/1500)); once that loss is under
+            // 0.005 it rounds back to v and the value stops moving
+            // forever.
+            //
+            // The dead zone is v* = 0.005 / (1 - 0.5^(dt/1500)), a single
+            // number set only by frame time, so EVERY decaying sensor
+            // collapses onto it and sits there identically:
+            //
+            //   60 fps -> 0.65    39 fps -> 0.42
+            //   30 fps -> 0.32    21 fps -> 0.22
+            //
+            // Those are the exact values seen frozen on five sensors at
+            // once. It is not a clamp and not the floor, it is the
+            // rounding. Heavier scenes lower the frame rate and move the
+            // frozen value down, which is why it looked fine yesterday
+            // and wrong today.
+            //
+            // Full precision is kept in state. The panel already rounds
+            // for display at the render site, which is where rounding
+            // belongs.
+            existing.confidence = (existing.confidence || 0)
+              * Math.pow(0.5, _dtMs / _CONF_HALF_LIFE_MS);
           }
           targetEvent.contributingSensors = targetEvent.contributingSensors
             .filter(c => c.offline || (c.confidence || 0) >= 0.08
