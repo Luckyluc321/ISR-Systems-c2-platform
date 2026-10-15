@@ -23,59 +23,96 @@
 // and requests, it does not instruct. That line is deliberate and
 // should not be smoothed over into one uniform register.
 
-// How confident, in words. A number belongs in the evidence pack, not
-// in the first line someone reads at two in the morning.
+// HOW AN AIRPORT ACTUALLY TALKS.
+//
+// The first version of this read like a briefing memo: "Notifying for
+// intelligence awareness", "this is precautionary while the airspace is
+// contested". Nobody on a radio or an ops phone says that. Real traffic
+// is short, leads with the fact, names the ask, and stops.
+//
+// Rewritten in that register. Fragments are correct here. The absence of
+// hedging is correct here. A duty manager at 02:00 wants to know what is
+// happening and what you want from them, in that order, in one breath.
 function _confidenceWord(conf) {
-  if (typeof conf !== 'number') return 'Detection';
-  if (conf >= 0.85) return 'Confirmed detection';
-  if (conf >= 0.65) return 'Probable detection';
-  return 'Low confidence detection';
+  // Only said when it is NOT certain. "Confirmed detection" as a prefix
+  // on every message is padding; ops assume confirmed unless told.
+  if (typeof conf !== 'number') return '';
+  if (conf >= 0.85) return '';
+  if (conf >= 0.65) return 'Probable. ';
+  return 'Unconfirmed. ';
 }
 
-function _situation(event, siteName) {
-  const what = event.droneType || 'Unidentified airborne platform';
-  return `${_confidenceWord(event.confidence)}. ${what} over ${siteName}.`;
+// WHO NEEDS THE MODEL NAMES AND WHO DOES NOT.
+//
+// A tower controller says "five drones over the field". They do not say
+// "4x Sibiryachok-5 + 1x DJI Mavic 3 (recon formation)", and handing
+// them that is the analyst's register leaking into an operational call.
+//
+// Intelligence recipients are the opposite case: the airframe types ARE
+// the message, because that is what they assess. So the head is written
+// for the reader rather than once for everyone.
+const _WORDS = ['no', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
+function _countFrom(droneType) {
+  const hits = String(droneType || '').match(/(\d+)\s*x/gi);
+  if (!hits) return null;
+  return hits.reduce((n, h) => n + parseInt(h, 10), 0);
 }
+function _whatPlain(event) {
+  const n = _countFrom(event.droneType);
+  if (n && n > 1) return `${_WORDS[n] || n} drones`;
+  if (event.platform === 'quadcopter' || /drone|quad|mavic|matrice/i.test(event.droneType || '')) return 'A drone';
+  return event.droneType || 'An unidentified aircraft';
+}
+function _situation(event, siteName, detailed) {
+  const what = detailed ? (event.droneType || 'Unidentified aircraft') : _whatPlain(event);
+  const lead = `${_confidenceWord(event.confidence)}${what}`;
+  // Capitalised here rather than in every table entry, because the word
+  // that lands first changes with the reader.
+  return `${lead.charAt(0).toUpperCase()}${lead.slice(1)} over ${siteName}. `;
+}
+
+// The recipients who assess airframes rather than respond to them.
+const _WANTS_MODELS = new Set(['t2-pet', 't3-fe', 't3-cta', 't3-nc3', 't4-forsvar']);
 
 // Keyed on the id suffix, which is stable across sites: cph-t1-atc and
 // billund-t1-atc both end in t1-atc.
 const BY_SUFFIX = {
-  't1-atc':      'Hold arrivals and departures. Divert inbound traffic to the alternate until the airspace is confirmed clear.',
-  't1-duty-mgr': 'Stand up the operations room and take the operational decision on runway status.',
-  't1-sec-ops':  'Ground response to the affected sector. Live track and contributing sensors are on the shared view.',
-  't1-fire':     'Stage crews at readiness. No deployment requested yet, this is precautionary while the airspace is contested.',
-  't1-ground':   'Hold airside vehicle movement in the affected sector until the track is clear of the manoeuvring area.',
-  't2-politi':   'Requesting ground response and perimeter support. Last confirmed position and heading are in the brief.',
-  't2-pet':      'Notifying for intelligence awareness. Emitter profile and formation behaviour are in the evidence pack.',
-  't3-rigspoliti': 'Notifying national police coordination. Local district has been escalated to in parallel.',
-  't3-fe':       'Requesting assessment. The emitters do not match the civil library and the flight profile is coordinated.',
-  't3-cta':      'Requesting threat assessment. Pattern, timing and target selection are in the evidence pack.',
-  't3-cfcs':     'Notifying for awareness. No cyber indicators observed, sharing in case it correlates with other reporting.',
-  't3-nc3':      'Notifying for awareness in case the emitter signature correlates with existing reporting.',
-  't3-beredskab':'Notifying for readiness. No assistance requested at this stage.',
-  't4-forsvar':  'Sharing the air picture. Track, emitter profile and confirmed positions are in the evidence pack.',
-  't5-stm':      'National notification. Critical infrastructure affected, operational response is under way locally.',
+  't1-atc':      'Request ground stop on arrivals and departures. Inbounds to hold or divert.',
+  't1-duty-mgr': 'Runway status is your call. Recommend ops room.',
+  't1-sec-ops':  'Patrols to the affected sector. Live track is on the shared view.',
+  't1-fire':     'Crews to standby. No response required unless we get a ground impact.',
+  't1-ground':   'Stop vehicle movement on the manoeuvring area until we call it clear.',
+  't2-politi':   'Request patrol response to the perimeter. Position and heading are in the brief.',
+  't2-pet':      'Signatures do not match commercial traffic. Passing for your awareness.',
+  't3-rigspoliti': 'Local district already engaged. Passing for national coordination.',
+  't3-fe':       'Coordinated flight profile, no library match on the link. Request assessment.',
+  't3-cta':      'Pattern, timing and target selection are in the pack. Request assessment.',
+  't3-cfcs':     'No cyber indicators seen. Passing in case it correlates with your reporting.',
+  't3-nc3':      'Passing in case the emitter signature matches anything you hold.',
+  't3-beredskab':'No assistance required at this stage. Passing for readiness.',
+  't4-forsvar':  'Track and emitter signatures are in the pack.',
+  't5-stm':      'Critical infrastructure affected. Local response running.',
 };
 
-// Systems are machines. They get an instruction, not a briefing.
+// Systems are machines. They get an instruction.
 function _systemMessage(dest, event, siteName) {
   const n = String(dest.name || '').toLowerCase();
   if (n.includes('notam') || n.includes('eurocontrol')) {
-    return `Airspace advisory. Requesting NOTAM for the affected zone at ${siteName} until the track is cleared.`;
+    return `NOTAM request. ${siteName}, drone activity in the vicinity. Runway unavailable until further notice.`;
   }
   if (n.includes('camera') || n.includes('surveillance')) {
-    return 'Slew to the reported track and begin recording. Coordinates follow the live position.';
+    return 'Slew to the live track. Record continuous.';
   }
-  return `Airspace event at ${siteName}. Flagging on the operations feed.`;
+  return `Drone activity flagged on the operations feed. ${siteName}.`;
 }
 
 // A friendly or stood-down track is still escalated sometimes, for the
 // record. It must not read like an incursion.
 function _benignMessage(event, siteName) {
   if (event.classification === 'friendly') {
-    return `Authorised flight over ${siteName}. Logged for the record, no action requested.`;
+    return `Authorised flight over ${siteName}. Logged, no action.`;
   }
-  return `Track over ${siteName} assessed and stood down. Logged for the record, no action requested.`;
+  return `Track over ${siteName} assessed and stood down. Logged, no action.`;
 }
 
 export function defaultEscalationMessage(dest, event, siteName = 'the site') {
@@ -83,21 +120,19 @@ export function defaultEscalationMessage(dest, event, siteName = 'the site') {
   if (event.classification && event.classification !== 'hostile') {
     return _benignMessage(event, siteName);
   }
-  const head = _situation(event, siteName);
   if (dest.type === 'system') return _systemMessage(dest, event, siteName);
 
   const suffix = String(dest.id || '').replace(/^[a-z_]+-/, '');
+  const head = _situation(event, siteName, _WANTS_MODELS.has(suffix));
   const body = BY_SUFFIX[suffix];
-  if (body) return `${head} ${body}`;
+  if (body) return `${head}${body}`;
 
-  // Unmapped destination: say something true rather than nothing. The
-  // tier is the only thing known about it, so the ask scales with that.
   const byTier = {
     1: 'Site response requested.',
-    2: 'Requesting response and coordination.',
-    3: 'Notifying for national awareness and assessment.',
-    4: 'Sharing for the air picture.',
+    2: 'Request response and coordination.',
+    3: 'Passing for national awareness.',
+    4: 'Passing for the air picture.',
     5: 'National notification.',
   };
-  return `${head} ${byTier[dest.tier] || 'Notifying for awareness.'}`;
+  return `${head}${byTier[dest.tier] || 'Passing for awareness.'}`;
 }

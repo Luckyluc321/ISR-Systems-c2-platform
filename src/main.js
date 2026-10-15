@@ -17781,6 +17781,40 @@ async function main() {
     };
   }
 
+  // SENSOR BLACKOUT, FOR ONE SCENARIO ONLY.
+  //
+  // The WITHOUT ISR clip has to show an airport with no detection layer,
+  // because that is the premise: nobody saw the formation coming. The
+  // perimeter STAYS, so the viewer still knows which site they are
+  // looking at.
+  //
+  // Deliberately NOT __isr_cleanWorld. That one is a global console
+  // toggle for recording passes and it hides the site boundary too,
+  // which is exactly what must remain here.
+  //
+  // Scope: entity ids beginning "sensor-", which is the dots and their
+  // coverage rings and nothing else, verified against the two places
+  // that mint them. No site config is touched, no sensor is taken
+  // offline, nothing in SITES changes, and every other scenario and
+  // account is unaffected. It is visibility, applied on launch of one
+  // menu entry and reversed on cancel.
+  let _scenarioSensorsHidden = false;
+  function _setScenarioSensorsHidden(on) {
+    const want = !!on;
+    if (want === _scenarioSensorsHidden) return;
+    _scenarioSensorsHidden = want;
+    for (const e of viewer.entities.values) {
+      if (!/^sensor-/.test(String(e.id || ''))) continue;
+      if (want) {
+        if (e._isrScenarioPrevShow === undefined) e._isrScenarioPrevShow = e.show;
+        e.show = false;
+      } else if (e._isrScenarioPrevShow !== undefined) {
+        e.show = e._isrScenarioPrevShow;
+        delete e._isrScenarioPrevShow;
+      }
+    }
+  }
+
   function removeDroneEntities(eventId) {
     const state = droneState.get(eventId);
     if (!state) return;
@@ -19800,6 +19834,9 @@ async function main() {
   }
 
   function cancelActiveThreats() {
+    // Whatever else happens, the sensors come back. A blackout that
+    // outlives its scenario would look like broken site config.
+    _setScenarioSensorsHidden(false);
     // Force-close every live drone track. Delegates entity cleanup to
     // removeDroneEntities() so swarm billboards, trails, projection lines,
     // and per-site markers are all handled uniformly.
@@ -20968,7 +21005,8 @@ async function main() {
       // decision point is its own t = 285.4 s, so the aircraft spawns 210 s
       // in and breaks off at about t = 495 on the swarm's clock, moments
       // after the formation arrives over the runway.
-      { key: '__combo_cph_incursion', label: 'COMBINED · Swarm on 04R + SAS 743 early go-around', cls: 'critical',
+      { key: '__combo_cph_incursion', label: 'COMBINED · WITHOUT ISR · swarm on 04R + crew-spotted go-around', cls: 'critical',
+        hideSensors: true,
         combo: [
           { key: 'cph_swarm_runway_incursion' },
           // Spawned when the swarm's OWN clock reads 216 s, so the two
@@ -21063,6 +21101,7 @@ async function main() {
     const meta = k => _SIM_COMPOSER_META[k] || null;
     const entries = menu.map(t => ({
       key: t.key, cls: t.cls || '',
+      hideSensors: !!t.hideSensors,
       // CARRY combo THROUGH. This rebuild dropped it, so a combined
       // entry arrived at the launch handler with combo undefined, fell
       // through to the single-template branch, and tried to spawn a key
@@ -21136,6 +21175,11 @@ async function main() {
         // at its t = 489, the aircraft needs 285.4 s to reach its
         // decision point, and the aircraft should break off 12.4 s after
         // the formation arrives. 489 + 12.4 - 285.4 = 216.
+        // Only this entry asks for it, and only while it runs.
+        if (selEntry.hideSensors) {
+          _setScenarioSensorsHidden(true);
+          toast('Sensor layer hidden for this scenario. Perimeter kept.', 'info');
+        }
         toast(`Combined scenario: ${selEntry.combo.length} tracks queued`, 'info');
         const _first = selEntry.combo[0];
         const _rest = selEntry.combo.slice(1).filter(c => c.atTSec != null);
