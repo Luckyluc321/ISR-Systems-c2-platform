@@ -331,7 +331,7 @@ export function addEvent(event) {
   } catch (err) { console.warn('[events] geoContext enrichment failed:', err.message); }
   syncEventSubject(event);   // canonical DetectionSubject attached here
   EVENTS.push(event);
-  _listeners.forEach(fn => fn(event.id));
+  _notify(event.id);
 }
 
 // Per-tick NN detection ingest. This is the integration point that
@@ -344,7 +344,7 @@ export function ingestNnDetection(eventId, nnTick) {
   if (!e.subject) syncEventSubject(e);
   applyNnTickToSubject(e.subject, nnTick);
   e.lastUpdated = new Date().toISOString();
-  _listeners.forEach(fn => fn(eventId));
+  _notify(eventId);
 }
 
 // opts.autoOutcome: machine-derived outcome for closes where the
@@ -394,7 +394,7 @@ export function closeEvent(id, exitPoint, { autoOutcome = null } = {}) {
   } catch (err) {
     console.warn('[pir] generation failed at close:', err.message);
   }
-  _listeners.forEach(fn => fn(id));
+  _notify(id);
 }
 
 // Lazy binding for the PIR generator so events.js doesn't have to
@@ -546,7 +546,7 @@ export function escalateEvent(id, { destinationIds, payload, message, operator =
       + (message && message.trim() ? ` Operator message: "${message.trim()}"` : ' Per-recipient default messages.'),
     type: 'escalation',
   });
-  _listeners.forEach(fn => fn(id));
+  _notify(id);
   return records;
 }
 
@@ -557,7 +557,7 @@ export function updateEscalationStatus(eventId, escalationId, status) {
   if (!rec) return;
   rec.status = status;
   rec.statusHistory.push({ timestamp: new Date().toISOString(), status });
-  _listeners.forEach(fn => fn(eventId));
+  _notify(eventId);
 }
 
 // Withdraw a cascade after the fact. Situation changed (drone shot
@@ -587,7 +587,7 @@ export function withdrawEscalation(eventId, escalationId, { by = 'unknown', reas
     text: `Withdrew escalation to ${rec.destinationId}${reason ? '. Reason: "' + reason.trim() + '"' : '.'}`,
     type: 'escalation-withdraw',
   });
-  _listeners.forEach(fn => fn(eventId));
+  _notify(eventId);
   return rec;
 }
 
@@ -642,7 +642,7 @@ export function rejectEscalation(eventId, escalationId, { by = 'unknown', byRole
     text: `Rejected escalation to ${rec.destinationId}. Reason: "${trimmed}".${backupNote}`,
     type: 'escalation-reject',
   });
-  _listeners.forEach(fn => fn(eventId));
+  _notify(eventId);
   return rec;
 }
 
@@ -675,7 +675,7 @@ export function updateEscalationAssessment(eventId, escalationId, { text, by = '
     text: `Updated escalation to ${rec.destinationId}: "${trimmed}"`,
     type: 'escalation-update',
   });
-  _listeners.forEach(fn => fn(eventId));
+  _notify(eventId);
   return rec;
 }
 
@@ -701,7 +701,7 @@ export function updateEscalationProgress(eventId, escalationId, progressStatus, 
     reason: rec.blockedReason,
     by,
   });
-  _listeners.forEach(fn => fn(eventId));
+  _notify(eventId);
   return rec;
 }
 
@@ -722,7 +722,7 @@ export function setEscalationOverdue(eventId, escalationId) {
     text: `Escalation ${rec.id} to ${rec.destinationId} passed its SLA window without acknowledgement. No auto-cascade fired — operator judgement required.`,
     type: 'sla-overdue',
   });
-  _listeners.forEach(fn => fn(eventId));
+  _notify(eventId);
   try {
     if (typeof window !== 'undefined' && typeof CustomEvent === 'function') {
       window.dispatchEvent(new CustomEvent('escalation-overdue', {
@@ -750,7 +750,7 @@ export function revokeParticipant(eventId, roleId, { revokedBy = 'unknown', reas
     text: `Removed ${roleId} from event participants (${reason}).`,
     type: 'participant-revoke',
   });
-  _listeners.forEach(fn => fn(eventId));
+  _notify(eventId);
   return { roleId, ...entry };
 }
 
@@ -781,7 +781,7 @@ export function addPostIncidentChainRoot(eventId, destId, dispatchedBy) {
     resolvedBy: null,
   };
   e.postIncidentChain.push(entry);
-  _listeners.forEach(fn => fn(eventId));
+  _notify(eventId);
   return entry;
 }
 export function handoffPostIncidentChain(eventId, parentChainId, newDestId, dispatchedBy) {
@@ -801,7 +801,7 @@ export function handoffPostIncidentChain(eventId, parentChainId, newDestId, disp
     resolvedBy: null,
   };
   e.postIncidentChain.push(entry);
-  _listeners.forEach(fn => fn(eventId));
+  _notify(eventId);
   return entry;
 }
 export function resolvePostIncidentChainEntry(eventId, chainId, resolvedBy) {
@@ -812,7 +812,7 @@ export function resolvePostIncidentChainEntry(eventId, chainId, resolvedBy) {
   entry.status = 'resolved';
   entry.resolvedAt = new Date().toISOString();
   entry.resolvedBy = resolvedBy;
-  _listeners.forEach(fn => fn(eventId));
+  _notify(eventId);
   return entry;
 }
 export function postIncidentChainLeaves(event) {
@@ -855,7 +855,7 @@ export function respondToEscalation(eventId, escalationId, text, respondedBy, re
     rec.status = 'acknowledged';
     rec.statusHistory.push({ timestamp: new Date().toISOString(), status: 'acknowledged' });
   }
-  _listeners.forEach(fn => fn(eventId));
+  _notify(eventId);
 }
 
 // Events currently escalated to a given set of destination IDs (for receiver view)
@@ -939,7 +939,7 @@ export function addNote(id, text, author = 'L. Flindt') {
     timestamp: new Date().toISOString(),
     author, text: text.trim(), type: 'note',
   });
-  _listeners.forEach(fn => fn(id));
+  _notify(id);
 }
 
 export function reclassifyEvent(id, { classification, threat = null, reason = '' }) {
@@ -966,12 +966,45 @@ export function reclassifyEvent(id, { classification, threat = null, reason = ''
       type: 'reclassification',
     });
   }
-  _listeners.forEach(fn => fn(id));
+  _notify(id);
 }
 
 // ── Selection state ──
 let _selectedEventId = null;
 const _listeners = new Set();
+
+// PER-LISTENER CRASH ISOLATION.
+//
+// `_listeners` is a Set, so it iterates in insertion order, and every
+// notify in this file used to be a bare `_listeners.forEach(fn => fn(id))`.
+// One listener throwing took out every listener registered AFTER it for
+// that notification, silently. main.js registers the alert-strip and
+// detail-panel renders in that chain, so a single bad render left the
+// ledger showing stale data or nothing at all while the events
+// underneath were perfectly correct, with nothing in the console
+// pointing at the cause.
+//
+// The account switch runs through here (setCurrentActor notifies every
+// listener with null so each re-filters against the new actor), and so
+// does a receiver acknowledgement. Those are exactly the paths where a
+// skipped render reads as a lost case.
+//
+// Same pattern and the same reason as `_tickBody` in drones.js, where
+// this failure shipped twice. Logged once per listener so a throw on
+// every frame stays visible without flooding the console.
+const _listenerErrLogged = new Set();
+function _notify(id) {
+  for (const fn of _listeners) {
+    try {
+      fn(id);
+    } catch (err) {
+      if (!_listenerErrLogged.has(fn)) {
+        _listenerErrLogged.add(fn);
+        console.error('[events] listener failed, event state is unaffected:', err);
+      }
+    }
+  }
+}
 
 export function getSelectedEventId() { return _selectedEventId; }
 export function getSelectedEvent() {
@@ -980,7 +1013,7 @@ export function getSelectedEvent() {
 }
 export function selectEvent(id) {
   _selectedEventId = id;
-  _listeners.forEach(fn => fn(id));
+  _notify(id);
 }
 export function clearSelection() { selectEvent(null); }
 export function onSelectionChange(fn) {
@@ -1029,7 +1062,7 @@ export function setCurrentActor(actor) {
   _currentActor = actor;
   // Role change is a re-render trigger — every listener re-runs its
   // filter against the new actor.
-  _listeners.forEach(fn => fn(null));
+  _notify(null);
 }
 export function getCurrentActor() { return _currentActor; }
 
@@ -1202,7 +1235,7 @@ export function expandEventDomainScope(eventId, ...domains) {
   const before = e.domainScope.length;
   const merged = new Set([...e.domainScope, ...domains.filter(Boolean)]);
   e.domainScope = [...merged];
-  if (e.domainScope.length !== before) _listeners.forEach(fn => fn(eventId));
+  if (e.domainScope.length !== before) _notify(eventId);
   return e.domainScope;
 }
 // Recompute domainScope for every seed event. Necessary because seed
@@ -1217,7 +1250,7 @@ export function refreshSeedDomainScopes() {
   EVENTS.forEach(e => {
     e.domainScope = _computeInitialDomainScope(e);
   });
-  _listeners.forEach(fn => fn(null));
+  _notify(null);
 }
 
 // Union linked events' scopes into this event's scope (shadow-chain
@@ -1241,7 +1274,7 @@ export function unionLinkedEventDomains(eventId) {
   });
   const changed = scope.size !== (Array.isArray(e.domainScope) ? e.domainScope.length : 0);
   e.domainScope = [...scope];
-  if (changed) _listeners.forEach(fn => fn(eventId));
+  if (changed) _notify(eventId);
   return e.domainScope;
 }
 
@@ -1308,7 +1341,7 @@ export function mutateEvent(id, patch, { notify = false } = {}) {
   const e = EVENTS.find(x => x.id === id);
   if (!e || !patch || typeof patch !== 'object') return null;
   Object.assign(e, patch);
-  if (notify) _listeners.forEach(fn => fn(id));
+  if (notify) _notify(id);
   return e;
 }
 
@@ -1319,7 +1352,7 @@ export function appendEventArray(id, field, item, { notify = false } = {}) {
   if (!e || !field) return null;
   if (!Array.isArray(e[field])) e[field] = [];
   e[field].push(item);
-  if (notify) _listeners.forEach(fn => fn(id));
+  if (notify) _notify(id);
   return e;
 }
 
@@ -1331,7 +1364,7 @@ export function addToEventSet(id, field, item, { notify = false } = {}) {
   if (!e || !field) return null;
   if (!(e[field] instanceof Set)) e[field] = new Set();
   e[field].add(item);
-  if (notify) _listeners.forEach(fn => fn(id));
+  if (notify) _notify(id);
   return e;
 }
 
@@ -1355,7 +1388,7 @@ export function syncMemberTrack(id, memberId, { lat, lon, alt, heading, speedMs,
   if (heading != null) m.kinematics.heading = heading;
   if (speedMs != null) m.kinematics.speedMs = speedMs;
   if (inCoverage != null) m.inCoverage = !!inCoverage;
-  if (notify) _listeners.forEach(fn => fn(id));
+  if (notify) _notify(id);
   return m;
 }
 
@@ -1399,7 +1432,7 @@ export function setMemberStatus(id, memberId, status, extra = {}, { notify = tru
   Object.assign(m, extra);
   if (!Array.isArray(m.history)) m.history = [];
   m.history.push({ status, at: new Date().toISOString(), ...(extra.reason ? { reason: extra.reason } : {}) });
-  if (notify) _listeners.forEach(fn => fn(id));
+  if (notify) _notify(id);
   return m;
 }
 
@@ -1411,7 +1444,7 @@ export function setEventMapKey(id, field, key, value, { notify = false } = {}) {
   if (!e || !field) return null;
   if (!(e[field] instanceof Map)) e[field] = new Map();
   e[field].set(key, value);
-  if (notify) _listeners.forEach(fn => fn(id));
+  if (notify) _notify(id);
   return e;
 }
 
@@ -1427,7 +1460,7 @@ export function setEventObjectKey(id, field, key, value, { notify = false } = {}
     e[field] = {};
   }
   e[field][key] = value;
-  if (notify) _listeners.forEach(fn => fn(id));
+  if (notify) _notify(id);
   return e;
 }
 
@@ -1448,8 +1481,8 @@ export function linkEvents(idA, idB, correlationScore = null) {
     a.correlationScore = correlationScore;
     b.correlationScore = correlationScore;
   }
-  _listeners.forEach(fn => fn(idA));
-  _listeners.forEach(fn => fn(idB));
+  _notify(idA);
+  _notify(idB);
   return { a, b };
 }
 
@@ -1469,7 +1502,7 @@ export function markNeutralised(id, { outcome = 'neutralised', at = null, byDisp
   if (by != null) e.neutralizedBy = by;
   if (needsPostIncident) e.needsPostIncident = true;
   e.projectedPath = null;   // projected path no longer meaningful post-neutralisation
-  _listeners.forEach(fn => fn(id));
+  _notify(id);
   return e;
 }
 
@@ -1504,7 +1537,7 @@ export function recordSceneRelease(id, { by = null, roleId = null, wreckageIds =
     by, roleId,
     wreckageIds: fresh,
   });
-  _listeners.forEach(fn => fn(id));
+  _notify(id);
   return e;
 }
 
@@ -1527,7 +1560,7 @@ export function recordInteraction(id, interaction) {
   if (!e || !interaction) return null;
   if (!Array.isArray(e.interactions)) e.interactions = [];
   e.interactions.push(interaction);
-  _listeners.forEach(fn => fn(id));
+  _notify(id);
   return e;
 }
 
@@ -1539,7 +1572,7 @@ export function updateEventSubject(id, subject) {
   if (!e || !subject) return null;
   e.subject = subject;
   e.narrativeCache = null;
-  _listeners.forEach(fn => fn(id));
+  _notify(id);
   return e;
 }
 
@@ -1554,7 +1587,7 @@ export function setDispatchOutcome(eventId, dispatchId, outcome) {
     e.dispatchOutcomes = {};
   }
   e.dispatchOutcomes[dispatchId] = outcome;
-  _listeners.forEach(fn => fn(eventId));
+  _notify(eventId);
   return e;
 }
 
@@ -1566,7 +1599,7 @@ export function attachPostIncidentReport(id, pir) {
   const e = EVENTS.find(x => x.id === id);
   if (!e) return null;
   e.postIncidentReport = pir;
-  _listeners.forEach(fn => fn(id));
+  _notify(id);
   return e;
 }
 
@@ -1582,7 +1615,7 @@ export function clearNarrativeCache(id) {
   // invalidation also drops the archetype reframings. Prevents a
   // stale lens from being served after Agent B regenerates.
   e.narrativeLenses = {};
-  _listeners.forEach(fn => fn(id));
+  _notify(id);
   return e;
 }
 // Explicit lens-only invalidation. Used when a specific archetype
@@ -1597,27 +1630,27 @@ export function clearNarrativeLenses(id, archetype = null) {
   } else {
     e.narrativeLenses = {};
   }
-  _listeners.forEach(fn => fn(id));
+  _notify(id);
   return e;
 }
 export function setNarrativeCache(id, cache) {
   const e = EVENTS.find(x => x.id === id);
   if (!e) return null;
   e.narrativeCache = cache;
-  _listeners.forEach(fn => fn(id));
+  _notify(id);
   return e;
 }
 export function clearPreprocessedCache(id) {
   const e = EVENTS.find(x => x.id === id);
   if (!e) return null;
   e._preprocessed = null;
-  _listeners.forEach(fn => fn(id));
+  _notify(id);
   return e;
 }
 export function setPreprocessedCache(id, preprocessed) {
   const e = EVENTS.find(x => x.id === id);
   if (!e) return null;
   e._preprocessed = preprocessed;
-  _listeners.forEach(fn => fn(id));
+  _notify(id);
   return e;
 }
