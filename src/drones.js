@@ -9,6 +9,96 @@
 // See sim_clock.js for why there are two readers.
 import { monoNow } from './sim_clock.js';
 
+// ── A FLOWN CURVE IS COMPUTED, NOT TYPED ──
+//
+// Every other template here is a hand-written list of waypoints, which
+// is right for a path made of straight legs. It is wrong for a turn,
+// and the reason is in main.js rather than in this file.
+//
+// The model's heading target is derived from the position delta between
+// two consecutive FRAMES (`-atan2(dLon, dLat)` in the drone tick). On a
+// straight segment that delta never changes direction, so the heading
+// target is constant inside the segment and takes a step at every
+// corner. The rig then derives bank from the yaw rate it sees
+// (coordinatedBank, atan(v omega / g)), so the aircraft rolls hard at
+// each waypoint, levels out again while it is still turning, and rolls
+// again at the next one. A 24-point circle wobbles its way round.
+//
+// Resolution is the fix. At a quarter of a second a point, each heading
+// step is 0.19 degrees and the steps arrive faster than the filter
+// chain settles, so the target moves continuously, the yaw rate is
+// steady, and the bank holds through the turn the way it should.
+//
+// Hence a generator. Two thousand literal waypoints would be unreadable
+// and unverifiable; the constants below are both.
+const _HOLD = {
+  arp:      { lat: 55.618, lon: 12.647 },  // airport reference point
+  v:        118,      // m/s. 425 km/h, about 229 kt at this level, inside
+                      // the 230 kt limit for holding below 14,000 ft.
+                      // The 900-odd km/h people quote is cruise at
+                      // 11,000 m, not a circuit of an airport.
+  inbound:  41,       // 04R inbound course
+  joinRad:  221,      // joins the circuit abeam southwest
+  circuitR: 9000,     // 9 km from the field. It is 3 km across, so this
+                      // is never near the thing it is avoiding
+  bankDeg:  20,       // bank held through the entry turn
+  straight: 40,       // seconds inbound before the tower turns it. The
+                      // first sensor has the formation at t=8 and three
+                      // hold it by t=26, so the escalation lands first
+  dt:       0.25,     // sample interval
+  altFrom:  1150,
+  altTo:    1070,
+};
+
+function _cphHoldPath() {
+  const { arp, v, inbound, joinRad, circuitR, bankDeg, straight, dt, altFrom, altTo } = _HOLD;
+  const RLAT = 111320, RLON = 111320 * Math.cos(arp.lat * Math.PI / 180);
+  const rad = d => d * Math.PI / 180;
+  const at = (c, b, d) => ({ lat: c.lat + (d * Math.cos(rad(b))) / RLAT,
+                             lon: c.lon + (d * Math.sin(rad(b))) / RLON });
+
+  // ANTICLOCKWISE, SO THE ENTRY IS A RIGHT TURN. Joining a clockwise
+  // circuit from this inbound course means turning LEFT, which sends the
+  // aircraft inland across the airport it is being held away from.
+  // Right is out over the sound.
+  const tangent = (joinRad - 90 + 360) % 360;        // rollout heading, 131
+  const rTurn   = (v * v) / (9.81 * Math.tan(rad(bankDeg)));   // radius 20 deg of bank gives
+  const turnS   = (Math.PI / 2) / (v / rTurn);       // time for the 90 deg turn
+  const lapS    = (2 * Math.PI * circuitR) / v;
+
+  const J = at(arp, joinRad, circuitR);                        // rollout point
+  const C = at(J, (tangent + 90) % 360, rTurn);                // entry turn centre
+  const S = at(C, (inbound - 90 + 360) % 360, rTurn);          // where the turn begins
+  const spawn = at(S, (inbound + 180) % 360, v * straight);
+
+  const wp = [];
+  // NO COORDINATE ROUNDING. Six decimals is 0.11 m, which sounds
+  // harmless until you divide it by the 1.9 m the aircraft covers in one
+  // frame: six per cent of the position delta the heading is derived
+  // from, which came out as plus or minus a degree a second of yaw
+  // jitter on a turn that only asks for 1.73. Full precision costs
+  // nothing here because the array is computed, not typed.
+  const push = (p, t, alt) => wp.push({
+    lat: p.lat, lon: p.lon, alt: Math.round(alt), heading: 0, tSec: +t.toFixed(2),
+  });
+
+  for (let t = 0; t < straight; t += dt) {
+    push(at(spawn, inbound, v * t), t, altFrom);
+  }
+  const bS = (inbound - 90 + 360) % 360;
+  for (let t = 0; t <= turnS; t += dt) {
+    const f = t / turnS;
+    push(at(C, (bS + 90 * f) % 360, rTurn), straight + t, altFrom + (altTo - altFrom) * f);
+  }
+  const t0 = straight + turnS;
+  for (let t = dt; t <= lapS; t += dt) {
+    const b = (joinRad - 360 * (t / lapS) + 720) % 360;        // anticlockwise
+    push(at(arp, b, circuitR), t0 + t, altTo);
+  }
+  return wp;
+}
+const _CPH_HOLD_PATH = _cphHoldPath();
+
 // ── Trajectory templates ──
 // Each template is a full flight path (list of waypoints). Spawn wraps it into
 // a live track with startTime = now.
@@ -550,12 +640,33 @@ export const TEMPLATES = {
   // activity is inside the perimeter, so the aircraft is never near the
   // thing it is avoiding. Circling tight overhead would be the mistake.
   //
-  // GEOMETRY IS FLYABLE, NOT DRAWN. 9 km radius at 118 m/s, which is
-  // about 229 kt indicated at this level and inside the 230 kt holding
-  // limit below 14,000 ft. That works out at 0.75 degrees a second and
-  // a 9 degree bank, so a gentle continuous turn rather than the
-  // standard-rate 3 degrees a hold normally uses. One lap is 56.5 km
-  // and takes eight minutes.
+  // IT TURNS RIGHT, AWAY FROM THE FIELD. The circuit is flown
+  // anticlockwise for that reason alone. Joining a clockwise circuit
+  // from this inbound course means a left turn, which sends a wide-body
+  // inland across the airport it is being kept away from. Right is out
+  // over the sound.
+  //
+  // THE TURN IS AN ARC, AND THE ARC IS THE BANK. A 90 degree turn at 20
+  // degrees of bank has a radius of v squared over g tan 20, which at
+  // 118 m/s is 3.90 km, and it takes 52 seconds at 1.73 degrees a
+  // second. That is not decoration. The rig derives roll from the yaw
+  // rate it actually sees (coordinatedBank, atan(v omega / g)), so the
+  // geometry IS what banks the aircraft, and a constant yaw rate is
+  // what holds the bank steady through the turn. Measured on the
+  // generated path: 0.000 deg/s on the inbound leg, a flat 1.734 deg/s
+  // right through the entry, a flat 0.751 deg/s left round the circuit.
+  // That is 20.0 degrees of bank in the turn and 9.0 on the circuit.
+  //
+  // See _cphHoldPath above for why this is generated rather than typed,
+  // and what a corner between two waypoints does instead.
+  //
+  // SPEED IS A HOLDING SPEED, NOT A CRUISE. 118 m/s is 425 km/h, which
+  // is about 229 kt indicated at this level and sits just inside the
+  // 230 kt limit for holding below 14,000 ft. The 900-odd km/h figure
+  // people quote is cruise at 11,000 m. Nothing flies a circuit of an
+  // airport at that speed. On the circuit itself the bank settles at 9
+  // degrees, which is the correct coordinated angle for 9 km at this
+  // speed. One lap is 56.5 km and takes eight minutes.
   cph_jet_hold_atc: {
     droneType: 'Commercial airliner (SAS 743, A320neo)',
     platform: 'jet',
@@ -575,39 +686,13 @@ export const TEMPLATES = {
       rfMatch: 'SAS743 A320neo, flight plan match',
       modality: 'Cooperative transponder',
       evidenceSize: '1.2 MB',
-      note: 'Scheduled arrival on 04R. Descent stopped and the approach never commenced. The formation was detected while the aircraft was still 30 km out, so the tower turned it onto a wide circuit of the field at 9 km and it is holding there in contact with the tower, waiting on the next approach slot. It never entered the final approach segment.',
+      note: 'Scheduled arrival on 04R, inbound and level at 1150 m when the formation was detected. Three sensors were holding the swarm 26 seconds in, so the tower turned the aircraft onto a circuit of the field before it reached the final approach segment. It is holding at 9 km in contact with the tower, waiting on the next approach slot. The approach was never commenced.',
     },
-    waypoints: [
-      { lat: 55.41592, lon: 12.33230, alt: 1363, heading: 0, tSec: 0 },     // spawn, 30 km from the airport on the 041 inbound
-      // HOLD INSTRUCTION. Descent arrested, level at 1370. Everything
-      // after this is the circuit, clockwise, 9 km from the field.
-      { lat: 55.55729, lon: 12.55245, alt: 1370, heading: 0, tSec: 178 },   // joins the circuit, abeam southwest
-      { lat: 55.57318, lon: 12.52785, alt: 1370, heading: 0, tSec: 198 },
-      { lat: 55.59212, lon: 12.51137, alt: 1370, heading: 0, tSec: 218 },
-      { lat: 55.61282, lon: 12.50413, alt: 1370, heading: 0, tSec: 238 },   // due west of the field
-      { lat: 55.63388, lon: 12.50662, alt: 1370, heading: 0, tSec: 258 },
-      { lat: 55.65386, lon: 12.51868, alt: 1370, heading: 0, tSec: 278 },
-      { lat: 55.67139, lon: 12.53949, alt: 1370, heading: 0, tSec: 298 },   // northwest quadrant
-      { lat: 55.68528, lon: 12.56762, alt: 1370, heading: 0, tSec: 318 },
-      { lat: 55.69459, lon: 12.60117, alt: 1370, heading: 0, tSec: 338 },
-      { lat: 55.69868, lon: 12.63783, alt: 1370, heading: 0, tSec: 358 },   // due north, over the Oresund
-      { lat: 55.69727, lon: 12.67512, alt: 1370, heading: 0, tSec: 378 },
-      { lat: 55.69046, lon: 12.71050, alt: 1370, heading: 0, tSec: 398 },
-      { lat: 55.67871, lon: 12.74155, alt: 1370, heading: 0, tSec: 418 },   // northeast quadrant
-      { lat: 55.66282, lon: 12.76615, alt: 1370, heading: 0, tSec: 438 },
-      { lat: 55.64388, lon: 12.78263, alt: 1370, heading: 0, tSec: 458 },
-      { lat: 55.62318, lon: 12.78987, alt: 1370, heading: 0, tSec: 478 },   // due east, Swedish side of the sound
-      { lat: 55.60212, lon: 12.78738, alt: 1370, heading: 0, tSec: 497 },
-      { lat: 55.58214, lon: 12.77532, alt: 1370, heading: 0, tSec: 517 },
-      { lat: 55.56461, lon: 12.75451, alt: 1370, heading: 0, tSec: 537 },   // southeast quadrant
-      { lat: 55.55072, lon: 12.72638, alt: 1370, heading: 0, tSec: 557 },
-      { lat: 55.54141, lon: 12.69283, alt: 1370, heading: 0, tSec: 577 },
-      { lat: 55.53732, lon: 12.65617, alt: 1370, heading: 0, tSec: 597 },   // due south of the field
-      { lat: 55.53873, lon: 12.61888, alt: 1370, heading: 0, tSec: 617 },
-      { lat: 55.54554, lon: 12.58350, alt: 1370, heading: 0, tSec: 637 },
-      { lat: 55.55729, lon: 12.55245, alt: 1370, heading: 0, tSec: 657 },   // one full lap, still holding for a slot
-    ],
-    durationSec: 657,
+    // Generated above. Entry arc plus one anticlockwise lap, sampled at
+    // 0.25 s so the heading changes continuously and the bank holds
+    // through the turn instead of pulsing at every corner.
+    waypoints: _CPH_HOLD_PATH,
+    durationSec: Math.round(_CPH_HOLD_PATH[_CPH_HOLD_PATH.length - 1].tSec),
   },
 
   cph_jet_goaround_early: {

@@ -21137,7 +21137,7 @@ async function main() {
       { key: '__combo_cph_incursion_isr_hold', label: 'COMBINED · WITH ISR · swarm on 04R + arrival circling the field', cls: 'critical',
         combo: [
           { key: 'cph_swarm_runway_incursion' },
-          { key: 'cph_jet_hold_atc', atTSec: 71 },
+          { key: 'cph_jet_hold_atc', atTSec: 0 },
         ] },
       // WITHOUT ISR. Neither a template nor a combo, because the run has
       // to take this site's sensor grid offline for its duration as well
