@@ -50,18 +50,24 @@ const _HOLD = {
                       // speed to be held at 14 km out. The 900-odd km/h
                       // figure is cruise at 11,000 m. This is an A320neo
   inbound:  41,       // 04R inbound course. Arrives from the southwest
-  spawnM:   30000,    // 30 km out, airborne long before the detection at t=8
-  straightS: 160,     // seconds of visible approach before the turn. The
+  spawnM:   34000,    // 34 km out, airborne long before the detection at t=8
+  straightS: 70,      // seconds of visible approach before the turn. The
                       // first sensor has the formation at t=8 and three
-                      // hold it by t=26, so detection, escalation and the
-                      // tower's call all land inside this leg
+                      // hold it by t=26. Turning at 70 puts the call 62
+                      // seconds after the first detection and 44 after the
+                      // grid is holding the track, which is a credible
+                      // decision chain and still 27 km from the field.
+                      // This was 160, which let the aircraft close to 14
+                      // km while the tower sat on a detection it already
+                      // had. Early warning that arrives late is just a
+                      // warning
   orbitR:   3000,     // 3 km. At 100 m/s that is 18.8 degrees of bank and
                       // a three minute lap. The 9 km version asked for 9
                       // degrees and looked like straight flight
   laps:     2,
   dt:       0.25,     // sample interval. See the note above
-  altFrom:  1570,     // 30 km out on a 3 degree path
-  altTo:    760,      // 14 km out, where the descent is stopped
+  altFrom:  1782,     // 34 km out on a 3 degree path
+  altTo:    1415,     // 27 km out, where the descent is stopped
 };
 
 function _cphHoldPath() {
@@ -612,7 +618,7 @@ export const TEMPLATES = {
       rfMatch: 'SAS743 A320neo, flight plan match',
       modality: 'Cooperative transponder',
       evidenceSize: '1.2 MB',
-      note: 'Scheduled arrival on 04R. Broke off at 398 m, 7.6 km from the threshold, on a tower instruction raised from the drone detection. The formation was still over the field at that point and never reached the runway with an aircraft on final.',
+      note: 'Scheduled arrival on 04R. Established on the approach, lined up and descending on a 3 degree path, and 27 km out through 1415 m when the tower turned it off. The first sensor had the formation at 8 seconds and three were holding it by 26, so the call reached the crew 62 seconds after the grid first heard anything and the approach was never commenced. It turned right, away from the city and the field, and is holding over Koge Bugt between 24 and 30 km out in contact with the tower, waiting on the next approach slot.',
     },
     waypoints: [
       { lat: 55.41592, lon: 12.33230, alt: 1363, heading: 0, tSec: 0 },   // spawn, 26 km out on the extended 04R centreline
@@ -674,18 +680,31 @@ export const TEMPLATES = {
   // visibly going to land before being told it cannot.
   //
   // So it flies the real profile, lined up on the extended 04R
-  // centreline, 1570 m down to 760 m across 16 km. That is 2.9 degrees,
-  // an ordinary glide path. At 14 km the news reaches it and it turns
+  // centreline, 1782 m down to 1415 m across 7 km. That is 3.0 degrees,
+  // an ordinary glide path. At 27 km the news reaches it and it turns
   // right, away from both the city and the field, and holds over open
-  // water in Koge Bugt between 11 and 17 km out. It never crosses a
+  // water in Koge Bugt between 24 and 30 km out. It never crosses a
   // coastline and it never enters the final approach segment.
+  //
+  // THE TURN IS AT 70 SECONDS, AND THAT IS THE POINT OF THE SCENARIO.
+  // The first sensor has the formation at 8 and three are holding it by
+  // 26, so the call goes out 62 seconds after the grid first hears
+  // anything. An earlier version turned at 160, which let the aircraft
+  // close to 14 km while the tower sat on a detection it already had.
+  // Early warning delivered late is not early warning, and the whole
+  // comparison against the go-around variants collapses if it is.
+  //
+  // The cost is framing: at 24 to 30 km the orbit and the airport do
+  // not sit in one tight shot. That is arithmetic, not a choice. Turn
+  // early and the aircraft is far away, because it was far away when it
+  // was told.
   //
   // THE TURN IS THE ORBIT. 3 km radius at 100 m/s is 1.91 degrees a
   // second and 18.8 degrees of bank, held from the roll-in to the end.
   // Two laps, three minutes each. There is no entry arc because there
   // is nothing to join: the first turn IS the circle. Measured on the
   // generated path: 0.000 deg/s down the approach, then a flat 1.910
-  // right, all the way.
+  // right, all the way, and a constant 5.243 m/s of descent before it.
   //
   // See _cphHoldPath above for why the path is generated rather than
   // typed, and what a corner between two waypoints does to an airframe
