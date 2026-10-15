@@ -19888,15 +19888,30 @@ async function main() {
   //   __isr_sensorAudit()
   window.__isr_sensorAudit = () => {
     const sel = getSelectedEventId();
+    // WHAT THE PANEL IS SHOWING, read back off the DOM.
+    //
+    // The state below and the rows on screen are two different things,
+    // and a report of "the list changed when I clicked another drone"
+    // is only answerable by comparing them. If they disagree the fault
+    // is in the render. If they agree the data is simply what it is.
+    const _panelHdr = [...document.querySelectorAll('.dp-section-title')]
+      .find(el => /Contributing Sensors/i.test(el.textContent));
+    const _panelRows = document.querySelectorAll('#detail-body .sensor-row').length;
+
     const rows = EVENTS.filter(ev => ev.status === 'active').map(ev => {
       const cs = ev.contributingSensors || [];
       return {
         event: ev.id,
+        // A RELAUNCH CAN REUSE AN ID. The per-day counter restarts on
+        // reload, so two runs on the same date both produce ...-9001.
+        // Comparing two captures without this is comparing two
+        // different cases and calling the difference a defect.
+        started: (ev.startTime || '').slice(11, 19),
         focused: ev.id === sel ? `YES · drone ${_selectedSwarmIndex + 1}` : '',
-        type: ev.droneType,
         cls: ev.classification,
         total: cs.length,
         online: cs.filter(s => !s.offline).length,
+        panel: ev.id === sel ? `${_panelRows} rows · ${(_panelHdr?.textContent || 'no section').trim()}` : '',
         sensors: cs.map(s => `${s.id}=${(s.confidence || 0).toFixed(2)}(peak ${(s.peakConfidence || 0).toFixed(2)})`).join('  '),
       };
     });
