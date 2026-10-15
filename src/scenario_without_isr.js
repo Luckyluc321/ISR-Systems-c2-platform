@@ -50,6 +50,7 @@
 import { SITES } from './sites_registry.js';
 import { onDroneUpdate } from './drones.js';
 import { EVENTS } from './events.js';
+import { getActiveRole } from './roles.js';
 
 const SITE_ID = 'cph';
 const SWARM_KEY = 'cph_swarm_runway_incursion';
@@ -74,6 +75,7 @@ let _entitySnapshot = [];     // [{ entity, show, billboardDdc, modelDdc }]
 let _unsub = null;
 let _leadEventId = null;
 let _jetSpawned = false;
+let _roleAtStart = null;
 
 function _viewer() {
   return (typeof window !== 'undefined' && window.__isr_viewer) || null;
@@ -100,12 +102,19 @@ function _sensorsRestore() {
 // so the viewer still knows which site they are looking at. Matching on
 // "sensor-" covers both, verified against the only two places in main.js
 // that mint those ids.
+// SCOPED TO CPH. The ids embed the site, `sensor-<siteId>-<id>` and
+// `sensor-cov-<siteId>-<id>`, and every site is drawn regardless of who
+// is signed in. A bare /^sensor-/ hid 130 sensors across ten sites
+// instead of this site's 35, which is the one thing this scenario must
+// never do.
+const _SENSOR_RE = new RegExp(`^sensor-(cov-)?${SITE_ID}-`);
+
 function _hideSensorEntities() {
   const v = _viewer();
   if (!v) return 0;
   let n = 0;
   for (const e of v.entities.values) {
-    if (!/^sensor-/.test(String(e.id || ''))) continue;
+    if (!_SENSOR_RE.test(String(e.id || ''))) continue;
     _entitySnapshot.push({ entity: e, show: e.show });
     e.show = false;
     n++;
@@ -165,7 +174,13 @@ function _forceVisible(eventId) {
     if (!_isSwarmEntity(e.id, eventId)) continue;
     // Trails are a CONFIRMED-path artefact. An undetected track has no
     // confirmed path, so they stay hidden on purpose.
-    if (String(e.id).endsWith('-trail') || String(e.id).startsWith('drone-trail-')) {
+    // Trails and forward projections are both path artefacts. A trail
+    // asserts a CONFIRMED path and the red dashed line asserts intent,
+    // and an undetected track has produced neither. Main would draw the
+    // projection anyway when out of coverage, so hiding it here is not a
+    // regression, it is the same rule applied consistently.
+    const _id = String(e.id);
+    if (_id.endsWith('-trail') || _id.endsWith('-proj') || _id.startsWith('drone-trail-')) {
       e.show = false;
       continue;
     }
@@ -198,43 +213,72 @@ export function startWithoutIsr() {
   _jetSpawned = false;
   _leadEventId = null;
 
-  _sensorsOff();
-  const hidden = _hideSensorEntities();
-  console.log(`[without-isr] ${SITES[SITE_ID].sensors.length} sensors offline, ${hidden} entities hidden`);
+  _roleAtStart = (() => { try { return getActiveRole()?.id || null; } catch (_) { return null; } })();
 
-  window.__spawnDrone(SWARM_KEY);
-  const ev = _newestEventFor(SWARM_KEY);
-  if (!ev) {
-    console.error('[without-isr] swarm did not spawn, aborting');
+  try {
+    _sensorsOff();
+    const hidden = _hideSensorEntities();
+    console.log(`[without-isr] ${SITES[SITE_ID].sensors.length} sensors offline, ${hidden} entities hidden`);
+
+    // A NEW event, not merely the newest one. spawnFromTemplate returns
+    // silently when a track is already live, and _newestEventFor would
+    // then hand back a STALE event from a previous run: the abort below
+    // would not fire, the aircraft would never spawn, and the sensors
+    // would stay off. Diffing ids is the only way to know a spawn
+    // actually happened.
+    const before = new Set(EVENTS.map(e => e.id));
+    window.__spawnDrone(SWARM_KEY);
+    const ev = EVENTS.find(e => e.templateKey === SWARM_KEY && !before.has(e.id));
+    if (!ev) {
+      console.error('[without-isr] swarm did not spawn. Cancel any running scenario first.');
+      stopWithoutIsr();
+      return;
+    }
+      console.log(`[without-isr] swarm ${_leadEventId} running, aircraft at swarm t=${JET_AT_SWARM_TSEC}s`);
+
+    _unsub = onDroneUpdate((ups) => {
+      if (!_active) return;
+      _suppressSymbols(_leadEventId);
+      _forceVisible(_leadEventId);
+      if (_jetSpawned) return;
+      const lead = ups.find(u => u.eventId === _leadEventId);
+      if (!lead || lead.tSec < JET_AT_SWARM_TSEC) return;
+      _jetSpawned = true;
+      // allowConcurrent, because the swarm is still live and
+      // spawnFromTemplate refuses a second track without it.
+      window.__spawnDrone(JET_KEY, { allowConcurrent: true });
+      console.log(`[without-isr] aircraft spawned at swarm t=${Math.round(lead.tSec)}s`);
+    });
+  } catch (err) {
+    // Sensors must never be left offline because something threw on the
+    // way up. Nothing persists SITES, so the blast radius is one page,
+    // but one page is still the demo.
+    console.error('[without-isr] start failed, rolling back:', err);
     stopWithoutIsr();
-    return;
   }
-  _leadEventId = ev.id;
-  console.log(`[without-isr] swarm ${_leadEventId} running, aircraft at swarm t=${JET_AT_SWARM_TSEC}s`);
-
-  _unsub = onDroneUpdate((ups) => {
-    if (!_active) return;
-    _suppressSymbols(_leadEventId);
-    _forceVisible(_leadEventId);
-    if (_jetSpawned) return;
-    const lead = ups.find(u => u.eventId === _leadEventId);
-    if (!lead || lead.tSec < JET_AT_SWARM_TSEC) return;
-    _jetSpawned = true;
-    // allowConcurrent, because the swarm is still live and
-    // spawnFromTemplate refuses a second track without it.
-    window.__spawnDrone(JET_KEY, { allowConcurrent: true });
-    console.log(`[without-isr] aircraft spawned at swarm t=${Math.round(lead.tSec)}s`);
-  });
 }
 
 export function stopWithoutIsr() {
   if (!_active) return;
   _active = false;
   if (_unsub) { try { _unsub(); } catch (_) {} _unsub = null; }
+  // IF THE ACCOUNT CHANGED, DO NOT RESTORE VISIBILITY.
+  //
+  // The snapshot was taken under the role that started the run.
+  // applySiteScopeVisibility sets show from _roleCanSeeSite on every
+  // account switch, so writing a stale `true` back would put this site's
+  // sensors on screen for an operator who is not allowed to see them.
+  // Leaving them hidden is the safe failure: the next account switch
+  // re-derives it correctly.
+  const _roleNow = (() => { try { return getActiveRole()?.id || null; } catch (_) { return null; } })();
+  const _roleSame = _roleNow === _roleAtStart;
+  if (!_roleSame) {
+    console.warn('[without-isr] account changed during the run, leaving sensor visibility to the role scope rather than restoring a stale value');
+  }
   for (const snap of _entitySnapshot) {
     const e = snap.entity;
     try {
-      e.show = snap.show;
+      if (_roleSame) e.show = snap.show;
       if (snap.hadOverride) {
         if (e.billboard) e.billboard.distanceDisplayCondition = snap.billboardDdc;
         if (e.model) e.model.distanceDisplayCondition = snap.modelDdc;
