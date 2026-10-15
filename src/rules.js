@@ -56,9 +56,28 @@ const DEFAULT_RULES = [
     then: { escalateToTiers: [3], payload: 'summary', message: '', delaySec: 60 },
   },
   {
+    // OFF, AND IT SHOULD NEVER HAVE BEEN ON.
+    //
+    // "Log to Tier 1" is a sensible intent implemented with the wrong
+    // mechanism. Escalation is how this platform asks an agency to do
+    // something, so a friendly firing it created seven escalation
+    // records against a scheduled arrival and the card read
+    // "ESCALATED · 7". A cooperative airliner, correlated on ADS-B and
+    // matching its own flight plan, is not something the tower, the
+    // fire service, ground ops and the camera system need dispatching
+    // about.
+    //
+    // It also outranked live work. Until the ledger comparator was
+    // fixed this put a routine arrival above a five-drone runway
+    // incursion in every receiver's inbox, purely because the aircraft
+    // spawned later.
+    //
+    // Logging a friendly is worth doing. It is a journal entry, not a
+    // dispatch, and when there is somewhere to write it this rule comes
+    // back pointed at that instead.
     id: 'r-friendly-log-only',
     name: 'Friendly ID → log to Tier 1 only',
-    siteId: 'all', enabled: true,
+    siteId: 'all', enabled: false,
     when: { classification: 'friendly' },
     then: { escalateToTiers: [1], payload: 'summary', message: '', delaySec: 0 },
   },
@@ -69,7 +88,10 @@ const DEFAULT_RULES = [
 // Bumped again 2026-10-14: the rules carried a hardcoded message that went
 // to every recipient identically. Without this bump a cached override
 // keeps sending it and the per-recipient defaults never appear.
-const STORAGE_KEY = 'isr_c2_rules_overrides_v4';
+// Bumped again 2026-10-15: the friendly rule is disabled in code, and a
+// cached v4 override would keep it enabled and keep escalating every
+// cooperative arrival to seven tier-1 destinations.
+const STORAGE_KEY = 'isr_c2_rules_overrides_v5';
 function loadRules() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);

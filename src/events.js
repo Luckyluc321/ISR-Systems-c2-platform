@@ -1313,9 +1313,25 @@ export function unionLinkedEventDomains(eventId) {
 }
 
 export function relativeTime(iso) {
-  const now = new Date('2026-07-24T14:32:41Z'); // demo reference time
+  // THE REAL CLOCK, NOT A PINNED ONE.
+  //
+  // This read from a hardcoded 2026-07-24T14:32:41Z, which worked only
+  // while every seeded event predated it. The CPH history was rewritten
+  // to span July to September, so events that happened AFTER the pinned
+  // reference produced a negative difference and the ledger rendered
+  // "-5873959s ago" against a closed case.
+  //
+  // History is wall-clock by nature: "15d ago" means 15 days before now,
+  // not 15 days before a constant somebody typed. sim_clock.js makes the
+  // same call for record timestamps and the UTC clock, and for the same
+  // reason. The simulation clock would freeze this with the scene, which
+  // is wrong for an archive.
+  //
+  // Clamped at zero so a future timestamp reads "0s ago" rather than
+  // counting backwards. That should not happen, and it just did.
+  const now = new Date();
   const then = new Date(iso);
-  const diffSec = Math.round((now - then) / 1000);
+  const diffSec = Math.max(0, Math.round((now - then) / 1000));
   if (diffSec < 60) return `${diffSec}s ago`;
   if (diffSec < 3600) return `${Math.floor(diffSec/60)}m ago`;
   if (diffSec < 86400) return `${Math.floor(diffSec/3600)}h ago`;

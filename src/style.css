@@ -88,7 +88,13 @@
   /* Legacy semantic aliases (do not remove — many components use these) */
   --hostile:           var(--danger);
   --hostile-glow:      var(--danger-glow);
-  --friendly:          var(--warn);
+  /* GREEN, NOT AMBER. This aliased --warn, so every cooperative track
+     rendered in the warning colour: a scheduled airliner correlated on
+     ADS-B and matching its own flight plan drew the same amber as a
+     degraded state. Amber has to mean "look at this", and a timetabled
+     arrival is the one thing on the board that does not.
+     Amber now belongs to `unknown`, which is what it was always for. */
+  --friendly:          var(--ok);
   --safe:              var(--ok);
   --degraded:          var(--hi);
 
@@ -514,6 +520,11 @@ body.mode-simulation .op-sim-badge { display: block; }
 }
 .alert-card.friendly .alert-stripe { background: var(--friendly); }
 .alert-card.resolved .alert-stripe { background: var(--text-dimmer); }
+/* UNKNOWN HAD NO STYLING AT ALL. A track the grid can see but cannot
+   identify is the single state that most needs the operator's eye, and
+   it was drawing an uncoloured card. Amber, which `friendly` was
+   wrongly holding. */
+.alert-card.unknown .alert-stripe { background: var(--warn); }
 .alert-head {
   display: flex; justify-content: space-between; align-items: baseline;
   margin-bottom: 8px;
@@ -526,6 +537,7 @@ body.mode-simulation .op-sim-badge { display: block; }
 .alert-card.hostile .alert-class { color: var(--hostile); }
 .alert-card.friendly .alert-class { color: var(--friendly); }
 .alert-card.resolved .alert-class { color: var(--text-dim); }
+.alert-card.unknown .alert-class { color: var(--warn); }
 .alert-conf {
   font-family: var(--font-mono);
   font-size: 10px; color: var(--text-dim);
