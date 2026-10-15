@@ -515,6 +515,79 @@ export const TEMPLATES = {
     durationSec: 460,
   },
 
+  // THE ARRIVAL THAT NEVER STARTS THE APPROACH.
+  //
+  // The two go-around variants both fly the aircraft down the
+  // centreline and then break it off, late at 37 m or earlier at 398 m.
+  // Both are the same story told at different distances: a crew or a
+  // controller reacting to something already underneath them.
+  //
+  // This one is the outcome warning early actually buys. The formation
+  // is detected while the arrival is still twenty-odd kilometres out,
+  // so the approach is never commenced at all. The tower stops the
+  // descent and puts the aircraft in a hold clear of the field until
+  // the airspace is confirmed clear.
+  //
+  // That is what the incident record shows. Newark 2019 put arrivals
+  // into holding patterns on the second sighting and nine aircraft
+  // diverted. Dublin parks arrivals in holds away from the field for an
+  // initial thirty minutes on a confirmed sighting. Nobody flies them
+  // down to a go-around if there is time not to.
+  //
+  // HELD AWAY FROM THE FIELD, NOT OVER IT. Circling above an airport
+  // with an active drone incursion would put the aircraft in the thing
+  // being avoided. The pattern sits on the approach side and the
+  // closest it ever comes is 18.9 km from the threshold.
+  //
+  // GEOMETRY IS A REAL HOLD, NOT A DRAWN OVAL. Below 14,000 ft a
+  // standard hold is one-minute legs with standard-rate turns at 3
+  // degrees a second. At 110 m/s that is a 6,600 m leg and a 2,101 m
+  // turn radius, so the racetrack is 6.6 km by 4.2 km and one orbit
+  // takes exactly four minutes. Right-hand turns, which is standard.
+  // Computed rather than eyeballed: the inbound leg closes back on the
+  // fix to the metre.
+  cph_jet_hold_atc: {
+    droneType: 'Commercial airliner (SAS 743, A320neo)',
+    platform: 'jet',
+    classification: 'friendly',
+    threat: null,
+    confidence: 0.99,
+    confidenceTrend: 'ADS-B correlated, flight plan match',
+    siteId: 'cph',
+    cooperative: true,
+    terrainRelativeAlt: true,
+    groundOffsetM: 0.1,
+    iconBearingTrimDeg: 0,
+    iconTracksFlightPath: true,
+    gearRetracts: true,
+    evidence: {
+      rfCarrier: '1090 MHz ADS-B',
+      rfMatch: 'SAS743 A320neo, flight plan match',
+      modality: 'Cooperative transponder',
+      evidenceSize: '1.2 MB',
+      note: 'Scheduled arrival on 04R. Descent stopped and the approach never commenced. The formation was detected while the aircraft was still 26 km out, so the tower held it on the inbound course at 21 km and it stayed in the pattern until the airspace was clear. Closest it came to the threshold was 18.9 km.',
+    },
+    waypoints: [
+      { lat: 55.41592, lon: 12.33230, alt: 1363, heading: 0, tSec: 0 },     // spawn, 26 km out on the extended 04R centreline
+      // HOLD INSTRUCTION. Descent arrested, level at 1370, continue to
+      // the fix. Everything after this is the pattern.
+      { lat: 55.44982, lon: 12.38446, alt: 1370, heading: 0, tSec: 46 },    // over the fix, 21.0 km out. First orbit begins
+      { lat: 55.45168, lon: 12.43141, alt: 1370, heading: 0, tSec: 76 },    // 90 deg through the right turn, 19.0 km
+      { lat: 55.42506, lon: 12.43469, alt: 1370, heading: 0, tSec: 106 },   // rolled out outbound on 221
+      { lat: 55.38031, lon: 12.36610, alt: 1370, heading: 0, tSec: 166 },   // end of the outbound leg, 27.9 km
+      { lat: 55.37845, lon: 12.31916, alt: 1370, heading: 0, tSec: 196 },   // 90 deg through the second turn
+      { lat: 55.40507, lon: 12.31587, alt: 1370, heading: 0, tSec: 226 },   // rolled out inbound on 041
+      { lat: 55.44982, lon: 12.38446, alt: 1370, heading: 0, tSec: 286 },   // back over the fix. One orbit, four minutes
+      { lat: 55.45168, lon: 12.43141, alt: 1370, heading: 0, tSec: 316 },   // second orbit
+      { lat: 55.42506, lon: 12.43469, alt: 1370, heading: 0, tSec: 346 },
+      { lat: 55.38031, lon: 12.36610, alt: 1370, heading: 0, tSec: 406 },
+      { lat: 55.37845, lon: 12.31916, alt: 1370, heading: 0, tSec: 436 },
+      { lat: 55.40507, lon: 12.31587, alt: 1370, heading: 0, tSec: 466 },
+      { lat: 55.44982, lon: 12.38446, alt: 1370, heading: 0, tSec: 526 },   // still holding when the formation is dealt with
+    ],
+    durationSec: 526,
+  },
+
   cph_jet_goaround_early: {
     droneType: 'Commercial airliner (SAS 743, A320neo)',
     platform: 'jet',

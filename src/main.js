@@ -21126,6 +21126,19 @@ async function main() {
           { key: 'cph_swarm_runway_incursion' },
           { key: 'cph_jet_goaround_atc', atTSec: 71 },
         ] },
+      // THE OUTCOME EARLY WARNING ACTUALLY BUYS.
+      //
+      // The go-around variants are the same story at different
+      // distances: an aircraft already committed to the approach being
+      // broken off. This one never commences it. Same trigger as the
+      // variant above so the two are compared on equal terms, and the
+      // aircraft is still in the hold when the formation reaches the
+      // runway, which is the point.
+      { key: '__combo_cph_incursion_isr_hold', label: 'COMBINED · WITH ISR · swarm on 04R + arrival held 21 km out', cls: 'critical',
+        combo: [
+          { key: 'cph_swarm_runway_incursion' },
+          { key: 'cph_jet_hold_atc', atTSec: 71 },
+        ] },
       // WITHOUT ISR. Neither a template nor a combo, because the run has
       // to take this site's sensor grid offline for its duration as well
       // as spawn the two tracks, and that is scenario behaviour which
@@ -21434,9 +21447,11 @@ async function main() {
     cph_jet_goaround:          { threat: 'Jet (SAS 743), friendly',pathLabel: 'Missed approach, 04R' },
     cph_jet_goaround_early:    { threat: 'Jet (SAS 743), friendly',pathLabel: 'Crew-spotted missed approach, 37 m at 700 m' },
     cph_jet_goaround_atc:      { threat: 'Jet (SAS 743), friendly',pathLabel: 'ATC-warned missed approach, 398 m at 7.6 km' },
+    cph_jet_hold_atc:          { threat: 'Jet (SAS 743), friendly',pathLabel: 'Held at 21 km, approach never commenced' },
     __combo_cph_incursion:     { threat: '5-drone swarm + SAS 743', pathLabel: 'Sensors live, crew spots them at 480 m' },
     __combo_cph_incursion_isr: { threat: '5-drone swarm + SAS 743', pathLabel: 'WITH ISR, tower warns at 7.6 km' },
     __combo_cph_incursion_noisr: { threat: '5-drone swarm + SAS 743', pathLabel: 'WITHOUT ISR, no sensor grid, crew spots them at 480 m' },
+    __combo_cph_incursion_isr_hold: { threat: '5-drone swarm + SAS 743', pathLabel: 'WITH ISR, arrival held 21 km out, no approach flown' },
     cph_missile_hostile:       { threat: 'Cruise missile',         pathLabel: 'Baltic sea ingress' },
     cph_missile_inbound_sw:    { threat: 'Cruise missile',         pathLabel: 'SW continuation ingress' },
     swarm_recon_cph_amk:       { threat: '5-drone recon swarm',    pathLabel: 'CPH → Amager transit' },
