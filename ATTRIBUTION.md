@@ -85,6 +85,37 @@ MH-60R Seahawks with Eskadrille 723 at Helicopter Wing Karup.
   `scripts/shrink_glb_textures.py`, 127.7 MB to 19.5 MB. All 104 nodes,
   19 meshes and 20 animation channels verified identical.
 
+### Airbus A320 — `public/aircraft/a320_noskin.glb`
+
+- **Author:** drcrazzie — https://sketchfab.com/drcrazzie
+- **Licence:** CC-BY-4.0 — http://creativecommons.org/licenses/by/4.0/
+- **Source:** https://sketchfab.com/3d-models/airbus-a320-indonesian-presidential-livery-548d038ab9774d079d8d4e7e560a69bd
+- **Title as published:** AIRBUS A320 (Indonesian Presidential Livery)
+- **Used for:** the scheduled arrival in every CPH scenario, SAS 743
+- **Modified:** heavily, and the licence requires saying so.
+  - Landing gear, gear doors and airbrakes lifted out of the 142-joint
+    skin into plain nodes by `scripts/split_airliner_surfaces.py`, which
+    is what makes `a320_noskin.glb` a separate file from the original.
+  - Landing pose baked by `scripts/bake_landing_pose.py`.
+  - **All Indonesian presidential markings removed** by
+    `scripts/strip_airliner_livery.py`: REPUBLIK INDONESIA titles on both
+    sides, two Garuda crests, the A-001 registration in four places, a
+    gold star-and-wreath emblem on each side of the fin, and five flag
+    patches. Eighteen regions across three textures, each replaced by the
+    paint around it. The red and gold scheme is kept.
+
+**THIS AIRCRAFT REPRESENTS NO REAL OPERATOR.** The markings are gone so
+that it cannot be read as the aircraft it was modelled from, which is a
+specific head-of-state airframe. It carries no titles, no registration
+and no flag, and the callsign SAS 743 exists only in scenario data. Do
+not add real airline titles to it: a stripped model is a generic
+airliner, a model wearing somebody's titles is that airline's aircraft.
+
+**In published material** the CC-BY credit travels with it. A video that
+shows this model needs a line in the credits naming the author, the
+licence and the fact that it was modified. "Airbus A320 by drcrazzie,
+CC-BY-4.0, modified" satisfies it.
+
 ## The rule, for anything added later
 
 **Never add an asset whose licence contains NC.** NonCommercial excludes this
