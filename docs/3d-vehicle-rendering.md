@@ -303,3 +303,38 @@ being driven into the tarmac. The current profile is a cubic Hermite from
 the glideslope gradient at the threshold (50 ft) to 148 fpm at the
 wheels, touching down 450 m in, inside the touchdown zone markings the
 orthophoto shows.
+
+## 9. Propeller spin and attitude, outside Cesium
+
+`scripts/blender_drone_flight_demo.py` runs inside Blender headless and
+turns any drone file (`.blend`, `.glb`, `.fbx`, `.obj`) into an animated
+`.blend` plus an MP4: props spinning about their own hubs at a hover rate
+(92 rps, diagonals counter-rotating in DJI sense) and the airframe flying
+hover, forward, brake, backward, slide right, slide left, descend, climb.
+
+The attitude is not keyframed by hand. A quadcopter moves only by tilting
+its thrust, so each frame tilts the body toward `a + c_d v` by
+`atan(|a + c_d v| / g)`, clamped at 32 degrees. That single rule produces
+nose-down to go forward, nose-up to brake or fly backward, roll into a
+slide, and a level body on vertical legs, which is the behaviour the
+in-map rig in `main.js` (`_quadOrientation`, `_rotorcraftStep` disc tilt)
+approximates per frame from measured velocity. Verified on
+`assault_drone_concept.glb` by reading vertex heights at each phase
+midpoint, not by looking at one still.
+
+```
+/Applications/Blender.app/Contents/MacOS/Blender -b \
+  --python scripts/blender_drone_flight_demo.py -- IN.glb --out OUT_DIR \
+  --render --stills [--forward -Y] [--prop-rps 92]
+```
+
+Props are found by name (`prop|rotor|blade`) first, then by splitting
+meshes into loose parts and taking the thin off-centre sheets. The pick is
+printed. `--forward` is the nose axis in Blender space; glTF's +Z nose
+imports as -Y, which is the default. If the nose leads on the BACKWARD
+leg, the axis is reversed.
+
+The DJI Mavic 3 Pro listing by ikad2023/dika3d (Sketchfab, now Fab) is a
+paid Standard-licence asset and is not downloadable without buying it, so
+until it is bought the assault drone stands in. The command is the same
+once the file lands.
