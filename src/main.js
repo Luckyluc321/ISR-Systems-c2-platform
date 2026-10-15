@@ -19731,7 +19731,36 @@ async function main() {
       endTime: null,
       duration: 0,
       entry: null, exit: null, lastPosition: null,
-      contributingSensors: template.contributingSensors,
+      // A CASE STARTS WITH NO CONTRIBUTING SENSORS, BECAUSE NONE HAVE
+      // CONTRIBUTED YET.
+      //
+      // This copied a hardcoded list off the template: five sensors with
+      // authored confidences like 0.91 and 0.82, stamped on the case the
+      // instant it spawned. No sensor had seen anything. The panel opened
+      // on "Contributing Sensors · 5 / 5" for a formation still out over
+      // the water, and then counted DOWN as those invented values decayed
+      // past the 0.08 prune, leaving only the sensors that had genuinely
+      // acquired the track. Five becoming one, reported as sensors being
+      // lost, when it was fabricated evidence draining away.
+      //
+      // They were identifiable in the audit by peakConfidence 0.00: the
+      // real ones earn a peak the moment geometry or a detection batch
+      // raises them, and a seeded entry never does.
+      //
+      // This is the same line the geometry floor already refuses to
+      // cross a few hundred lines down, where it raises existing entries
+      // but will not invent one, because inventing a detection is the
+      // classifier's job and C2 is not the classifier. Seeding the list
+      // at spawn was that same invention, earlier and larger.
+      //
+      // Starts empty. The count now climbs as the formation comes in,
+      // which is what the grid is actually doing.
+      //
+      // The templates still carry their contributingSensors blocks.
+      // Nothing reads them at spawn any more. Left in place rather than
+      // deleted from 35 templates in one pass, which would be a much
+      // wider change than this defect warrants.
+      contributingSensors: [],
       evidence: template.evidence,
       notes: [],
       templateKey,
