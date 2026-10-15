@@ -1353,6 +1353,50 @@ Facts below were verified against Microsoft documentation on 2026-08-23. This is
 
 Status: pending. Will specify the `window.__isr_*` surface, the DOM mount contract, external service endpoints, and the environment surface.
 
+### IF-10.1 Third-party endpoints reached from the browser `[live]`
+
+Two external services are called directly from the page in development.
+Both answer a browser with an `access-control-allow-origin` that is not
+ours, so both are routed through a dev-server proxy to make the call
+same-origin. Neither proxy exists in a build.
+
+| Service | Dev path | Target | Production |
+|---|---|---|---|
+| Inference (Scaleway) | `/scw/...` | `https://api.scaleway.ai` | Azure sovereign proxy, IF-9.7 |
+| Cooperative traffic (OpenSky) | `/osky/states/all` | `https://opensky-network.org/api` | Read server side |
+
+Why a proxy rather than a client fix: the header has to come from the
+server, so nothing in the page can repair it. Proxying removes the
+preflight entirely and lets the real status code reach the caller. A
+masked CORS failure reports as `Failed to fetch` and hides whether the
+service answered at all, which is how a 403 on a valid endpoint reads
+as an outage.
+
+Overrides: `VITE_MISTRAL_ENDPOINT`, `VITE_OPENSKY_ENDPOINT`.
+
+Failure behaviour is unchanged by the proxy. The traffic adapter treats
+any non-ok response as "feed offline" and returns no tracks, and the
+case file falls back to its mock summary. A credentials failure on the
+inference endpoint appends a pointer to `await __isr_inferenceCheck()`,
+which names the cause rather than leaving a bare status code.
+
+### IF-10.2 Scenario modules `[live]`
+
+A scenario that needs more than a drone template, for example one that
+also changes the state of a site's sensor grid, is a module rather than
+an entry in the template registry. It owns its own spawns and its own
+teardown, and exposes `start()` and `stop()` on a `window.__isr_*`
+handle.
+
+The simulation picker offers such an entry only while its handle is
+present, so deleting the file removes the option instead of leaving a
+row that fails on click. `Cancel active threat` calls `stop()` on the
+handle before tearing down tracks, because the module may hold state
+that outlives them.
+
+Current modules: `__isr_withoutIsr` (`src/scenario_without_isr.js`),
+the run with the sensor grid offline.
+
 ## Appendix
 
 Status: pending. Data dictionary, full enums, ID formats, coordinate conventions, and the open-gaps register.

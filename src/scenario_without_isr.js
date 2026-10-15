@@ -82,7 +82,9 @@ let _entitySnapshot = [];     // [{ entity, show, billboardDdc, modelDdc }]
 let _unsub = null;
 let _leadEventId = null;
 let _jetSpawned = false;
+let _jetEventId = null;
 let _roleAtStart = null;
+let _watchdog = null;
 
 function _viewer() {
   return (typeof window !== 'undefined' && window.__isr_viewer) || null;
@@ -251,9 +253,35 @@ export function startWithoutIsr() {
       _jetSpawned = true;
       // allowConcurrent, because the swarm is still live and
       // spawnFromTemplate refuses a second track without it.
+      const _beforeJet = new Set(EVENTS.map(e => e.id));
       window.__spawnDrone(JET_KEY, { allowConcurrent: true });
+      _jetEventId = EVENTS.find(e => e.templateKey === JET_KEY && !_beforeJet.has(e.id))?.id || null;
       console.log(`[without-isr] aircraft spawned at swarm t=${Math.round(lead.tSec)}s`);
     });
+
+    // THE RUN HAS TO END ITSELF.
+    //
+    // Nothing outside this file knows the sensor grid is off. When both
+    // tracks close, the clip is over and the grid has to come back, or
+    // the next scenario at this site runs blind with nothing on screen
+    // saying why. That was reachable before only by remembering to call
+    // stop() by hand.
+    //
+    // Polled rather than driven off the track feed, because the feed
+    // stops emitting for a track the moment it ends, so the last tick
+    // can never be the one that observes the end.
+    _watchdog = setInterval(() => {
+      if (!_active) return;
+      const lead = EVENTS.find(e => e.id === _leadEventId);
+      if (!lead || lead.status !== 'closed') return;
+      if (!_jetSpawned) return;                 // aircraft not cued yet
+      if (_jetEventId) {
+        const jet = EVENTS.find(e => e.id === _jetEventId);
+        if (jet && jet.status !== 'closed') return;
+      }
+      console.log('[without-isr] both tracks closed, restoring the sensor grid');
+      stopWithoutIsr();
+    }, 2000);
   } catch (err) {
     // Sensors must never be left offline because something threw on the
     // way up. Nothing persists SITES, so the blast radius is one page,
@@ -267,6 +295,7 @@ export function stopWithoutIsr() {
   if (!_active) return;
   _active = false;
   if (_unsub) { try { _unsub(); } catch (_) {} _unsub = null; }
+  if (_watchdog) { clearInterval(_watchdog); _watchdog = null; }
   // IF THE ACCOUNT CHANGED, DO NOT RESTORE VISIBILITY.
   //
   // The snapshot was taken under the role that started the run.
@@ -295,6 +324,7 @@ export function stopWithoutIsr() {
   _sensorsRestore();
   _leadEventId = null;
   _jetSpawned = false;
+  _jetEventId = null;
   console.log('[without-isr] stopped, sensors and entities restored');
 }
 

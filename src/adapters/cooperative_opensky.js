@@ -18,7 +18,23 @@
 
 import { registerCooperativeAdapter } from '../cooperative_traffic_source.js';
 
-const OPENSKY_URL = 'https://opensky-network.org/api/states/all';
+// WHY THIS IS NOT ALWAYS THE DIRECT URL.
+//
+// OpenSky answers a browser with access-control-allow-origin set to its
+// own origin, so every call from a dev host was blocked by CORS after
+// the response had already been received. The request shows 200 and
+// still fails, which makes it look like the feed is down when it is not.
+//
+// In dev the call goes through the /osky proxy in vite.config.js, which
+// makes it same-origin. A build points at the real host, because
+// production reads this feed server side where no CORS check applies.
+// VITE_OPENSKY_ENDPOINT overrides both. See IDD IF-10.1.
+const OPENSKY_URL = _readEnv('VITE_OPENSKY_ENDPOINT')
+  || (import.meta.env?.DEV ? '/osky/states/all' : 'https://opensky-network.org/api/states/all');
+
+function _readEnv(k) {
+  try { return import.meta.env?.[k] || null; } catch (_) { return null; }
+}
 
 // Poll-result cache — dedup rapid re-checks (Agent B + Agent 3 might
 // both trigger within seconds). Key: bbox string. TTL: 60s so multiple
@@ -97,8 +113,12 @@ const openskyAdapter = {
     if (cached && (Date.now() - cached.ts) < CACHE_TTL_MS) {
       return cached.tracks;
     }
-    // OpenSky expects lamin, lomin, lamax, lomax
-    const url = new URL(OPENSKY_URL);
+    // OpenSky expects lamin, lomin, lamax, lomax.
+    // Second argument so a relative proxy path resolves. URL() throws on
+    // a relative string with no base, which would take the whole adapter
+    // down rather than return an empty feed.
+    const _base = typeof window !== 'undefined' ? window.location.origin : 'http://localhost';
+    const url = new URL(OPENSKY_URL, _base);
     url.searchParams.set('lamin', bbox.minLat.toFixed(4));
     url.searchParams.set('lomin', bbox.minLon.toFixed(4));
     url.searchParams.set('lamax', bbox.maxLat.toFixed(4));

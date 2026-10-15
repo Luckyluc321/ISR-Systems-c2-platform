@@ -19824,6 +19824,16 @@ async function main() {
   }
 
   function cancelActiveThreats() {
+    // A SELF-DRIVING SCENARIO HAS TO BE TOLD IT IS OVER.
+    //
+    // The WITHOUT ISR run puts a site's whole sensor grid offline for
+    // its duration. Cancelling only the tracks left the grid off, so the
+    // next scenario at that site ran blind with no indication why.
+    // stop() is a no-op when the module is not running, and the optional
+    // chain keeps this a no-op when the file is not installed at all.
+    try { window.__isr_withoutIsr?.stop(); } catch (err) {
+      console.warn('[cancel] without-isr stop failed:', err.message);
+    }
     // Force-close every live drone track. Delegates entity cleanup to
     // removeDroneEntities() so swarm billboards, trails, projection lines,
     // and per-site markers are all handled uniformly.
@@ -21022,6 +21032,16 @@ async function main() {
           { key: 'cph_swarm_runway_incursion' },
           { key: 'cph_jet_goaround_atc', atTSec: 71 },
         ] },
+      // WITHOUT ISR. Neither a template nor a combo, because the run has
+      // to take this site's sensor grid offline for its duration as well
+      // as spawn the two tracks, and that is scenario behaviour which
+      // does not belong in this file. It lives in scenario_without_isr.js
+      // and drives itself. This entry only names the window handle.
+      //
+      // Delete that one file and the entry disappears from the list
+      // below rather than sitting there failing on click.
+      { key: '__combo_cph_incursion_noisr', label: 'COMBINED · WITHOUT ISR · swarm on 04R, no sensor grid', cls: 'critical',
+        module: '__isr_withoutIsr' },
       { key: 'cph_unknown_contact', label: 'Non-identifiable contact (N perimeter)', cls: 'recon' },
       { key: 'cph_shahed_amalienborg', label: 'Shahed-136 attack (Øresund → CPH → Amalienborg)', cls: 'critical' },
       { key: 'cph_geran3_amalienborg', label: 'Geran-3 jet attack, same route at 2x speed', cls: 'critical' },
@@ -21089,7 +21109,12 @@ async function main() {
     // threat has exactly one route). Launch resolves the authored
     // template for the chosen pair.
     const meta = k => _SIM_COMPOSER_META[k] || null;
-    const entries = menu.map(t => ({
+    const entries = menu
+      // An entry backed by a module is only offered while that module is
+      // loaded. Deleting the file removes the option instead of leaving
+      // a dead row that errors on Launch.
+      .filter(t => !t.module || typeof window[t.module]?.start === 'function')
+      .map(t => ({
       key: t.key, cls: t.cls || '',
       // CARRY combo THROUGH. This rebuild dropped it, so a combined
       // entry arrived at the launch handler with combo undefined, fell
@@ -21097,6 +21122,9 @@ async function main() {
       // that is not a template. spawnFromTemplate returns on an unknown
       // key, so Launch did nothing and said nothing.
       combo: t.combo || null,
+      // Same trap, same fix. A module entry that lost this field here
+      // would fall through to the template branch and do nothing.
+      module: t.module || null,
       threat: meta(t.key)?.threat || t.label,
       pathLabel: meta(t.key)?.pathLabel || 'Authored route',
     }));
@@ -21139,6 +21167,19 @@ async function main() {
     if (launchBtn && selEntry) launchBtn.addEventListener('click', () => {
       if (anyTrackLive()) return;
       flyTo(site);
+      // A MODULE ENTRY DRIVES ITSELF. It spawns its own tracks and owns
+      // whatever else its scenario needs, so this file hands over and
+      // stops. The handle is re-checked here rather than trusted from
+      // render time, because the panel can outlive a hot reload.
+      if (selEntry.module) {
+        const mod = window[selEntry.module];
+        if (!mod || typeof mod.start !== 'function') {
+          toast(`${selEntry.module} is not loaded`, 'err');
+          return;
+        }
+        mod.start();
+        return;
+      }
       // A COMBINED ENTRY IS A PAIR, NOT A TEMPLATE. Two tracks on one
       // clock with an offset between them, so the aircraft arrives on
       // final exactly as the formation reaches the runway. Spawned
@@ -21301,6 +21342,7 @@ async function main() {
     cph_jet_goaround_atc:      { threat: 'Jet (SAS 743), friendly',pathLabel: 'ATC-warned missed approach, 398 m at 7.6 km' },
     __combo_cph_incursion:     { threat: '5-drone swarm + SAS 743', pathLabel: 'Sensors live, crew spots them at 480 m' },
     __combo_cph_incursion_isr: { threat: '5-drone swarm + SAS 743', pathLabel: 'WITH ISR, tower warns at 7.6 km' },
+    __combo_cph_incursion_noisr: { threat: '5-drone swarm + SAS 743', pathLabel: 'WITHOUT ISR, no sensor grid, crew spots them at 480 m' },
     cph_missile_hostile:       { threat: 'Cruise missile',         pathLabel: 'Baltic sea ingress' },
     cph_missile_inbound_sw:    { threat: 'Cruise missile',         pathLabel: 'SW continuation ingress' },
     swarm_recon_cph_amk:       { threat: '5-drone recon swarm',    pathLabel: 'CPH → Amager transit' },

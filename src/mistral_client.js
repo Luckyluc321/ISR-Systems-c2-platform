@@ -192,7 +192,14 @@ export async function streamCompletion(messages, callbacks, opts = {}) {
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');
-      throw new Error(`Mistral HTTP ${res.status}: ${errText.slice(0, 200)}`);
+      // 401 and 403 are credentials, not an outage, and the difference
+      // matters. The platform falls back to the mock summary either way,
+      // so without this line the only clue on screen is a bare status
+      // code and the reader has no idea a one-line check exists.
+      const hint = (res.status === 401 || res.status === 403)
+        ? ' · run await __isr_inferenceCheck() for the cause'
+        : '';
+      throw new Error(`Mistral HTTP ${res.status}: ${errText.slice(0, 200)}${hint}`);
     }
 
     const reader = res.body.getReader();

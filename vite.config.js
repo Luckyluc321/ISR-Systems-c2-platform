@@ -32,6 +32,28 @@ export default defineConfig({
         secure: true,
         rewrite: (p) => p.replace(/^\/scw/, ''),
       },
+      // DEV PROXY FOR THE COOPERATIVE TRAFFIC FEED.
+      //
+      // OpenSky answers a browser request with
+      // access-control-allow-origin: https://opensky-network.org, which
+      // is its own origin and never ours, so every call from localhost
+      // was blocked after the response had already arrived. The console
+      // filled with a CORS failure and a net::ERR_FAILED on a request
+      // that returned 200.
+      //
+      // Same remedy as the inference endpoint above: same-origin through
+      // the dev server, no preflight, and the real status reaches the
+      // adapter, which already treats a non-ok response as "feed
+      // offline" and returns no tracks.
+      //
+      // Dev only. Production reads the feed server side, because a
+      // browser-held credential is not a credential. See IDD IF-10.1.
+      '/osky': {
+        target: 'https://opensky-network.org',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (p) => p.replace(/^\/osky/, '/api'),
+      },
     },
   },
 });
