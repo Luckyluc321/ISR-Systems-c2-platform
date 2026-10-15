@@ -96,8 +96,25 @@ function _cphHoldPath() {
   // is derived from exactly that delta. It showed up as plus or minus a
   // degree a second of yaw jitter. Full precision costs nothing in a
   // computed array.
+  //
+  // ALTITUDE IS NOT ROUNDED EITHER, AND FOR A WORSE REASON THAN THE
+  // COORDINATES. The descent is 5.06 m/s, so a 0.25 s sample drops
+  // 1.27 m. Rounded to whole metres that becomes a run of 1 m steps
+  // with a 2 m step every fourth sample, and the implied rate
+  // square-waves between 4 and 8 m/s a few times a second.
+  //
+  // Pitch is derived from the climb rate, frame to frame, and the
+  // aircraft covers 1.67 m horizontally per frame at 60 fps. A 1 m
+  // altitude step against that is atan(1 / 1.67), which is 31 degrees
+  // of nose-down demand, clamped to the rig's 12. So the nose pitched
+  // to the floor and back several times a second: the aircraft
+  // porpoised down the whole approach.
+  //
+  // Every other template rounds its altitudes and is fine, because its
+  // waypoints are seconds apart and the interpolation between them is
+  // smooth. Quantising only bites at this sample rate.
   const push = (p, t, alt) => wp.push({
-    lat: p.lat, lon: p.lon, alt: Math.round(alt), heading: 0, tSec: +t.toFixed(2),
+    lat: p.lat, lon: p.lon, alt: alt, heading: 0, tSec: +t.toFixed(2),
   });
 
   for (let t = 0; t < straightS; t += dt) {
