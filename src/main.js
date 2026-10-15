@@ -19838,7 +19838,26 @@ async function main() {
     addLiveTrack(eventId, template);
     createDroneEntities(event);
     updateContributingRings();
-    selectEvent(eventId);
+    // A SECOND TRACK JOINING A RUNNING SCENARIO DOES NOT TAKE THE PANEL.
+    //
+    // Every spawn selected itself, which is right for a launch: the
+    // operator pressed the button, the new case is what they want. It is
+    // wrong for the aircraft that joins the combined run 216 seconds in.
+    // That one arrived uninvited, threw the operator off the incursion
+    // they were working and put a scheduled arrival in the panel in its
+    // place, mid-incident.
+    //
+    // The aircraft stays on the map and stays clickable. Opening it is a
+    // decision the operator makes, not one the simulation makes for
+    // them.
+    //
+    // Scoped to allowConcurrent, which is the flag that already means
+    // "joining something already live", and only when the operator has a
+    // live case open. Selecting a stale closed case is not worth
+    // protecting, so a launch into that still takes the panel.
+    const _curSel = getSelectedEventId();
+    const _curSelLive = !!_curSel && EVENTS.find(e => e.id === _curSel)?.status === 'active';
+    if (!opts.allowConcurrent || !_curSelLive) selectEvent(eventId);
     updateSimButton();
   }
 
