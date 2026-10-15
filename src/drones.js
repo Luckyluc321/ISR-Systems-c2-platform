@@ -33,23 +33,35 @@ import { monoNow } from './sim_clock.js';
 // and unverifiable; the constants below are both.
 const _HOLD = {
   arp:      { lat: 55.618, lon: 12.647 },  // airport reference point
-  v:        118,      // m/s. 425 km/h, about 229 kt at this level, inside
-                      // the 230 kt limit for holding below 14,000 ft. The
-                      // 900-odd km/h figure is cruise at 11,000 m, not a
-                      // hold. This airframe is an A320neo.
+  // IT HAS TO LOOK LIKE AN APPROACH BEFORE IT LOOKS LIKE A HOLD.
+  //
+  // The previous version spawned 30 km out at 1150 m and stayed there,
+  // which is not an approach, it is an aeroplane flying in a straight
+  // line a long way from an airport. Nothing about it said "this one is
+  // about to land", so the turn did not read as anything being
+  // abandoned.
+  //
+  // So it now flies the real profile: lined up on the extended 04R
+  // centreline, descending 1570 m to 760 m across 16 km, which is 2.9
+  // degrees and therefore an ordinary glide path. By the time the news
+  // reaches it the aircraft is 14 km out and through 760 m, visibly
+  // committed. That is the approach the turn interrupts.
+  v:        100,      // m/s. 360 km/h, about 194 kt, which is a normal
+                      // speed to be held at 14 km out. The 900-odd km/h
+                      // figure is cruise at 11,000 m. This is an A320neo
   inbound:  41,       // 04R inbound course. Arrives from the southwest
   spawnM:   30000,    // 30 km out, airborne long before the detection at t=8
-  straightS: 90,      // seconds inbound before the turn. The first sensor
-                      // has the formation at t=8 and three hold it by
-                      // t=26, so the escalation lands well before this
-  orbitR:   4500,     // 4.5 km. At 118 m/s that is 17.5 degrees of bank
-                      // and a four minute lap, which reads as circling.
-                      // The 9 km version only asked for 9 degrees and
-                      // looked almost straight
+  straightS: 160,     // seconds of visible approach before the turn. The
+                      // first sensor has the formation at t=8 and three
+                      // hold it by t=26, so detection, escalation and the
+                      // tower's call all land inside this leg
+  orbitR:   3000,     // 3 km. At 100 m/s that is 18.8 degrees of bank and
+                      // a three minute lap. The 9 km version asked for 9
+                      // degrees and looked like straight flight
   laps:     2,
   dt:       0.25,     // sample interval. See the note above
-  altFrom:  1150,
-  altTo:    1070,
+  altFrom:  1570,     // 30 km out on a 3 degree path
+  altTo:    760,      // 14 km out, where the descent is stopped
 };
 
 function _cphHoldPath() {
@@ -624,9 +636,9 @@ export const TEMPLATES = {
   // initial thirty minutes on a confirmed sighting. Nobody flies them
   // down to a go-around if there is time not to.
   //
-  // HELD OVER THE WATER, SOUTHWEST, IN KOGE BUGT.
+  // A NORMAL APPROACH, INTERRUPTED. HELD OVER KOGE BUGT.
   //
-  // Three attempts got this wrong and each one is worth writing down.
+  // Four attempts got this wrong and each one is worth writing down.
   //
   // A published-fix racetrack on the approach side is what the incident
   // reports actually describe, and it read as an aircraft that had gone
@@ -637,29 +649,30 @@ export const TEMPLATES = {
   // bug. No lap around CPH avoids land.
   //
   // A 9 km circuit asks for 9 degrees of bank, which on screen is
-  // indistinguishable from flying straight. It did not look like
-  // holding because at that radius it barely is.
+  // indistinguishable from flying straight.
   //
-  // So: southwest, over open water in Koge Bugt, 15 to 24 km out. The
-  // aircraft turns right off the 041 inbound, which is the direction
-  // that takes it away from both the city and the field, and never
-  // crosses a coastline.
+  // And none of them looked like an APPROACH first. An aeroplane 30 km
+  // out holding 1150 m is not on approach, it is just flying, so the
+  // turn interrupted nothing. That is the whole beat: it has to be
+  // visibly going to land before being told it cannot.
   //
-  // THE TURN IS THE ORBIT. 4.5 km radius at 118 m/s is 1.50 degrees a
-  // second and 17.5 degrees of bank, held from the moment it rolls in
-  // until the clip ends. Two laps, four minutes each. There is no entry
-  // arc because there is nothing to join: the first turn IS the circle.
-  // Measured on the generated path: 0.000 deg/s down the inbound leg,
-  // then a flat 1.502 right, all the way.
+  // So it flies the real profile, lined up on the extended 04R
+  // centreline, 1570 m down to 760 m across 16 km. That is 2.9 degrees,
+  // an ordinary glide path. At 14 km the news reaches it and it turns
+  // right, away from both the city and the field, and holds over open
+  // water in Koge Bugt between 11 and 17 km out. It never crosses a
+  // coastline and it never enters the final approach segment.
+  //
+  // THE TURN IS THE ORBIT. 3 km radius at 100 m/s is 1.91 degrees a
+  // second and 18.8 degrees of bank, held from the roll-in to the end.
+  // Two laps, three minutes each. There is no entry arc because there
+  // is nothing to join: the first turn IS the circle. Measured on the
+  // generated path: 0.000 deg/s down the approach, then a flat 1.910
+  // right, all the way.
   //
   // See _cphHoldPath above for why the path is generated rather than
   // typed, and what a corner between two waypoints does to an airframe
-  // whose bank is derived from its yaw rate.
-  //
-  // SPEED IS A HOLDING SPEED, NOT A CRUISE. 118 m/s is 425 km/h, about
-  // 229 kt at this level, inside the 230 kt limit for holding below
-  // 14,000 ft. The 900-odd km/h figure is cruise at 11,000 m. Nothing
-  // holds at that speed, and this airframe is an A320neo.
+  // whose bank is derived from its own yaw rate.
   cph_jet_hold_atc: {
     droneType: 'Commercial airliner (SAS 743, A320neo)',
     platform: 'jet',
@@ -679,7 +692,7 @@ export const TEMPLATES = {
       rfMatch: 'SAS743 A320neo, flight plan match',
       modality: 'Cooperative transponder',
       evidenceSize: '1.2 MB',
-      note: 'Scheduled arrival on 04R, inbound from the southwest and 30 km out when the formation was detected. The first sensor had it at 8 seconds and three were holding it by 26, so the approach was never commenced. The aircraft was turned right, away from the field and the city, and is holding over Koge Bugt between 15 and 24 km out in contact with the tower, waiting on the next approach slot.',
+      note: 'Scheduled arrival on 04R. Established on the approach, lined up and descending on a 2.9 degree path, and 14 km out through 760 m when the tower turned it off. The first sensor had the formation at 8 seconds and three were holding it by 26, so the call reached the crew while the aircraft was still well outside the final approach segment. It turned right, away from the city and the field, and is holding over Koge Bugt between 11 and 17 km out in contact with the tower, waiting on the next approach slot.',
     },
     // Generated above. Entry arc plus one anticlockwise lap, sampled at
     // 0.25 s so the heading changes continuously and the bank holds
