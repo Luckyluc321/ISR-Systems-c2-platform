@@ -304,6 +304,51 @@ the glideslope gradient at the threshold (50 ft) to 148 fpm at the
 wheels, touching down 450 m in, inside the touchdown zone markings the
 orthophoto shows.
 
+## 8b. A heading derived from one frame cannot curve
+
+The model's heading target is `-atan2(dLon, dLat)` across two
+consecutive frames. On a straight segment that direction never changes,
+so the heading is constant inside the segment and steps at the corner.
+The airliner rig derives bank from the yaw rate it sees
+(`coordinatedBank`, `atan(v omega / g)`), so a path of straight legs
+makes the aircraft snap flat through a turn and then roll afterwards,
+and a 24-point circle rolls in at every waypoint and levels out in
+between while still turning.
+
+Resolution is the fix, not smoothing. `cph_jet_hold_atc` generates its
+path at 0.25 s a point (`_cphHoldPath` in `drones.js`), which puts each
+heading step at about 0.19 degrees, below what the filter chain settles
+in. Measured on the result: 0.000 deg/s down the approach, a flat 1.502
+deg/s through the orbit.
+
+Do not round generated coordinates. Six decimals is 0.11 m, which is six
+per cent of the 1.9 m an airliner covers in a frame, and it showed up as
+plus or minus a degree a second of yaw jitter on a turn asking for 1.73.
+
+## 8c. Third-party liveries have to come off before anything ships
+
+`a320_noskin.glb` arrived in Indonesian presidential livery: REPUBLIK
+INDONESIA titles down both sides, two Garuda crests, the A-001
+registration in four places, a gold star-and-wreath on each side of the
+fin, and five flag patches. `scripts/strip_airliner_livery.py` removes
+all of it and keeps the red and gold scheme, because a plain white
+aircraft reads as a placeholder.
+
+Two things in there are worth reusing:
+
+- **Fill from paint, not from the adjacent pixel.** Taking the column
+  either side of a region smeared a cabin window across the fuselage
+  wherever a row happened to end on one. Take the median of a ring
+  around the region, then have each row search outward for the nearest
+  pixel close to it.
+- **Pad the replacement to the original byte length.** Each cleaned PNG
+  is smaller, so a `tEXt` chunk pads it to match exactly and it is
+  written in place. Every `bufferView` offset stays valid and the file
+  size does not change. The alternative is rebuilding the buffer and
+  rewriting 1,394 accessor offsets.
+
+Restore with `git checkout public/aircraft/a320_noskin.glb`.
+
 ## 9. Propeller spin and attitude, outside Cesium
 
 `scripts/blender_drone_flight_demo.py` runs inside Blender headless and
