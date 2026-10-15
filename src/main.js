@@ -13131,7 +13131,22 @@ async function main() {
   // modality quorum, drone-vs-bird discriminators) in one place without
   // hunting call sites.
   // ═══════════════════════════════════════════════════════════════════
-  function _shouldAutoDetect(lat, lon, altM) {
+  // UNDETECTABLE, PER EVENT. The WITHOUT ISR clip needs an airport with
+  // no detection at all: no DETECTED trigger, no contributing sensors,
+  // no card in the ledger. Hiding the sensor dots was only cosmetic.
+  //
+  // One gate does nearly all of it. With this false the track never
+  // enters coverage as far as the system is concerned, so `detected`
+  // stays false, filteredEvents() holds it out of the alert strip and
+  // the receiver inbox, no sensor is ever credited, and the DETECTED
+  // toast never fires. That machinery already existed for coverage-gated
+  // templates and is reused rather than rebuilt.
+  //
+  // STAMPED ON THE EVENT, NOT THE TEMPLATE, because both combined
+  // scenarios fly the SAME swarm template. A template flag would darken
+  // the WITH ISR clip too, which is the opposite of its point.
+  function _shouldAutoDetect(lat, lon, altM, event = null) {
+    if (event && event._undetectable) return false;
     return _anySensorSeesPoint(lat, lon, altM);
   }
 
@@ -18118,7 +18133,7 @@ async function main() {
         // Lucas's rule: symbol visible IFF drone inside ANY sensor cov at ANY site.
         // Uniform across every event type. beingChased keeps missile
         // targets visible through terminal chase.
-        const leadInCov = _shouldAutoDetect(p.lat, p.lon, p.alt);
+        const leadInCov = _shouldAutoDetect(p.lat, p.lon, p.alt, event);
         // Suppress the lead billboard while the operator is POV'd inside
         // this drone (single-drone events use state.billboard as the POV
         // target). Without this the tick loop re-shows the billboard
@@ -18142,9 +18157,13 @@ async function main() {
         // Opt-in terrain-relative altitude. See the position assignment
         // below for why this is a template flag and not a global fix.
         const _terrainRel = !!(TEMPLATES[event.templateKey]?.terrainRelativeAlt);
+        // An undetectable track is still THERE. The viewer watches the
+        // airport, not the console, so the drones fly on screen while the
+        // system shows nothing. That gap is the entire clip.
+        const _undet = !!event._undetectable;
         const shouldShow = (leadDown || povSuppressed) ? false : (state.closedAt
           ? false
-          : (leadInCov || beingChased || _coop));
+          : (leadInCov || beingChased || _coop || _undet));
         state.billboard.show = shouldShow;
         state.shadow.show = shouldShow && !povSuppressed;
         // Also hide the lead's trail polyline once the lead is dead —
@@ -18186,7 +18205,10 @@ async function main() {
           const leadCur  = { lat: p.lat, lon: p.lon, alt: p.alt };
           const leadPrev = state._leadMarkerPrevPos || leadCur;
           const label = state.leadSwarmMember?.model || event.droneType || 'target';
-          processDroneSiteMarkers(event, state, 'lead', leadCur, leadPrev, label);
+          // No markers when nothing can see it. A perimeter pin from an
+          // undetectable track would be the system claiming an
+          // observation it never made.
+          if (!event._undetectable) processDroneSiteMarkers(event, state, 'lead', leadCur, leadPrev, label);
           state._leadMarkerPrevPos = leadCur;
         }
         // ALTITUDE DATUM. fromDegrees' third argument is a height above
@@ -18523,7 +18545,7 @@ async function main() {
         // where EXIT sometimes means "left the site" and sometimes means
         // "we stopped hearing it" cannot be read. Coverage transitions
         // keep their own markers (OUT OF RANGE, REACQUIRED).
-        _updatePerimeterCrossings(event, state, isInside, p);
+        if (!event._undetectable) _updatePerimeterCrossings(event, state, isInside, p);
 
         // ENTRY marker on first inside crossing. Multi-site tracks use
         // processPerSiteMarkers for all sites (including origin) so this
@@ -18768,7 +18790,7 @@ async function main() {
               && (!state._leadLastSampleMs || (nowMs - state._leadLastSampleMs) >= _sampleIntervalForEvent(event))) {
             const _template_lead = TEMPLATES[event.templateKey];
             const _leadSlot = _template_lead?.swarm?.formation?.[0] || {};
-            const _leadInCov = _shouldAutoDetect(p.lat, p.lon, p.alt);
+            const _leadInCov = _shouldAutoDetect(p.lat, p.lon, p.alt, event);
             // Sticky ever-detected flag on the lead wrapper (matches
             // wingmen). Roster filter reads this to show only drones
             // that have been detected at least once.
@@ -19043,7 +19065,7 @@ async function main() {
           // the drone (points to where it CAME from), not forward. The
           // tip-cue calculation below uses the drone's own position for
           // coverage entry, no forward projection needed.
-          const inCov = _shouldAutoDetect(pos.lat, pos.lon, pos.alt);
+          const inCov = _shouldAutoDetect(pos.lat, pos.lon, pos.alt, event);
           const tipInCov = false;
           // Sticky "ever detected" flag — once a drone has been in any
           // sensor coverage, it stays in the swarm roster even after it
@@ -19081,7 +19103,7 @@ async function main() {
           // alone decides and the stagger comes through. Once the track
           // stops AND the case is closed there is nothing left to
           // update, which is the freeze this guards against.
-          const _swVisible = swShouldShow && (isTrackLive(event.id) || !state.closedAt);
+          const _swVisible = (swShouldShow || event._undetectable) && (isTrackLive(event.id) || !state.closedAt);
           sw.billboard.show = _swVisible && !sw._povActive;
           // Trail visibility mirrors the drone billboard — as soon as
           // the drone drops out of coverage (billboard hides), its
@@ -19352,7 +19374,7 @@ async function main() {
           const swKey = `sw${i}`;
           sw._id = swKey;
           const swCur = { lat: pos.lat, lon: pos.lon };
-          processDroneSiteMarkers(event, state, swKey, swCur, sw._markerPrevPos, sw.model || sw.role);
+          if (!event._undetectable) processDroneSiteMarkers(event, state, swKey, swCur, sw._markerPrevPos, sw.model || sw.role);
           sw.prevPos = { lat: pos.lat, lon: pos.lon };
           sw.prevTs = nowMs;
         }
@@ -19778,8 +19800,17 @@ async function main() {
       // detection event for an object no sensor can hear.
       coverageGatedTrack: !!template.multiSite || !!template.coverageGated
         || templateKey === 'cruise_missile_to_amalienborg',
-      detected: (!!template.multiSite || !!template.coverageGated
-        || templateKey === 'cruise_missile_to_amalienborg') ? false : true,
+      // An undetectable run never becomes detected, so it never reaches
+      // the alert strip or a receiver inbox. filteredEvents() already
+      // holds back anything with detected === false; this just makes sure
+      // nothing can flip it, since _shouldAutoDetect returns false for it
+      // and that flip only happens on first coverage entry.
+      detected: opts.undetectable ? false
+        : ((!!template.multiSite || !!template.coverageGated
+            || templateKey === 'cruise_missile_to_amalienborg') ? false : true),
+      // Scenario-scoped, never a template property: both combined runs
+      // fly the same swarm and only one of them is dark.
+      _undetectable: !!opts.undetectable,
       // Peak cardinality of the incident. A 5-drone swarm is ONE event
       // (one lifecycle) but its history record must not read as a
       // single-drone incident — precedent_index buckets this into
@@ -21008,7 +21039,10 @@ async function main() {
       { key: '__combo_cph_incursion', label: 'COMBINED · WITHOUT ISR · swarm on 04R + crew-spotted go-around', cls: 'critical',
         hideSensors: true,
         combo: [
-          { key: 'cph_swarm_runway_incursion' },
+          // Dark to the platform. The airliner is NOT, because a
+          // transponder is not our sensor grid and the airport still has
+          // its own traffic picture.
+          { key: 'cph_swarm_runway_incursion', undetectable: true },
           // Spawned when the swarm's OWN clock reads 216 s, so the two
           // meet over the runway however the wall clock behaves.
           // 38, not 40. The crew reacts at 480 m instead of 425, which is
@@ -21185,7 +21219,7 @@ async function main() {
         const _rest = selEntry.combo.slice(1).filter(c => c.atTSec != null);
         simAfter(() => {
           const _before = new Set(droneState.keys());
-          window.__spawnDrone(_first.key);
+          window.__spawnDrone(_first.key, { undetectable: !!_first.undetectable });
           const _leadId = [...droneState.keys()].find(k => !_before.has(k)) || null;
           console.log(`[combo] lead ${_leadId ? 'spawned' : 'FAILED'} ${_first.key}`);
           if (!_leadId) { toast(`Combined scenario: ${_first.key} failed to spawn`, 'err'); return; }
@@ -21198,7 +21232,7 @@ async function main() {
               if (lead.tSec < c.atTSec) continue;
               _waiting.delete(c);
               const n0 = droneState.size;
-              window.__spawnDrone(c.key, { allowConcurrent: true });
+              window.__spawnDrone(c.key, { allowConcurrent: true, undetectable: !!c.undetectable });
               const ok = droneState.size > n0;
               console.log(`[combo] ${ok ? 'spawned' : 'FAILED to spawn'} ${c.key} at lead tSec ${Math.round(lead.tSec)}`);
               toast(ok ? `${TEMPLATES[c.key]?.droneType || c.key} on the board`
