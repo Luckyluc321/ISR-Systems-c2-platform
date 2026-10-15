@@ -59,7 +59,7 @@ import re
 import sys
 
 import bpy
-from mathutils import Quaternion, Vector
+from mathutils import Matrix, Quaternion, Vector
 
 G = 9.81                      # m/s^2, the model is assumed to be in metres
 PROP_NAME = re.compile(r"(prop|rotor|blade|elic|helic)", re.I)
@@ -252,17 +252,24 @@ def rig_props(groups, root, centre, fwd, right, rps, fps, frame_end):
         axis = Vector((0, 0, 0))
         axis[axis_i] = 1.0
 
+        # Explicit matrices throughout. A freshly made object's
+        # matrix_world is identity until the depsgraph runs, so reading
+        # it back here to build the parent inverse parented every blade
+        # with a zero offset and the hub's translation was then applied
+        # twice: the blades sat one hub-offset outboard and, once the rig
+        # moved, drifted loose of the airframe altogether.
         hub = bpy.data.objects.new(f"PropHub_{i}", None)
         hub.empty_display_size = 0.05
         bpy.context.scene.collection.objects.link(hub)
-        hub.location = hub_pos
+        hub_world = Matrix.Translation(hub_pos)
         hub.parent = root
         hub.matrix_parent_inverse = root.matrix_world.inverted()
+        hub.matrix_basis = hub_world            # root_world @ root_world^-1 @ this
         for o in g["objs"]:
-            mw = o.matrix_world.copy()
+            mw = o.matrix_world.copy()           # valid: the import was evaluated
             o.parent = hub
-            o.matrix_parent_inverse = hub.matrix_world.inverted()
-            o.matrix_world = mw
+            o.matrix_parent_inverse = hub_world.inverted()
+            o.matrix_basis = mw                  # hub_world @ hub_world^-1 @ mw = mw
 
         # DJI sense: front-right and rear-left anticlockwise from above.
         rel = hub_pos - centre
@@ -424,7 +431,7 @@ def stage(root, size, phase_frames, res):
     scene.render.resolution_y = h
     scene.render.engine = "BLENDER_EEVEE" if hasattr(bpy.types, "SceneEEVEE") else "BLENDER_EEVEE_NEXT"
     scene.render.use_motion_blur = True
-    scene.render.motion_blur_shutter = 0.5
+    scene.render.motion_blur_shutter = 0.3
     try:
         scene.eevee.motion_blur_steps = 8
     except AttributeError:
@@ -439,7 +446,12 @@ def main():
     ap.add_argument("input")
     ap.add_argument("--out", required=True)
     ap.add_argument("--forward", default="-Y", help="nose axis in Blender space: +X -X +Y -Y")
-    ap.add_argument("--prop-rps", type=float, default=92.0, help="Mavic 3 hover is ~5500 rpm")
+    ap.add_argument("--prop-rps", type=float, default=18.0,
+                    help="revolutions per second. An Air 3 hovers at ~92, but at 30 fps with "
+                         "motion blur that is over a turn per frame and renders as a clear disc, "
+                         "which is what a camera sees and reads as no propellers at all. 18 gives "
+                         "a 65 degree blur arc per frame: visibly spinning blades. Pass 92 for "
+                         "the physical rate.")
     ap.add_argument("--size-m", type=float, default=None,
                     help="real length of the airframe's longest extent in metres; the file is "
                          "scaled to it so m/s and g mean what they say")

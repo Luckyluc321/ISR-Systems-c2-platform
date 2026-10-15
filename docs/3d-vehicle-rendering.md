@@ -308,9 +308,9 @@ orthophoto shows.
 
 `scripts/blender_drone_flight_demo.py` runs inside Blender headless and
 turns any drone file (`.blend`, `.glb`, `.fbx`, `.obj`) into an animated
-`.blend` plus an MP4: props spinning about their own hubs at a hover rate
-(92 rps, diagonals counter-rotating in DJI sense, front-right and
-rear-left anticlockwise from above) and the airframe flying hover,
+`.blend` plus an MP4: props spinning about their own hubs (diagonals
+counter-rotating in DJI sense, front-right and rear-left anticlockwise
+from above) and the airframe flying hover,
 forward, a banked 180 degree turn, brake, backward, slide right, slide
 left, descend, climb.
 
@@ -327,8 +327,14 @@ velocity.
 ```
 /Applications/Blender.app/Contents/MacOS/Blender -b \
   --python scripts/blender_drone_flight_demo.py -- IN.glb --out OUT_DIR \
-  --forward +Y --size-m 0.5 --render --stills [--prop-rps 92] [--props REGEX]
+  --forward +Y --size-m 0.5 --render --stills [--prop-rps 18] [--props REGEX]
 ```
+
+- `--prop-rps` defaults to 18, not the physical 92 an Air 3 hovers at.
+  At 30 fps with motion blur, 92 is over a turn per frame and renders as
+  a clear disc, which is what a camera sees and what a viewer reads as
+  "the propellers are gone". 18 is a 65 degree blur arc per frame:
+  blades visibly spinning. Pass 92 for the physical rate.
 
 - `--forward` is the nose axis in Blender space. glTF's +Z nose imports
   as -Y, which is the default; the DJI Air 3 export has its nose on +Y.
@@ -347,7 +353,15 @@ Verified on `assault_drone_concept.glb` (named rotors) and on
 `dji_air_3.glb` (polyman, Sketchfab, CC-BY-4.0, 341 unnamed meshes) by
 reading rotor hub heights at each phase midpoint, not by looking at one
 still. The Air 3's eight blades are found at the four motor positions to
-within a millimetre of the model's own motor nodes.
+within a millimetre of the model's own motor nodes, and every blade is
+checked to stay half a blade length from its hub across the flight.
+
+Blades are reparented with explicit matrices. A freshly made object's
+`matrix_world` is identity until the depsgraph runs, and the first
+version read it back to build the parent inverse, so each blade carried
+the hub offset twice and drifted loose of the airframe as the rig moved.
+Verified by rendering a frame without motion blur: four propellers a
+metre from the aircraft. Blur hid it.
 
 The DJI Mavic 3 Pro listing by ikad2023/dika3d (Sketchfab, now Fab and
 Superhive) is a paid asset at USD 60 and is not downloadable without
