@@ -551,21 +551,34 @@ export const TEMPLATES = {
       note: 'Scheduled arrival on 04R. Broke off the approach at 398 m, 7.6 km from the threshold, after the runway incursion was passed to the tower. Standard missed approach, climbed on runway heading and turned out over the Oresund.',
     },
     waypoints: [
-      // BREAKS OFF WHERE THE CREW COULD ACTUALLY SEE THEM.
+      // THE BREAK-OFF IS WHERE THE CREW COULD ACTUALLY SEE THEM.
       //
-      // 63 m at 1.2 km, down from 94 m at 1.8 km. The point of the shot
-      // is that the drones are visible from the flight deck and the
-      // crew reacts, so breaking off while still most of two kilometres
-      // short read as reacting to a radio call rather than to anything
-      // anyone saw.
+      // Lucas's point: a flight deck does not see the big red icons the
+      // operator sees, it sees small grey objects. So the reaction has to
+      // happen at a distance where a 300 mm airframe is visible, not at a
+      // distance where a map symbol is.
       //
-      // Still a flown go-around rather than the 46 m last-second save in
-      // cph_jet_goaround, and roughly at the Cat I minima an approach is
-      // allowed down to.
+      // Measured rather than chosen. With the aircraft breaking off at
+      // 1.2 km the separation to the formation at that moment was 970 m,
+      // which is far too far to have seen anything. Holding the
+      // glideslope down to 700 m from the threshold, at 37 m, puts the
+      // separation at break-off at 425 m, inside the 300 to 500 m Lucas
+      // asked for.
       //
-      // 30 km out at 1572 m on the real extended 04R centreline, 3
-      // degree slope, 66 to 96 m/s. Decision point is its own
-      // t = 371 s, which sets the combined trigger.
+      // THE COST, AND IT IS UNAVOIDABLE. At 425 m, closing at roughly
+      // 100 m/s combined, there are about four seconds. An A320 cannot
+      // climb clear of a drone at 45 m in four seconds, so the closest
+      // approach becomes 176 m horizontally with 11 m of vertical gap.
+      // That is not a near miss, it is very nearly a collision.
+      //
+      // Which is the point of this clip. It is the WITHOUT ISR outcome:
+      // nobody warned them, they saw it with their own eyes far too
+      // late, and the margin is whatever physics left. The WITH ISR
+      // version, cph_jet_goaround_atc, breaks off at 7.6 km on a tower
+      // call with 1103 m of separation. The gap between those two
+      // numbers is the argument.
+      //
+      // Decision point is its own t = 378.7 s.
       { lat: 55.38880, lon: 12.29058, alt: 1572, heading: 0, tSec: 0 },   // spawn, 30 km out on the extended 04R centreline
       { lat: 55.42270, lon: 12.34273, alt: 1310, heading: 0, tSec: 59.5 },
       { lat: 55.45660, lon: 12.39489, alt: 1048, heading: 0, tSec: 120.5 },
@@ -574,17 +587,19 @@ export const TEMPLATES = {
       { lat: 55.53117, lon: 12.50964, alt:  472, heading: 0, tSec: 261.3 },
       { lat: 55.54812, lon: 12.53572, alt:  341, heading: 0, tSec: 295 },
       { lat: 55.56168, lon: 12.55658, alt:  236, heading: 0, tSec: 322.8 },
-      { lat: 55.57592, lon: 12.57848, alt:  126, heading: 0, tSec: 352.8 },   // short final, drones in sight
-      { lat: 55.58405, lon: 12.59100, alt:   63, heading: 0, tSec: 371 },   // GO-AROUND. 63 m, 1.2 km out.
-      { lat: 55.58677, lon: 12.59517, alt:   77, heading: 0, tSec: 376.7 },   // power up, descent arrested
-      { lat: 55.59083, lon: 12.60143, alt:  125, heading: 0, tSec: 384.8 },   // climbing
-      { lat: 55.59694, lon: 12.61082, alt:  243, heading: 0, tSec: 396.1 },   // over the threshold
-      { lat: 55.61185, lon: 12.63377, alt:  463, heading: 0, tSec: 421.7 },
-      { lat: 55.62096, lon: 12.67096, alt:  723, heading: 0, tSec: 450 },   // turning right, clear of the field
-      { lat: 55.61996, lon: 12.72631, alt:  993, heading: 0, tSec: 487 },
-      { lat: 55.60806, lon: 12.77963, alt: 1243, heading: 0, tSec: 524.6 },   // outbound over the Oresund
+      { lat: 55.57185, lon: 12.57223, alt:  157, heading: 0, tSec: 344.2 },
+      { lat: 55.57999, lon: 12.58474, alt:   94, heading: 0, tSec: 361.9 },   // short final, still descending
+      { lat: 55.58473, lon: 12.59205, alt:   58, heading: 0, tSec: 372.5 },   // drones now visible from the flight deck
+      { lat: 55.58744, lon: 12.59622, alt:   37, heading: 0, tSec: 378.7 },   // GO-AROUND. 37 m, 700 m out. Last-second.
+      { lat: 55.58948, lon: 12.59935, alt:   59, heading: 0, tSec: 383.3 },   // full power, rotating
+      { lat: 55.59219, lon: 12.60352, alt:  132, heading: 0, tSec: 388.8 },   // over the threshold, climbing hard
+      { lat: 55.59829, lon: 12.61291, alt:  297, heading: 0, tSec: 400.4 },
+      { lat: 55.60846, lon: 12.62856, alt:  557, heading: 0, tSec: 418.2 },
+      { lat: 55.61807, lon: 12.66230, alt:  857, heading: 0, tSec: 444.7 },   // turning right, clear of the field
+      { lat: 55.61775, lon: 12.71870, alt: 1157, heading: 0, tSec: 482.4 },
+      { lat: 55.60653, lon: 12.77306, alt: 1417, heading: 0, tSec: 520.3 },   // outbound over the Oresund
     ],
-    durationSec: 525,
+    durationSec: 520,
   },
 
   cph_swarm_runway_incursion: {

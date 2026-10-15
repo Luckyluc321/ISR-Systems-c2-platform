@@ -20957,7 +20957,7 @@ async function main() {
       { key: 'cph_recon_hostile', label: 'Reconnaissance drone (HALE), hostile', cls: 'recon' },
       { key: 'cph_jet_friendly', label: 'Jet (SAS 743), friendly', cls: 'friendly' },
       { key: 'cph_jet_goaround', label: 'Jet (SAS 743), go-around at 185 ft', cls: 'friendly' },
-      { key: 'cph_jet_goaround_early', label: 'Jet (SAS 743), crew-spotted go-around at 63 m', cls: 'friendly' },
+      { key: 'cph_jet_goaround_early', label: 'Jet (SAS 743), crew-spotted go-around at 37 m', cls: 'friendly' },
       { key: 'cph_jet_goaround_atc', label: 'Jet (SAS 743), ATC-warned go-around at 398 m', cls: 'friendly' },
       { key: 'cph_missile_hostile', label: 'Cruise missile, critical', cls: 'critical' },
       { key: 'cph_missile_inbound_sw', label: 'Cruise missile inbound from SW (continuation)', cls: 'critical' },
@@ -20973,7 +20973,7 @@ async function main() {
           { key: 'cph_swarm_runway_incursion' },
           // Spawned when the swarm's OWN clock reads 216 s, so the two
           // meet over the runway however the wall clock behaves.
-          { key: 'cph_jet_goaround_early', atTSec: 46 },
+          { key: 'cph_jet_goaround_early', atTSec: 40 },
         ] },
       // THE SAME SWARM, THE OTHER OUTCOME. Detected on ingress, airport
       // notified, tower calls the aircraft. It breaks off at 7.6 km with
@@ -21260,7 +21260,7 @@ async function main() {
     cph_recon_hostile:         { threat: 'HALE reconnaissance',    pathLabel: 'High-altitude loiter' },
     cph_jet_friendly:          { threat: 'Jet (SAS 743), friendly',pathLabel: 'Filed airliner route' },
     cph_jet_goaround:          { threat: 'Jet (SAS 743), friendly',pathLabel: 'Missed approach, 04R' },
-    cph_jet_goaround_early:    { threat: 'Jet (SAS 743), friendly',pathLabel: 'Crew-spotted missed approach, 63 m at 1.2 km' },
+    cph_jet_goaround_early:    { threat: 'Jet (SAS 743), friendly',pathLabel: 'Crew-spotted missed approach, 37 m at 700 m' },
     cph_jet_goaround_atc:      { threat: 'Jet (SAS 743), friendly',pathLabel: 'ATC-warned missed approach, 398 m at 7.6 km' },
     __combo_cph_incursion:     { threat: '5-drone swarm + SAS 743', pathLabel: 'WITHOUT ISR, crew spots them at 1.2 km' },
     __combo_cph_incursion_isr: { threat: '5-drone swarm + SAS 743', pathLabel: 'WITH ISR, tower warns at 7.6 km' },
