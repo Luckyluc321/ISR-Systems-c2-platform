@@ -19872,6 +19872,37 @@ async function main() {
   // behaviour depends on it; it exists so a self-contained scenario
   // module can hide entities without this file knowing it exists.
   window.__isr_viewer = viewer;
+  // READ-ONLY AUDIT OF WHAT EVERY LIVE CASE ACTUALLY HOLDS.
+  //
+  // "The sensor list shrank" and "it copied the other drone's list" are
+  // reports about state that the panel shows a filtered, sorted, top
+  // five view of, so the panel cannot tell the two apart. This prints
+  // the state itself: which event is selected, which drone is focused
+  // inside it, and every sensor on every live case with its current
+  // value and its peak.
+  //
+  // Contributing sensors are a property of the CASE, not of one drone
+  // in it, so two members of the same swarm must always show the same
+  // list. Two different numbers means two different events.
+  //
+  //   __isr_sensorAudit()
+  window.__isr_sensorAudit = () => {
+    const sel = getSelectedEventId();
+    const rows = EVENTS.filter(ev => ev.status === 'active').map(ev => {
+      const cs = ev.contributingSensors || [];
+      return {
+        event: ev.id,
+        focused: ev.id === sel ? `YES · drone ${_selectedSwarmIndex + 1}` : '',
+        type: ev.droneType,
+        cls: ev.classification,
+        total: cs.length,
+        online: cs.filter(s => !s.offline).length,
+        sensors: cs.map(s => `${s.id}=${(s.confidence || 0).toFixed(2)}(peak ${(s.peakConfidence || 0).toFixed(2)})`).join('  '),
+      };
+    });
+    console.table(rows);
+    return rows;
+  };
   window.__updateSimButton = updateSimButton;
 
   // ── Sensor + drone click handling ──

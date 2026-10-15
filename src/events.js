@@ -1171,6 +1171,12 @@ export function onFilterChange(fn) {
 }
 
 // ── Helpers ──
+// Ledger ordering for live cases. An unknown classification ranks
+// between hostile and friendly on purpose: it has not been ruled out,
+// so it outranks a confirmed friendly and yields to a confirmed threat.
+const _CLASS_RANK = { hostile: 0, unknown: 1, friendly: 2, resolved: 3 };
+const _THREAT_RANK = { high: 0, medium: 1, low: 2 };
+
 export function filteredEvents() {
   // Only surface events that a real sensor has actually detected. Events
   // in transit but not yet inside any sensor coverage are held back so the
@@ -1181,9 +1187,29 @@ export function filteredEvents() {
     .filter(e => e.detected !== false)
     .filter(e => _visibleToActor(e, _currentActor));   // Phase 3 tenant scope
   const evs = _filter === 'all' ? base : base.filter(e => e.classification === _filter);
+  // RANK LIVE CASES BY WHAT THEY ARE, NOT BY WHICH ARRIVED LAST.
+  //
+  // Active before closed was already right. Among two active cases it
+  // then fell straight to recency, so a friendly airliner sitting
+  // exactly where its flight plan says it should be took the top of the
+  // ledger off a live hostile incursion purely by spawning after it.
+  // On a combined scenario that is the one case the operator is working
+  // being pushed down by the one that needs no decision at all.
+  //
+  // Recency is the right tiebreaker and the wrong first key. Closed
+  // cases keep pure recency, because a record of finished work reads
+  // chronologically.
   return [...evs].sort((a, b) => {
     if (a.status === 'active' && b.status !== 'active') return -1;
     if (b.status === 'active' && a.status !== 'active') return 1;
+    if (a.status === 'active' && b.status === 'active') {
+      const ca = _CLASS_RANK[a.classification] ?? _CLASS_RANK.unknown;
+      const cb = _CLASS_RANK[b.classification] ?? _CLASS_RANK.unknown;
+      if (ca !== cb) return ca - cb;
+      const ta = _THREAT_RANK[a.threat] ?? 3;
+      const tb = _THREAT_RANK[b.threat] ?? 3;
+      if (ta !== tb) return ta - tb;
+    }
     return b.startTime.localeCompare(a.startTime);
   });
 }
