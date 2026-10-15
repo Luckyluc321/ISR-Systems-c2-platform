@@ -863,11 +863,7 @@ export function eventsForDestinations(destIds) {
   const idSet = new Set(destIds);
   return EVENTS
     .filter(e => e.escalations && e.escalations.some(r => idSet.has(r.destinationId)))
-    .sort((a, b) => {
-      if (a.status === 'active' && b.status !== 'active') return -1;
-      if (b.status === 'active' && a.status !== 'active') return 1;
-      return b.startTime.localeCompare(a.startTime);
-    });
+    .sort(_byUrgencyThenRecency);
 }
 
 // ── Notes / reclassification ──
@@ -1177,6 +1173,30 @@ export function onFilterChange(fn) {
 const _CLASS_RANK = { hostile: 0, unknown: 1, friendly: 2, resolved: 3 };
 const _THREAT_RANK = { high: 0, medium: 1, low: 2 };
 
+// ONE ORDERING, USED BY EVERY LEDGER.
+//
+// The operator's alert strip and the receiver's inbox had the same rule
+// written out twice: active first, then newest. Both therefore put a
+// scheduled arrival above a live runway incursion, and fixing one would
+// have left the other, which is exactly how two surfaces drift apart.
+//
+// The receiver side is the one that matters more. A duty officer at the
+// tower opening their inbox mid-incident must not find "Authorised
+// flight, logged, no action" sitting on top of the five drones.
+export function _byUrgencyThenRecency(a, b) {
+  if (a.status === 'active' && b.status !== 'active') return -1;
+  if (b.status === 'active' && a.status !== 'active') return 1;
+  if (a.status === 'active' && b.status === 'active') {
+    const ca = _CLASS_RANK[a.classification] ?? _CLASS_RANK.unknown;
+    const cb = _CLASS_RANK[b.classification] ?? _CLASS_RANK.unknown;
+    if (ca !== cb) return ca - cb;
+    const ta = _THREAT_RANK[a.threat] ?? 3;
+    const tb = _THREAT_RANK[b.threat] ?? 3;
+    if (ta !== tb) return ta - tb;
+  }
+  return b.startTime.localeCompare(a.startTime);
+}
+
 export function filteredEvents() {
   // Only surface events that a real sensor has actually detected. Events
   // in transit but not yet inside any sensor coverage are held back so the
@@ -1199,19 +1219,7 @@ export function filteredEvents() {
   // Recency is the right tiebreaker and the wrong first key. Closed
   // cases keep pure recency, because a record of finished work reads
   // chronologically.
-  return [...evs].sort((a, b) => {
-    if (a.status === 'active' && b.status !== 'active') return -1;
-    if (b.status === 'active' && a.status !== 'active') return 1;
-    if (a.status === 'active' && b.status === 'active') {
-      const ca = _CLASS_RANK[a.classification] ?? _CLASS_RANK.unknown;
-      const cb = _CLASS_RANK[b.classification] ?? _CLASS_RANK.unknown;
-      if (ca !== cb) return ca - cb;
-      const ta = _THREAT_RANK[a.threat] ?? 3;
-      const tb = _THREAT_RANK[b.threat] ?? 3;
-      if (ta !== tb) return ta - tb;
-    }
-    return b.startTime.localeCompare(a.startTime);
-  });
+  return [...evs].sort(_byUrgencyThenRecency);
 }
 
 // Registered per-site display names. Populated by main.js at boot so we
