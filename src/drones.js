@@ -34,66 +34,66 @@ import { monoNow } from './sim_clock.js';
 const _HOLD = {
   arp:      { lat: 55.618, lon: 12.647 },  // airport reference point
   v:        118,      // m/s. 425 km/h, about 229 kt at this level, inside
-                      // the 230 kt limit for holding below 14,000 ft.
-                      // The 900-odd km/h people quote is cruise at
-                      // 11,000 m, not a circuit of an airport.
-  inbound:  41,       // 04R inbound course
-  joinRad:  221,      // joins the circuit abeam southwest
-  circuitR: 9000,     // 9 km from the field. It is 3 km across, so this
-                      // is never near the thing it is avoiding
-  bankDeg:  20,       // bank held through the entry turn
-  straight: 40,       // seconds inbound before the tower turns it. The
-                      // first sensor has the formation at t=8 and three
-                      // hold it by t=26, so the escalation lands first
-  dt:       0.25,     // sample interval
+                      // the 230 kt limit for holding below 14,000 ft. The
+                      // 900-odd km/h figure is cruise at 11,000 m, not a
+                      // hold. This airframe is an A320neo.
+  inbound:  41,       // 04R inbound course. Arrives from the southwest
+  spawnM:   30000,    // 30 km out, airborne long before the detection at t=8
+  straightS: 90,      // seconds inbound before the turn. The first sensor
+                      // has the formation at t=8 and three hold it by
+                      // t=26, so the escalation lands well before this
+  orbitR:   4500,     // 4.5 km. At 118 m/s that is 17.5 degrees of bank
+                      // and a four minute lap, which reads as circling.
+                      // The 9 km version only asked for 9 degrees and
+                      // looked almost straight
+  laps:     2,
+  dt:       0.25,     // sample interval. See the note above
   altFrom:  1150,
   altTo:    1070,
 };
 
 function _cphHoldPath() {
-  const { arp, v, inbound, joinRad, circuitR, bankDeg, straight, dt, altFrom, altTo } = _HOLD;
+  const { arp, v, inbound, spawnM, straightS, orbitR, laps, dt, altFrom, altTo } = _HOLD;
   const RLAT = 111320, RLON = 111320 * Math.cos(arp.lat * Math.PI / 180);
   const rad = d => d * Math.PI / 180;
   const at = (c, b, d) => ({ lat: c.lat + (d * Math.cos(rad(b))) / RLAT,
                              lon: c.lon + (d * Math.sin(rad(b))) / RLON });
 
-  // ANTICLOCKWISE, SO THE ENTRY IS A RIGHT TURN. Joining a clockwise
-  // circuit from this inbound course means turning LEFT, which sends the
-  // aircraft inland across the airport it is being held away from.
-  // Right is out over the sound.
-  const tangent = (joinRad - 90 + 360) % 360;        // rollout heading, 131
-  const rTurn   = (v * v) / (9.81 * Math.tan(rad(bankDeg)));   // radius 20 deg of bank gives
-  const turnS   = (Math.PI / 2) / (v / rTurn);       // time for the 90 deg turn
-  const lapS    = (2 * Math.PI * circuitR) / v;
-
-  const J = at(arp, joinRad, circuitR);                        // rollout point
-  const C = at(J, (tangent + 90) % 360, rTurn);                // entry turn centre
-  const S = at(C, (inbound - 90 + 360) % 360, rTurn);          // where the turn begins
-  const spawn = at(S, (inbound + 180) % 360, v * straight);
+  // THE TURN IS THE ORBIT. There is no separate entry arc, because there
+  // does not need to be one: the moment the aircraft starts a steady
+  // right turn at 4.5 km it is already flying the circle it will hold
+  // on. One rate, one bank, no join, nothing to roll out of and back
+  // into. The earlier version turned right to join a circuit that then
+  // ran the other way, so it rolled right, rolled left, and sat at 9
+  // degrees for eight minutes.
+  //
+  // RIGHT, AND IT STAYS OVER WATER. Turning right from the 041 inbound
+  // puts the orbit southwest of the field, in Koge Bugt. A circle
+  // centred ON the airport is inland across its whole western half, and
+  // that is geometry rather than a bug: Copenhagen and Amager are there.
+  const spawn   = at(arp, (inbound + 180) % 360, spawnM);
+  const turnAt  = at(spawn, inbound, v * straightS);
+  const centre  = at(turnAt, (inbound + 90) % 360, orbitR);   // centre is to the RIGHT
+  const rateDeg = (v / orbitR) * 180 / Math.PI;               // constant, so the bank is constant
+  const startB  = (inbound - 90 + 360) % 360;                 // bearing of the aircraft FROM the centre
+  const orbitS  = laps * (2 * Math.PI * orbitR) / v;
 
   const wp = [];
-  // NO COORDINATE ROUNDING. Six decimals is 0.11 m, which sounds
-  // harmless until you divide it by the 1.9 m the aircraft covers in one
-  // frame: six per cent of the position delta the heading is derived
-  // from, which came out as plus or minus a degree a second of yaw
-  // jitter on a turn that only asks for 1.73. Full precision costs
-  // nothing here because the array is computed, not typed.
+  // NO COORDINATE ROUNDING. Six decimals is 0.11 m, which is six per
+  // cent of the 1.9 m the aircraft covers in one frame, and the heading
+  // is derived from exactly that delta. It showed up as plus or minus a
+  // degree a second of yaw jitter. Full precision costs nothing in a
+  // computed array.
   const push = (p, t, alt) => wp.push({
     lat: p.lat, lon: p.lon, alt: Math.round(alt), heading: 0, tSec: +t.toFixed(2),
   });
 
-  for (let t = 0; t < straight; t += dt) {
-    push(at(spawn, inbound, v * t), t, altFrom);
+  for (let t = 0; t < straightS; t += dt) {
+    const f = t / straightS;
+    push(at(spawn, inbound, v * t), t, altFrom + (altTo - altFrom) * f);
   }
-  const bS = (inbound - 90 + 360) % 360;
-  for (let t = 0; t <= turnS; t += dt) {
-    const f = t / turnS;
-    push(at(C, (bS + 90 * f) % 360, rTurn), straight + t, altFrom + (altTo - altFrom) * f);
-  }
-  const t0 = straight + turnS;
-  for (let t = dt; t <= lapS; t += dt) {
-    const b = (joinRad - 360 * (t / lapS) + 720) % 360;        // anticlockwise
-    push(at(arp, b, circuitR), t0 + t, altTo);
+  for (let t = 0; t <= orbitS; t += dt) {
+    push(at(centre, (startB + rateDeg * t) % 360, orbitR), straightS + t, altTo);
   }
   return wp;
 }
@@ -624,49 +624,42 @@ export const TEMPLATES = {
   // initial thirty minutes on a confirmed sighting. Nobody flies them
   // down to a go-around if there is time not to.
   //
-  // A CIRCUIT OF THE FIELD, NOT A RACETRACK OFF TO ONE SIDE.
+  // HELD OVER THE WATER, SOUTHWEST, IN KOGE BUGT.
   //
-  // First version was a standard published-fix hold 21 km out on the
-  // approach side, which is what the incident reports describe. Lucas
-  // chose a wide circuit of the airport instead, and for this piece he
-  // is right: the whole value of the early warning is legible in one
-  // frame when the formation is over the runway and the arrival is
-  // visibly orbiting the entire field, waiting on a slot. A racetrack
-  // parked off to the southwest reads as an aircraft that went
-  // somewhere else.
+  // Three attempts got this wrong and each one is worth writing down.
   //
-  // WIDE ENOUGH TO STAY OUT OF IT. The circuit is 9 km from the airport
-  // reference point. The field is about 3 km across and the drone
-  // activity is inside the perimeter, so the aircraft is never near the
-  // thing it is avoiding. Circling tight overhead would be the mistake.
+  // A published-fix racetrack on the approach side is what the incident
+  // reports actually describe, and it read as an aircraft that had gone
+  // somewhere else rather than one waiting on this airport.
   //
-  // IT TURNS RIGHT, AWAY FROM THE FIELD. The circuit is flown
-  // anticlockwise for that reason alone. Joining a clockwise circuit
-  // from this inbound course means a left turn, which sends a wide-body
-  // inland across the airport it is being kept away from. Right is out
-  // over the sound.
+  // A circuit centred ON the airport reads perfectly and crosses
+  // Copenhagen and Amager on its western half. That is geometry, not a
+  // bug. No lap around CPH avoids land.
   //
-  // THE TURN IS AN ARC, AND THE ARC IS THE BANK. A 90 degree turn at 20
-  // degrees of bank has a radius of v squared over g tan 20, which at
-  // 118 m/s is 3.90 km, and it takes 52 seconds at 1.73 degrees a
-  // second. That is not decoration. The rig derives roll from the yaw
-  // rate it actually sees (coordinatedBank, atan(v omega / g)), so the
-  // geometry IS what banks the aircraft, and a constant yaw rate is
-  // what holds the bank steady through the turn. Measured on the
-  // generated path: 0.000 deg/s on the inbound leg, a flat 1.734 deg/s
-  // right through the entry, a flat 0.751 deg/s left round the circuit.
-  // That is 20.0 degrees of bank in the turn and 9.0 on the circuit.
+  // A 9 km circuit asks for 9 degrees of bank, which on screen is
+  // indistinguishable from flying straight. It did not look like
+  // holding because at that radius it barely is.
   //
-  // See _cphHoldPath above for why this is generated rather than typed,
-  // and what a corner between two waypoints does instead.
+  // So: southwest, over open water in Koge Bugt, 15 to 24 km out. The
+  // aircraft turns right off the 041 inbound, which is the direction
+  // that takes it away from both the city and the field, and never
+  // crosses a coastline.
   //
-  // SPEED IS A HOLDING SPEED, NOT A CRUISE. 118 m/s is 425 km/h, which
-  // is about 229 kt indicated at this level and sits just inside the
-  // 230 kt limit for holding below 14,000 ft. The 900-odd km/h figure
-  // people quote is cruise at 11,000 m. Nothing flies a circuit of an
-  // airport at that speed. On the circuit itself the bank settles at 9
-  // degrees, which is the correct coordinated angle for 9 km at this
-  // speed. One lap is 56.5 km and takes eight minutes.
+  // THE TURN IS THE ORBIT. 4.5 km radius at 118 m/s is 1.50 degrees a
+  // second and 17.5 degrees of bank, held from the moment it rolls in
+  // until the clip ends. Two laps, four minutes each. There is no entry
+  // arc because there is nothing to join: the first turn IS the circle.
+  // Measured on the generated path: 0.000 deg/s down the inbound leg,
+  // then a flat 1.502 right, all the way.
+  //
+  // See _cphHoldPath above for why the path is generated rather than
+  // typed, and what a corner between two waypoints does to an airframe
+  // whose bank is derived from its yaw rate.
+  //
+  // SPEED IS A HOLDING SPEED, NOT A CRUISE. 118 m/s is 425 km/h, about
+  // 229 kt at this level, inside the 230 kt limit for holding below
+  // 14,000 ft. The 900-odd km/h figure is cruise at 11,000 m. Nothing
+  // holds at that speed, and this airframe is an A320neo.
   cph_jet_hold_atc: {
     droneType: 'Commercial airliner (SAS 743, A320neo)',
     platform: 'jet',
@@ -686,7 +679,7 @@ export const TEMPLATES = {
       rfMatch: 'SAS743 A320neo, flight plan match',
       modality: 'Cooperative transponder',
       evidenceSize: '1.2 MB',
-      note: 'Scheduled arrival on 04R, inbound and level at 1150 m when the formation was detected. Three sensors were holding the swarm 26 seconds in, so the tower turned the aircraft onto a circuit of the field before it reached the final approach segment. It is holding at 9 km in contact with the tower, waiting on the next approach slot. The approach was never commenced.',
+      note: 'Scheduled arrival on 04R, inbound from the southwest and 30 km out when the formation was detected. The first sensor had it at 8 seconds and three were holding it by 26, so the approach was never commenced. The aircraft was turned right, away from the field and the city, and is holding over Koge Bugt between 15 and 24 km out in contact with the tower, waiting on the next approach slot.',
     },
     // Generated above. Entry arc plus one anticlockwise lap, sampled at
     // 0.25 s so the heading changes continuously and the bank holds
