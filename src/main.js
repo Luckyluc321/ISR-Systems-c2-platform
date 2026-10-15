@@ -20972,7 +20972,7 @@ async function main() {
           { key: 'cph_swarm_runway_incursion' },
           // Spawned when the swarm's OWN clock reads 216 s, so the two
           // meet over the runway however the wall clock behaves.
-          { key: 'cph_jet_goaround_early', atTSec: 60 },
+          { key: 'cph_jet_goaround_early', atTSec: 46 },
         ] },
       { key: 'cph_unknown_contact', label: 'Non-identifiable contact (N perimeter)', cls: 'recon' },
       { key: 'cph_shahed_amalienborg', label: 'Shahed-136 attack (Øresund → CPH → Amalienborg)', cls: 'critical' },

@@ -488,23 +488,21 @@ export const TEMPLATES = {
       note: 'Scheduled arrival on 04R. Broke off the approach at 398 m, 7.6 km from the threshold, after the runway incursion was passed to the tower. Standard missed approach, climbed on runway heading and turned out over the Oresund.',
     },
     waypoints: [
-      // LONGER APPROACH SO IT IS AIRBORNE EARLY, AND IT CLIMBS LATER.
+      // BREAKS OFF WHERE THE CREW COULD ACTUALLY SEE THEM.
       //
-      // Two separate notes from Lucas. The aircraft used to spawn 199 s
-      // into the swarm's run, which is three and a half minutes of
-      // nothing. It now spawns at 60 s, which took a longer final rather
-      // than a different trigger: 30 km out at 1572 m, so the extra time
-      // is flown, not waited.
+      // 63 m at 1.2 km, down from 94 m at 1.8 km. The point of the shot
+      // is that the drones are visible from the flight deck and the
+      // crew reacts, so breaking off while still most of two kilometres
+      // short read as reacting to a radio call rather than to anything
+      // anyone saw.
       //
-      // And it holds the glideslope lower before breaking off. 94 m at
-      // 1.8 km rather than 131 m at 2.5 km, so the climb begins visibly
-      // later and closer in. Still a deliberate go-around well above the
-      // roughly 60 m minima a Cat I approach flies to, and a long way
-      // above the 46 m last-second version in cph_jet_goaround.
+      // Still a flown go-around rather than the 46 m last-second save in
+      // cph_jet_goaround, and roughly at the Cat I minima an approach is
+      // allowed down to.
       //
-      // Decision point is its own t = 361.9 s. With the swarm over the
-      // threshold at 409.9 and a 12 s gap wanted, the trigger is
-      // 421.9 - 361.9 = 60 on the swarm's clock.
+      // 30 km out at 1572 m on the real extended 04R centreline, 3
+      // degree slope, 66 to 96 m/s. Decision point is its own
+      // t = 371 s, which sets the combined trigger.
       { lat: 55.38880, lon: 12.29058, alt: 1572, heading: 0, tSec: 0 },   // spawn, 30 km out on the extended 04R centreline
       { lat: 55.42270, lon: 12.34273, alt: 1310, heading: 0, tSec: 59.5 },
       { lat: 55.45660, lon: 12.39489, alt: 1048, heading: 0, tSec: 120.5 },
@@ -513,17 +511,17 @@ export const TEMPLATES = {
       { lat: 55.53117, lon: 12.50964, alt:  472, heading: 0, tSec: 261.3 },
       { lat: 55.54812, lon: 12.53572, alt:  341, heading: 0, tSec: 295 },
       { lat: 55.56168, lon: 12.55658, alt:  236, heading: 0, tSec: 322.8 },
-      { lat: 55.57185, lon: 12.57223, alt:  157, heading: 0, tSec: 344.2 },   // short final
-      { lat: 55.57999, lon: 12.58474, alt:   94, heading: 0, tSec: 361.9 },   // GO-AROUND. 94 m, 1.8 km out.
-      { lat: 55.58338, lon: 12.58996, alt:  112, heading: 0, tSec: 368.8 },   // power up, descent arrested
-      { lat: 55.58812, lon: 12.59726, alt:  174, heading: 0, tSec: 378 },   // climbing
-      { lat: 55.59490, lon: 12.60769, alt:  314, heading: 0, tSec: 390.2 },   // over the threshold
-      { lat: 55.60982, lon: 12.63064, alt:  524, heading: 0, tSec: 415.2 },
-      { lat: 55.61961, lon: 12.66888, alt:  784, heading: 0, tSec: 443.9 },   // turning right, clear of the field
-      { lat: 55.61861, lon: 12.72423, alt: 1054, heading: 0, tSec: 481 },
-      { lat: 55.60671, lon: 12.77755, alt: 1304, heading: 0, tSec: 518.5 },   // outbound over the Oresund
+      { lat: 55.57592, lon: 12.57848, alt:  126, heading: 0, tSec: 352.8 },   // short final, drones in sight
+      { lat: 55.58405, lon: 12.59100, alt:   63, heading: 0, tSec: 371 },   // GO-AROUND. 63 m, 1.2 km out.
+      { lat: 55.58677, lon: 12.59517, alt:   77, heading: 0, tSec: 376.7 },   // power up, descent arrested
+      { lat: 55.59083, lon: 12.60143, alt:  125, heading: 0, tSec: 384.8 },   // climbing
+      { lat: 55.59694, lon: 12.61082, alt:  243, heading: 0, tSec: 396.1 },   // over the threshold
+      { lat: 55.61185, lon: 12.63377, alt:  463, heading: 0, tSec: 421.7 },
+      { lat: 55.62096, lon: 12.67096, alt:  723, heading: 0, tSec: 450 },   // turning right, clear of the field
+      { lat: 55.61996, lon: 12.72631, alt:  993, heading: 0, tSec: 487 },
+      { lat: 55.60806, lon: 12.77963, alt: 1243, heading: 0, tSec: 524.6 },   // outbound over the Oresund
     ],
-    durationSec: 519,
+    durationSec: 525,
   },
 
   cph_swarm_runway_incursion: {
@@ -647,52 +645,72 @@ export const TEMPLATES = {
       // The orbit finishing sooner moves everything after it: the
       // threshold pass is now t = 409.9 s, which is what the combined
       // launcher's trigger is derived from.
-      { lat: 55.63700, lon: 12.67900, alt: 115, heading: 0, tSec: 0 },
-      { lat: 55.63300, lon: 12.66900, alt: 108, heading: 0, tSec: 30.8 },
-      { lat: 55.62870, lon: 12.65550, alt:  92, heading: 0, tSec: 69.8 },
-      { lat: 55.62100, lon: 12.65450, alt:  80, heading: 0, tSec: 104.2 },
-      { lat: 55.61643, lon: 12.65258, alt:  72, heading: 0, tSec: 125.1 },
-      { lat: 55.61302, lon: 12.65949, alt:  62, heading: 0, tSec: 148.2 },
-      { lat: 55.61258, lon: 12.66011, alt:  62, heading: 0, tSec: 151.3 },
-      { lat: 55.61204, lon: 12.66043, alt:  62, heading: 0, tSec: 154.4 },
-      { lat: 55.61148, lon: 12.66040, alt:  62, heading: 0, tSec: 157.5 },
-      { lat: 55.61095, lon: 12.66004, alt:  62, heading: 0, tSec: 160.6 },
-      { lat: 55.61053, lon: 12.65937, alt:  62, heading: 0, tSec: 163.7 },
-      { lat: 55.61026, lon: 12.65849, alt:  62, heading: 0, tSec: 166.8 },
-      { lat: 55.61018, lon: 12.65750, alt:  62, heading: 0, tSec: 169.9 },
-      { lat: 55.61030, lon: 12.65652, alt:  62, heading: 0, tSec: 173 },
-      { lat: 55.61060, lon: 12.65568, alt:  62, heading: 0, tSec: 176.1 },
-      { lat: 55.61105, lon: 12.65506, alt:  62, heading: 0, tSec: 179.2 },
-      { lat: 55.61159, lon: 12.65476, alt:  62, heading: 0, tSec: 182.3 },
-      { lat: 55.61215, lon: 12.65481, alt:  62, heading: 0, tSec: 185.4 },
-      { lat: 55.61267, lon: 12.65519, alt:  62, heading: 0, tSec: 188.5 },
-      { lat: 55.61309, lon: 12.65587, alt:  62, heading: 0, tSec: 191.6 },
-      { lat: 55.61335, lon: 12.65676, alt:  62, heading: 0, tSec: 194.7 },
-      { lat: 55.61341, lon: 12.65775, alt:  62, heading: 0, tSec: 197.8 },
-      { lat: 55.61329, lon: 12.65873, alt:  62, heading: 0, tSec: 200.9 },
-      { lat: 55.61298, lon: 12.65956, alt:  62, heading: 0, tSec: 204 },
-      { lat: 55.61252, lon: 12.66016, alt:  62, heading: 0, tSec: 207.1 },
-      { lat: 55.61198, lon: 12.66044, alt:  62, heading: 0, tSec: 210.2 },
-      { lat: 55.61142, lon: 12.66038, alt:  62, heading: 0, tSec: 213.3 },
-      { lat: 55.61090, lon: 12.65998, alt:  62, heading: 0, tSec: 216.4 },
-      { lat: 55.61049, lon: 12.65929, alt:  62, heading: 0, tSec: 219.5 },
-      { lat: 55.61025, lon: 12.65839, alt:  62, heading: 0, tSec: 222.6 },
-      { lat: 55.60439, lon: 12.62230, alt:  58, heading: 0, tSec: 340.7 },
-      { lat: 55.59897, lon: 12.61395, alt:  50, heading: 0, tSec: 371.5 },
-      { lat: 55.59422, lon: 12.60665, alt:  45, heading: 0, tSec: 398.4 },
-      { lat: 55.59219, lon: 12.60352, alt:  43, heading: 0, tSec: 409.9 },
-      { lat: 55.59078, lon: 12.60199, alt:  48, heading: 0, tSec: 418.2 },
-      { lat: 55.58917, lon: 12.60135, alt:  51, heading: 0, tSec: 426.5 },
-      { lat: 55.58753, lon: 12.60166, alt:  54, heading: 0, tSec: 434.8 },
-      { lat: 55.58604, lon: 12.60290, alt:  57, heading: 0, tSec: 443.1 },
-      { lat: 55.58485, lon: 12.60493, alt:  60, heading: 0, tSec: 451.4 },
-      { lat: 55.58410, lon: 12.60753, alt:  63, heading: 0, tSec: 459.7 },
-      { lat: 55.58386, lon: 12.61041, alt:  66, heading: 0, tSec: 468 },
-      { lat: 55.58416, lon: 12.61329, alt:  69, heading: 0, tSec: 476.3 },
-      { lat: 55.58785, lon: 12.63122, alt:  72, heading: 0, tSec: 510.6 },
-      { lat: 55.58954, lon: 12.63943, alt:  80, heading: 0, tSec: 526.3 },
+      // ALTITUDE PROFILE: HIGH ON THE WAY IN, LOW ON THE TARGET.
+      //
+      // They used to run the whole flight between 43 and 115 m. Crossing
+      // a populated approach at that height is visible from the ground
+      // to anyone who looks up, which is not how a reconnaissance flight
+      // arrives.
+      //
+      // Now 265 m over the Oresund on ingress, 190 m holding over the
+      // control tower, then descending through 140 and 90 to 42 m on the
+      // run down the centreline. High where being seen from below is the
+      // risk, low where being seen against the horizon is the risk, which
+      // is the trade a real crew makes.
+      //
+      // Well inside the sensors' 1500 m ceiling at every point, so
+      // nothing changes about detection.
+      //
+      // ESCAPE BURST. Same path, more pace. They hold 20 to 26 m/s
+      // through the approach, then wind up to 28 through the turn and 42
+      // on the run out, which is the acceleration as the aircraft closes
+      // on them. No route change, only speed.
+      { lat: 55.63700, lon: 12.67900, alt: 265, heading: 0, tSec: 0 },
+      { lat: 55.63300, lon: 12.66900, alt: 255, heading: 0, tSec: 30.8 },
+      { lat: 55.62870, lon: 12.65550, alt: 240, heading: 0, tSec: 69.8 },
+      { lat: 55.62100, lon: 12.65450, alt: 220, heading: 0, tSec: 104.2 },
+      { lat: 55.61643, lon: 12.65258, alt: 200, heading: 0, tSec: 125.1 },
+      { lat: 55.61302, lon: 12.65949, alt: 190, heading: 0, tSec: 148.2 },
+      { lat: 55.61258, lon: 12.66011, alt: 190, heading: 0, tSec: 151.3 },
+      { lat: 55.61204, lon: 12.66043, alt: 190, heading: 0, tSec: 154.4 },
+      { lat: 55.61148, lon: 12.66040, alt: 190, heading: 0, tSec: 157.5 },
+      { lat: 55.61095, lon: 12.66004, alt: 190, heading: 0, tSec: 160.6 },
+      { lat: 55.61053, lon: 12.65937, alt: 190, heading: 0, tSec: 163.7 },
+      { lat: 55.61026, lon: 12.65849, alt: 190, heading: 0, tSec: 166.8 },
+      { lat: 55.61018, lon: 12.65750, alt: 190, heading: 0, tSec: 169.9 },
+      { lat: 55.61030, lon: 12.65652, alt: 190, heading: 0, tSec: 173 },
+      { lat: 55.61060, lon: 12.65568, alt: 190, heading: 0, tSec: 176.1 },
+      { lat: 55.61105, lon: 12.65506, alt: 190, heading: 0, tSec: 179.2 },
+      { lat: 55.61159, lon: 12.65476, alt: 190, heading: 0, tSec: 182.3 },
+      { lat: 55.61215, lon: 12.65481, alt: 190, heading: 0, tSec: 185.4 },
+      { lat: 55.61267, lon: 12.65519, alt: 190, heading: 0, tSec: 188.5 },
+      { lat: 55.61309, lon: 12.65587, alt: 190, heading: 0, tSec: 191.6 },
+      { lat: 55.61335, lon: 12.65676, alt: 190, heading: 0, tSec: 194.7 },
+      { lat: 55.61341, lon: 12.65775, alt: 190, heading: 0, tSec: 197.8 },
+      { lat: 55.61329, lon: 12.65873, alt: 190, heading: 0, tSec: 200.9 },
+      { lat: 55.61298, lon: 12.65956, alt: 190, heading: 0, tSec: 204 },
+      { lat: 55.61252, lon: 12.66016, alt: 190, heading: 0, tSec: 207.1 },
+      { lat: 55.61198, lon: 12.66044, alt: 190, heading: 0, tSec: 210.2 },
+      { lat: 55.61142, lon: 12.66038, alt: 190, heading: 0, tSec: 213.3 },
+      { lat: 55.61090, lon: 12.65998, alt: 190, heading: 0, tSec: 216.4 },
+      { lat: 55.61049, lon: 12.65929, alt: 190, heading: 0, tSec: 219.5 },
+      { lat: 55.61025, lon: 12.65839, alt: 190, heading: 0, tSec: 222.6 },
+      { lat: 55.60439, lon: 12.62230, alt: 140, heading: 0, tSec: 340.7 },
+      { lat: 55.59897, lon: 12.61395, alt:  90, heading: 0, tSec: 371.5 },
+      { lat: 55.59422, lon: 12.60665, alt:  55, heading: 0, tSec: 398.4 },
+      { lat: 55.59219, lon: 12.60352, alt:  42, heading: 0, tSec: 409.9 },
+      { lat: 55.59078, lon: 12.60199, alt:  44, heading: 0, tSec: 415.3 },
+      { lat: 55.58917, lon: 12.60135, alt:  46, heading: 0, tSec: 420.7 },
+      { lat: 55.58753, lon: 12.60166, alt:  48, heading: 0, tSec: 426.1 },
+      { lat: 55.58604, lon: 12.60290, alt:  50, heading: 0, tSec: 431.5 },
+      { lat: 55.58485, lon: 12.60493, alt:  52, heading: 0, tSec: 436.9 },
+      { lat: 55.58410, lon: 12.60753, alt:  54, heading: 0, tSec: 442.3 },
+      { lat: 55.58386, lon: 12.61041, alt:  56, heading: 0, tSec: 447.7 },
+      { lat: 55.58416, lon: 12.61329, alt:  58, heading: 0, tSec: 453.1 },
+      { lat: 55.58785, lon: 12.63122, alt:  75, heading: 0, tSec: 479.8 },
+      { lat: 55.58954, lon: 12.63943, alt: 100, heading: 0, tSec: 492 },
     ],
-    durationSec: 526,
+    durationSec: 492,
   },
 
   // ── Recon drone, HALE (Reaper/Global-Hawk class), high altitude circular loiter ──
