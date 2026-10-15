@@ -188,14 +188,6 @@ function _forceVisible(eventId) {
   }
 }
 
-function _newestEventFor(templateKey) {
-  let best = null;
-  for (const e of EVENTS) {
-    if (e.templateKey !== templateKey) continue;
-    if (!best || e.startTime > best.startTime) best = e;
-  }
-  return best;
-}
 
 // ── run ─────────────────────────────────────────────────────────────
 export function startWithoutIsr() {
@@ -296,30 +288,9 @@ export function stopWithoutIsr() {
 if (typeof window !== 'undefined') {
   window.__isr_withoutIsr = { start: startWithoutIsr, stop: stopWithoutIsr };
 
-  // A button, because a console command is not a demo. Floating and
-  // self-contained: the sim panel re-renders on every clock change and
-  // would wipe anything injected into it.
-  const _mountButton = () => {
-    if (document.getElementById('wi-launch')) return;
-    const b = document.createElement('button');
-    b.id = 'wi-launch';
-    b.textContent = 'WITHOUT ISR · run';
-    b.style.cssText = [
-      'position:fixed', 'left:12px', 'bottom:12px', 'z-index:9999',
-      'padding:8px 14px', 'background:rgba(90,22,22,0.9)', 'color:#ffb8b8',
-      'border:1px solid rgba(180,50,50,0.6)', 'border-radius:4px',
-      'font-family:"IBM Plex Mono",monospace', 'font-size:11px',
-      'letter-spacing:0.12em', 'cursor:pointer',
-    ].join(';');
-    b.addEventListener('click', () => {
-      if (_active) { stopWithoutIsr(); b.textContent = 'WITHOUT ISR · run'; }
-      else { startWithoutIsr(); b.textContent = 'WITHOUT ISR · stop'; }
-    });
-    document.body.appendChild(b);
-  };
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', _mountButton);
-  } else {
-    _mountButton();
-  }
+  // NO BUTTON. It was floating over the status bar in the normal UI and
+  // had no business being on screen during ordinary work. Console only:
+  //
+  //   __isr_withoutIsr.start()
+  //   __isr_withoutIsr.stop()
 }
