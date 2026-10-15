@@ -107,9 +107,29 @@ export async function inferenceCheck() {
           : `Key is fine, but "${cfg.model}" is not in this project. Set VITE_MISTRAL_MODEL to one of sampleModels.`;
       } catch (_) { out.verdict = 'Key works, model list could not be parsed.'; }
     } else if (r.status === 403 || r.status === 401) {
-      out.verdict = out.projectScopedPath
-        ? 'Rejected on a project-scoped URL. Either the project id is wrong or the key has no access to that project.'
-        : 'Rejected on the default project. Check the key is valid and that its IAM identity has GenerativeApisModelAccess, GenerativeApisFullAccess or AllProductsFullAccess.';
+      if (out.projectScopedPath) {
+        // SPLIT THE TWO CAUSES RATHER THAN NAMING BOTH.
+        //
+        // A 403 on a project-scoped URL is either the wrong project id in
+        // the URL or a key with no Generative APIs access at all, and
+        // those are different fixes in different parts of the console.
+        // The provider's own debugging order starts by testing the key
+        // against the default project, so do that here instead of
+        // reporting an ambiguity and leaving it to be done by hand.
+        out.projectId = (base.match(/[0-9a-f-]{36}/i) || [])[0] || null;
+        const defaultBase = base.replace(/\/[0-9a-f-]{36}(?=\/v1)/i, '');
+        try {
+          const r2 = await fetch(`${defaultBase}/models`, { headers: { Authorization: `Bearer ${cfg.token}` } });
+          out.defaultProjectStatus = r2.status;
+          out.verdict = r2.ok
+            ? `The key works on the default project but is refused on project ${out.projectId}. That project id is the wrong one for this key. Point VITE_MISTRAL_ENDPOINT at the project the key belongs to, or drop the id from the path to use the default.`
+            : 'Refused on the project-scoped URL AND on the default one, so the project id is not the problem. The key has no access to Generative APIs. Give its IAM identity GenerativeApisFullAccess, or GenerativeApisModelAccess for read only.';
+        } catch (err) {
+          out.verdict = `Refused on a project-scoped URL, and the default-project retry failed at transport: ${err.message}`;
+        }
+      } else {
+        out.verdict = 'Rejected on the default project. Check the key is valid and that its IAM identity has GenerativeApisModelAccess, GenerativeApisFullAccess or AllProductsFullAccess.';
+      }
     } else {
       out.verdict = `Unexpected status ${r.status}.`;
     }
