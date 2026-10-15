@@ -20973,7 +20973,16 @@ async function main() {
           { key: 'cph_swarm_runway_incursion' },
           // Spawned when the swarm's OWN clock reads 216 s, so the two
           // meet over the runway however the wall clock behaves.
-          { key: 'cph_jet_goaround_early', atTSec: 40 },
+          // 38, not 40. The crew reacts at 480 m instead of 425, which is
+          // the slightly earlier break-off Lucas asked for and still
+          // inside the 300 to 500 m a small airframe is visible at.
+          //
+          // CORRECTION TO AN EARLIER NOTE: I wrote that a HIGHER trigger
+          // buys more reaction distance. It is the opposite. A lower
+          // trigger puts the aircraft at its decision point earlier in
+          // the encounter, so the formation is further away when it
+          // commits. Measured both ways rather than reasoned about.
+          { key: 'cph_jet_goaround_early', atTSec: 38 },
         ] },
       // THE SAME SWARM, THE OTHER OUTCOME. Detected on ingress, airport
       // notified, tower calls the aircraft. It breaks off at 7.6 km with
