@@ -28826,6 +28826,9 @@ async function main() {
   const _mistralCooldownUntil = new Map();   // event.id -> Date.now() cooldown expiry
   const _mistralResultCache = new Map();   // event.id -> {body, recommendation, model_version, generated_at}
   const MISTRAL_COOLDOWN_MS = 45 * 1000;   // 45s cooldown on 429
+  // A rejected key is not a transient condition. Long enough to mean
+  // "for this session" without being an infinity that outlives the fix.
+  const MISTRAL_AUTH_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 
   // ── Receiver-lens fetcher (Phase 4 Step 5) ────────────────────
   // Fires the archetype-shaped narrative lens on case-file open for
@@ -29067,6 +29070,22 @@ async function main() {
         if (/429|Rate limit/i.test(err.message)) {
           _mistralCooldownUntil.set(event.id, Date.now() + MISTRAL_COOLDOWN_MS);
           if (footEl) footEl.textContent = `Mistral rate-limited. Showing mock synthesis. Retry available in ${Math.round(MISTRAL_COOLDOWN_MS / 1000)}s or click regenerate.`;
+        } else if (/HTTP 40[13]/.test(err.message)) {
+          // CREDENTIALS DO NOT FIX THEMSELVES BETWEEN TWO RENDERS.
+          //
+          // A 401 or 403 is settled until someone changes the key or its
+          // permissions, so retrying it is pure cost. The receiver view
+          // re-renders on every event notification, so one unauthorised
+          // key put a failed round trip and three console lines on the
+          // board every time anything moved, which buries whatever else
+          // the console was trying to say during a run.
+          //
+          // Parked for the session rather than a short window. Regenerate
+          // still forces a retry, which is the deliberate way back in
+          // once the key is fixed, and a reload clears it anyway.
+          _mistralCooldownUntil.set(event.id, Date.now() + MISTRAL_AUTH_COOLDOWN_MS);
+          if (footEl) footEl.textContent = `Inference not authorised at ${inferenceHost()} · showing mock synthesis · fix the key, then click regenerate`;
+          console.warn('[inference] not authorised, parked for this session. Run await __isr_inferenceCheck() for the cause.');
         } else {
           // NAME THE HOST. "Failed to fetch" is all a browser gives you
           // for any transport failure, and the endpoint is configurable
