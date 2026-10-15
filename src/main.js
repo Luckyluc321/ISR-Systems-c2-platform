@@ -19834,6 +19834,10 @@ async function main() {
   onDroneUpdate(onDroneTick);
   // Expose spawn function to the sim button (wired below in control panel section)
   window.__spawnDrone = spawnFromTemplate;
+  // Read-only handle on the scene. Nothing in here reads it back and no
+  // behaviour depends on it; it exists so a self-contained scenario
+  // module can hide entities without this file knowing it exists.
+  window.__isr_viewer = viewer;
   window.__updateSimButton = updateSimButton;
 
   // ── Sensor + drone click handling ──
