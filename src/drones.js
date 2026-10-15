@@ -534,18 +534,28 @@ export const TEMPLATES = {
   // initial thirty minutes on a confirmed sighting. Nobody flies them
   // down to a go-around if there is time not to.
   //
-  // HELD AWAY FROM THE FIELD, NOT OVER IT. Circling above an airport
-  // with an active drone incursion would put the aircraft in the thing
-  // being avoided. The pattern sits on the approach side and the
-  // closest it ever comes is 18.9 km from the threshold.
+  // A CIRCUIT OF THE FIELD, NOT A RACETRACK OFF TO ONE SIDE.
   //
-  // GEOMETRY IS A REAL HOLD, NOT A DRAWN OVAL. Below 14,000 ft a
-  // standard hold is one-minute legs with standard-rate turns at 3
-  // degrees a second. At 110 m/s that is a 6,600 m leg and a 2,101 m
-  // turn radius, so the racetrack is 6.6 km by 4.2 km and one orbit
-  // takes exactly four minutes. Right-hand turns, which is standard.
-  // Computed rather than eyeballed: the inbound leg closes back on the
-  // fix to the metre.
+  // First version was a standard published-fix hold 21 km out on the
+  // approach side, which is what the incident reports describe. Lucas
+  // chose a wide circuit of the airport instead, and for this piece he
+  // is right: the whole value of the early warning is legible in one
+  // frame when the formation is over the runway and the arrival is
+  // visibly orbiting the entire field, waiting on a slot. A racetrack
+  // parked off to the southwest reads as an aircraft that went
+  // somewhere else.
+  //
+  // WIDE ENOUGH TO STAY OUT OF IT. The circuit is 9 km from the airport
+  // reference point. The field is about 3 km across and the drone
+  // activity is inside the perimeter, so the aircraft is never near the
+  // thing it is avoiding. Circling tight overhead would be the mistake.
+  //
+  // GEOMETRY IS FLYABLE, NOT DRAWN. 9 km radius at 118 m/s, which is
+  // about 229 kt indicated at this level and inside the 230 kt holding
+  // limit below 14,000 ft. That works out at 0.75 degrees a second and
+  // a 9 degree bank, so a gentle continuous turn rather than the
+  // standard-rate 3 degrees a hold normally uses. One lap is 56.5 km
+  // and takes eight minutes.
   cph_jet_hold_atc: {
     droneType: 'Commercial airliner (SAS 743, A320neo)',
     platform: 'jet',
@@ -565,27 +575,39 @@ export const TEMPLATES = {
       rfMatch: 'SAS743 A320neo, flight plan match',
       modality: 'Cooperative transponder',
       evidenceSize: '1.2 MB',
-      note: 'Scheduled arrival on 04R. Descent stopped and the approach never commenced. The formation was detected while the aircraft was still 26 km out, so the tower held it on the inbound course at 21 km and it stayed in the pattern until the airspace was clear. Closest it came to the threshold was 18.9 km.',
+      note: 'Scheduled arrival on 04R. Descent stopped and the approach never commenced. The formation was detected while the aircraft was still 30 km out, so the tower turned it onto a wide circuit of the field at 9 km and it is holding there in contact with the tower, waiting on the next approach slot. It never entered the final approach segment.',
     },
     waypoints: [
-      { lat: 55.41592, lon: 12.33230, alt: 1363, heading: 0, tSec: 0 },     // spawn, 26 km out on the extended 04R centreline
-      // HOLD INSTRUCTION. Descent arrested, level at 1370, continue to
-      // the fix. Everything after this is the pattern.
-      { lat: 55.44982, lon: 12.38446, alt: 1370, heading: 0, tSec: 46 },    // over the fix, 21.0 km out. First orbit begins
-      { lat: 55.45168, lon: 12.43141, alt: 1370, heading: 0, tSec: 76 },    // 90 deg through the right turn, 19.0 km
-      { lat: 55.42506, lon: 12.43469, alt: 1370, heading: 0, tSec: 106 },   // rolled out outbound on 221
-      { lat: 55.38031, lon: 12.36610, alt: 1370, heading: 0, tSec: 166 },   // end of the outbound leg, 27.9 km
-      { lat: 55.37845, lon: 12.31916, alt: 1370, heading: 0, tSec: 196 },   // 90 deg through the second turn
-      { lat: 55.40507, lon: 12.31587, alt: 1370, heading: 0, tSec: 226 },   // rolled out inbound on 041
-      { lat: 55.44982, lon: 12.38446, alt: 1370, heading: 0, tSec: 286 },   // back over the fix. One orbit, four minutes
-      { lat: 55.45168, lon: 12.43141, alt: 1370, heading: 0, tSec: 316 },   // second orbit
-      { lat: 55.42506, lon: 12.43469, alt: 1370, heading: 0, tSec: 346 },
-      { lat: 55.38031, lon: 12.36610, alt: 1370, heading: 0, tSec: 406 },
-      { lat: 55.37845, lon: 12.31916, alt: 1370, heading: 0, tSec: 436 },
-      { lat: 55.40507, lon: 12.31587, alt: 1370, heading: 0, tSec: 466 },
-      { lat: 55.44982, lon: 12.38446, alt: 1370, heading: 0, tSec: 526 },   // still holding when the formation is dealt with
+      { lat: 55.41592, lon: 12.33230, alt: 1363, heading: 0, tSec: 0 },     // spawn, 30 km from the airport on the 041 inbound
+      // HOLD INSTRUCTION. Descent arrested, level at 1370. Everything
+      // after this is the circuit, clockwise, 9 km from the field.
+      { lat: 55.55729, lon: 12.55245, alt: 1370, heading: 0, tSec: 178 },   // joins the circuit, abeam southwest
+      { lat: 55.57318, lon: 12.52785, alt: 1370, heading: 0, tSec: 198 },
+      { lat: 55.59212, lon: 12.51137, alt: 1370, heading: 0, tSec: 218 },
+      { lat: 55.61282, lon: 12.50413, alt: 1370, heading: 0, tSec: 238 },   // due west of the field
+      { lat: 55.63388, lon: 12.50662, alt: 1370, heading: 0, tSec: 258 },
+      { lat: 55.65386, lon: 12.51868, alt: 1370, heading: 0, tSec: 278 },
+      { lat: 55.67139, lon: 12.53949, alt: 1370, heading: 0, tSec: 298 },   // northwest quadrant
+      { lat: 55.68528, lon: 12.56762, alt: 1370, heading: 0, tSec: 318 },
+      { lat: 55.69459, lon: 12.60117, alt: 1370, heading: 0, tSec: 338 },
+      { lat: 55.69868, lon: 12.63783, alt: 1370, heading: 0, tSec: 358 },   // due north, over the Oresund
+      { lat: 55.69727, lon: 12.67512, alt: 1370, heading: 0, tSec: 378 },
+      { lat: 55.69046, lon: 12.71050, alt: 1370, heading: 0, tSec: 398 },
+      { lat: 55.67871, lon: 12.74155, alt: 1370, heading: 0, tSec: 418 },   // northeast quadrant
+      { lat: 55.66282, lon: 12.76615, alt: 1370, heading: 0, tSec: 438 },
+      { lat: 55.64388, lon: 12.78263, alt: 1370, heading: 0, tSec: 458 },
+      { lat: 55.62318, lon: 12.78987, alt: 1370, heading: 0, tSec: 478 },   // due east, Swedish side of the sound
+      { lat: 55.60212, lon: 12.78738, alt: 1370, heading: 0, tSec: 497 },
+      { lat: 55.58214, lon: 12.77532, alt: 1370, heading: 0, tSec: 517 },
+      { lat: 55.56461, lon: 12.75451, alt: 1370, heading: 0, tSec: 537 },   // southeast quadrant
+      { lat: 55.55072, lon: 12.72638, alt: 1370, heading: 0, tSec: 557 },
+      { lat: 55.54141, lon: 12.69283, alt: 1370, heading: 0, tSec: 577 },
+      { lat: 55.53732, lon: 12.65617, alt: 1370, heading: 0, tSec: 597 },   // due south of the field
+      { lat: 55.53873, lon: 12.61888, alt: 1370, heading: 0, tSec: 617 },
+      { lat: 55.54554, lon: 12.58350, alt: 1370, heading: 0, tSec: 637 },
+      { lat: 55.55729, lon: 12.55245, alt: 1370, heading: 0, tSec: 657 },   // one full lap, still holding for a slot
     ],
-    durationSec: 526,
+    durationSec: 657,
   },
 
   cph_jet_goaround_early: {
