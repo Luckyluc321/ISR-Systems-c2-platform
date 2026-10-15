@@ -452,6 +452,69 @@ export const TEMPLATES = {
   //
   // Decision point is its own t = 285.4 s. The combined launcher offsets
   // the spawn so that lands just after the swarm reaches the threshold.
+  // WITH ISR. The warned go-around.
+  //
+  // The other two airliner paths are the same story without us.
+  // cph_jet_goaround breaks off at 46 m and cph_jet_goaround_early at
+  // 63 m, both of them a crew spotting drones from the flight deck and
+  // reacting. Nobody told them anything.
+  //
+  // This one is what the network buys. The formation is detected on
+  // ingress, the airport is notified, the tower calls the aircraft, and
+  // it breaks off at 398 m and 7.6 km out while the drones are still
+  // over the field and nowhere near the runway. A routine missed
+  // approach instead of a near miss.
+  //
+  // Decision point is its own t = 229.1 s, which is what the combined
+  // launcher's trigger is derived from.
+  cph_jet_goaround_atc: {
+    droneType: 'Commercial airliner (SAS 743, A320neo)',
+    platform: 'jet',
+    classification: 'friendly',
+    threat: null,
+    confidence: 0.99,
+    confidenceTrend: 'ADS-B correlated, flight plan match',
+    siteId: 'cph',
+    cooperative: true,
+    terrainRelativeAlt: true,
+    groundOffsetM: 0.1,
+    iconBearingTrimDeg: 0,
+    iconTracksFlightPath: true,
+    gearRetracts: true,
+    contributingSensors: [
+      { id: 'N07', confidence: 0.98 },
+      { id: 'N08', confidence: 0.96 },
+      { id: 'N09', confidence: 0.94 },
+      { id: 'N15', confidence: 0.92 },
+      { id: 'N17', confidence: 0.90 },
+    ],
+    evidence: {
+      rfCarrier: '1090 MHz ADS-B',
+      rfMatch: 'SAS743 A320neo, flight plan match',
+      modality: 'Cooperative transponder',
+      evidenceSize: '1.2 MB',
+      note: 'Scheduled arrival on 04R. Broke off at 398 m, 7.6 km from the threshold, on a tower instruction raised from the drone detection. The formation was still over the field at that point and never reached the runway with an aircraft on final.',
+    },
+    waypoints: [
+      { lat: 55.41592, lon: 12.33230, alt: 1363, heading: 0, tSec: 0 },   // spawn, 26 km out on the extended 04R centreline
+      { lat: 55.44982, lon: 12.38446, alt: 1101, heading: 0, tSec: 59.5 },
+      { lat: 55.47694, lon: 12.42618, alt:  891, heading: 0, tSec: 108.3 },
+      { lat: 55.50066, lon: 12.46269, alt:  708, heading: 0, tSec: 152.1 },
+      { lat: 55.52100, lon: 12.49399, alt:  550, heading: 0, tSec: 190.5 },
+      { lat: 55.53253, lon: 12.51172, alt:  461, heading: 0, tSec: 212.9 },
+      { lat: 55.54066, lon: 12.52424, alt:  398, heading: 0, tSec: 229.1 },   // GO-AROUND on an ATC call. 398 m, 7.6 km out.
+      { lat: 55.54948, lon: 12.53780, alt:  443, heading: 0, tSec: 245.8 },   // power up, descent arrested
+      { lat: 55.56100, lon: 12.55554, alt:  608, heading: 0, tSec: 266.5 },   // climbing
+      { lat: 55.57727, lon: 12.58057, alt:  878, heading: 0, tSec: 294.4 },
+      { lat: 55.59219, lon: 12.60352, alt: 1118, heading: 0, tSec: 319.4 },   // over the threshold, through 1100 m
+      { lat: 55.60982, lon: 12.63064, alt: 1398, heading: 0, tSec: 348.3 },
+      { lat: 55.62037, lon: 12.67216, alt: 1688, heading: 0, tSec: 379.4 },   // turning right, clear of the field
+      { lat: 55.61896, lon: 12.73320, alt: 1978, heading: 0, tSec: 420.3 },
+      { lat: 55.60588, lon: 12.78892, alt: 2238, heading: 0, tSec: 459.8 },   // outbound over the Oresund
+    ],
+    durationSec: 460,
+  },
+
   cph_jet_goaround_early: {
     droneType: 'Commercial airliner (SAS 743, A320neo)',
     platform: 'jet',

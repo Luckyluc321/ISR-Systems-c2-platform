@@ -20957,7 +20957,8 @@ async function main() {
       { key: 'cph_recon_hostile', label: 'Reconnaissance drone (HALE), hostile', cls: 'recon' },
       { key: 'cph_jet_friendly', label: 'Jet (SAS 743), friendly', cls: 'friendly' },
       { key: 'cph_jet_goaround', label: 'Jet (SAS 743), go-around at 185 ft', cls: 'friendly' },
-      { key: 'cph_jet_goaround_early', label: 'Jet (SAS 743), EARLY go-around at 398 m', cls: 'friendly' },
+      { key: 'cph_jet_goaround_early', label: 'Jet (SAS 743), crew-spotted go-around at 63 m', cls: 'friendly' },
+      { key: 'cph_jet_goaround_atc', label: 'Jet (SAS 743), ATC-warned go-around at 398 m', cls: 'friendly' },
       { key: 'cph_missile_hostile', label: 'Cruise missile, critical', cls: 'critical' },
       { key: 'cph_missile_inbound_sw', label: 'Cruise missile inbound from SW (continuation)', cls: 'critical' },
       { key: 'swarm_recon_cph_amk', label: 'SWARM · 5-drone recon (CPH → Amager)', cls: 'critical' },
@@ -20973,6 +20974,16 @@ async function main() {
           // Spawned when the swarm's OWN clock reads 216 s, so the two
           // meet over the runway however the wall clock behaves.
           { key: 'cph_jet_goaround_early', atTSec: 46 },
+        ] },
+      // THE SAME SWARM, THE OTHER OUTCOME. Detected on ingress, airport
+      // notified, tower calls the aircraft. It breaks off at 7.6 km with
+      // the formation still over the field, so the runway is clear long
+      // before they reach it. Trigger 71 = the swarm at t = 300 minus the
+      // aircraft's own 229.1 s to its decision point.
+      { key: '__combo_cph_incursion_isr', label: 'COMBINED · WITH ISR · swarm on 04R + tower-warned go-around', cls: 'critical',
+        combo: [
+          { key: 'cph_swarm_runway_incursion' },
+          { key: 'cph_jet_goaround_atc', atTSec: 71 },
         ] },
       { key: 'cph_unknown_contact', label: 'Non-identifiable contact (N perimeter)', cls: 'recon' },
       { key: 'cph_shahed_amalienborg', label: 'Shahed-136 attack (Øresund → CPH → Amalienborg)', cls: 'critical' },
@@ -21249,8 +21260,10 @@ async function main() {
     cph_recon_hostile:         { threat: 'HALE reconnaissance',    pathLabel: 'High-altitude loiter' },
     cph_jet_friendly:          { threat: 'Jet (SAS 743), friendly',pathLabel: 'Filed airliner route' },
     cph_jet_goaround:          { threat: 'Jet (SAS 743), friendly',pathLabel: 'Missed approach, 04R' },
-    cph_jet_goaround_early:    { threat: 'Jet (SAS 743), friendly',pathLabel: 'Early missed approach, 398 m at 7.6 km' },
-    __combo_cph_incursion:     { threat: '5-drone swarm + SAS 743', pathLabel: 'Incursion on 04R, aircraft breaks off' },
+    cph_jet_goaround_early:    { threat: 'Jet (SAS 743), friendly',pathLabel: 'Crew-spotted missed approach, 63 m at 1.2 km' },
+    cph_jet_goaround_atc:      { threat: 'Jet (SAS 743), friendly',pathLabel: 'ATC-warned missed approach, 398 m at 7.6 km' },
+    __combo_cph_incursion:     { threat: '5-drone swarm + SAS 743', pathLabel: 'WITHOUT ISR, crew spots them at 1.2 km' },
+    __combo_cph_incursion_isr: { threat: '5-drone swarm + SAS 743', pathLabel: 'WITH ISR, tower warns at 7.6 km' },
     cph_missile_hostile:       { threat: 'Cruise missile',         pathLabel: 'Baltic sea ingress' },
     cph_missile_inbound_sw:    { threat: 'Cruise missile',         pathLabel: 'SW continuation ingress' },
     swarm_recon_cph_amk:       { threat: '5-drone recon swarm',    pathLabel: 'CPH → Amager transit' },
