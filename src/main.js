@@ -16718,6 +16718,23 @@ async function main() {
     //     wing down. Clamped and smoothed.
     let _touchdownMs = null;
     let _lastHoriz = 0;
+    // SPEED NEEDS ITS OWN ANCHOR, SEPARATE FROM THE FRAME TIMER.
+    //
+    // _lastHoriz was distance-this-frame over frame-time, and position
+    // only advances on a TICK while this runs every RENDER FRAME. So on
+    // most frames the aircraft had not moved and the speed read 0,
+    // which failed the coordinatedBank test and dropped it onto the
+    // bankFactor fallback; on the frame after a tick it read several
+    // times the true speed. The roll filter then averaged the two into
+    // something far too shallow. Measured on the hold: a steady 4.9
+    // degrees of bank where 18.8 was asked for, which is atan(v omega/g)
+    // solved with v = 25 m/s instead of 100.
+    //
+    // Same failure the heading already carries a long note about: a
+    // per-frame delta of a per-tick value. Here the anchor only moves
+    // when the position does, so the elapsed time matches the distance.
+    let _spdPrevCart = null;
+    let _spdPrevTime = performance.now();
     let _yawRateFilt = 0;
     let _smoothedHeading = null;   // radians, compass bearing (CW from N)
     let _smoothedPitch = 0;        // radians, +up
@@ -16872,7 +16889,6 @@ async function main() {
         const dNorth = (curr.latitude  - prev.latitude)  * R;
         const dEast  = (curr.longitude - prev.longitude) * R * Math.cos(meanLat);
         const dHoriz = Math.sqrt(dNorth * dNorth + dEast * dEast);
-        _lastHoriz = dHoriz / dt;
         if (dHoriz > 0.1) {
           targetPitch = Math.atan2(dAlt, dHoriz);
           if (targetPitch >  pitchClamp) targetPitch =  pitchClamp;
@@ -16939,6 +16955,28 @@ async function main() {
         if (_dRoll < -cap) _dRoll = -cap;
       }
       _smoothedRoll += _dRoll;
+
+      // Ground speed, over the interval in which the aircraft actually
+      // moved rather than over one render frame. 0.05 m is below any
+      // real step and above float noise on a stationary track.
+      if (_spdPrevCart) {
+        const a = Cesium.Cartographic.fromCartesian(_spdPrevCart);
+        const b = Cesium.Cartographic.fromCartesian(cart);
+        const R = 6371000;
+        const mLat = (a.latitude + b.latitude) / 2;
+        const dN = (b.latitude - a.latitude) * R;
+        const dE = (b.longitude - a.longitude) * R * Math.cos(mLat);
+        const d = Math.sqrt(dN * dN + dE * dE);
+        if (d > 0.05) {
+          const dtSpd = Math.max(0.001, (now - _spdPrevTime) / 1000);
+          _lastHoriz = d / dtSpd;
+          _spdPrevCart = Cesium.Cartesian3.clone(cart);
+          _spdPrevTime = now;
+        }
+      } else {
+        _spdPrevCart = Cesium.Cartesian3.clone(cart);
+        _spdPrevTime = now;
+      }
 
       _prevPosCart = Cesium.Cartesian3.clone(cart);
       _prevTime = now;
