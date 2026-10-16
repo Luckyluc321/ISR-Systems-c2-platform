@@ -20227,6 +20227,41 @@ async function main() {
     console.log(`[sensors] depth testing ${on ? 'ON, scene geometry can now hide a marker' : 'OFF, markers draw on top again'}`);
   };
 
+  // LIVE ATTITUDE OF EVERY TRACK, read-only.
+  //
+  // The rig publishes stateHolder.attitude in world terms, before the
+  // asset-space sign flips, so this is what the aircraft is actually
+  // doing rather than what this particular model's axes call it. Added
+  // because "it turns flat" and "the roll is computed and applied" are
+  // both plausible from the source and only one of them can be true.
+  //
+  //   __isr_attitude()        one reading
+  //   __isr_attitude(5)       a reading a second for five seconds
+  window.__isr_attitude = (seconds = 0) => {
+    const read = () => {
+      const rows = [];
+      for (const [eid, st] of droneState) {
+        const ev = EVENTS.find(e => e.id === eid);
+        const a = st?.stateHolder?.attitude;
+        rows.push({
+          event: eid,
+          type: (ev?.droneType || '').slice(0, 34),
+          headingDeg: a ? +((a.heading * 180 / Math.PI + 360) % 360).toFixed(1) : null,
+          pitchDeg: a ? +(a.pitch * 180 / Math.PI).toFixed(1) : null,
+          rollDeg: a ? +(a.roll * 180 / Math.PI).toFixed(1) : null,
+          modelShown: !!st?.modelEntity?.show,
+          speedMs: st?.leadStats?.speed != null ? +st.leadStats.speed.toFixed(1) : null,
+        });
+      }
+      console.table(rows);
+      return rows;
+    };
+    if (!seconds) return read();
+    let n = 0;
+    const t = setInterval(() => { read(); if (++n >= seconds) clearInterval(t); }, 1000);
+    return `sampling for ${seconds} s`;
+  };
+
   window.__isr_ringAudit = () => {
     const rows = [];
     for (const e of viewer.entities.values) {
