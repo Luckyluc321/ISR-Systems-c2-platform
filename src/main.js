@@ -19825,8 +19825,19 @@ async function main() {
             || Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
           point: {
             show: _showInRange,
-            // Hollow: the fill is nothing, the outline is the ring.
-            color: Cesium.Color.TRANSPARENT,
+            // A FAINT FILL, NOT A FULLY TRANSPARENT ONE.
+            //
+            // Cesium's point shader builds the fragment as
+            // mix(outlineColor, color, innerAlpha) and then discards
+            // fully transparent fragments. A Color.TRANSPARENT fill is
+            // the one configuration where that discard can take the
+            // whole primitive, which is why the pulses stopped
+            // appearing at all. The sensor dot renders reliably because
+            // it has a real fill, so the ring gets one too, at an alpha
+            // low enough to read as hollow.
+            color: new Cesium.CallbackProperty(() => Cesium.Color
+              .fromCssColorString(_degraded ? '#ff8c3d' : '#4dd2ff')
+              .withAlpha(0.10), false),
             pixelSize: new Cesium.CallbackProperty(
               () => 24 + 5 * Math.sin(performance.now() / 250), false),
             outlineColor: new Cesium.CallbackProperty(() => {
