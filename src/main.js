@@ -20393,10 +20393,62 @@ async function main() {
   };
   window.__updateSimButton = updateSimButton;
 
+  // Nearest sensor to a click, in screen pixels, or null.
+  //
+  // Only sensors the active account can see and that are currently
+  // shown, so a hidden site's grid is not secretly clickable. The pulse
+  // ring is ignored deliberately: it is a second entity on the same
+  // spot whose properties say 'sensor-pulse', so a ray pick lands on it
+  // and matches nothing.
+  const _SENSOR_PICK_PX = 14;
+  function _pickSensorOnScreen(windowPos) {
+    let best = null, bestD2 = _SENSOR_PICK_PX * _SENSOR_PICK_PX;
+    for (const sid of Object.keys(SITES)) {
+      if (!_roleCanSeeSite(sid)) continue;
+      for (const sensor of (SITES[sid].sensors || [])) {
+        const ent = viewer.entities.getById(`sensor-${sid}-${sensor.id}`);
+        if (!ent || ent.show === false) continue;
+        const cart = ent.position?.getValue?.(viewer.clock.currentTime);
+        if (!cart) continue;
+        const sc = Cesium.SceneTransforms.worldToWindowCoordinates(viewer.scene, cart);
+        if (!sc) continue;
+        const dx = sc.x - windowPos.x, dy = sc.y - windowPos.y;
+        const d2 = dx * dx + dy * dy;
+        if (d2 < bestD2) { bestD2 = d2; best = { siteId: sid, sensorId: sensor.id }; }
+      }
+    }
+    return best;
+  }
+
   // ── Sensor + drone click handling ──
   const handler = new Cesium.ScreenSpaceEventHandler(viewer.scene.canvas);
   handler.setInputAction((movement) => {
     const picked = viewer.scene.pick(movement.position);
+
+    // SENSORS ARE FOUND ON SCREEN, NOT BY RAY.
+    //
+    // They stopped being clickable when they stopped clamping. A clamped
+    // marker sits ON the surface and the pick ray reaches it; an
+    // unclamped one sits at ground height, which at CPH is about 40 m
+    // below the rooftops, so the ray hits the building first. They still
+    // RENDER on top, because the depth test is off for them, and that
+    // mismatch is exactly what makes them look clickable and not be.
+    //
+    // Clamping them again would bring back the drift that took an
+    // afternoon to remove, so picking happens in screen space instead:
+    // project each visible sensor and take the nearest within a few
+    // pixels. Nothing can occlude it, it matches what the operator can
+    // actually see, and it is a forgiving target on an 8 px mark.
+    //
+    // Checked BEFORE the ray result, so a sensor in front of a building
+    // wins over the building behind it.
+    const _sensorHit = _pickSensorOnScreen(movement.position);
+    if (_sensorHit) {
+      setActiveSite(_sensorHit.siteId);
+      showSensorPopup(_sensorHit.siteId, _sensorHit.sensorId);
+      return;
+    }
+
     if (picked && picked.id && picked.id.properties) {
       // A debrief callout dot. Clicking it dismisses its callout;
       // clicking again brings it back. The dot never disappears,
