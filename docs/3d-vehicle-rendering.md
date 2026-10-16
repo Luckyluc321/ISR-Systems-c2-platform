@@ -372,9 +372,21 @@ given and waits. Called at boot with 130 sensors spread across Denmark,
 from the planet view where nothing is loaded, that is 130 tile pyramids
 streaming at once and the globe visibly churns while they land.
 `sampleHeight` reads what is already rendered and requests nothing,
-returning undefined where tiles have not arrived. A sweeper retries
-every three seconds and a sensor is pinned when its ground is actually
-on screen, which is also the only moment the pin matters.
+returning undefined where tiles have not arrived.
+
+**Do not run it on a timer.** `sampleHeight` is a pick: it renders the
+scene to resolve one pixel. A sweeper calling it for 130 sensors every
+three seconds is 130 render passes every three seconds and the whole
+application crawls, with camera moves landing seconds late. It is a
+manual command, `await __isr_pinSensors()`, run while parked at the
+site you are looking at, which is the only moment the pin matters.
+
+**Take the highest sample, never the first.** A coarse tile has no
+buildings on it, so a rooftop sensor measures at near ground level.
+Freeze that and fly in, and with depth testing on the marker ends up
+under the detailed surface and vanishes. Refinement only adds surface,
+so the maximum converges on the real rooftop. Add a metre or two of
+lift so a depth-tested marker sits on the roof rather than inside it.
 
 **`disableDepthTestDistance: Infinity` is camera-dependent by design.**
 It draws the marker over everything in front of it. From above nothing

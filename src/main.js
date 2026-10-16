@@ -31688,50 +31688,22 @@ async function main() {
 
   console.log('ISR C2 Platform initialized. To wipe stored sim data: await window.__isr_clearAllSimData()');
 
-  // PIN THE SENSORS TO MEASURED HEIGHTS, ONCE THE SCENE CAN BE SAMPLED.
+  // NO AUTOMATIC PINNING. It is a manual command, and this is why.
   //
-  // Clamping re-samples the surface every frame and resolves differently
-  // for a point than for a billboard, which is what put every pulse ring
-  // beside its own sensor and moved it with the camera. One measured
-  // height for both, read from the rendered scene, settles it: the audit
-  // showed 128 of 128 pairs coincident to the centimetre afterwards.
+  // scene.sampleHeight is a PICK: it renders the scene to resolve one
+  // pixel. A sweeper calling it for 130 sensors every three seconds is
+  // 130 render passes every three seconds, forever, and the whole
+  // application crawled. Camera moves landed seconds late.
   //
-  // DEFERRED AND RETRIED, because sampleHeightMostDetailed needs the
-  // tiles under each sensor to exist. Three attempts at widening gaps,
-  // and if none of them lands the markers simply stay clamped, which is
-  // how they behaved for months. Quiet unless it fails.
+  // It is also unnecessary as a background task. The pin matters when
+  // you are parked at a site looking at it, which is exactly when you
+  // can run it yourself and see the result:
   //
-  // WRAPPED, AND THAT IS NOT DECORATION. Two changes to this code took
-  // the whole application down today, one of them on boot. Nothing in
-  // here is allowed to throw into the boot path.
-  (() => {
-    let _expected = 0;
-    for (const sid of Object.keys(SITES)) _expected += (SITES[sid].sensors || []).length;
-    let _passes = 0;
-    const _timer = setInterval(async () => {
-      _passes++;
-      try {
-        await window.__isr_pinSensors?.({ quiet: true });
-      } catch (err) {
-        console.warn('[sensors] pin pass failed:', err?.message || err);
-      }
-      // Stop once everything is pinned, or after five minutes of
-      // trying. Sites nobody has looked at never load their ground, so
-      // waiting forever would be waiting for something that is not
-      // coming.
-      // Does not stop when everything has A height, because a first
-      // height taken from a coarse tile is usually too low. It keeps
-      // refining upward for five minutes, which covers any site the
-      // operator flies into during a session.
-      if (_passes === 10 || _passes === 40) {
-        console.log(`[sensors] ${_sensorPinH.size}/${_expected} pinned to measured heights, refining`);
-      }
-      if (_passes > 100) {
-        clearInterval(_timer);
-        console.log(`[sensors] ${_sensorPinH.size}/${_expected} pinned, refinement finished`);
-      }
-    }, 3000);
-  })();
+  //   await __isr_pinSensors()   measure and pin what is on screen
+  //   __isr_pinSensors.off()     back to clamping
+  //
+  // Depth testing stays on by default, because that costs nothing and
+  // is what made markers sit correctly in the scene.
 }
 
 main().catch((err) => console.error('Fatal error:', err));
