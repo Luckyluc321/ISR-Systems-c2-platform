@@ -382,7 +382,7 @@ type NnDetectionBatch = {
 }
 ```
 
-Same shape from mock and real sources. Downstream code aggregates by (siteId, sensorId) with per-tick MAX across drones (the same monotonic-tick reset behaviour landed in `_updateContributingSensorsForPosition`).
+Same shape from mock and real sources. Downstream code aggregates by (siteId, sensorId, memberKey): a MAX merge inside the bucket of the airframe the batch is about, with one time-based decay pass per event per tick across every bucket. `_updateContributingSensorsForPosition(event, lat, lon, altM, memberKey)` is the entry point, and the per-sensor numbers are per AIRFRAME, not per formation.
 
 ### IF-1.4a Confidence lifecycle inside C2
 
@@ -397,10 +397,12 @@ flowchart TD
   C --> D{Track inside this<br/>sensor's cylinder?}
   D -- yes --> E[Geometry floor<br/>0.18 at the edge, 0.60 overhead]
   D -- no --> F[Keeps decaying, drops out<br/>below 0.08 unless it has a peak]
-  E --> G[contributingSensors]
+  E --> G["memberSensors[memberKey]<br/>the bucket for the airframe<br/>whose position came in"]
   F --> G
-  G --> H[Count of sensors holding the track]
-  H --> I[Fused track confidence<br/>one estimate for the formation]
+  G --> U["contributingSensors<br/>DERIVED union across members"]
+  G --> H[Mass of the sensors holding<br/>THIS airframe]
+  H --> I[Fused member confidence<br/>one estimate per airframe]
+  U --> S[Alert strip · case file · PDF<br/>signal-evidence gate]
 ```
 
 **Per-sensor confidence** answers "what is this sensor contributing right
@@ -427,11 +429,36 @@ from geometry alone would make C2 the classifier, which it is not. Declining
 to claim a live detection evaporated is a different act from asserting one
 that was never reported.
 
-**Fused track confidence** answers "how well do we hold this track". It is
-one estimate for the whole formation rather than a per-airframe self-score.
-Its VALUE is a function of the summed confidence of the sensors holding the
-track, saturating at 5. It rises as a track crosses into denser coverage and
-falls as sensors drop, including when they are jammed or taken offline.
+**Fused member confidence** answers "how well do we hold this airframe". Its
+VALUE is a function of the summed confidence of the sensors holding THAT
+airframe, saturating at 5. It rises as the airframe crosses into denser
+coverage and falls as sensors drop, including when they are jammed or taken
+offline.
+
+This was one estimate for the whole formation, read off the case union's
+mass, and that was wrong in a way an operator could see: a trailing airframe
+held by one sensor at the edge of a ring printed the same figure as the lead
+sitting under four. A sensor observes an airframe, not a formation, so the
+mass is the member's own — `event.memberSensors[memberKey]`, written by the
+tick one bucket per position. A member with a store but an empty bucket
+scores zero mass, because "no sensor holds this airframe" is a real answer
+and borrowing the formation's is not. An event with no per-member store — any
+single-platform event, any historical event — falls back to the case union.
+
+`contributingSensors` remains, and is now the DERIVED union of those buckets:
+per sensor the best confidence and the best peak any member earned. That is
+the "which sensors hold this CASE" view the alert strip, the case file, the
+PDF, the signal-evidence gate and `entry.sensorIds` all read, and none of
+them changed.
+
+Batches that arrive without a member to attribute them to — a WebSocket field
+node reports a detection, not a formation slot — are filed under the
+`_event` key and still reach the union. The gap is visible rather than
+guessed, and it is the seam where real per-target association lands once
+there is a classifier to do it.
+
+See `docs/swarm-individual-tracking-architecture.md`, "Per-member sensor
+attribution", for the full store and the gate that holds it.
 
 Two further properties, both scaled by that same evidence:
 

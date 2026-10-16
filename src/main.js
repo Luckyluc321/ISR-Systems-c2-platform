@@ -12595,6 +12595,180 @@ async function main() {
   // that a drone skimming the edge of a ring does not strobe.
   const _CONF_HALF_LIFE_MS = 1500;
 
+  // ═══════════════════════════════════════════════════════════════════
+  // PER-MEMBER SENSOR ATTRIBUTION
+  // ───────────────────────────────────────────────────────────────────
+  // A SENSOR OBSERVES AN AIRFRAME. IT DOES NOT OBSERVE A FORMATION.
+  //
+  // contributingSensors was one array per EVENT, written by five
+  // callers: the lead's tick branch and one call per wingman, all
+  // MAX-merging into the same list. So the instant any one member
+  // crossed into a ring, that sensor was credited with holding the
+  // whole case, and there was no per-member list anywhere to disagree
+  // with it. Clicking DRONE-4 in the roster showed DRONE-1's sensors
+  // because there was only ever one list.
+  //
+  // It got worse than a union. The per-tick decay ran on the FIRST call
+  // for the event in a tick and the rest only raised values, so which
+  // airframe's geometry defined the baseline depended on call order,
+  // and the lead's call is skipped entirely while it is neutralised
+  // (18599) or once its trajectory has completed (p.visible, 18354)
+  // while the wingman loop keeps running (18914, outside that branch).
+  // A sensor could therefore be held up by a wingman and read as
+  // holding the lead after the lead had stopped being evaluated at all.
+  //
+  // So attribution is now per member:
+  //
+  //   event.memberSensors holds one bucket per member:
+  //     '<eventId>-m0'  ->  [ { id, confidence, peakConfidence } ]  lead
+  //     '<eventId>-m1'  ->  [ ... ]                               wingman
+  //     '_event'        ->  [ ... ]   batches with no member context
+  //
+  // Decay, the geometry floor and the detection batch all act on ONE
+  // bucket, scoped to the position they were called with.
+  //
+  // event.contributingSensors is kept and is now DERIVED: the union of
+  // every bucket, per sensor the best confidence and the best peak any
+  // member earned. The alert strip, the case file, the PDF, the
+  // signal-evidence gate and entry.sensorIds all want "which sensors
+  // hold this case" and are unchanged by this.
+  //
+  // THE KEY FOR UNATTRIBUTED OBSERVATIONS. The WebSocket subscriber and
+  // the live-sensor console fold real batches in without knowing which
+  // airframe they belong to — a field node reports a detection, not a
+  // formation slot. Those land in '_event' so they still reach the
+  // union and are still visibly not attributed to any member, which is
+  // the honest state rather than a guess.
+  const _MEMBER_SENSORS_UNATTRIBUTED = '_event';
+
+  // The member id a formation slot was minted with, so a caller holding
+  // a slot index resolves the same key the writer used. Mirrors the
+  // spawn path: lead is m0, formation[i] is m{i}.
+  function _memberKeyForSlot(event, slotIdx) {
+    if (!event?.id || slotIdx == null) return null;
+    return `${event.id}-m${slotIdx}`;
+  }
+
+  // The bucket for one member, created on demand. Returns null for an
+  // event that cannot own one.
+  function _memberSensorBucket(targetEvent, memberKey) {
+    if (!targetEvent || !memberKey) return null;
+    if (!targetEvent.memberSensors) targetEvent.memberSensors = {};
+    if (!Array.isArray(targetEvent.memberSensors[memberKey])) {
+      targetEvent.memberSensors[memberKey] = [];
+    }
+    return targetEvent.memberSensors[memberKey];
+  }
+
+  // Read-only view of one member's sensors, newest state, highest first.
+  // Used by the detail panel and the audit handle. Never creates a
+  // bucket: asking about a member must not invent one.
+  function _memberSensorsFor(event, memberKey) {
+    const bucket = event?.memberSensors?.[memberKey];
+    return Array.isArray(bucket) ? bucket : [];
+  }
+
+  // THE UNION IS DERIVED, NOT WRITTEN ALONGSIDE.
+  //
+  // Maintaining a per-member store AND an independently written union
+  // is two sources of truth for the same fact, and they would drift the
+  // first time one writer was missed. So the union is recomputed from
+  // the buckets after every write.
+  //
+  // Cost: members are at most five and a member's bucket holds only the
+  // sensors that have actually held it, so this is tens of entries per
+  // call, no allocation beyond the output array, and no scene access.
+  //
+  // OFFLINE ENTRIES SURVIVE. `offline: true` is a declaration about a
+  // sensor rather than an observation of a target, nothing in the live
+  // path mints one, and the historical events in events.js carry them.
+  // Dropping them on a recompute would silently delete the one row in
+  // the panel that says a sensor that should be contributing cannot.
+  function _recomputeEventContributingSensors(targetEvent) {
+    if (!targetEvent?.memberSensors) return;
+    const merged = new Map();
+    for (const prev of (targetEvent.contributingSensors || [])) {
+      if (prev?.offline) merged.set(prev.id, { ...prev });
+    }
+    for (const bucket of Object.values(targetEvent.memberSensors)) {
+      if (!Array.isArray(bucket)) continue;
+      for (const entry of bucket) {
+        if (!entry?.id) continue;
+        const cur = merged.get(entry.id);
+        if (!cur) {
+          merged.set(entry.id, {
+            id: entry.id,
+            confidence: entry.confidence || 0,
+            peakConfidence: entry.peakConfidence || 0,
+          });
+          continue;
+        }
+        if (cur.offline) continue;
+        if ((entry.confidence || 0) > (cur.confidence || 0)) cur.confidence = entry.confidence;
+        if ((entry.peakConfidence || 0) > (cur.peakConfidence || 0)) cur.peakConfidence = entry.peakConfidence;
+      }
+    }
+    targetEvent.contributingSensors = [...merged.values()];
+  }
+
+  // One member's sensors, strongest first. Confidence ranks them rather
+  // than distance: for ONE airframe the geometry floor is monotonic in
+  // range, so the strongest reading is the nearest sensor, and it costs
+  // no haversine per row per frame to say so.
+  function _memberSensorsRanked(event, memberKey) {
+    return _memberSensorsFor(event, memberKey)
+      .filter(c => c.offline || (c.confidence || 0) > 0 || (c.peakConfidence || 0) > 0)
+      .slice()
+      .sort((a, b) => {
+        if (!!a.offline !== !!b.offline) return a.offline ? 1 : -1;
+        return (b.confidence || 0) - (a.confidence || 0);
+      });
+  }
+
+  // Title line for the focused member's sensor section. Reports the
+  // member, how many sensors hold it NOW, and how many have ever held
+  // it, because a sensor fading out of a member's list is a different
+  // event from one that never saw it.
+  // The drone id sits AFTER the first '·' on purpose. _dpSectionKey
+  // keys a section's collapse state on the text before that separator,
+  // so putting the id first would mint a new key per focused drone and
+  // a section collapsed on DRONE-1 would spring open on DRONE-2.
+  function _memberSensorTitle(event, memberKey, slotIdx) {
+    const ranked = _memberSensorsRanked(event, memberKey);
+    const live = ranked.filter(c => !c.offline && (c.confidence || 0) >= 0.08).length;
+    return `Sensors Holding This Airframe · DRONE-${(slotIdx ?? 0) + 1} · ${live} now / ${ranked.length} ever`;
+  }
+
+  // Roster row tooltip. Carries this airframe's OWN sensor attribution.
+  //
+  // A tooltip rather than an eleventh column: the roster grid is ten
+  // fixed columns and widening it for this would reflow every row,
+  // which is a visible change nobody asked for. The focused member's
+  // full list is the panel section above; this is the at-a-glance
+  // "DRONE-4 is held by one sensor and DRONE-1 by four" that the
+  // operator needs while scanning the roster.
+  function _rosterRowTitle(d) {
+    const n = d?.stats?.sensorCount;
+    const m = d?.stats?.sensorMass;
+    const held = (typeof n === 'number')
+      ? ` · held by ${n} sensor${n === 1 ? '' : 's'}${typeof m === 'number' ? ` (mass ${m.toFixed(2)})` : ''}`
+      : '';
+    return `Click to focus ${d.id} (${d.model})${held}`;
+  }
+
+  function _memberSensorRowsHtml(event, memberKey) {
+    const ranked = _memberSensorsRanked(event, memberKey);
+    if (!ranked.length) {
+      return `<div class="dp-note dp-dim">No sensor is holding this airframe. The case may still be held by sensors that have the rest of the formation.</div>`;
+    }
+    return ranked.slice(0, 8).map(s => `
+      <div class="sensor-row member-sensor-row ${s.offline ? 'off' : ''}">
+        <span class="s-lbl">${s.id}</span>
+        <div class="s-bar"><div class="s-fill" style="width:${Math.round((s.confidence || 0) * 100)}%;"></div></div>
+        <span class="s-val">${s.offline ? 'off' : (s.confidence || 0).toFixed(2)}</span>
+      </div>`).join('');
+  }
+
   // FUSED CONFIDENCE, DRIVEN BY OBSERVATION QUALITY.
   //
   // This was a sine wave: 0.75 + i*0.04 + sin(tSec*0.3 + i*1.7)*0.08.
@@ -12763,15 +12937,33 @@ async function main() {
   const _CONF_TAU_MIN_MS = 120;   // thin, responsive
   const _CONF_TAU_MAX_MS = 800;   // well held, steady
   const _CONF_BAND_MAX = 0.085;   // widest uncertainty, at no evidence
-  function _fusedMemberConfidence(event, state, slotIdx, unidentified) {
-    const q = _evidenceQ(event);
+  // EVERY MEMBER SCORES ITSELF OFF THE SENSORS THAT HOLD IT.
+  //
+  // This read _evidenceQ(event), the mass of the CASE's whole sensor
+  // union, so a trailing airframe held by one sensor at the edge of a
+  // ring reported the same estimate as the lead sitting under four. The
+  // comment above this block used to call that "one estimate for the
+  // formation, per the fusion contract". It is not a fusion: it is the
+  // formation's best-held member's number, printed five times.
+  //
+  // A sensor observes an airframe, not a formation. So the mass is now
+  // the member's own, and the per-slot offset that existed to stop five
+  // identical numbers appearing is left in place only as a tie-break —
+  // the numbers now differ because the geometry differs.
+  //
+  // memberKey defaults to the slot's minted id so a caller that has the
+  // slot index but not the wrapper still gets per-member attribution.
+  // _evidenceQForMember falls back to the case union when the event has
+  // no per-member store at all, which is every non-swarm event.
+  function _fusedMemberConfidence(event, state, slotIdx, unidentified, memberKey) {
+    const q = _evidenceQForMember(event, memberKey ?? _memberKeyForSlot(event, slotIdx));
     const now = monoNow();
     const secs = now / 1000;
     const phase = slotIdx * 2.3;
     const band = _CONF_BAND_MAX * (1 - q);
     const wander = band * (0.6 * Math.sin(secs * 0.9 + phase)
                          + 0.4 * Math.sin(secs * 0.37 + phase * 1.7));
-    const target = _fusedTarget(event, slotIdx, unidentified) + (unidentified ? 0 : wander);
+    const target = _fusedTarget(event, slotIdx, unidentified, memberKey) + (unidentified ? 0 : wander);
     if (!state) return +Math.max(0.30, Math.min(0.98, target)).toFixed(2);
     if (!state._confFilt) state._confFilt = [];
     const prev = state._confFilt[slotIdx];
@@ -12785,6 +12977,12 @@ async function main() {
 
   // How much observation there is, 0 to 1. Drives the value, the
   // response speed and the width of the uncertainty band.
+  //
+  // CASE LEVEL. This is the union across every member, and it stays —
+  // the alert strip, the signal-evidence gate and the case file all ask
+  // "how well is this CASE held", which is a different question from
+  // "how well is this airframe held". Per-member mass is
+  // _evidenceQForMember below.
   function _evidenceQ(event) {
     const mass = (event.contributingSensors || [])
       .filter(c => !c.offline)
@@ -12792,10 +12990,52 @@ async function main() {
     return Math.min(1, mass / _FUSION_SATURATION_MASS);
   }
 
+  // MEMBER LEVEL. The mass of the sensors that hold THIS airframe.
+  //
+  // Falls back to the case union when the event carries no per-member
+  // store, which is every single-platform event and every historical
+  // event in events.js. Falls back to ZERO mass — not to the union —
+  // once a store exists but this member has nothing in it, because at
+  // that point "no sensor holds this airframe" is a real answer and
+  // borrowing the formation's is the defect this replaces.
+  function _evidenceQForMember(event, memberKey) {
+    const store = event?.memberSensors;
+    if (!store || !memberKey) return _evidenceQ(event);
+    const bucket = store[memberKey];
+    if (!Array.isArray(bucket)) return 0;
+    const mass = bucket
+      .filter(c => !c.offline)
+      .reduce((acc, c) => acc + (c.confidence || 0), 0);
+    return Math.min(1, mass / _FUSION_SATURATION_MASS);
+  }
+
   // The unsmoothed value, straight off the current sensor set.
-  function _fusedTarget(event, slotIdx, unidentified) {
-    const q = _evidenceQ(event);
-    const jitter = ((slotIdx % 3) - 1) * 0.02;
+  function _fusedTarget(event, slotIdx, unidentified, memberKey) {
+    const q = _evidenceQForMember(event, memberKey ?? _memberKeyForSlot(event, slotIdx));
+    // THE STATIC PER-SLOT BIAS IS GONE, and it had to go with this
+    // change rather than after it.
+    //
+    // It was `((slotIdx % 3) - 1) * 0.02`: a fixed offset by formation
+    // slot, worth up to 0.04 between two members. It existed for one
+    // reason, written down above — every member read the CASE's sensor
+    // mass, so without a per-slot nudge the roster showed five
+    // identical numbers and nothing moved.
+    //
+    // The mass is the member's own now, so the numbers differ because
+    // the geometry differs. The nudge stopped being a tie-break and
+    // became a lie on top of the measurement: at the moment the lead
+    // crosses into a second ring its mass is about 0.11 against the
+    // wingmen's 0.055, which is a target gap of roughly 0.09, and a
+    // 0.04 slot bias is large enough to invert the ordering. The
+    // roster would have printed a trailing airframe above the lead
+    // that was genuinely better held, which is the same defect in a
+    // smaller costume.
+    //
+    // Uncertainty is still on screen: the wander band below is scaled
+    // by (1 - q), so it is wide when a member is thinly held and
+    // closes as its own sensors pick it up. That one is evidence-driven
+    // and stays.
+    const jitter = 0;
     // UNIDENTIFIED members stay in the weak band whatever the geometry,
     // because the uncertainty is in the CLASSIFICATION rather than in the
     // fix. Replay and debrief colour-code trails off this band.
@@ -12820,9 +13060,17 @@ async function main() {
     return +Math.max(0.30, Math.min(0.98, base * (0.35 + 0.64 * Math.sqrt(q)) + jitter)).toFixed(2);
   }
 
-  function _updateContributingSensorsForPosition(event, lat, lon, altM) {
+  // memberKey IS THE SUBJECT OF THE OBSERVATION, not a hint.
+  //
+  // Every caller passes the member id of the airframe whose position it
+  // is handing in. Omitting it files the observation under '_event',
+  // which is correct for a batch with no member context and wrong for a
+  // sim position — scripts/check-member-sensor-attribution.mjs is the
+  // gate that keeps the tick's two call sites honest.
+  function _updateContributingSensorsForPosition(event, lat, lon, altM, memberKey) {
     try {
       const tickSeq = _contribTickSeq;
+      const _mk = memberKey || _MEMBER_SENSORS_UNATTRIBUTED;
       const hitSites = _sitesSeeingPoint(lat, lon, altM);
       for (const sid of hitSites) {
         // ONE RESOLVER, SHARED WITH THE PER-SITE LIFECYCLE.
@@ -12843,16 +13091,40 @@ async function main() {
         const targetEvent = _findGroupEventForSite(event, sid);
         if (!targetEvent) continue;
         if (!targetEvent.contributingSensors) targetEvent.contributingSensors = [];
-        // First call for this event in the current tick? Reset every
-        // sensor's confidence to 0 so all drones this tick start from a
-        // clean slate. Subsequent calls in the same tick (later drones
-        // in the swarm) skip the reset and just apply MAX. Between-tick
-        // residue never survives, so confidence tracks live geometry.
+        const _bucket = _memberSensorBucket(targetEvent, _mk);
+        if (!_bucket) continue;
+        // ONE DECAY PASS PER TICK, ACROSS EVERY MEMBER'S BUCKET.
+        //
+        // Ageing is a function of TIME, and time passes for an airframe
+        // whether or not the tick got round to calling this for it. So
+        // the decay cannot live behind the member's own call.
+        //
+        // Both wrong versions are worth writing down, because they are
+        // the same mistake twice:
+        //
+        //   EVENT-LEVEL DECAY ON A SHARED LIST. The first of the five
+        //   calls in a tick decayed the one array and the other four
+        //   could only raise it, so whose geometry set the baseline was
+        //   decided by loop order.
+        //
+        //   PER-MEMBER DECAY INSIDE THE MEMBER'S CALL. Correct right up
+        //   to the point where a member stops being called — the lead
+        //   while neutralised (its call is guarded) or any member once
+        //   its own trajectory has completed (the whole p.visible branch
+        //   is skipped). Its bucket then never ages and froze at its
+        //   last value for the rest of the case. The gate catches this.
+        //
+        // So: one pass, once per event per tick, over every bucket.
+        // Attribution stays per member because the floor and the batch
+        // merge below raise ONLY this member's bucket — decay is uniform
+        // and only the raising is attributed.
         if (targetEvent._contribTickSeq !== tickSeq) {
           const _nowMs = monoNow();
           const _dtMs = Math.min(500, Math.max(0, _nowMs - (targetEvent._contribTickMs || _nowMs)));
           targetEvent._contribTickMs = _nowMs;
-          for (const existing of targetEvent.contributingSensors) {
+          targetEvent._contribTickSeq = tickSeq;
+          for (const _bk of Object.keys(targetEvent.memberSensors)) {
+          for (const existing of targetEvent.memberSensors[_bk]) {
             if (existing.offline) continue;
             // DECAY, NOT A RESET.
             //
@@ -12900,11 +13172,17 @@ async function main() {
             existing.confidence = (existing.confidence || 0)
               * Math.pow(0.5, _dtMs / _CONF_HALF_LIFE_MS);
           }
-          targetEvent.contributingSensors = targetEvent.contributingSensors
+          targetEvent.memberSensors[_bk] = targetEvent.memberSensors[_bk]
             .filter(c => c.offline || (c.confidence || 0) >= 0.08
                       || (c.peakConfidence || 0) > 0);
-          targetEvent._contribTickSeq = tickSeq;
+          }
+          // The union is a view of the buckets, so it has to be rebuilt
+          // after they age or the panel shows the pre-decay values for a
+          // frame.
+          _recomputeEventContributingSensors(targetEvent);
         }
+        // Re-read: the prune above replaces the array.
+        const _memberList = targetEvent.memberSensors[_mk];
         // GEOMETRY FLOOR: A NEAREST SENSOR CANNOT READ 0.00.
         //
         // The active panel ranks contributing sensors by distance to the
@@ -12927,6 +13205,12 @@ async function main() {
         // from geometry alone would make C2 the classifier, which it is
         // not. Refusing to claim a live detection evaporated is different
         // from asserting one that was never reported.
+        //
+        // SCOPED TO THIS MEMBER'S OWN LIST. The distance below is the
+        // distance to the position this call was made with, so raising
+        // the case-wide union with it credited the nearest airframe's
+        // range to every other one. It raises only the bucket of the
+        // airframe that is actually that close.
         for (const _s of (SITES[sid]?.sensors || [])) {
           if (_s.status === 'offline') continue;
           const _d = haversineM(lat, lon, _s.lat, _s.lon);
@@ -12954,7 +13238,7 @@ async function main() {
           if (_hf <= 0) continue;
           const _floor = +Math.max(0.12 * _hf, Math.min(0.95,
             ((0.18 + 0.42 * (1 - _d / _s.coverageRadius)) + _wob) * _hf)).toFixed(2);
-          const _entry = targetEvent.contributingSensors.find(c => c.id === _s.id);
+          const _entry = _memberList.find(c => c.id === _s.id);
           if (!_entry || _entry.offline) continue;
           if ((_entry.confidence || 0) < _floor) {
             _entry.confidence = _floor;
@@ -12972,8 +13256,13 @@ async function main() {
         const unsub = src.onDetection(b => { batch = b; });
         src.ingestPositions([{ lat, lon }]);
         unsub();
-        if (!batch?.sensors) continue;
-        _applyDetectionBatchToEvent(batch, targetEvent);
+        if (!batch?.sensors) {
+          // The floor may still have moved this member's list, so the
+          // union has to be rebuilt even when no batch arrived.
+          _recomputeEventContributingSensors(targetEvent);
+          continue;
+        }
+        _applyDetectionBatchToEvent(batch, targetEvent, _mk);
       }
     } catch (_) { /* silent — never break the tick */ }
   }
@@ -12990,7 +13279,17 @@ async function main() {
   // "sensor N01 saw this target at 0.87 at its closest approach" not
   // "sensor N01 saw 0% because the drone exited coverage before the
   // event closed." Peak is monotonic — never decays.
-  function _applyDetectionBatchToEvent(batch, targetEvent) {
+  //
+  // memberKey NAMES THE AIRFRAME THE BATCH IS ABOUT.
+  //
+  // The sim path knows: it handed one position in and got one position
+  // back. A real field node does not — it reports a detection, not a
+  // formation slot — so the WebSocket subscriber and the live-sensor
+  // console leave it out and the observation is filed as unattributed.
+  // That is a visible gap in the panel rather than a guess, and it is
+  // the seam where real per-target association lands when there is a
+  // classifier to do it.
+  function _applyDetectionBatchToEvent(batch, targetEvent, memberKey) {
     // Observation recency: the sweeper's level-triggered clock.
     // Stamped whenever any sensor in the batch carries a detection.
     // Source-agnostic (mock and WebSocket both flow through here),
@@ -12998,6 +13297,9 @@ async function main() {
     if ((batch.sensors || []).some(se => se.status !== 'offline' && (se.detections || []).length)) {
       targetEvent._lastDetectionTs = wallNow();
     }
+    const _bucket = _memberSensorBucket(targetEvent,
+      memberKey || _MEMBER_SENSORS_UNATTRIBUTED);
+    if (!_bucket) return;
     for (const sEntry of batch.sensors) {
       if (sEntry.status === 'offline') continue;
       let maxConf = 0;
@@ -13018,14 +13320,19 @@ async function main() {
         (SITES[targetEvent.siteId]?.sensors || []).find(x => x.id === sEntry.sensorId));
       if (_hf <= 0) continue;
       const rounded = +(maxConf * _hf).toFixed(2);
-      const existing = targetEvent.contributingSensors.find(s => s.id === sEntry.sensorId);
+      const existing = _bucket.find(s => s.id === sEntry.sensorId);
       if (!existing) {
-        targetEvent.contributingSensors.push({ id: sEntry.sensorId, confidence: rounded, peakConfidence: rounded });
+        _bucket.push({ id: sEntry.sensorId, confidence: rounded, peakConfidence: rounded });
       } else if (!existing.offline) {
         if (rounded > (existing.confidence || 0)) existing.confidence = rounded;
         if (rounded > (existing.peakConfidence || 0)) existing.peakConfidence = rounded;
       }
     }
+    // The case-level union is derived from the buckets, so it is
+    // rebuilt here rather than written twice. Every caller of this
+    // function therefore gets a correct contributingSensors with no
+    // extra call of its own, including the WebSocket subscriber.
+    _recomputeEventContributingSensors(targetEvent);
   }
 
   // ── Persistent WebSocket NN subscriber (IF-1 real-hardware path) ──
@@ -18596,8 +18903,19 @@ async function main() {
         // Applies to primary AND linked/shadow events at other sites
         // (fixes: AMK shadow event had zero sensor data because template's
         // contributingSensors were CPH's — no dynamic update ever ran).
+        //
+        // ATTRIBUTED TO THE LEAD, BY ITS OWN MEMBER ID. `p` is the lead
+        // airframe's position and nothing else's, so the sensors this
+        // call finds hold the LEAD. They used to be written into the
+        // case-wide list the four wingmen also wrote to, which is why
+        // the panel could never answer "which sensors hold DRONE-1".
+        //
+        // A non-swarm event has no leadSwarmMember and no member ids, so
+        // the key falls back to the event's own m0 slot: one platform,
+        // one bucket, union identical to it.
         if (!state.leadSwarmMember?.neutralised) {
-          _updateContributingSensorsForPosition(event, p.lat, p.lon, p.alt);
+          _updateContributingSensorsForPosition(event, p.lat, p.lon, p.alt,
+            state.leadSwarmMember?.memberId || _memberKeyForSlot(event, 0));
         }
 
         // ── P55: single-drone recording capture (fixed-wing / jet / missile)
@@ -18979,7 +19297,19 @@ async function main() {
             // source for that number instead of two disagreeing ones.
             confidence: _fusedMemberConfidence(
               event, state, 0,
-              TEMPLATES[event.templateKey]?.swarm?.formation?.[0]?.unidentified === true),
+              TEMPLATES[event.templateKey]?.swarm?.formation?.[0]?.unidentified === true,
+              state.leadSwarmMember?.memberId || _memberKeyForSlot(event, 0)),
+            // The lead's OWN sensor attribution, read out of its own
+            // bucket. Written by the call in the p.visible branch above,
+            // which runs earlier in this same tick.
+            sensorCount: (() => {
+              const _own = _memberSensorsFor(event, state.leadSwarmMember?.memberId || _memberKeyForSlot(event, 0));
+              return _own.filter(c => !c.offline && (c.confidence || 0) > 0).length;
+            })(),
+            sensorMass: (() => {
+              const _own = _memberSensorsFor(event, state.leadSwarmMember?.memberId || _memberKeyForSlot(event, 0));
+              return +_own.filter(c => !c.offline).reduce((acc, c) => acc + (c.confidence || 0), 0).toFixed(2);
+            })(),
             // AND THE CARRIER, for the same reason. The roster read "No
             // radio-frequency data" on the lead while every wingman showed
             // its frequency, because this object never carried rfCarrierMHz
@@ -19427,10 +19757,29 @@ async function main() {
             rfCarrierMHz: sw.rfMHz || (2412 + (i % 3) * 5),
             rfPower_dBm: -68 + (i * -2),
             model: sw.model,
-            confidence: _fusedMemberConfidence(event, state, i + 1, _isRogue),
+            confidence: _fusedMemberConfidence(event, state, i + 1, _isRogue,
+              sw.memberId || _memberKeyForSlot(event, i + 1)),
+            // How many sensors currently hold THIS airframe, and the
+            // mass behind them. Carried on the member's own stats so the
+            // roster and the 4 Hz panel patcher can show per-member
+            // attribution without recomputing it per row per frame.
+            sensorCount: 0, sensorMass: 0,
           };
-          // P68: dynamic contributingSensors for the WINGMAN's position too
-          _updateContributingSensorsForPosition(event, pos.lat, pos.lon, pos.alt);
+          // P68: this WINGMAN's own sensors, filed under its own member
+          // id. Same position-in, sensors-out call the lead makes, into
+          // a different bucket, so a sensor that holds the lead is not
+          // credited with holding this airframe and vice versa.
+          _updateContributingSensorsForPosition(event, pos.lat, pos.lon, pos.alt,
+            sw.memberId || _memberKeyForSlot(event, i + 1));
+          // Read back AFTER the update so the roster shows this tick's
+          // attribution rather than last tick's.
+          {
+            const _own = _memberSensorsFor(event, sw.memberId || _memberKeyForSlot(event, i + 1));
+            sw.stats.sensorCount = _own.filter(c => !c.offline && (c.confidence || 0) > 0).length;
+            sw.stats.sensorMass = +_own
+              .filter(c => !c.offline)
+              .reduce((acc, c) => acc + (c.confidence || 0), 0).toFixed(2);
+          }
           // Swarm Phase 1: sync source-of-truth member track. Same
           // throttle as recording samples so listener-silent writes
           // stay cheap; coverage flips sync immediately below via
@@ -20141,9 +20490,19 @@ async function main() {
   // inside it, and every sensor on every live case with its current
   // value and its peak.
   //
-  // Contributing sensors are a property of the CASE, not of one drone
-  // in it, so two members of the same swarm must always show the same
-  // list. Two different numbers means two different events.
+  // THIS NOTE USED TO SAY THE OPPOSITE, and the thing it asserted was
+  // the defect: "contributing sensors are a property of the CASE, not
+  // of one drone in it, so two members of the same swarm must always
+  // show the same list". A sensor observes an airframe. Two members of
+  // one formation showing the SAME list is now the suspicious output,
+  // not the expected one, and happens only while they are genuinely
+  // inside the same rings.
+  //
+  // So it prints two tables. The first is the case: the union across
+  // every member, which is what the alert strip and the case file read.
+  // The second is per member, off event.memberSensors, with the mass
+  // each airframe's own sensors add up to and the confidence that mass
+  // produced.
   //
   //   __isr_sensorAudit()
   // WHERE EVERY PULSE RING ACTUALLY IS, and whether it is showing.
@@ -20369,7 +20728,10 @@ async function main() {
     // is in the render. If they agree the data is simply what it is.
     const _panelHdr = [...document.querySelectorAll('.dp-section-title')]
       .find(el => /Contributing Sensors/i.test(el.textContent));
-    const _panelRows = document.querySelectorAll('#detail-body .sensor-row').length;
+    const _panelRows = document.querySelectorAll(
+      '#detail-body .sensor-row:not(.member-sensor-row)').length;
+    const _memberPanelRows = document.querySelectorAll(
+      '#detail-body .sensor-row.member-sensor-row').length;
 
     const rows = EVENTS.filter(ev => ev.status === 'active').map(ev => {
       const cs = ev.contributingSensors || [];
@@ -20388,8 +20750,66 @@ async function main() {
         sensors: cs.map(s => `${s.id}=${(s.confidence || 0).toFixed(2)}(peak ${(s.peakConfidence || 0).toFixed(2)})`).join('  '),
       };
     });
+    console.log('CASE LEVEL — the union across every member. This is what '
+      + 'the alert strip and the case file read.');
     console.table(rows);
-    return rows;
+
+    // ── PER MEMBER — the question the union cannot answer ────────────
+    //
+    // "Which sensors hold THIS airframe." One row per formation member
+    // per live case, off event.memberSensors, which is the store the
+    // tick writes one bucket of per position. Two members showing
+    // different sensors is now the CORRECT output: before this existed
+    // they could only ever show the same list, because there was only
+    // one list.
+    //
+    // `conf` is the number the roster prints for that member, and it is
+    // derived from `mass`, so a member held by one sensor reading 0.2
+    // and a member held by four cannot print the same figure any more.
+    // `_event` is the unattributed bucket: real batches that arrived
+    // without a member to attribute them to.
+    const memberRows = [];
+    for (const ev of EVENTS.filter(x => x.status === 'active')) {
+      const store = ev.memberSensors;
+      if (!store) continue;
+      const st = droneState.get(ev.id);
+      const keys = Object.keys(store).sort();
+      for (const key of keys) {
+        const bucket = store[key] || [];
+        const live = bucket.filter(s => !s.offline && (s.confidence || 0) >= 0.08);
+        const mass = bucket.filter(s => !s.offline)
+          .reduce((a, s) => a + (s.confidence || 0), 0);
+        const m = /-m(\d+)$/.exec(key);
+        const slotIdx = m ? Number(m[1]) : null;
+        const _wrapper = slotIdx === 0
+          ? st?.leadSwarmMember
+          : (slotIdx != null ? st?.swarmBillboards?.[slotIdx - 1] : null);
+        memberRows.push({
+          event: ev.id,
+          member: key === _MEMBER_SENSORS_UNATTRIBUTED
+            ? 'UNATTRIBUTED (real batches, no member)'
+            : `DRONE-${(slotIdx ?? 0) + 1}`,
+          role: _wrapper?.role || (key === _MEMBER_SENSORS_UNATTRIBUTED ? '' : 'lead'),
+          focused: (ev.id === sel && slotIdx === _selectedSwarmIndex) ? 'YES' : '',
+          holding: live.length,
+          ever: bucket.length,
+          mass: +mass.toFixed(2),
+          conf: slotIdx == null ? ''
+            : (slotIdx === 0 ? st?.leadStats?.confidence
+                             : st?.swarmBillboards?.[slotIdx - 1]?.stats?.confidence) ?? '',
+          sensors: bucket.slice()
+            .sort((a, b) => (b.confidence || 0) - (a.confidence || 0))
+            .map(s => `${s.id}=${(s.confidence || 0).toFixed(2)}(peak ${(s.peakConfidence || 0).toFixed(2)})`)
+            .join('  ') || '(none)',
+        });
+      }
+    }
+    console.log(`PER MEMBER — which sensors hold each airframe. Panel is `
+      + `showing ${_panelRows} case row(s) and ${_memberPanelRows} member row(s).`);
+    if (memberRows.length) console.table(memberRows);
+    else console.log('no live case carries a per-member store yet '
+      + '(it is created on the first tick a member is inside any coverage)');
+    return { cases: rows, members: memberRows };
   };
   window.__updateSimButton = updateSimButton;
 
@@ -24305,6 +24725,72 @@ async function main() {
       }
     }
     if (!stats && event.lastPosition) stats = event.lastPosition;
+
+    // ── SENSOR ATTRIBUTION IS LIVE DATA, SO IT IS PATCHED HERE ───────
+    //
+    // Both sensor sections used to be painted only by the full render,
+    // and the full render is exactly what the hover gate blocks. So
+    // while the operator watched the panel with the pointer on it, a
+    // sensor acquiring the formation could not appear: the rows kept
+    // their old values, the count kept its old number, and the first
+    // thing that repainted the section was the operator clicking
+    // another roster row. Clicking DRONE-2 therefore made the sensor
+    // that had acquired the LEAD seconds earlier appear at the moment
+    // DRONE-2 was selected, which reads as "the wingmen got the sensor
+    // and the lead did not".
+    //
+    // This is the same defect, in the same panel, that the roster
+    // growth guard below already fixes for member rows. Two fixes:
+    //
+    //   1. The focused member's section is rewritten every 250 ms.
+    //      Pure markup, no listeners inside it, so innerHTML is safe.
+    //   2. The case-level union's rows are patched in place, and a
+    //      change in ROW MEMBERSHIP forces a full render — the rows
+    //      carry no sensor id, so there is nothing to patch when the
+    //      set itself changes, and the toggle button inside that
+    //      section means it cannot simply be rewritten.
+    //
+    // Runs before the `stats` bail-out below: a case with no live
+    // kinematics yet still has sensors acquiring it.
+    const _msSection = document.querySelector('[data-live-member-sensors="1"]');
+    if (_msSection) {
+      const _key = _msSection.dataset.memberKey;
+      const _rows = _msSection.querySelector('[data-live="memberSensorRows"]');
+      const _title = _msSection.querySelector('[data-live="memberSensorTitle"]');
+      if (_rows) {
+        const _html = _memberSensorRowsHtml(event, _key);
+        if (_rows.innerHTML !== _html) _rows.innerHTML = _html;
+      }
+      // The title carries the collapse caret inserted by
+      // _decorateActiveSectionsCollapsible, so only the text node that
+      // holds the label is replaced and the caret element is left alone.
+      if (_title) {
+        const _txt = _memberSensorTitle(event, _key, _selectedSwarmIndex);
+        for (const node of _title.childNodes) {
+          if (node.nodeType === 3 && node.textContent.trim()) { // Node.TEXT_NODE
+            if (node.textContent !== _txt) node.textContent = _txt;
+            break;
+          }
+        }
+      }
+    }
+    const _caseSection = document.querySelector('[data-live-case-sensors="1"]');
+    if (_caseSection) {
+      const _union = (event.contributingSensors || []);
+      const _sigNow = `${_union.filter(s => !s.offline).length}/${_union.length}`;
+      if (_caseSection.dataset.sensorSig !== _sigNow) { renderDetailPanel(); return; }
+      for (const row of _caseSection.querySelectorAll('.sensor-row')) {
+        const id = row.querySelector('.s-lbl')?.textContent;
+        const entry = _union.find(s => s.id === id);
+        if (!entry || entry.offline) continue;
+        const fill = row.querySelector('.s-fill');
+        const val = row.querySelector('.s-val');
+        if (fill) fill.style.width = `${Math.round((entry.confidence || 0) * 100)}%`;
+        const _v = (entry.confidence || 0).toFixed(2);
+        if (val && val.textContent !== _v) val.textContent = _v;
+      }
+    }
+
     if (!stats) return;
 
     // Patch top telemetry cells
@@ -24373,6 +24859,20 @@ async function main() {
         if (confSpan) {
           const rowConf = rowStats.confidence ?? event.confidence ?? 0;
           confSpan.textContent = `${Math.round(rowConf * 100)}%`;
+        }
+        // Per-member sensor attribution rides the tooltip, so it stays
+        // live without the roster grid gaining an eleventh column. The
+        // id and the model come off the row rather than the droneList,
+        // which the patcher does not build.
+        {
+          const _n = rowStats.sensorCount, _m = rowStats.sensorMass;
+          if (typeof _n === 'number') {
+            const _id = row.querySelector('.dp-swarm-id')?.textContent || `DRONE-${idx + 1}`;
+            const _model = row.querySelector('.dp-swarm-model')?.textContent || '';
+            const _t = `Click to focus ${_id} (${_model}) · held by ${_n} sensor${_n === 1 ? '' : 's'}`
+              + `${typeof _m === 'number' ? ` (mass ${_m.toFixed(2)})` : ''}`;
+            if (row.title !== _t) row.title = _t;
+          }
         }
         // THE NAME AND THE SIGNAL RESOLVE ON THEIR OWN SCHEDULE, so they
         // are patched here at 4 Hz with everything else.
@@ -24651,8 +25151,13 @@ async function main() {
       <button class="dp-sensor-toggle" data-dp-sensor-toggle="${e.id}">
         ${_sensorsExpanded ? `Show top 5 only` : `See all ${_sensorTotal} sensors`}
       </button>` : '';
+    // data-sensor-sig IS THE MEMBERSHIP STAMP, not decoration. The rows
+    // carry a sensor id in their label and nothing else, and the section
+    // shows only the top five, so the patcher cannot tell "N23 joined"
+    // from "N23 is below the fold" by counting rows. It compares this
+    // signature instead and forces one full render when it moves.
     const sensors = e.contributingSensors && e.contributingSensors.length ? `
-      <div class="dp-section">
+      <div class="dp-section" data-live-case-sensors="1" data-sensor-sig="${e.contributingSensors.filter(s => !s.offline).length}/${_sensorTotal}">
         <div class="dp-section-title">Contributing Sensors · ${e.contributingSensors.filter(s => !s.offline).length} / ${_sensorTotal}${_sensorTotal > 5 && !_sensorsExpanded ? ' · showing top 5 by proximity' : ''}</div>
         ${_sensorVisible.map(s => `
           <div class="sensor-row ${s.offline ? 'off' : ''}">
@@ -24662,6 +25167,40 @@ async function main() {
           </div>`).join('')}
         ${_sensorToggleHtml}
       </div>` : '';
+
+    // ── WHICH SENSORS HOLD THE FOCUSED AIRFRAME ──────────────────────
+    //
+    // The section above is the CASE: the union across every member, and
+    // it is what the alert strip and the case file need. It cannot
+    // answer the operator's actual question about a formation, which is
+    // "what is holding THIS one", because a union says yes to a sensor
+    // that holds any of them.
+    //
+    // So the focused member gets its own list, off its own bucket. An
+    // empty list is rendered rather than hidden: "no sensor holds this
+    // airframe right now" is the answer in the gap between a member
+    // crossing into coverage and the one in front of it doing so, and
+    // hiding it is what made the union look like per-member truth.
+    //
+    // data-live-member-sensors is the patcher's anchor. The case section
+    // is painted only by a full render, which the hover gate blocks
+    // while the pointer is on the panel; this one updates at 4 Hz
+    // regardless, so a sensor acquiring an airframe shows up when it
+    // happens rather than on the operator's next click.
+    const memberSensorsSection = (() => {
+      const _st = droneState.get(e.id);
+      const _tpl = TEMPLATES[e.templateKey];
+      if (!_tpl?.swarm || !_st) return '';
+      const _idx = _selectedSwarmIndex;
+      const _key = (_idx === 0
+        ? _st.leadSwarmMember?.memberId
+        : _st.swarmBillboards?.[_idx - 1]?.memberId) || _memberKeyForSlot(e, _idx);
+      return `
+      <div class="dp-section" data-live-member-sensors="1" data-member-key="${_key}">
+        <div class="dp-section-title" data-live="memberSensorTitle">${_memberSensorTitle(e, _key, _idx)}</div>
+        <div class="dp-member-sensor-rows" data-live="memberSensorRows">${_memberSensorRowsHtml(e, _key)}</div>
+      </div>`;
+    })();
 
     // The "Brief Incident Summary" section that stood here is removed.
     // It shipped in f798e41 with the Agent 3 narrative work and was never
@@ -24744,7 +25283,7 @@ async function main() {
       var totalDrones = droneList.length;
 
       const fmtRow = (d, idx) => `
-        <div class="dp-swarm-row ${idx === _selectedSwarmIndex ? 'is-focused' : ''} ${d.status === 'neutralised' ? 'is-downed' : ''} ${d.status === 'lost' ? 'is-lost' : ''}" data-swarm-idx="${idx}" title="Click to focus ${d.id} (${d.model})">
+        <div class="dp-swarm-row ${idx === _selectedSwarmIndex ? 'is-focused' : ''} ${d.status === 'neutralised' ? 'is-downed' : ''} ${d.status === 'lost' ? 'is-lost' : ''}" data-swarm-idx="${idx}" title="${_rosterRowTitle(d)}">
           <span class="dp-swarm-id">${d.id}</span>
           <span class="dp-swarm-model">${d.model}</span>
           <span class="dp-swarm-role">${d.role}</span>
@@ -25276,6 +25815,7 @@ async function main() {
       ${preIngress ? '' : pir}
       ${preIngress ? '' : swarmRoster}
       ${preIngress ? '' : reacquired}
+      ${preIngress ? '' : memberSensorsSection}
       ${preIngress ? '' : sensors}
       ${preIngress ? '' : perimeter}
       ${preIngress ? '' : projected}

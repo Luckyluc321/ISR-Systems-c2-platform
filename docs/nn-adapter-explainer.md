@@ -16,7 +16,7 @@ Every site's detections come from an `NnOutputSource`. Two kinds exist today: `M
 
 The simulation engine is untouched. Drones, swarm formations, waypoint templates, RF signatures, template scenarios like the CPH swarm — all still work exactly as before. Simulations are a permanent, first-class part of the platform, not a phased-out mock. They will be used for demos, training, and edge-case regression testing forever.
 
-The C2 UI, tick loop, event lifecycle, correlator, agentic summary — none of them changed either. They read from `event.contributingSensors` the same way they always have.
+The C2 UI, tick loop, event lifecycle, correlator, agentic summary — none of them changed either. They read from `event.contributingSensors` the same way they always have. (Since 2026-10-16 that field is the DERIVED union of `event.memberSensors`, one bucket per airframe, so the case-level view every consumer reads is unchanged while attribution underneath it is per member. See `docs/swarm-individual-tracking-architecture.md`.)
 
 ---
 

@@ -9914,3 +9914,16 @@ body.workspace-map-active #receiver-view {
    read rather than scanned. */
 .dp-note-detail p { margin: 0 0 0.6em; }
 .dp-note-detail p:last-child { margin-bottom: 0; }
+
+/* ── Per-member sensor attribution, in the detail panel ──────────────
+   The case-level "Contributing Sensors" section answers which sensors
+   hold the CASE. This one answers which hold the focused airframe, and
+   it is the section an operator reads while a formation is coming in,
+   so it is marked as the member's own with an accent rule rather than
+   left to look like a second copy of the list above it. */
+.dp-member-sensor-rows {
+  margin-top: 4px;
+  border-left: 2px solid rgba(77, 210, 255, 0.35);
+  padding-left: 8px;
+}
+.sensor-row.member-sensor-row .s-lbl { color: var(--accent); }

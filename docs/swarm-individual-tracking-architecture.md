@@ -1,6 +1,6 @@
 # Swarm Individual Tracking Architecture
 
-**Status:** `[phase 2 in progress]` — designed 2026-09-16. P1.1 landed 2026-09-16 (commits 5809fd6 + 06d602b): `event.memberTracks[]` source of truth, syncMemberTrack/setMemberStatus mutators, tick-loop sync, kill-path status routing, frozen-at-spawn shadow clones. P1.2 landed 2026-09-17 (commit 501ee72): swarm roster renders per-member status from memberTracks. P2.1 landed 2026-09-17 (commits 12c99dc + 6f9225e): breakaway detection (observed-deviation grace clock, sensors-observe-only), child event promotion with provenance + cross-links, per-tick child mirroring with sticky detected, child-owned coverage-loss close, kill-path child closure, roster BREAKAWAY badge. Remaining Phase 2: rejoin semantics (P2.2), formation split (P2.3). Adversarially verified; four findings fixed in the follow-up commit.
+**Status:** `[phase 2 in progress]` — designed 2026-09-16. P1.1 landed 2026-09-16 (commits 5809fd6 + 06d602b): `event.memberTracks[]` source of truth, syncMemberTrack/setMemberStatus mutators, tick-loop sync, kill-path status routing, frozen-at-spawn shadow clones. P1.2 landed 2026-09-17 (commit 501ee72): swarm roster renders per-member status from memberTracks. P2.1 landed 2026-09-17 (commits 12c99dc + 6f9225e): breakaway detection (observed-deviation grace clock, sensors-observe-only), child event promotion with provenance + cross-links, per-tick child mirroring with sticky detected, child-owned coverage-loss close, kill-path child closure, roster BREAKAWAY badge. Remaining Phase 2: rejoin semantics (P2.2), formation split (P2.3). Adversarially verified; four findings fixed in the follow-up commit. Per-member sensor attribution landed 2026-10-16: `event.memberSensors` is the per-airframe store, `contributingSensors` is the derived case union, member confidence reads member mass, and `scripts/check-member-sensor-attribution.mjs` gates it — see "Per-member sensor attribution" below.
 
 ## Problem
 
@@ -47,6 +47,89 @@ MemberTrack = {
 **Per-member classification.** A mixed group (four quadcopters escorting one fixed-wing) carries per-member class. The event's top-level subject remains the group summary (dominant class + cardinality), which keeps every existing consumer working.
 
 **Cross-site shadow events (P1.1 semantics, deliberate).** A shadow event clones the primary's member tracks at spawn with `sourceMemberId` provenance and inherits each member's status at that moment. After spawn the shadow's tracks are FROZEN: shadow events have no droneState render wrappers, so nothing syncs their kinematics or coverage, and a member neutralised after the shadow spawned stays 'tracked' in the shadow's copy. The primary event's tracks are the live truth for the group; the shadow's copy answers "what did this site's event know at handoff." Live shadow-track sync (deriving the shadow's per-member coverage against ITS site's sensors) is Phase 2 work, folded into breakaway detection which needs per-site member geometry anyway.
+
+### Per-member sensor attribution
+
+**Landed 2026-10-16.** A sensor observes an airframe. It does not observe a formation.
+
+`event.contributingSensors` was one array per event, and the swarm tick wrote into it five
+times per frame: once for the lead, from inside the `if (p.visible)` branch, and once per
+wingman inside the swarm loop. Every writer MAX-merged into the same list, so the instant
+any one member crossed into a ring, that sensor was credited with holding the whole case.
+There was no per-member list anywhere that could disagree, so clicking DRONE-4 in the
+roster showed DRONE-1's sensors — the panel had only ever had one list to show.
+
+Two consequences that were worse than a union:
+
+- **The decay baseline depended on call order.** The per-tick decay ran on the FIRST call
+  for the event in a tick and every later call could only RAISE a value. Which airframe's
+  geometry set the floor was therefore decided by loop order.
+- **A member whose call is skipped kept its sensors.** The lead's call is guarded on
+  `!leadSwarmMember.neutralised`, and the whole `p.visible` branch it sits in is skipped
+  once the lead's trajectory completes, while the wingman loop sits OUTSIDE that branch
+  and keeps running. Nothing then aged the lead's contribution down, so sensors held up by
+  a wingman read as holding a lead that had stopped being evaluated at all.
+
+And the roster's per-member confidence came off the case union's mass, so a member held by
+one weak sensor printed the number of a member held by four.
+
+The store is now per member, with the case view derived from it:
+
+```mermaid
+flowchart TD
+    P0["lead position<br/>p.lat p.lon p.alt"] --> B0["memberSensors['&lt;ev&gt;-m0']"]
+    P1["wingman 1 position"] --> B1["memberSensors['&lt;ev&gt;-m1']"]
+    PN["wingman n position"] --> BN["memberSensors['&lt;ev&gt;-mn']"]
+    WS["WebSocket / live-sensor batch<br/>no member context"] --> BU["memberSensors['_event']"]
+    B0 --> U["contributingSensors<br/>DERIVED union<br/>best confidence, best peak"]
+    B1 --> U
+    BN --> U
+    BU --> U
+    B0 --> C0["DRONE-1 confidence<br/>off its own mass"]
+    B1 --> C1["DRONE-2 confidence<br/>off its own mass"]
+    U --> S["alert strip · case file · PDF<br/>signal-evidence gate · entry.sensorIds"]
+```
+
+- `_updateContributingSensorsForPosition(event, lat, lon, altM, memberKey)` takes the
+  member the position belongs to. One call, one position, one airframe, one bucket. The
+  geometry floor and the detection-batch merge raise only that bucket.
+- Decay runs ONCE per event per tick, across every bucket, because ageing is a function of
+  time and time passes for an airframe whether or not the tick called this for it. Decay is
+  uniform; only the raising is attributed.
+- `contributingSensors` is recomputed from the buckets after every write: per sensor the
+  best confidence and the best peak any member earned. Every existing case-level consumer
+  is unchanged. `offline: true` entries survive a rebuild — that is a declaration about a
+  sensor, not an observation of a target, and the historical events in `events.js` carry
+  them.
+- `_event` is the unattributed bucket. A real field node reports a detection, not a
+  formation slot, so the WebSocket subscriber and the live-sensor console file there. It is
+  a visible gap rather than a guess, and it is the seam where real per-target association
+  lands once there is a classifier to do it.
+- `_fusedMemberConfidence` reads `_evidenceQForMember`. A member with a store but an empty
+  bucket scores ZERO mass, not the formation's — "no sensor holds this airframe" is a real
+  answer. An event with no store at all (every single-platform event, every historical
+  event) falls back to the case union, so nothing outside swarms changed.
+
+**Operator surface.** The detail panel keeps the case-level **Contributing Sensors**
+section and adds **Sensors Holding DRONE-n** above it, off the focused member's own bucket,
+with an explicit empty state. Both are now live-patched by the 250 ms patcher: the full
+render is blocked by the panel's hover gate, so a sensor acquiring an airframe while the
+pointer was on the panel could not appear until the operator clicked something — which made
+the sensor appear at the moment another drone was selected. A change in the case union's
+membership forces one full render, because those rows carry an id and a value and nothing
+else, so there is nothing to patch when the SET changes.
+
+`__isr_sensorAudit()` prints two tables: the case union, then one row per member with the
+sensors holding it, their mass, and the confidence that mass produced.
+
+**Gate:** `scripts/check-member-sensor-attribution.mjs`, wired into `npm run build`. Static
+half asserts the attribution contract in the source; live half extracts the real functions
+and runs them against the real site manifests and the real CPH 5-drone template.
+
+**Known limit, unchanged by this work.** When NO member of a case is inside any coverage,
+`_updateContributingSensorsForPosition` returns before the decay pass, so every bucket holds
+its last value until a member re-enters coverage or the sweeper closes the case on
+`_lastDetectionTs`. That was true of the single shared array too.
 
 ### Breakaway detection and promotion
 
