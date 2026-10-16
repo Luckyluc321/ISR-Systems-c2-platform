@@ -20114,7 +20114,27 @@ async function main() {
       let h;
       try { h = scene.sampleHeight(carto, dots); } catch (_) { h = undefined; }
       if (!Number.isFinite(h)) { rows.push({ sensor: `${sid}-${sn.id}`, pinned: 'no sample' }); continue; }
-      _sensorPinH.set(_sensorPinKey(sid, sn.id), h);
+
+      // KEEP THE HIGHEST SAMPLE, AND KEEP RE-SAMPLING.
+      //
+      // sampleHeight reads whatever detail is loaded right now. From far
+      // out that is a coarse tile with no buildings on it, so a rooftop
+      // sensor measures at near ground level. Freeze that and then fly
+      // in: the detailed surface rises above the pin, and with depth
+      // testing on the marker ends up UNDER the ground and vanishes.
+      // Every sensor at the site disappeared that way.
+      //
+      // Refinement only ever adds detail, so the surface only ever rises
+      // as tiles sharpen. Taking the maximum converges on the real
+      // rooftop and can never bury the marker. The sweeper keeps going
+      // rather than stopping at the first answer.
+      const key = _sensorPinKey(sid, sn.id);
+      const prev = _sensorPinH.get(key);
+      if (prev != null && prev >= h) { rows.push({ sensor: `${sid}-${sn.id}`, pinnedM: +prev.toFixed(1) }); continue; }
+      // Lifted clear of the surface it was measured against, so a
+      // depth-tested marker sits ON the roof rather than inside it.
+      h += 1.5;
+      _sensorPinH.set(key, h);
       const ent = viewer.entities.getById(`sensor-${sid}-${sn.id}`);
       if (ent) {
         ent.position = Cesium.Cartesian3.fromDegrees(sn.lon, sn.lat, h);
@@ -31699,9 +31719,16 @@ async function main() {
       // trying. Sites nobody has looked at never load their ground, so
       // waiting forever would be waiting for something that is not
       // coming.
-      if (_sensorPinH.size >= _expected || _passes > 100) {
+      // Does not stop when everything has A height, because a first
+      // height taken from a coarse tile is usually too low. It keeps
+      // refining upward for five minutes, which covers any site the
+      // operator flies into during a session.
+      if (_passes === 10 || _passes === 40) {
+        console.log(`[sensors] ${_sensorPinH.size}/${_expected} pinned to measured heights, refining`);
+      }
+      if (_passes > 100) {
         clearInterval(_timer);
-        console.log(`[sensors] ${_sensorPinH.size}/${_expected} pinned to measured heights, depth testing on`);
+        console.log(`[sensors] ${_sensorPinH.size}/${_expected} pinned, refinement finished`);
       }
     }, 3000);
   })();
