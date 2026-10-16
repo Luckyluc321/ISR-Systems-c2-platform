@@ -103,8 +103,13 @@ check('same entity id scheme', spec.id === `sensor-${siteId}-${live.id}` && /id:
 check('same pixel size rule', spec.point.pixelSize === 8 && /pixelSize: sensor\.isCore \? 11 : 8/.test(renderSiteBlock));
 check('same outline rule', spec.point.outlineWidth === 3 && /outlineWidth: sensor\.isCore \? 5 : 3/.test(renderSiteBlock));
 check('same outline alpha', spec.point.outlineColor.a === 0.4 && /outlineColor: color\.withAlpha\(0\.4\)/.test(renderSiteBlock));
+// Clamping is still the default on both paths. renderSite now reaches it
+// through a ternary, because a sensor pinned by __isr_pinSensors must NOT
+// also clamp or the clamp overwrites the pin on the next frame. The
+// assertion is that clamping is what happens when nothing is pinned, not
+// that the line is spelled a particular way.
 check('clamped to ground like the others', spec.point.heightReference === 'CLAMP_TO_GROUND'
-  && /heightReference: Cesium\.HeightReference\.CLAMP_TO_GROUND/.test(renderSiteBlock));
+  && /Cesium\.HeightReference\.CLAMP_TO_GROUND/.test(renderSiteBlock));
 check('depth test disabled like the others', spec.point.disableDepthTestDistance === Infinity
   && /disableDepthTestDistance: Number\.POSITIVE_INFINITY/.test(renderSiteBlock));
 check('picked as a sensor by the click handler', spec.properties.type === 'sensor' && spec.properties.sensorId === live.id

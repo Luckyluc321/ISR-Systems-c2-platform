@@ -3106,6 +3106,34 @@ async function main() {
     return working.length / all.length;
   }
 
+  // RESOLVED SENSOR HEIGHTS, EMPTY BY DEFAULT.
+  //
+  // While this map is empty every marker behaves exactly as it always
+  // has: clamped to ground, per frame. Nothing below changes until
+  // __isr_pinSensors() fills it, which is deliberate. Two attempts at
+  // this today took the map down, so the new path ships switched off
+  // and has to be asked for.
+  //
+  // WHY A PIN IS NEEDED AT ALL. The dot is a point and the ring is a
+  // billboard, and Cesium clamps the two through different visualisers:
+  // the point resolves against the photogrammetry mesh, about 43 m at
+  // CPH, and the billboard against terrain, about 5 m. Thirty-eight
+  // metres apart vertically. From directly overhead they coincide, and
+  // every degree of camera tilt smears that gap across the ground,
+  // which is why the pulse sat beside its sensor and moved whenever the
+  // camera did.
+  //
+  // One height, sampled once from the RENDERED scene rather than from
+  // terrain, used by both, with no clamping left to re-sample. An
+  // earlier version of this used globe.getHeight, which is terrain
+  // only, so it made them concentric and sank both of them 38 m.
+  const _sensorPinH = new Map();
+  const _sensorPinKey = (siteId, sensorId) => `${siteId}-${sensorId}`;
+  function _sensorPinnedPos(siteId, sensor) {
+    const h = _sensorPinH.get(_sensorPinKey(siteId, sensor.id));
+    return h == null ? null : Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, h);
+  }
+
   function renderSite(site) {
     // Outer site boundary — dashed cyan line, slightly thicker than sub-areas
     if (site.siteBoundary && site.siteBoundary.length > 0) {
@@ -3209,13 +3237,17 @@ async function main() {
 
       viewer.entities.add({
         id: `sensor-${site.id}-${sensor.id}`,
-        position: Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
+        position: _sensorPinnedPos(site.id, sensor)
+          || Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
         point: {
           pixelSize: sensor.isCore ? 11 : 8,
           color: color,
           outlineColor: color.withAlpha(0.4),
           outlineWidth: sensor.isCore ? 5 : 3,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          // Clamping is what re-samples per frame, so a pinned sensor
+          // must not also clamp or the pin is immediately overwritten.
+          heightReference: _sensorPinnedPos(site.id, sensor)
+            ? undefined : Cesium.HeightReference.CLAMP_TO_GROUND,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
         properties: {
@@ -19737,8 +19769,9 @@ async function main() {
           return false;
         }, false);
         contributingRingEntities.push(viewer.entities.add({
-          // SAME POSITION AS THE SENSOR DOT, exactly.
-          position: Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
+          // SAME POSITION AS THE SENSOR DOT, exactly, and the same pin.
+          position: _sensorPinnedPos(sid, sensor)
+            || Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
           billboard: {
             image: ringIcon(_degraded),
             width: 26, height: 26,
@@ -19750,7 +19783,8 @@ async function main() {
                 ? Cesium.Color.fromCssColorString('#ff8c3d')
                 : Cesium.Color.WHITE).withAlpha(pulse);
             }, false),
-            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            heightReference: _sensorPinnedPos(sid, sensor)
+              ? undefined : Cesium.HeightReference.CLAMP_TO_GROUND,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
         }));
@@ -20003,6 +20037,71 @@ async function main() {
   // rounds of guessing.
   //
   //   __isr_ringAudit()
+  // PIN EVERY SENSOR TO ONE MEASURED HEIGHT. Off until called.
+  //
+  //   await __isr_pinSensors()     measure, pin, report
+  //   __isr_pinSensors.off()       drop the pins, back to clamping
+  //
+  // Samples the RENDERED scene, which includes the photogrammetry mesh,
+  // because that is the surface the dot already clamps to. Terrain is
+  // the wrong surface and using it is what sank the markers earlier.
+  // The sensor entities are excluded from the sample so it cannot pick
+  // up the marker it is trying to place.
+  //
+  // Dots exist already, so they are re-positioned in place. Rings are
+  // rebuilt every tick and pick the pin up on their own.
+  window.__isr_pinSensors = async () => {
+    const scene = viewer.scene;
+    if (!scene.sampleHeightSupported) {
+      console.warn('[pin] scene.sampleHeight is not supported here, nothing changed');
+      return [];
+    }
+    const dots = viewer.entities.values.filter(e => /^sensor-(?!cov-)/.test(String(e.id)));
+    const targets = [];
+    for (const sid of Object.keys(SITES)) {
+      for (const sn of (SITES[sid].sensors || [])) {
+        targets.push({ sid, sn, carto: Cesium.Cartographic.fromDegrees(sn.lon, sn.lat) });
+      }
+    }
+    try {
+      await scene.sampleHeightMostDetailed(targets.map(t => t.carto), dots);
+    } catch (err) {
+      console.warn('[pin] sampling failed, nothing changed:', err?.message || err);
+      return [];
+    }
+    const rows = [];
+    for (let i = 0; i < targets.length; i++) {
+      const { sid, sn, carto } = targets[i];
+      const h = carto.height;
+      if (!Number.isFinite(h)) { rows.push({ sensor: `${sid}-${sn.id}`, pinned: 'no sample' }); continue; }
+      _sensorPinH.set(_sensorPinKey(sid, sn.id), h);
+      const ent = viewer.entities.getById(`sensor-${sid}-${sn.id}`);
+      if (ent) {
+        ent.position = Cesium.Cartesian3.fromDegrees(sn.lon, sn.lat, h);
+        if (ent.point) ent.point.heightReference = undefined;
+      }
+      rows.push({ sensor: `${sid}-${sn.id}`, lat: +sn.lat.toFixed(5), lon: +sn.lon.toFixed(5), pinnedM: +h.toFixed(1) });
+    }
+    updateContributingRings();
+    console.table(rows.slice(0, 40));
+    console.log(`${_sensorPinH.size} sensors pinned. Run __isr_ringAudit() to confirm the dot and its ring now report the same height.`);
+    return rows;
+  };
+  window.__isr_pinSensors.off = () => {
+    for (const sid of Object.keys(SITES)) {
+      for (const sn of (SITES[sid].sensors || [])) {
+        const ent = viewer.entities.getById(`sensor-${sid}-${sn.id}`);
+        if (ent) {
+          ent.position = Cesium.Cartesian3.fromDegrees(sn.lon, sn.lat, 0);
+          if (ent.point) ent.point.heightReference = Cesium.HeightReference.CLAMP_TO_GROUND;
+        }
+      }
+    }
+    _sensorPinH.clear();
+    updateContributingRings();
+    console.log('[pin] cleared, markers are clamping again');
+  };
+
   window.__isr_ringAudit = () => {
     const rows = [];
     for (const e of viewer.entities.values) {
