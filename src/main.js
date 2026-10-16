@@ -19804,33 +19804,45 @@ async function main() {
           // SAME POSITION AS THE SENSOR DOT, exactly, and the same pin.
           position: _sensorPinnedPos(sid, sensor)
             || Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
-          billboard: {
-            image: ringIcon(_degraded),
-            width: 26, height: 26,
+          // A POINT, NOT A BILLBOARD, AND IT OPTS OUT OF THE DEPTH TEST.
+          //
+          // Both halves are needed and I shipped them separately, which
+          // is why neither worked.
+          //
+          // POINT, so it is locked to the dot. Cesium clamps a point to
+          // the photogrammetry mesh and a billboard to terrain, 43 m
+          // against 5 m at CPH, so a billboard ring is always about
+          // 38 m below its own sensor. That gap is invisible from
+          // overhead and smears across the ground with camera tilt,
+          // which is the pulse drifting off its sensor. Same graphics
+          // type means the same clamp and the same height, by
+          // construction, at every angle.
+          //
+          // ON TOP, so it renders. A marker sitting exactly on the
+          // surface it was clamped to is level with the depth buffer
+          // there, and a depth-tested point at that depth is discarded.
+          // My first two attempts at the point ring were depth tested
+          // and drew nothing at all.
+          //
+          // A real fill, not Color.TRANSPARENT. The point shader is
+          // mix(outlineColor, color, innerAlpha) followed by a discard
+          // of fully transparent fragments, and a transparent fill is
+          // the one case that can take the whole primitive with it.
+          point: {
             show: _showInRange,
-            scale: new Cesium.CallbackProperty(() => 1.0 + 0.18 * Math.sin(performance.now() / 250), false),
-            color: new Cesium.CallbackProperty(() => {
+            color: new Cesium.CallbackProperty(() => Cesium.Color
+              .fromCssColorString(_degraded ? '#ff8c3d' : '#4dd2ff')
+              .withAlpha(0.10), false),
+            pixelSize: new Cesium.CallbackProperty(
+              () => 24 + 5 * Math.sin(performance.now() / 250), false),
+            outlineColor: new Cesium.CallbackProperty(() => {
               const pulse = 0.35 + 0.40 * Math.sin(performance.now() / 250);
-              return (_degraded
-                ? Cesium.Color.fromCssColorString('#ff8c3d')
-                : Cesium.Color.WHITE).withAlpha(pulse);
+              return Cesium.Color.fromCssColorString(
+                _degraded ? '#ff8c3d' : '#4dd2ff').withAlpha(pulse);
             }, false),
+            outlineWidth: 3,
             heightReference: _sensorPinnedPos(sid, sensor)
               ? undefined : Cesium.HeightReference.CLAMP_TO_GROUND,
-            // THE RING ALWAYS DRAWS ON TOP. Not the shared switch.
-            //
-            // A billboard clamps to TERRAIN while the dot, being a
-            // point, clamps to the photogrammetry mesh: 5 m against
-            // 43 m at CPH. The ring has therefore always been about
-            // 38 m underground. Nobody noticed while every marker drew
-            // over everything, and the moment depth testing went on by
-            // default it did exactly what it should and hid a thing
-            // that is below the surface. Every pulse disappeared.
-            //
-            // Until the ring and the dot resolve the same height this
-            // has to opt out of the depth test, or there is no pulse at
-            // all. The dot stays depth tested, which is the part that
-            // made markers sit correctly in the scene.
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
         }));
@@ -20241,7 +20253,7 @@ async function main() {
           dH: +(b.h - a.h).toFixed(1),
           dMetres: +Math.hypot((b.lat - a.lat) * 111320, (b.lon - a.lon) * 111320 * Math.cos(a.lat * Math.PI / 180)).toFixed(2),
           dotClamp: dot.point?.heightReference === undefined ? 'pinned' : 'clamped',
-          ringClamp: ring.billboard?.heightReference === undefined ? 'pinned' : 'clamped',
+          ringClamp: ring.point?.heightReference === undefined ? 'pinned' : 'clamped',
         });
       }
     }
