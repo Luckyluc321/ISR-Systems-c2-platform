@@ -3122,7 +3122,12 @@ async function main() {
   // behind a terminal becomes invisible rather than showing through it.
   // Which of those an operator wants is Lucas's call, so it is a switch
   // rather than a decision I make for him.
-  let _sensorDepthTested = false;
+  // ON by default now. Lucas tested both and the scene-occluded version
+  // is the one that reads correctly from an oblique camera, which is
+  // where every screenshot of this platform gets taken. The cost is
+  // real and accepted: a sensor behind a terminal is hidden until the
+  // camera moves, rather than showing through it.
+  let _sensorDepthTested = true;
   const _sensorDepthValue = () => (_sensorDepthTested ? 0 : Number.POSITIVE_INFINITY);
 
   // RESOLVED SENSOR HEIGHTS, EMPTY BY DEFAULT.
@@ -20077,7 +20082,7 @@ async function main() {
   //
   // Dots exist already, so they are re-positioned in place. Rings are
   // rebuilt every tick and pick the pin up on their own.
-  window.__isr_pinSensors = async () => {
+  window.__isr_pinSensors = async ({ quiet = false } = {}) => {
     const scene = viewer.scene;
     if (!scene.sampleHeightSupported) {
       console.warn('[pin] scene.sampleHeight is not supported here, nothing changed');
@@ -20110,8 +20115,10 @@ async function main() {
       rows.push({ sensor: `${sid}-${sn.id}`, lat: +sn.lat.toFixed(5), lon: +sn.lon.toFixed(5), pinnedM: +h.toFixed(1) });
     }
     updateContributingRings();
-    console.table(rows.slice(0, 40));
-    console.log(`${_sensorPinH.size} sensors pinned. Run __isr_ringAudit() to confirm the dot and its ring now report the same height.`);
+    if (!quiet) {
+      console.table(rows.slice(0, 40));
+      console.log(`${_sensorPinH.size} sensors pinned. Run __isr_ringAudit() to confirm the dot and its ring now report the same height.`);
+    }
     return rows;
   };
   window.__isr_pinSensors.off = () => {
@@ -31652,6 +31659,38 @@ async function main() {
   }
 
   console.log('ISR C2 Platform initialized. To wipe stored sim data: await window.__isr_clearAllSimData()');
+
+  // PIN THE SENSORS TO MEASURED HEIGHTS, ONCE THE SCENE CAN BE SAMPLED.
+  //
+  // Clamping re-samples the surface every frame and resolves differently
+  // for a point than for a billboard, which is what put every pulse ring
+  // beside its own sensor and moved it with the camera. One measured
+  // height for both, read from the rendered scene, settles it: the audit
+  // showed 128 of 128 pairs coincident to the centimetre afterwards.
+  //
+  // DEFERRED AND RETRIED, because sampleHeightMostDetailed needs the
+  // tiles under each sensor to exist. Three attempts at widening gaps,
+  // and if none of them lands the markers simply stay clamped, which is
+  // how they behaved for months. Quiet unless it fails.
+  //
+  // WRAPPED, AND THAT IS NOT DECORATION. Two changes to this code took
+  // the whole application down today, one of them on boot. Nothing in
+  // here is allowed to throw into the boot path.
+  (async () => {
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      await new Promise(r => setTimeout(r, attempt * 1500));
+      try {
+        await window.__isr_pinSensors?.({ quiet: true });
+        if (_sensorPinH.size) {
+          console.log(`[sensors] ${_sensorPinH.size} pinned to measured heights, depth testing on`);
+          return;
+        }
+      } catch (err) {
+        console.warn('[sensors] pin attempt', attempt, 'failed:', err?.message || err);
+      }
+    }
+    console.warn('[sensors] could not measure heights, markers stay clamped');
+  })();
 }
 
 main().catch((err) => console.error('Fatal error:', err));

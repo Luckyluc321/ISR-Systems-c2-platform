@@ -349,6 +349,49 @@ Two things in there are worth reusing:
 
 Restore with `git checkout public/aircraft/a320_noskin.glb`.
 
+## 8d. A marker that will not stay on its sensor
+
+Two faults, often mistaken for one, and both read as "the coordinates
+are wrong" when the coordinates were never wrong.
+
+**Clamping resolves differently per graphics type.** A point clamped to
+ground resolves against the photogrammetry mesh, about 43 m at CPH. A
+billboard clamped to ground resolves against terrain, about 5 m. Put a
+dot and its pulse ring at the same latitude and longitude and they sit
+38 m apart vertically. From overhead they coincide; every degree of
+camera tilt smears that gap across the ground.
+
+The fix is one measured height for both, with no clamp left to
+re-sample. Measure from the RENDERED scene with
+`scene.sampleHeightMostDetailed`, not `globe.getHeight`: the latter is
+terrain only and using it sank every marker 38 m and put a pulse ring
+out in the Oresund. Boot does this automatically now, deferred and
+retried, because the tiles under each sensor have to exist first.
+
+**`disableDepthTestDistance: Infinity` is camera-dependent by design.**
+It draws the marker over everything in front of it. From above nothing
+is in front. From the side, a sensor at 40 m behind a 50 m hangar still
+draws over the hangar and reads as stuck to the near wall, and it shifts
+as the camera moves because what is in front of it changes. Fixed
+position, moving appearance. Depth testing is on for sensors now and
+the cost is accepted: a sensor behind a terminal is hidden until the
+camera moves.
+
+Switches, both live without a reload:
+
+```js
+__isr_ringAudit()            // pairs every dot with its own pulse
+await __isr_pinSensors()     // re-measure and pin
+__isr_pinSensors.off()       // back to clamping
+__isr_sensorDepth(false)     // back to drawing on top
+```
+
+**Measure before you change this code.** Three attempts at it in one
+afternoon took the map down twice, once through a dead-zone read on
+boot and once by putting the ring on the sensor entity, which silently
+suppressed the sensor's own point. `__isr_ringAudit` exists because
+nothing in the source tells you where a marker actually ended up.
+
 ## 9. Propeller spin and attitude, outside Cesium
 
 `scripts/blender_drone_flight_demo.py` runs inside Blender headless and
