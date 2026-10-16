@@ -3114,7 +3114,23 @@ async function main() {
   // ring kept landing a little off its own dot. One entity has one
   // position, so the ring is concentric by construction and there is
   // nothing left to drift.
+  //
+  // WRAPPED, BECAUSE THIS IS CALLED FROM A CALLBACK ON AN ENTITY BUILT
+  // AT BOOT. renderSite runs at about line 3300 and droneState is
+  // declared at about 4300, so anything that evaluates this predicate
+  // before that line executes reads a const in its temporal dead zone.
+  // Cesium evaluates a CallbackProperty lazily on the first render,
+  // which is after boot, so it should never happen. "Should never
+  // happen" is how the ring icon cache took the whole page down an hour
+  // ago, and a sensor pulse is not worth a blank app.
   function _liveTrackInSensorRange(sensor) {
+    try {
+      return _liveTrackInSensorRangeInner(sensor);
+    } catch (_) {
+      return false;
+    }
+  }
+  function _liveTrackInSensorRangeInner(sensor) {
     const lat = sensor.lat, lon = sensor.lon, r = sensor.coverageRadius;
     for (const [eid] of droneState) {
       const evt = getEvent(eid);
@@ -4270,10 +4286,24 @@ async function main() {
   // the same convention the crossing markers already use for "this is
   // provisional", and it says at a glance that the sensor is holding
   // the track with fewer senses than it was built with.
-  const _ringIcons = new Map();
+  // THE CACHE HANGS OFF THE FUNCTION, NOT A CONST BESIDE IT.
+  //
+  // It was a const on the line above this one, and renderSite calls
+  // ringIcon at boot roughly a thousand lines before that const
+  // executes. A const is in the temporal dead zone until its own line
+  // runs, so it threw on the very first sensor and took the whole boot
+  // with it: the globe came up and every panel stayed empty.
+  //
+  // A function declaration is hoisted together with its binding, so a
+  // property hung on it is reachable from anywhere in this scope, which
+  // is what makes this safe to call from earlier code.
+  //
+  // check:undeclared did not catch it because the name WAS declared,
+  // just later. That gate reads spelling, not order of execution.
   function ringIcon(dashed = false) {
+    const cache = ringIcon._cache || (ringIcon._cache = new Map());
     const key = dashed ? 'dashed' : 'solid';
-    if (_ringIcons.has(key)) return _ringIcons.get(key);
+    if (cache.has(key)) return cache.get(key);
     const c = document.createElement('canvas');
     c.width = 64; c.height = 64;
     const ctx = c.getContext('2d');
@@ -4288,7 +4318,7 @@ async function main() {
     ctx.lineWidth = 3;
     if (dashed) ctx.setLineDash([7, 6]);
     ctx.stroke();
-    _ringIcons.set(key, c);
+    cache.set(key, c);
     return c;
   }
 
