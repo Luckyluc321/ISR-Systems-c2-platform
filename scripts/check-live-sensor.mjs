@@ -108,8 +108,14 @@ check('same outline alpha', spec.point.outlineColor.a === 0.4 && /outlineColor: 
 // also clamp or the clamp overwrites the pin on the next frame. The
 // assertion is that clamping is what happens when nothing is pinned, not
 // that the line is spelled a particular way.
-check('clamped to ground like the others', spec.point.heightReference === 'CLAMP_TO_GROUND'
-  && /Cesium\.HeightReference\.CLAMP_TO_GROUND/.test(renderSiteBlock));
+// NEITHER SENSOR MARK CLAMPS ANY MORE. Cesium resolves a clamped height
+// per entity and only where tiles are loaded, so the dot and its pulse
+// ring disagreed wherever one had its answer and the other did not. Both
+// take their height from the terrain sweep now. The live-sensor spec
+// still clamps because it is a single mark with nothing to stay joined
+// to, and that difference is deliberate rather than drift.
+check('renderSite no longer clamps its sensor dot',
+  !/heightReference/.test(renderSiteBlock.replace(/^\s*\/\/.*$/gm, '')));
 // Drawing on top is still the default on both paths. renderSite reaches
 // it through _sensorDepthValue() now, because __isr_sensorDepth(true)
 // lets scene geometry occlude a marker instead, which is a switch rather

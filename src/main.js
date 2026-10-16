@@ -3156,6 +3156,10 @@ async function main() {
   // measured at, with no clamping left to re-sample. An earlier version
   // used globe.getHeight, which is terrain only, so it sank both marks
   // 38 m. Manual, because it costs picks.
+  // Ground height per sensor, written by the terrain sweep. The single
+  // source of height for both the dot and its ring now that neither
+  // clamps, so a ring built after the sweep still lands on its dot.
+  const _sensorGroundH = new Map();
   const _sensorPinH = new Map();
   const _sensorPinKey = (siteId, sensorId) => `${siteId}-${sensorId}`;
   function _sensorPinnedPos(siteId, sensor) {
@@ -3249,6 +3253,11 @@ async function main() {
 
     // Sensor dots — clamped to ground via Cesium's heightReference so they
     // always sit ON terrain regardless of camera angle or building geometry.
+    //
+    // NO LONGER TRUE, and left as the anchor two gates slice on. They do
+    // not clamp at all now. See the note on the point graphics below for
+    // why, and do not reword this line without updating
+    // scripts/check-live-sensor.mjs and scripts/check-sensor-pulse.mjs.
     // Previous approach (absolute height + disableDepthTestDistance:Infinity)
     // caused rooftop-labelled sensors to appear "hovering" above buildings
     // because the point rendered on top of everything at sea-level height.
@@ -3275,8 +3284,21 @@ async function main() {
           outlineWidth: sensor.isCore ? 5 : 3,
           // Clamping is what re-samples per frame, so a pinned sensor
           // must not also clamp or the pin is immediately overwritten.
-          heightReference: _sensorPinnedPos(site.id, sensor)
-            ? undefined : Cesium.HeightReference.CLAMP_TO_GROUND,
+          // NO heightReference. NOT A SIMPLIFICATION, THE WHOLE POINT.
+          //
+          // Cesium resolves a clamped height per entity, asynchronously,
+          // and only where tiles are loaded. Two entities asked to clamp
+          // will always disagree somewhere: one has its answer, the
+          // other does not yet, and the pair comes apart for exactly as
+          // long as that lasts. That is why some sensors looked right
+          // and others did not, in the same frame.
+          //
+          // Neither clamps now. Both take their height from the terrain
+          // sweep, which writes one number to both entities in the same
+          // loop, so they are identical by construction with nothing
+          // asynchronous left to disagree about. Markers draw on top
+          // anyway, so sitting at ground level rather than on a rooftop
+          // costs nothing visible.
           disableDepthTestDistance: _sensorDepthValue(),
         },
         properties: {
@@ -3374,7 +3396,8 @@ async function main() {
       viewer.entities.add({
         id: `sensor-pulse-${siteKey}-${sensor.id}`,
         position: _sensorPinnedPos(siteKey, sensor)
-          || Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
+          || Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat,
+               _sensorGroundH.get(`${siteKey}-${sensor.id}`) ?? 0),
         point: {
           show: new Cesium.CallbackProperty(() => _liveTrackInSensorRange(sensor), false),
           // CONSTANTS, all four. An entity point carrying a
@@ -3396,9 +3419,9 @@ async function main() {
             const k = 1 + 0.16 * Math.sin(performance.now() / 250);
             return new Cesium.NearFarScalar(1.0, k, 1.0e7, k);
           }, false),
-          // Identical to the dot's, so the two cannot resolve apart.
-          heightReference: _sensorPinnedPos(siteKey, sensor)
-            ? undefined : Cesium.HeightReference.CLAMP_TO_GROUND,
+          // No heightReference, for the same reason as the dot. See the
+          // note there: a clamp is resolved per entity and two entities
+          // will always disagree somewhere.
           disableDepthTestDistance: _sensorDepthValue(),
         },
         properties: { type: 'sensor-pulse', siteId: siteKey, sensorId: sensor.id },
@@ -3455,6 +3478,11 @@ async function main() {
         const { sid, s } = allSensors[i];
         const height = (cart.height || 0) + OFFSET_M;
         const pos = Cesium.Cartesian3.fromDegrees(s.lon, s.lat, height);
+        // Remembered as well as applied. Neither mark clamps any more,
+        // so this sweep is the ONLY source of their height, and a ring
+        // built after the sweep resolved would otherwise sit at zero
+        // while its dot sat on the ground.
+        _sensorGroundH.set(`${sid}-${s.id}`, height);
         // Both marks, always. They are separate entities and anything
         // that moves one must move the other or they come apart.
         for (const id of [`sensor-${sid}-${s.id}`, `sensor-pulse-${sid}-${s.id}`]) {

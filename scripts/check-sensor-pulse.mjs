@@ -106,20 +106,31 @@ const hrOf = (block) => {
 };
 const dotHR = hrOf(dot);
 const ringHR = hrOf(ring);
-check('both declare a heightReference', !!dotHR && !!ringHR);
-check('the heightReference expression is identical', dotHR === ringHR,
-  `dot:  ${dotHR}\n       ring: ${ringHR}`);
-check('clamping is what happens when nothing is pinned',
-  /Cesium\.HeightReference\.CLAMP_TO_GROUND/.test(dotHR ?? ''));
+// NEITHER MARK CLAMPS. That is the invariant now, and it is the only
+// configuration with no asynchrony in it. Cesium resolves a clamped
+// height per entity and only where tiles are loaded, so two entities
+// asked to clamp will always disagree somewhere, for as long as one has
+// its answer and the other does not. Both take their height from the
+// terrain sweep instead, which writes one number to both in the same
+// loop.
+// Comments are stripped first. Both of these blocks EXPLAIN at length
+// why they do not clamp, and a gate that greps the prose it is
+// documented with passes or fails on wording.
+const code = (t) => t.replace(/^\s*\/\/.*$/gm, '');
+check('neither mark clamps',
+  !/heightReference/.test(code(dot)) && !/heightReference/.test(code(ring)));
+check('both take their height from the shared terrain sweep',
+  /_sensorGroundH\.set\(/.test(main)
+  && /_sensorGroundH\.get\(/.test(ring));
 
-// 3. Same occlusion rule. The dot being depth tested while the ring drew
-//    on top is itself a camera-dependent displacement.
-const depthOf = (block) => {
-  const m = block.match(/^[ \t]+disableDepthTestDistance:[^\n]*$/m);
-  return m ? sameSite(flat(m[0])).replace(/,$/, '') : null;
+// The depth expression, pulled off each block and compared as text.
+const depthOf = (t) => {
+  const m = code(t).match(/disableDepthTestDistance:\s*([^,\n]+)/);
+  return m ? `disableDepthTestDistance: ${flat(m[1])}` : null;
 };
 const dotDepth = depthOf(dot);
 const ringDepth = depthOf(ring);
+
 check('the disableDepthTestDistance expression is identical', dotDepth === ringDepth,
   `dot:  ${dotDepth}\n       ring: ${ringDepth}`);
 check('both go through the _sensorDepthValue() switch',
