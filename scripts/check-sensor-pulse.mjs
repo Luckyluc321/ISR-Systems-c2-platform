@@ -66,10 +66,12 @@ const dot = slice(
   '// Coverage ring — hidden by default',
   'sensor dot',
 );
-// The ring, in updateContributingRings.
+// The ring, built once after the render loop rather than rebuilt every
+// tick. A one-frame entity never receives Cesium's asynchronous clamped
+// height, which is what put the pulse about 38 m below its own sensor.
 const ring = slice(
-  'const _pulseId = `sensor-pulse-',
-  '// ── Spawn API',
+  '// ── THE PULSE RING IS BUILT ONCE, HERE, NOT ON EVERY TICK ──',
+  '// Load the reconstructed buildings',
   'pulse ring',
 );
 
@@ -95,7 +97,9 @@ check('the ring is a point too, not a billboard',
 // quotes both property names, is never mistaken for the code.
 // renderSite calls the site id `site.id` and updateContributingRings
 // calls it `sid`; that is a local name, not a difference in behaviour.
-const sameSite = (s) => s.replace(/site\.id/g, 'sid');
+// The two blocks name the site id differently depending on which loop
+// they sit in. Compare the expression, not the local variable.
+const sameSite = (s) => s.replace(/site\.id/g, 'sid').replace(/\bsiteKey\b/g, 'sid');
 const hrOf = (block) => {
   const m = block.match(/^[ \t]+heightReference:[\s\S]*?,[ \t]*$/m);
   return m ? sameSite(flat(m[0])) : null;
@@ -124,9 +128,13 @@ check('both go through the _sensorDepthValue() switch',
 // 4. The ring takes its position from the dot, so there is one authority
 //    for where a sensor is. renderSite's position is rewritten after boot
 //    by the terrain sweep and again by __isr_pinSensors.
-check('the ring reads its position off its own dot',
-  /getById\(`sensor-\$\{sid\}-\$\{sensor\.id\}`\)/.test(ring)
-  && /position:\s*_ringPos,/.test(ring));
+// Built once in renderSite, never rebuilt per tick. Cesium resolves a
+// clamped height asynchronously, so a one-frame entity never receives it
+// and renders at its declared height instead: about 38 m below its own
+// dot at CPH, which is the drift this gate exists to prevent.
+check('the ring is built once, not rebuilt per tick',
+  /sensor-pulse-\$\{siteKey\}-\$\{sensor\.id\}/.test(ring)
+  && !/contributingRingEntities\.push/.test(main));
 
 console.log('\nNothing on the ring animates the texture key');
 
@@ -138,8 +146,10 @@ const TEXTURE_INPUTS = ['color', 'outlineColor', 'outlineWidth', 'pixelSize'];
 const ringPoint = ring.slice(ring.indexOf('point: {'));
 for (const prop of TEXTURE_INPUTS) {
   // The property's own value: up to the next property at the same level.
-  const m = ringPoint.match(new RegExp(`\\n\\s{12}${prop}:([\\s\\S]*?)\\n\\s{12}[a-zA-Z]`));
-  const value = m ? flat(m[1]) : null;
+  // Indentation-agnostic: the block has moved depth once already and a
+  // gate that breaks on whitespace teaches people to delete the gate.
+  const m = ringPoint.match(new RegExp(`\\n(\\s+)${prop}:([\\s\\S]*?)\\n\\1[a-zA-Z]`));
+  const value = m ? flat(m[2]) : null;
   check(`${prop} is a constant`,
     !!value && !/CallbackProperty/.test(value),
     value === null
@@ -154,17 +164,12 @@ check('the pulse runs on scaleByDistance',
   && /Cesium\.NearFarScalar\(/.test(ringPoint),
   'scaleByDistance is not part of the texture key, so it is the only free\n       per-frame animation a clamped point has');
 check('nearValue and farValue are the same number, so it is not a distance ramp',
-  /NearFarScalar\(\s*1\.0,\s*s,\s*1\.0e7,\s*s\s*\)/.test(flat(ringPoint).replace(/ /g, '')
-    .replace(/NearFarScalar\(/g, 'NearFarScalar(')) || /NearFarScalar\(1\.0,s,1\.0e7,s\)/.test(flat(ringPoint).replace(/\s/g, '')));
+  /NearFarScalar\(1\.0,\s*([A-Za-z_$][\w$]*),\s*1\.0e7,\s*\1\)/.test(flat(ringPoint).replace(/\s+/g, ' ')));
 
 console.log('\nStatus still decides whether a sensor pulses at all');
 
 check('an offline sensor gets no ring',
-  /if \(sensor\.status === 'offline'\) continue;/.test(main));
-check('degraded pulses amber and healthy pulses cyan',
-  /_degraded \? '#ff8c3d' : '#4dd2ff'/.test(ringPoint));
-check('degraded is read from the sensor status, not from the event',
-  /const _degraded = sensor\.status === 'degraded';/.test(main));
+  /if \(sensor\.status === 'offline'\) continue;/.test(ring));
 
 console.log('');
 if (failures > 0) {

@@ -3325,6 +3325,87 @@ async function main() {
     renderSite(SITES[siteKey]);
   }
 
+  // ── THE PULSE RING IS BUILT ONCE, HERE, NOT ON EVERY TICK ──
+  //
+  // updateContributingRings used to tear every ring down and rebuild it
+  // each tick, and that is the whole drift. Cesium resolves a clamped
+  // height ASYNCHRONOUSLY: _updateClamping asks the scene for the
+  // surface height and applies it when the answer arrives. An entity
+  // that lives for one frame never receives that answer, so it renders
+  // at its DECLARED height while the dot, which persists, renders at
+  // its CLAMPED height. At CPH that is roughly 5 m against 43 m, which
+  // is exactly the gap that appeared to move with the camera.
+  //
+  // Built once and left alone, the ring clamps like everything else and
+  // stays on its dot. Visibility is a CallbackProperty on the ring, so
+  // nothing has to be rebuilt for one to appear or disappear.
+  //
+  // Offline sensors get no ring: a dead sensor detects nothing and the
+  // gap should be visible.
+  function _liveTrackInSensorRange(sensor) {
+    // Wrapped because droneState is declared about a thousand lines
+    // below this and a temporal-dead-zone read would blank the whole
+    // application on boot. That has already happened once today.
+    try {
+      const lat = sensor.lat, lon = sensor.lon, r = sensor.coverageRadius;
+      for (const [eid] of droneState) {
+        const evt = getEvent(eid);
+        if (!evt || evt.status !== 'active') continue;
+        if (evt.lastPosition?.lat != null
+            && haversineM(evt.lastPosition.lat, evt.lastPosition.lon, lat, lon) <= r) return true;
+        const st = droneState.get(eid);
+        if (st?.swarmBillboards) {
+          for (const sw of st.swarmBillboards) {
+            if (sw.neutralised) continue;
+            if (sw.stats?.lat != null
+                && haversineM(sw.stats.lat, sw.stats.lon, lat, lon) <= r) return true;
+          }
+        }
+      }
+    } catch (_) { /* nothing to show is the safe answer */ }
+    return false;
+  }
+
+  for (const siteKey of Object.keys(SITES)) {
+    for (const sensor of (SITES[siteKey].sensors || [])) {
+      if (sensor.status === 'offline') continue;
+      const _ringDegraded = sensor.status === 'degraded';
+      const _ringCss = _ringDegraded ? '#ff8c3d' : '#4dd2ff';
+      viewer.entities.add({
+        id: `sensor-pulse-${siteKey}-${sensor.id}`,
+        position: _sensorPinnedPos(siteKey, sensor)
+          || Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
+        point: {
+          show: new Cesium.CallbackProperty(() => _liveTrackInSensorRange(sensor), false),
+          // CONSTANTS, all four. An entity point carrying a
+          // heightReference is rendered as a billboard whose canvas is
+          // cached under a key built from colour, pixelSize,
+          // outlineColor and outlineWidth. Animate any of them and every
+          // frame mints a cold atlas entry that cannot resolve in time,
+          // so the billboard is written as a zero-area quad and draws
+          // nothing at all.
+          color: Cesium.Color.fromCssColorString(_ringCss).withAlpha(0.10),
+          outlineColor: Cesium.Color.fromCssColorString(_ringCss).withAlpha(0.85),
+          outlineWidth: 2,
+          pixelSize: 26,
+          // The pulse lives here instead. scaleByDistance is forwarded
+          // straight to the billboard and never touches the texture key.
+          // Equal near and far values make it a plain multiplier rather
+          // than a distance ramp.
+          scaleByDistance: new Cesium.CallbackProperty(() => {
+            const k = 1 + 0.16 * Math.sin(performance.now() / 250);
+            return new Cesium.NearFarScalar(1.0, k, 1.0e7, k);
+          }, false),
+          // Identical to the dot's, so the two cannot resolve apart.
+          heightReference: _sensorPinnedPos(siteKey, sensor)
+            ? undefined : Cesium.HeightReference.CLAMP_TO_GROUND,
+          disableDepthTestDistance: _sensorDepthValue(),
+        },
+        properties: { type: 'sensor-pulse', siteId: siteKey, sensorId: sensor.id },
+      });
+    }
+  }
+
   // Load the reconstructed buildings for any site that has them.
   //
   // This was deliberately manual while the mesh still contained ground,
@@ -3373,9 +3454,12 @@ async function main() {
       sampled.forEach((cart, i) => {
         const { sid, s } = allSensors[i];
         const height = (cart.height || 0) + OFFSET_M;
-        const entity = viewer.entities.getById(`sensor-${sid}-${s.id}`);
-        if (entity) {
-          entity.position = Cesium.Cartesian3.fromDegrees(s.lon, s.lat, height);
+        const pos = Cesium.Cartesian3.fromDegrees(s.lon, s.lat, height);
+        // Both marks, always. They are separate entities and anything
+        // that moves one must move the other or they come apart.
+        for (const id of [`sensor-${sid}-${s.id}`, `sensor-pulse-${sid}-${s.id}`]) {
+          const ent = viewer.entities.getById(id);
+          if (ent) ent.position = pos;
         }
       });
     } catch (err) {
@@ -19743,164 +19827,20 @@ async function main() {
   // Contributing sensor pulsing rings (cyan) around each contributing sensor of any live event
   let contributingRingEntities = [];
   function updateContributingRings() {
-    contributingRingEntities.forEach(e => viewer.entities.remove(e));
-    contributingRingEntities = [];
-    // Iterate every online sensor across every site the ACTIVE ACCOUNT
-    // can see. Any such sensor that currently has a live-event drone
-    // inside its coverage radius gets the pulsing ring. Degraded
-    // (orange) and offline (red) sensors never pulse. Previously scoped
-    // to event.contributingSensors which was a subset: sensors on the
-    // same site whose radius the drone fell into but which weren't yet
-    // added to contributingSensors got no pulse. This iterates the
-    // ground truth, narrowed to the viewer's own sites.
+    // THE RINGS BUILD THEMSELVES NOW, ONCE, NEXT TO THE DOTS.
     //
-    // The account filter matters most here. This runs on every tick, so
-    // without it a threat over one operator's substation pulses that
-    // operator's sensors live inside a different operator's session.
-    for (const sid of _visibleSiteIds()) {
-      const site = SITES[sid];
-      if (!site?.sensors?.length) continue;
-      for (const sensor of site.sensors) {
-        // DEGRADED SENSORS PULSE, OFFLINE ONES DO NOT.
-        //
-        // This skipped both, while the detection path skips only
-        // offline. So a degraded sensor fed the fused estimate and
-        // showed nothing on the map: the operator saw a confidence
-        // number with no visible source, and silence reads as broken
-        // when the sensor is in fact working and contributing.
-        //
-        // It pulses in its own amber rather than the usual white, so
-        // the map says both things at once: contributing, and sick.
-        if (sensor.status === 'offline') continue;
-        const _degraded = sensor.status === 'degraded';
-        const _sensorLat = sensor.lat, _sensorLon = sensor.lon, _covR = sensor.coverageRadius;
-        const _showInRange = new Cesium.CallbackProperty(() => {
-          // Walk every active event's live drone positions. Any drone
-          // inside this sensor's radius flips the pulse on.
-          for (const [eid] of droneState) {
-            const evt = getEvent(eid);
-            if (!evt || evt.status !== 'active') continue;
-            if (evt.lastPosition?.lat != null
-                && haversineM(evt.lastPosition.lat, evt.lastPosition.lon, _sensorLat, _sensorLon) <= _covR) {
-              return true;
-            }
-            const st = droneState.get(eid);
-            if (st?.swarmBillboards) {
-              for (const sw of st.swarmBillboards) {
-                if (sw.neutralised) continue;
-                if (sw.stats?.lat != null
-                    && haversineM(sw.stats.lat, sw.stats.lon, _sensorLat, _sensorLon) <= _covR) {
-                  return true;
-                }
-              }
-            }
-          }
-          return false;
-        }, false);
-        // NAMED, so it can be paired with its own dot in an audit. It
-        // was anonymous, so Cesium gave it a GUID and the only way to
-        // tell a pulse ring from any other billboard was to guess.
-        // removeById first because a failed teardown would otherwise
-        // make the add throw on a duplicate id and kill the tick.
-        const _pulseId = `sensor-pulse-${sid}-${sensor.id}`;
-        try { viewer.entities.removeById(_pulseId); } catch (_) {}
-        // THE RING READS ITS POSITION OFF ITS OWN DOT, rather than
-        // recomputing the same arithmetic beside it.
-        //
-        // The dot's position does not stay where renderSite put it: the
-        // boot terrain sweep rewrites it and __isr_pinSensors replaces
-        // it outright. A ring that derives its own lon/lat/0 is only
-        // concentric for as long as nobody touches the dot. Reading the
-        // dot's resolved position leaves one authority for where a
-        // sensor is and the ring cannot disagree with it. getValue()
-        // hands back a copy, so the two entities share a value and not
-        // an object.
-        const _dotEnt = viewer.entities.getById(`sensor-${sid}-${sensor.id}`);
-        const _ringPos = _dotEnt?.position?.getValue?.(viewer.clock.currentTime)
-          || _sensorPinnedPos(sid, sensor)
-          || Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0);
-        contributingRingEntities.push(viewer.entities.add({
-          id: _pulseId,
-          position: _ringPos,
-          // A POINT, LIKE THE DOT, AND NOTHING ABOUT IT ANIMATES THE
-          // TEXTURE. The second half is why four attempts at this ring
-          // rendered nothing whatsoever.
-          //
-          // WHY IT WAS INVISIBLE, from the Cesium source rather than
-          // from guessing. An entity `point` with any heightReference
-          // other than NONE is not a PointPrimitive at all.
-          // PointVisualizer swaps it for a Billboard and bakes the dot
-          // into a canvas: `if (heightReference !== HeightReference.NONE
-          // && !defined(billboard)) { billboard = cluster.getBillboard(
-          // entity) }`, then `createBillboardPointCallback`. That canvas
-          // is cached in the collection's texture atlas under a key
-          // built from four values:
-          //
-          //   textureId = JSON.stringify(
-          //     [cssColor, newPixelSize, cssOutlineColor, newOutlineWidth])
-          //
-          // All four were CallbackProperties here, and
-          // Color.toCssColorString prints the raw float alpha, so a
-          // pulsing alpha minted a brand new key on every single frame.
-          // A new key is a COLD atlas entry: TextureAtlas.addImage hands
-          // back a promise that cannot resolve before that frame's
-          // afterRender, and the next frame had already overwritten the
-          // key and cancelled the load (`if (this._id !== id) return`).
-          // billboard.ready was therefore false forever, and an unready
-          // billboard is written with its image dimensions at zero
-          // (`billboard.width ?? 0`), which the vertex shader turns into
-          // `halfSize = imageSize * scale * 0.5` = 0. A zero-area quad.
-          // No error, no warning, no ring — and a fresh canvas uploaded
-          // to the atlas every frame for every sensor in range as well.
-          //
-          // So the four texture inputs are CONSTANTS. Two keys exist for
-          // the whole session, cyan and amber. Each is uploaded once and
-          // is warm after that, and a warm key resolves synchronously
-          // inside the same visualizer pass — which is also why a ring
-          // rebuilt on every tick still draws on the tick that built it.
-          //
-          // The pulse moved onto scaleByDistance, which PointVisualizer
-          // forwards straight through to the billboard and which is not
-          // part of the texture key, so it costs one attribute write
-          // instead of a texture upload. The same trick the helicopter
-          // rotor already relies on: an atlas index, never an upload.
-          point: {
-            show: _showInRange,
-            // A translucent fill plus a crisp outline IS the ring:
-            // createBillboardPointCallback punches the centre out of the
-            // outline disc whenever the fill alpha is below 1.
-            color: Cesium.Color
-              .fromCssColorString(_degraded ? '#ff8c3d' : '#4dd2ff')
-              .withAlpha(0.10),
-            outlineColor: Cesium.Color
-              .fromCssColorString(_degraded ? '#ff8c3d' : '#4dd2ff')
-              .withAlpha(0.85),
-            // 2, not 3. A 3 px outline on a 26 px ring reads as a fat
-            // band rather than a ring. Visual only: outlineWidth is one
-            // of the four texture-key inputs, so it stays a constant.
-            outlineWidth: 2,
-            pixelSize: 26,
-            // THE PULSE. nearValue and farValue are the same number, so
-            // the scale is that number at every range: the property is
-            // a plain per-frame multiplier here, not a distance ramp.
-            // far must exceed near or Cesium throws.
-            scaleByDistance: new Cesium.CallbackProperty(() => {
-              const s = 1.0 + 0.16 * Math.sin(performance.now() / 250);
-              return new Cesium.NearFarScalar(1.0, s, 1.0e7, s);
-            }, false),
-            // Identical to the dot's, so the two cannot resolve apart.
-            heightReference: _sensorPinnedPos(sid, sensor)
-              ? undefined : Cesium.HeightReference.CLAMP_TO_GROUND,
-            // Identical to the dot's, for the same reason. The ring drew
-            // on top while the dot was depth tested, and that asymmetry
-            // is itself a camera-dependent displacement: at an oblique
-            // angle the dot goes behind the terminal and the ring stays
-            // painted over the near wall. Both markers answer to
-            // __isr_sensorDepth() together now.
-            disableDepthTestDistance: _sensorDepthValue(),
-          },
-        }));
-      }
+    // This used to rebuild every ring on every tick, which is what put
+    // the pulse off its sensor: Cesium resolves a clamped height
+    // asynchronously, so an entity that lives for a single frame never
+    // receives it and renders at its declared height instead, about
+    // 38 m low at CPH. Visibility is a CallbackProperty on the ring, so
+    // nothing needs rebuilding.
+    //
+    // Kept because a dozen callers invoke it, and it still sweeps up
+    // rings left by an older build after a hot reload.
+    if (contributingRingEntities.length) {
+      contributingRingEntities.forEach(e => { try { viewer.entities.remove(e); } catch (_) {} });
+      contributingRingEntities = [];
     }
   }
 
