@@ -3092,6 +3092,39 @@ async function main() {
   // rather than the mesh on purpose: sampling the rendered scene would
   // pick up the marker's own billboard, and a stable anchor at ground
   // level beats a correct one that wanders.
+  // HOW MUCH OF A SENSOR IS STILL WORKING.
+  //
+  // `status: degraded` is one word doing a job that needs three, so the
+  // weighting reads `degradedModalities` instead: the fraction of a
+  // sensor's senses that still function. A unit with three modalities
+  // and one out contributes at two thirds. One whose every modality is
+  // down contributes nothing at all, which is the case Lucas asked for:
+  // a sensor can be nominally alive and still be deaf to the particular
+  // thing in front of it.
+  //
+  // NO HIERARCHY OF SENSES. An earlier version of this reasoning
+  // assumed radio was the primary sense and the rest were support. That
+  // is wrong and getting more wrong: autonomous, pre-programmed and
+  // fibre-guided drones carry no link to hear, and acoustics and
+  // multi-camera optics are what still see them. Every modality counts
+  // the same here until there is per-target data to weight them with.
+  //
+  // NEXT STEP, NOT BUILT. Once a track declares which senses can
+  // actually perceive it, this becomes an intersection rather than a
+  // fraction: a sensor whose remaining senses cannot perceive THIS
+  // target contributes zero even though it is healthy for others.
+  function _sensorHealth(sensor) {
+    if (!sensor) return 0;
+    if (sensor.status === 'offline') return 0;
+    const all = Array.isArray(sensor.modalities) ? sensor.modalities : [];
+    const down = Array.isArray(sensor.degradedModalities) ? sensor.degradedModalities : [];
+    if (!all.length) return sensor.status === 'degraded' ? 0.67 : 1;
+    const lower = down.map(d => String(d).toLowerCase());
+    const working = all.filter(m => !lower.includes(String(m).toLowerCase()));
+    if (!working.length) return 0;
+    return working.length / all.length;
+  }
+
   const _sensorAnchorH = new Map();
   function _sensorAnchor(siteId, sensor) {
     const key = `${siteId}-${sensor.id}`;
@@ -4224,7 +4257,14 @@ async function main() {
     return c;
   }
 
-  function ringIcon() {
+  // Solid for a healthy sensor, dashed for a degraded one. The dash is
+  // the same convention the crossing markers already use for "this is
+  // provisional", and it says at a glance that the sensor is holding
+  // the track with fewer senses than it was built with.
+  const _ringIcons = new Map();
+  function ringIcon(dashed = false) {
+    const key = dashed ? 'dashed' : 'solid';
+    if (_ringIcons.has(key)) return _ringIcons.get(key);
     const c = document.createElement('canvas');
     c.width = 64; c.height = 64;
     const ctx = c.getContext('2d');
@@ -4232,7 +4272,9 @@ async function main() {
     ctx.arc(32, 32, 26, 0, Math.PI * 2);
     ctx.strokeStyle = '#4dd2ff';
     ctx.lineWidth = 3;
+    if (dashed) ctx.setLineDash([7, 6]);
     ctx.stroke();
+    _ringIcons.set(key, c);
     return c;
   }
 
@@ -12767,8 +12809,13 @@ async function main() {
           const _ph = (_h / 997) * Math.PI * 2;
           const _tS = monoNow() / 1000;
           const _wob = 0.07 * (0.6 * Math.sin(_tS * 0.55 + _ph) + 0.4 * Math.sin(_tS * 0.23 + _ph * 1.9));
-          const _floor = +Math.max(0.12, Math.min(0.95,
-            (0.18 + 0.42 * (1 - _d / _s.coverageRadius)) + _wob)).toFixed(2);
+          // Scaled by what is still working. The floor says "a sensor
+          // this close cannot read zero"; a sensor down a sense cannot
+          // claim the same floor as an intact one.
+          const _hf = _sensorHealth(_s);
+          if (_hf <= 0) continue;
+          const _floor = +Math.max(0.12 * _hf, Math.min(0.95,
+            ((0.18 + 0.42 * (1 - _d / _s.coverageRadius)) + _wob) * _hf)).toFixed(2);
           const _entry = targetEvent.contributingSensors.find(c => c.id === _s.id);
           if (!_entry || _entry.offline) continue;
           if ((_entry.confidence || 0) < _floor) {
@@ -12824,7 +12871,15 @@ async function main() {
       // now (nn_source.js), which is the only place that knows what a
       // sensor is doing. Two wobbles in two layers was how the frozen
       // 0.55 survived both of them.
-      const rounded = +maxConf.toFixed(2);
+      // SCALED BY WHAT THE SENSOR STILL HAS. The source reports what it
+      // saw; how much that reading is worth depends on how much of the
+      // sensor is working, and only C2 knows the grid's health. A unit
+      // whose every modality is down reports nothing usable, so it is
+      // dropped rather than merged at zero.
+      const _hf = _sensorHealth(
+        (SITES[targetEvent.siteId]?.sensors || []).find(x => x.id === sEntry.sensorId));
+      if (_hf <= 0) continue;
+      const rounded = +(maxConf * _hf).toFixed(2);
       const existing = targetEvent.contributingSensors.find(s => s.id === sEntry.sensorId);
       if (!existing) {
         targetEvent.contributingSensors.push({ id: sEntry.sensorId, confidence: rounded, peakConfidence: rounded });
@@ -12899,6 +12954,7 @@ async function main() {
   // is ever created for a live event: _sweepUnobservedActiveEvents owns
   // its close.
   const _liveSensors = createLiveSensorRuntime({
+    anchorFor: _sensorAnchor,
     sites: SITES, viewer, Cesium, events: EVENTS, addEvent, getEvent, mutateEvent, addNote,
     nextEventId, applyDetectionBatch: _applyDetectionBatchToEvent, selectEvent, renderAlertStrip,
     renderDetailPanel: renderDetailPanelThrottled, toast, ringIcon,
@@ -19723,7 +19779,7 @@ async function main() {
           // sensor from an oblique angle.
           position: _sensorAnchor(sid, sensor),
           billboard: {
-            image: ringIcon(),
+            image: ringIcon(_degraded),
             width: 26, height: 26,
             show: _showInRange,
             scale: new Cesium.CallbackProperty(() => 1.0 + 0.18 * Math.sin(performance.now() / 250), false),

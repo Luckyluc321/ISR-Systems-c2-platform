@@ -222,6 +222,14 @@ export function normalizeManifest(manifest) {
           id: s.sensor_id || s.id,
           modality,
           modalities: Array.isArray(s.modalities) ? s.modalities : [modality],
+          // WHICH SENSES ARE DOWN, not just that something is.
+          // `status: degraded` said a sensor was unwell and the reason
+          // lived in a free-text `issues` string nothing could read, so
+          // a unit with its acoustics out and one with its radio out
+          // were indistinguishable to the fusion. Named here so the
+          // weighting can tell them apart.
+          degradedModalities: Array.isArray(s.degraded_modalities) ? s.degraded_modalities
+            : (Array.isArray(s.degradedModalities) ? s.degradedModalities : []),
           lat, lon,
           altM: pos.alt_m != null ? pos.alt_m : null,
           coverageRadius: coverage,
@@ -233,7 +241,8 @@ export function normalizeManifest(manifest) {
         const extras = {};
         for (const [k, v] of Object.entries(s)) {
           if (!(k in base) && k !== 'sensor_id' && k !== 'position'
-              && k !== 'coverage_radius_m' && k !== 'modalities' && k !== 'coverageRadius') {
+              && k !== 'coverage_radius_m' && k !== 'modalities' && k !== 'coverageRadius'
+              && k !== 'degraded_modalities') {
             extras[k] = v;
           }
         }

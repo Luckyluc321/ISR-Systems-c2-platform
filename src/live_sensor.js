@@ -124,6 +124,10 @@ export function buildLiveSensorRecord(site, { lat, lon, id, nodeId, label, hardw
     id: sensorId,
     modality: 'rf',
     modalities: ['RF'],
+    // A live node is healthy or it is not registered. Declared so the
+    // record carries the same shape as a manifest sensor, which the
+    // fusion's health weighting reads on every sensor it folds in.
+    degradedModalities: [],
     lat, lon,
     altM: null,
     coverageRadius: COVERAGE_RADIUS_M,
@@ -169,18 +173,25 @@ export function liveSensorStatusColour(status, { nightNow, onlineDay, onlineNigh
 // renderSite in main.js field for field; scripts/check-live-sensor.mjs
 // asserts the two stay in step. The symbol is the one every other sensor
 // uses, not a special one.
-export function liveSensorEntitySpec(siteId, sensor, { Cesium, nightNow, onlineDay, onlineNight }) {
+// `position` is supplied by the caller, which owns the one-off height
+// resolution. It used to build its own clamped position here, and a
+// clamp re-samples the surface every frame: over photogrammetry the
+// sampled height follows the loaded tile LOD, so the marker moved when
+// the camera did. A sensor does not move, so its anchor is resolved
+// once and frozen, and a live node has to use the same one as the rest
+// of the grid or it will drift away from them.
+export function liveSensorEntitySpec(siteId, sensor, { Cesium, nightNow, onlineDay, onlineNight, position }) {
   const css = liveSensorStatusColour(sensor.status, { nightNow, onlineDay, onlineNight });
   const color = Cesium.Color.fromCssColorString(css);
   return {
     id: `sensor-${siteId}-${sensor.id}`,
-    position: Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
+    position: position || Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
     point: {
       pixelSize: sensor.isCore ? 11 : 8,
       color,
       outlineColor: color.withAlpha(0.4),
       outlineWidth: sensor.isCore ? 5 : 3,
-      heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+      // No heightReference, for the reason above.
       disableDepthTestDistance: Number.POSITIVE_INFINITY,
     },
     properties: {
@@ -340,6 +351,7 @@ export function createLiveSensorRuntime(deps) {
     sites, viewer, Cesium, events, addEvent, getEvent, mutateEvent, addNote,
     nextEventId, applyDetectionBatch, selectEvent, renderAlertStrip,
     renderDetailPanel, toast, ringIcon, nightNow, colours, liveFeeds,
+    anchorFor,
   } = deps;
   const log = deps.log || console;
   const ringHoldMs = deps.ringHoldMs || 15000;
@@ -402,6 +414,10 @@ export function createLiveSensorRuntime(deps) {
     try {
       rec.entity = viewer.entities.add(liveSensorEntitySpec(siteId, sensor, {
         Cesium, nightNow: !!nightNow?.(), onlineDay: colours.onlineDay, onlineNight: colours.onlineNight,
+        // The same one-off anchor the manifest sensors use, so a live
+        // node sits with the rest of the grid instead of drifting
+        // against it when the camera moves.
+        position: anchorFor?.(siteId, sensor),
       }));
       rec.coverage = viewer.entities.add(liveSensorCoverageSpec(siteId, sensor, { Cesium }));
       rec.ring = viewer.entities.add(_ringSpec(rec));
