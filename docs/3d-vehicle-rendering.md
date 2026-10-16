@@ -349,47 +349,105 @@ Two things in there are worth reusing:
 
 Restore with `git checkout public/aircraft/a320_noskin.glb`.
 
-## 8d. A marker that will not stay on its sensor
+## 8d. A marker that will not stay on its sensor, and a ring that will not draw
 
-Two faults, often mistaken for one, and both read as "the coordinates
-are wrong" when the coordinates were never wrong.
+Three faults, routinely mistaken for one, and all three read as "the
+coordinates are wrong" when the coordinates were never wrong.
 
-**Clamping resolves differently per graphics type.** A point clamped to
-ground resolves against the photogrammetry mesh, about 43 m at CPH. A
-billboard clamped to ground resolves against terrain, about 5 m. Put a
-dot and its pulse ring at the same latitude and longitude, one as a
-point and one as a billboard, and they sit 38 m apart vertically. From
-overhead they coincide; every degree of camera tilt smears that gap
-across the ground.
+**A clamped `point` is not a point. It is a billboard.** This is the one
+fact that explains the whole afternoon, and it is in
+`PointVisualizer.js`:
 
-**Use the same graphics type for things that must stay together.** That
-is the entire fix and it took four wrong ones to reach. The pulse ring
-is a point now, with `color: TRANSPARENT` and a thick `outlineWidth`,
-which renders as a ring and clamps through the identical code path as
-the dot. Locked at every camera angle by construction, with nothing
-measured, nothing cached and nothing to drift.
+```js
+if (heightReference !== HeightReference.NONE && !defined(billboard)) {
+  if (defined(pointPrimitive)) { returnPrimitive(...); }
+  billboard = cluster.getBillboard(entity);   // not a PointPrimitive
+  ...
+}
+```
+
+`PointPrimitiveCollection` has no terrain clamping, so any `point` with
+a `heightReference` is quietly rendered as a `Billboard` whose image is
+a canvas drawn by `createBillboardPointCallback`. A clamped `point` and
+a clamped `billboard` are therefore the *same class*, clamped by the
+*same* `Billboard._updateClamping` through the *same*
+`scene.getHeight(position, heightReference)`. They cannot resolve to
+different heights. An earlier version of this document claimed a point
+resolved against the photogrammetry mesh and a billboard against
+terrain, 38 m apart at CPH. That is not what the source says, and three
+commits were spent acting on it.
+
+**The ring rendered nothing because its texture key changed every
+frame.** `PointVisualizer` caches the generated canvas in the
+collection's texture atlas under
+
+```js
+textureId = JSON.stringify([cssColor, newPixelSize, cssOutlineColor, newOutlineWidth])
+```
+
+and regenerates it whenever any of those four changes. All four were
+`CallbackProperty`s on the pulse ring, and `Color.toCssColorString()`
+prints the raw float alpha (`rgba(77,210,255,0.5327148)`), so a pulsing
+alpha minted a brand new key every frame. A new key is a cold atlas
+entry: `TextureAtlas.addImage` returns a promise that cannot resolve
+before that frame's `afterRender`, and the next frame overwrote the key
+and cancelled the load (`if (this._id !== id) return`). So
+`billboard.ready` stayed false forever, and an unready billboard is
+written with its image dimensions at zero:
+
+```js
+const imageWidth  = Math.round(billboard.width ?? 0);   // width is undefined until LOADED
+const imageHeight = billboard.height ?? 0;
+```
+
+which the vertex shader turns into `halfSize = imageSize * scale * 0.5`
+= 0. A zero-area quad. No error, no warning, no ring, plus a fresh
+canvas uploaded to the atlas every frame for every sensor in range.
+
+The rule that falls out of this: **on a clamped `point`, fill colour,
+outline colour, outline width and pixel size are texture inputs, not
+animation inputs.** Animate any of them and the mark disappears. The
+ring holds all four constant — two keys exist for the whole session,
+cyan and amber — and pulses through `scaleByDistance` instead, which
+`PointVisualizer` forwards straight to the billboard and which is not
+part of the key. `nearValue` and `farValue` are set to the same number,
+so it acts as a plain per-frame multiplier rather than a distance ramp.
+The same economy the helicopter rotor already relies on: an atlas index,
+never an upload.
+
+A warm key resolves *synchronously* inside the visualizer pass, which is
+why a ring rebuilt on every tick still draws on the tick that built it.
+
+**`disableDepthTestDistance` must match between marks that must look
+joined.** Infinity draws a mark over everything in front of it. From
+above nothing is in front. From the side, a sensor at 40 m behind a 50 m
+hangar still draws over the hangar and reads as stuck to the near wall,
+and it shifts as the camera moves because what is in front of it
+changes. Fixed position, moving appearance. The dot was depth tested and
+the ring was not, so the pair came apart at an oblique angle for that
+reason alone and not because of any height disagreement. Both use
+`_sensorDepthValue()` now and both answer to `__isr_sensorDepth()`
+together. The accepted cost is that a sensor behind a terminal is hidden
+until the camera moves.
+
+The ring also reads its position off its own dot
+(`dotEntity.position.getValue(...)`) rather than recomputing
+lon/lat/0 beside it, because the dot's position does not stay where
+`renderSite` put it: the boot terrain sweep rewrites it and
+`__isr_pinSensors` replaces it. One authority for where a sensor is.
 
 What the wrong answers cost, so nobody repeats them: measuring one
-height for both and pinning it worked and brought a tile storm at boot
+height for both and pinning it brought a tile storm at boot
 (`sampleHeightMostDetailed` requests the finest tile under every point),
 a pin frozen at coarse detail that put every marker under the ground
 once depth testing was on, and a render pass on a timer
 (`scene.sampleHeight` is a pick) that made the application crawl.
 `__isr_pinSensors()` survives as a manual command and is not needed for
-this.
+any of this.
 
 The cost of the point is that it cannot be dashed, so a degraded sensor
 is marked by colour alone, amber against cyan, which is what its dot
 already does.
-
-**`disableDepthTestDistance: Infinity` is camera-dependent by design.**
-It draws the marker over everything in front of it. From above nothing
-is in front. From the side, a sensor at 40 m behind a 50 m hangar still
-draws over the hangar and reads as stuck to the near wall, and it shifts
-as the camera moves because what is in front of it changes. Fixed
-position, moving appearance. Depth testing is on for sensors now and
-the cost is accepted: a sensor behind a terminal is hidden until the
-camera moves.
 
 Switches, both live without a reload:
 
@@ -400,7 +458,13 @@ __isr_pinSensors.off()       // back to clamping
 __isr_sensorDepth(false)     // back to drawing on top
 ```
 
-**Measure before you change this code.** Three attempts at it in one
+`npm run check:sensor-pulse` is the gate: it reads `src/main.js` and
+fails if the dot and the ring stop being the same graphics type, stop
+sharing a `heightReference` and `disableDepthTestDistance` expression,
+or if any of the four texture inputs on the ring becomes a
+`CallbackProperty` again.
+
+**Measure before you change this code.** Four attempts at it in one
 afternoon took the map down twice, once through a dead-zone read on
 boot and once by putting the ring on the sensor entity, which silently
 suppressed the sensor's own point. `__isr_ringAudit` exists because

@@ -3138,19 +3138,26 @@ async function main() {
   // this today took the map down, so the new path ships switched off
   // and has to be asked for.
   //
-  // WHY A PIN IS NEEDED AT ALL. The dot is a point and the ring is a
-  // billboard, and Cesium clamps the two through different visualisers:
-  // the point resolves against the photogrammetry mesh, about 43 m at
-  // CPH, and the billboard against terrain, about 5 m. Thirty-eight
-  // metres apart vertically. From directly overhead they coincide, and
-  // every degree of camera tilt smears that gap across the ground,
-  // which is why the pulse sat beside its sensor and moved whenever the
-  // camera did.
+  // A PIN IS NOT NEEDED FOR THE DOT AND ITS RING TO AGREE.
   //
-  // One height, sampled once from the RENDERED scene rather than from
-  // terrain, used by both, with no clamping left to re-sample. An
-  // earlier version of this used globe.getHeight, which is terrain
-  // only, so it made them concentric and sank both of them 38 m.
+  // This map was built on the belief that a clamped point resolves
+  // against the photogrammetry mesh and a clamped billboard against
+  // terrain, 38 m apart at CPH, so the two had to be reconciled by
+  // measuring one height for both. The Cesium source does not say that.
+  // PointVisualizer renders ANY point with a heightReference as a
+  // Billboard, so a clamped dot and a clamped ring are the same class
+  // clamped by the same Billboard._updateClamping through the same
+  // scene.getHeight. They cannot resolve apart. The pair came apart
+  // because the ring drew on top while the dot was depth tested, which
+  // is a camera-dependent appearance, not a height disagreement.
+  //
+  // What this map is still good for: putting a marker on a ROOF.
+  // Clamping resolves to whatever surface is under the sensor, and a
+  // rooftop sensor authored at ground level clamps to the ground. A pin
+  // measured from the rendered scene holds it at the height it was
+  // measured at, with no clamping left to re-sample. An earlier version
+  // used globe.getHeight, which is terrain only, so it sank both marks
+  // 38 m. Manual, because it costs picks.
   const _sensorPinH = new Map();
   const _sensorPinKey = (siteId, sensorId) => `${siteId}-${sensorId}`;
   function _sensorPinnedPos(siteId, sensor) {
@@ -19799,51 +19806,97 @@ async function main() {
         // make the add throw on a duplicate id and kill the tick.
         const _pulseId = `sensor-pulse-${sid}-${sensor.id}`;
         try { viewer.entities.removeById(_pulseId); } catch (_) {}
+        // THE RING READS ITS POSITION OFF ITS OWN DOT, rather than
+        // recomputing the same arithmetic beside it.
+        //
+        // The dot's position does not stay where renderSite put it: the
+        // boot terrain sweep rewrites it and __isr_pinSensors replaces
+        // it outright. A ring that derives its own lon/lat/0 is only
+        // concentric for as long as nobody touches the dot. Reading the
+        // dot's resolved position leaves one authority for where a
+        // sensor is and the ring cannot disagree with it. getValue()
+        // hands back a copy, so the two entities share a value and not
+        // an object.
+        const _dotEnt = viewer.entities.getById(`sensor-${sid}-${sensor.id}`);
+        const _ringPos = _dotEnt?.position?.getValue?.(viewer.clock.currentTime)
+          || _sensorPinnedPos(sid, sensor)
+          || Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0);
         contributingRingEntities.push(viewer.entities.add({
           id: _pulseId,
-          // SAME POSITION AS THE SENSOR DOT, exactly, and the same pin.
-          position: _sensorPinnedPos(sid, sensor)
-            || Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
-          // A POINT, NOT A BILLBOARD, AND IT OPTS OUT OF THE DEPTH TEST.
+          position: _ringPos,
+          // A POINT, LIKE THE DOT, AND NOTHING ABOUT IT ANIMATES THE
+          // TEXTURE. The second half is why four attempts at this ring
+          // rendered nothing whatsoever.
           //
-          // Both halves are needed and I shipped them separately, which
-          // is why neither worked.
+          // WHY IT WAS INVISIBLE, from the Cesium source rather than
+          // from guessing. An entity `point` with any heightReference
+          // other than NONE is not a PointPrimitive at all.
+          // PointVisualizer swaps it for a Billboard and bakes the dot
+          // into a canvas: `if (heightReference !== HeightReference.NONE
+          // && !defined(billboard)) { billboard = cluster.getBillboard(
+          // entity) }`, then `createBillboardPointCallback`. That canvas
+          // is cached in the collection's texture atlas under a key
+          // built from four values:
           //
-          // POINT, so it is locked to the dot. Cesium clamps a point to
-          // the photogrammetry mesh and a billboard to terrain, 43 m
-          // against 5 m at CPH, so a billboard ring is always about
-          // 38 m below its own sensor. That gap is invisible from
-          // overhead and smears across the ground with camera tilt,
-          // which is the pulse drifting off its sensor. Same graphics
-          // type means the same clamp and the same height, by
-          // construction, at every angle.
+          //   textureId = JSON.stringify(
+          //     [cssColor, newPixelSize, cssOutlineColor, newOutlineWidth])
           //
-          // ON TOP, so it renders. A marker sitting exactly on the
-          // surface it was clamped to is level with the depth buffer
-          // there, and a depth-tested point at that depth is discarded.
-          // My first two attempts at the point ring were depth tested
-          // and drew nothing at all.
+          // All four were CallbackProperties here, and
+          // Color.toCssColorString prints the raw float alpha, so a
+          // pulsing alpha minted a brand new key on every single frame.
+          // A new key is a COLD atlas entry: TextureAtlas.addImage hands
+          // back a promise that cannot resolve before that frame's
+          // afterRender, and the next frame had already overwritten the
+          // key and cancelled the load (`if (this._id !== id) return`).
+          // billboard.ready was therefore false forever, and an unready
+          // billboard is written with its image dimensions at zero
+          // (`billboard.width ?? 0`), which the vertex shader turns into
+          // `halfSize = imageSize * scale * 0.5` = 0. A zero-area quad.
+          // No error, no warning, no ring — and a fresh canvas uploaded
+          // to the atlas every frame for every sensor in range as well.
           //
-          // A real fill, not Color.TRANSPARENT. The point shader is
-          // mix(outlineColor, color, innerAlpha) followed by a discard
-          // of fully transparent fragments, and a transparent fill is
-          // the one case that can take the whole primitive with it.
+          // So the four texture inputs are CONSTANTS. Two keys exist for
+          // the whole session, cyan and amber. Each is uploaded once and
+          // is warm after that, and a warm key resolves synchronously
+          // inside the same visualizer pass — which is also why a ring
+          // rebuilt on every tick still draws on the tick that built it.
+          //
+          // The pulse moved onto scaleByDistance, which PointVisualizer
+          // forwards straight through to the billboard and which is not
+          // part of the texture key, so it costs one attribute write
+          // instead of a texture upload. The same trick the helicopter
+          // rotor already relies on: an atlas index, never an upload.
           point: {
             show: _showInRange,
-            color: new Cesium.CallbackProperty(() => Cesium.Color
+            // A translucent fill plus a crisp outline IS the ring:
+            // createBillboardPointCallback punches the centre out of the
+            // outline disc whenever the fill alpha is below 1.
+            color: Cesium.Color
               .fromCssColorString(_degraded ? '#ff8c3d' : '#4dd2ff')
-              .withAlpha(0.10), false),
-            pixelSize: new Cesium.CallbackProperty(
-              () => 24 + 5 * Math.sin(performance.now() / 250), false),
-            outlineColor: new Cesium.CallbackProperty(() => {
-              const pulse = 0.35 + 0.40 * Math.sin(performance.now() / 250);
-              return Cesium.Color.fromCssColorString(
-                _degraded ? '#ff8c3d' : '#4dd2ff').withAlpha(pulse);
-            }, false),
+              .withAlpha(0.10),
+            outlineColor: Cesium.Color
+              .fromCssColorString(_degraded ? '#ff8c3d' : '#4dd2ff')
+              .withAlpha(0.85),
             outlineWidth: 3,
+            pixelSize: 26,
+            // THE PULSE. nearValue and farValue are the same number, so
+            // the scale is that number at every range: the property is
+            // a plain per-frame multiplier here, not a distance ramp.
+            // far must exceed near or Cesium throws.
+            scaleByDistance: new Cesium.CallbackProperty(() => {
+              const s = 1.0 + 0.16 * Math.sin(performance.now() / 250);
+              return new Cesium.NearFarScalar(1.0, s, 1.0e7, s);
+            }, false),
+            // Identical to the dot's, so the two cannot resolve apart.
             heightReference: _sensorPinnedPos(sid, sensor)
               ? undefined : Cesium.HeightReference.CLAMP_TO_GROUND,
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            // Identical to the dot's, for the same reason. The ring drew
+            // on top while the dot was depth tested, and that asymmetry
+            // is itself a camera-dependent displacement: at an oblique
+            // angle the dot goes behind the terminal and the ring stays
+            // painted over the near wall. Both markers answer to
+            // __isr_sensorDepth() together now.
+            disableDepthTestDistance: _sensorDepthValue(),
           },
         }));
       }
