@@ -3106,28 +3106,26 @@ async function main() {
     return working.length / all.length;
   }
 
-  // DRAW ON TOP, OR LET THE SCENE OCCLUDE IT. Off by default, meaning
-  // markers keep drawing on top exactly as they always have.
+  // DRAW ON TOP. OFF means depth tested; this is the default and it is
+  // what works.
   //
-  // disableDepthTestDistance: Infinity makes a marker ignore everything
-  // in front of it. From overhead nothing is in front, so it looks
-  // right. From an oblique angle a sensor at 40 m with a 50 m hangar
-  // between it and the camera still draws over the hangar, so it reads
-  // as stuck to the near wall rather than hidden behind the building,
-  // and it changes as the camera moves because what is in front of it
-  // changes. That is camera-dependent placement with a fixed position,
-  // which is the thing that kept looking like a coordinate fault.
+  // Depth testing was briefly the default on the argument that a marker
+  // should sit inside the scene rather than over it. Tested on the real
+  // map it hides the pulse: the ring is a 26 px mark clamped to the
+  // surface, so its anchor depth is level with the ground it is drawn
+  // on and the per-fragment depth test discards it, while the 8 px dot
+  // is small enough to survive. Lucas confirmed __isr_sensorDepth(false)
+  // fixes both the missing pulse and the placement, so that is the
+  // default now rather than a command to remember.
   //
-  // Depth testing fixes the look and costs something real: a sensor
-  // behind a terminal becomes invisible rather than showing through it.
-  // Which of those an operator wants is Lucas's call, so it is a switch
-  // rather than a decision I make for him.
-  // ON by default now. Lucas tested both and the scene-occluded version
-  // is the one that reads correctly from an oblique camera, which is
-  // where every screenshot of this platform gets taken. The cost is
-  // real and accepted: a sensor behind a terminal is hidden until the
-  // camera moves, rather than showing through it.
-  let _sensorDepthTested = true;
+  // The cost is accepted and is the behaviour this app has always had:
+  // a sensor behind a terminal shows through it rather than being
+  // hidden. For an operator that is the right failure anyway. Never
+  // losing sight of a sensor beats a prettier oblique view.
+  //
+  //   __isr_sensorDepth(true)   let scene geometry occlude markers
+  //   __isr_sensorDepth(false)  draw on top, the default
+  let _sensorDepthTested = false;
   const _sensorDepthValue = () => (_sensorDepthTested ? 0 : Number.POSITIVE_INFINITY);
 
   // RESOLVED SENSOR HEIGHTS, EMPTY BY DEFAULT.
@@ -19877,7 +19875,10 @@ async function main() {
             outlineColor: Cesium.Color
               .fromCssColorString(_degraded ? '#ff8c3d' : '#4dd2ff')
               .withAlpha(0.85),
-            outlineWidth: 3,
+            // 2, not 3. A 3 px outline on a 26 px ring reads as a fat
+            // band rather than a ring. Visual only: outlineWidth is one
+            // of the four texture-key inputs, so it stays a constant.
+            outlineWidth: 2,
             pixelSize: 26,
             // THE PULSE. nearValue and farValue are the same number, so
             // the scale is that number at every range: the property is
