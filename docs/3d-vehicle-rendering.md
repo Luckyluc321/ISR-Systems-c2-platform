@@ -357,36 +357,30 @@ are wrong" when the coordinates were never wrong.
 **Clamping resolves differently per graphics type.** A point clamped to
 ground resolves against the photogrammetry mesh, about 43 m at CPH. A
 billboard clamped to ground resolves against terrain, about 5 m. Put a
-dot and its pulse ring at the same latitude and longitude and they sit
-38 m apart vertically. From overhead they coincide; every degree of
-camera tilt smears that gap across the ground.
+dot and its pulse ring at the same latitude and longitude, one as a
+point and one as a billboard, and they sit 38 m apart vertically. From
+overhead they coincide; every degree of camera tilt smears that gap
+across the ground.
 
-The fix is one measured height for both, with no clamp left to
-re-sample. Measure from the RENDERED scene, not with `globe.getHeight`:
-that is terrain only, and using it sank every marker 38 m and put a
-pulse ring out in the Oresund.
+**Use the same graphics type for things that must stay together.** That
+is the entire fix and it took four wrong ones to reach. The pulse ring
+is a point now, with `color: TRANSPARENT` and a thick `outlineWidth`,
+which renders as a ring and clamps through the identical code path as
+the dot. Locked at every camera angle by construction, with nothing
+measured, nothing cached and nothing to drift.
 
-Use `scene.sampleHeight`, never `sampleHeightMostDetailed`, for this.
-MostDetailed requests the highest-detail tile under every point it is
-given and waits. Called at boot with 130 sensors spread across Denmark,
-from the planet view where nothing is loaded, that is 130 tile pyramids
-streaming at once and the globe visibly churns while they land.
-`sampleHeight` reads what is already rendered and requests nothing,
-returning undefined where tiles have not arrived.
+What the wrong answers cost, so nobody repeats them: measuring one
+height for both and pinning it worked and brought a tile storm at boot
+(`sampleHeightMostDetailed` requests the finest tile under every point),
+a pin frozen at coarse detail that put every marker under the ground
+once depth testing was on, and a render pass on a timer
+(`scene.sampleHeight` is a pick) that made the application crawl.
+`__isr_pinSensors()` survives as a manual command and is not needed for
+this.
 
-**Do not run it on a timer.** `sampleHeight` is a pick: it renders the
-scene to resolve one pixel. A sweeper calling it for 130 sensors every
-three seconds is 130 render passes every three seconds and the whole
-application crawls, with camera moves landing seconds late. It is a
-manual command, `await __isr_pinSensors()`, run while parked at the
-site you are looking at, which is the only moment the pin matters.
-
-**Take the highest sample, never the first.** A coarse tile has no
-buildings on it, so a rooftop sensor measures at near ground level.
-Freeze that and fly in, and with depth testing on the marker ends up
-under the detailed surface and vanishes. Refinement only adds surface,
-so the maximum converges on the real rooftop. Add a metre or two of
-lift so a depth-tested marker sits on the roof rather than inside it.
+The cost of the point is that it cannot be dashed, so a degraded sensor
+is marked by colour alone, amber against cyan, which is what its dot
+already does.
 
 **`disableDepthTestDistance: Infinity` is camera-dependent by design.**
 It draws the marker over everything in front of it. From above nothing
