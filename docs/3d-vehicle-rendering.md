@@ -353,60 +353,99 @@ Restore with `git checkout public/aircraft/a320_noskin.glb`.
 
 `scripts/blender_drone_flight_demo.py` runs inside Blender headless and
 turns any drone file (`.blend`, `.glb`, `.fbx`, `.obj`) into an animated
-`.blend` plus an MP4: props spinning about their own hubs (diagonals
-counter-rotating in DJI sense, front-right and rear-left anticlockwise
-from above) and the airframe flying hover,
-forward, a banked 180 degree turn, brake, backward, slide right, slide
-left, descend, climb.
+`.blend` plus an MP4 of the airframe flying hover, forward, a banked 180
+degree turn, brake, backward, slide right, slide left, descend, climb.
 
-The attitude is not keyframed by hand. A quadcopter moves only by tilting
-its thrust, so each frame tilts the body toward `a + c_d v` by
-`atan(|a + c_d v| / g)`, clamped at 32 degrees, after yawing it to its
-heading. That single rule produces nose-down to go forward, nose-up to
-brake or fly backward, roll into a slide, roll into a turn (the
-centripetal term), and a level body on vertical legs. It is the same
-physics the in-map rig in `main.js` (`_quadOrientation`, the
-`_rotorcraftStep` disc tilt) approximates per frame from measured
-velocity.
+Nothing is keyframed by hand and nothing is read backwards from the
+path. The motion comes from a small flight-controller model, the loop a
+DJI runs:
+
+1. The plan commands a velocity (stick, or waypoint).
+2. A velocity loop asks for an acceleration, capped at `A_MAX`
+   (6.5 m/s^2: 0 to 21 m/s in about 3.5 s, as an Air 3 does).
+3. That plus quadratic drag gives the lean the thrust must have,
+   `tan(lean) = |a + k v|v|| / g`, capped at `MAX_TILT` (32 degrees; DJI
+   limits sport mode to about 35). `k` is 0.0156/m from the top-speed
+   balance, 21 m/s at 35 degrees.
+4. The attitude follows that demand with a 0.15 s lag and a 120 deg/s
+   slew limit, because a body has inertia and rotors finite authority.
+   This is what makes a real one tip into a move and roll out of it.
+5. Acceleration is `g tan(lean)` minus drag, integrated to velocity and
+   position. Vertical speed is throttle, with its own 0.6 s response.
+   Yaw is a rate command with a 0.3 s response.
+
+So: nose down to go forward, nose UP to brake or fly backward, roll into
+a slide, roll into a turn from the centripetal term, level on vertical
+legs. Measured on the Air 3 at the phase midpoints: 30 degrees nose down
+at peak acceleration, 20 in the accelerating cruise, 6 to 9 at a steady
+10 m/s, 29 nose up braking, 12 nose up at 6 m/s backward, 25 to 29 of
+roll at the start of each slide, under 1 degree on descend and climb.
+Peak slew 123 deg/s including noise.
+
+On top of that, what a real one does and the old shortcut never did:
+
+- **Rotor speed per rotor.** Thrust goes with the square of rotor
+  speed, so the base rate scales with `sqrt(thrust / weight)`: up with
+  lean and climb, down in descent. A 3 percent dip in slow forward
+  flight for translational lift (arXiv 2109.04741 measures about 9
+  percent less power than hover at the endurance-optimal speed, and
+  power goes with the cube of speed). During a pitch or roll
+  *acceleration* the four differ: to pitch nose down the front pair
+  drops and the rear rises, and the opposite to stop the rotation; the
+  rates are equal while the attitude slews at its limit. During a yaw
+  acceleration the clockwise and anticlockwise pairs differ, and
+  reaction torque opposes spin, so to yaw anticlockwise the
+  **clockwise** rotors speed up. A small steady differential holds the
+  yaw rate against air drag. In steady cruise the average barely moves;
+  the transitions are where it changes, which is what the ear hears.
+- **The camera gimbal stays level** while the body leans
+  (`--gimbal-near x,y,z,r`, a sphere in file units; for the Air 3
+  `0,0.94,-0.49,0.13` takes ten meshes). Verified at 0.00 degrees off
+  level across the whole flight.
+- **Hover is not still.** Sub-degree attitude noise at a few tenths of
+  a Hertz to 1.7 Hz, 3 cm of height wander, half a degree of yaw. The
+  gimbal cancels the attitude part, which is the most recognisable
+  thing about a hovering DJI.
+- **The pivot is the centre of mass**, rotor centroid in plan and body
+  centre in height, not the bounding-box centre, which on the Air 3 sat
+  2 cm aft and 4 cm low of it because of the gimbal and legs.
 
 ```
 /Applications/Blender.app/Contents/MacOS/Blender -b \
   --python scripts/blender_drone_flight_demo.py -- IN.glb --out OUT_DIR \
-  --forward +Y --size-m 0.5 --render --stills [--prop-rps 18] [--props REGEX]
+  --forward +Y --size-m 0.5 --gimbal-near 0,0.94,-0.49,0.13 \
+  --render --stills [--prop-rps 18] [--props REGEX]
 ```
-
-- `--prop-rps` defaults to 18, not the physical 92 an Air 3 hovers at.
-  At 30 fps with motion blur, 92 is over a turn per frame and renders as
-  a clear disc, which is what a camera sees and what a viewer reads as
-  "the propellers are gone". 18 is a 65 degree blur arc per frame:
-  blades visibly spinning. Pass 92 for the physical rate.
 
 - `--forward` is the nose axis in Blender space. glTF's +Z nose imports
   as -Y, which is the default; the DJI Air 3 export has its nose on +Y.
   If the nose leads on the BACKWARD leg, the axis is reversed.
-- `--size-m` is the real length of the longest extent. The file is scaled
-  to it so that m/s and g mean what they say; without it a 4.7 unit Air 3
-  would fly like a 4.7 m aircraft.
+- `--size-m` is the real length of the longest extent. The file is
+  scaled to it so m/s and g mean what they say; without it a 4.7 unit
+  Air 3 flew like a 4.7 m aircraft.
+- `--prop-rps` defaults to 18, not the physical 92 an Air 3 hovers at.
+  At 30 fps with motion blur, 92 is over a turn per frame and renders as
+  a clear disc, which is what a camera sees and what a viewer reads as
+  "the propellers are gone". 18 is a 65 degree blur arc per frame.
 - Props are found by name (`prop|rotor|blade`) first, then by shape: a
   sheet, 15 to 35 percent of the airframe long, off the body axis, and
   then the largest set of near-identical such sheets, which is what
-  separates eight blades from two arms of the same flatness. Whatever is
-  chosen is printed, with what was dropped. `--props` overrides it with a
-  regex against object or parent names.
+  separates eight blades from two arms. The pick is printed with what
+  was dropped. `--props` overrides it with a regex.
 
 Verified on `assault_drone_concept.glb` (named rotors) and on
 `dji_air_3.glb` (polyman, Sketchfab, CC-BY-4.0, 341 unnamed meshes) by
-reading rotor hub heights at each phase midpoint, not by looking at one
-still. The Air 3's eight blades are found at the four motor positions to
-within a millimetre of the model's own motor nodes, and every blade is
-checked to stay half a blade length from its hub across the flight.
+reading rotor hub heights, per-rotor rates, gimbal level and blade
+attachment at every frame, not by looking at one still.
 
-Blades are reparented with explicit matrices. A freshly made object's
-`matrix_world` is identity until the depsgraph runs, and the first
-version read it back to build the parent inverse, so each blade carried
-the hub offset twice and drifted loose of the airframe as the rig moved.
-Verified by rendering a frame without motion blur: four propellers a
-metre from the aircraft. Blur hid it.
+Two lessons that cost a render each. Blades are reparented with explicit
+matrices: a freshly made object's `matrix_world` is identity until the
+depsgraph runs, and reading it back to build the parent inverse carried
+the hub offset twice, so the blades drifted loose of the airframe as it
+flew, and motion blur hid it until a frame was rendered without blur.
+And any vector read out of `matrix_world` on a scaled rig must be
+normalised before taking an angle from it, or every tilt reads 84
+degrees.
 
 The DJI Mavic 3 Pro listing by ikad2023/dika3d (Sketchfab, now Fab and
 Superhive) is a paid asset at USD 60 and is not downloadable without

@@ -1,55 +1,79 @@
 #!/usr/bin/env python3
-"""Spin a drone's propellers and fly it through every attitude a quadcopter has.
+"""Spin a drone's propellers and fly it the way a quadcopter actually flies.
 
 Runs INSIDE Blender, headless. Takes any drone file Blender can open
 (.blend, .glb/.gltf, .fbx, .obj), finds the propellers, and writes a new
-.blend (and optionally an MP4) in which:
+.blend (and optionally an MP4) in which the airframe flies hover, forward,
+a banked turn, brake, backward, slide right, slide left, descend, climb.
 
-  * every propeller spins about its own hub, at a real hover rate, with
-    diagonal pairs counter-rotating the way a DJI airframe does
-    (front-right and rear-left anticlockwise seen from above, the other
-    diagonal clockwise), and
-  * the airframe flies a fixed sequence: hover, forward, brake, backward,
-    slide right, slide left, descend, climb. Attitude is not keyframed by
-    hand. A quadcopter can only move by tilting its thrust, so the tilt is
-    derived every frame from acceleration plus drag:
+What is simulated, and why it is simulated rather than keyframed
+-------------------------------------------------------------------
+A quadcopter has one way to move sideways: lean its thrust. So the whole
+motion is driven by a small flight-controller model, the same loop a DJI
+runs, and the attitude you see is whatever that loop needed:
 
-        tilt axis   = up x (a + c_d * v)        horizontal
-        tilt angle  = atan(|a + c_d * v| / g)   clamped to a real max
+  1. The plan commands a velocity (stick input, or a mission waypoint).
+  2. A velocity controller asks for an acceleration, capped at what the
+     airframe can do (A_MAX).
+  3. That plus drag gives a required lean: tan(lean) = |a + drag| / g,
+     capped at the airframe's tilt limit (MAX_TILT).
+  4. The ATTITUDE FOLLOWS THE DEMAND with a lag and a rate limit, because
+     a body has inertia and the rotors have finite authority. This is what
+     makes a real one tip into a move and roll out of it rather than snap.
+  5. The actual acceleration is g*tan(lean) minus quadratic drag, and that
+     is integrated to velocity and position. Nothing is read backwards.
 
-    which gives the behaviour people recognise without being told: nose
-    down to go forward, nose UP (front rising, back dropping) to go
-    backward or to brake, roll into a sideways slide, and a level body
-    while descending or climbing because vertical motion is throttle,
-    not tilt.
+So: nose down to go forward, nose UP to brake or fly backward, roll into
+a slide, roll into a turn (the centripetal term), level on vertical legs
+because vertical motion is throttle, not lean. Plus the things a real one
+does that the shortcut never did:
 
-Why a script rather than hand animation
----------------------------------------
-Because the asset is going to change. The DJI Mavic 3 Pro file is bought
-and dropped in later; the assault_drone_concept.glb already in
-public/aircraft/ stands in until then. The same command produces the same
-demo from either, so the demo is reproducible and the propeller search is
-written down rather than clicked.
+  * Rotor speed per rotor. Base rate scaled by sqrt(thrust/weight), so it
+    rises with lean and with climb and falls in descent; a small dip in
+    slow forward flight (translational lift: arXiv 2109.04741 finds ~9%
+    less power than hover at the endurance-optimal speed); a differential
+    across the four during pitch/roll accelerations (front pair slows and
+    rear speeds up to pitch nose-down) and between the CW and CCW pairs
+    during yaw accelerations. The average barely moves in cruise. The
+    transitions are where it changes, which is what the ear hears.
+  * The camera gimbal stays level while the body leans (--gimbal-near).
+  * Hover is not still: sub-degree attitude noise and a few centimetres of
+    height wander, which the gimbal cancels. That contrast is the most
+    recognisable thing about a hovering DJI.
+  * The body rotates about its centre of mass (rotor centroid in plan,
+    body centre in height), not the bounding-box centre.
+
+Propellers spin about their own hubs, diagonal pairs counter-rotating the
+way a DJI airframe does (front-right and rear-left anticlockwise from
+above). The default rate is a readable 18 rps; the physical ~92 rps of an
+Air 3 renders as a clear disc under motion blur and reads as no props at
+all. Pass --prop-rps 92 for camera-true.
 
 Propeller detection
 -------------------
-1. Mesh objects whose name matches prop/rotor/blade/elice.
-2. Failing that, every mesh is split into loose parts and the parts that
-   are thin sheets (long in two axes, thin in the third), small relative
-   to the airframe and sitting away from the centre are taken as blades.
-   Whatever is chosen is printed, so a wrong pick is visible in the log.
+1. Mesh objects whose name (or parent's) matches --props (prop|rotor|blade).
+2. Failing that, by shape: a sheet, 15 to 35 percent of the airframe long,
+   off the body axis, and then the largest set of near-identical such
+   sheets, which is what separates eight blades from two arms. Failing
+   that, meshes are split into loose parts and tested the same way.
+Whatever is chosen is printed, with what was dropped.
 
 Usage
 -----
   /Applications/Blender.app/Contents/MacOS/Blender -b \
       --python scripts/blender_drone_flight_demo.py -- IN.glb --out OUT_DIR \
-      [--forward -Y] [--prop-rps 92] [--fps 30] [--render] [--stills] \
-      [--resolution 1280x720]
+      --forward +Y --size-m 0.5 [--gimbal-near x,y,z,r] [--prop-rps 18] \
+      [--fps 30] [--render] [--stills] [--resolution 1280x720]
 
---forward is the model's nose axis in Blender space. Blender's own
-convention is -Y (the Front view looks along +Y), and glTF's +Z nose
-imports as -Y, so that is the default. Check the first still: if the nose
-leads on the BACKWARD leg the axis is reversed, pass --forward +Y.
+--forward is the nose axis in Blender space. Blender's convention is -Y
+(the Front view looks along +Y) and glTF's +Z nose imports as -Y, so that
+is the default; the DJI Air 3 export has its nose on +Y. If the nose leads
+on the BACKWARD leg the axis is reversed.
+--size-m is the real length of the longest extent; the file is scaled to
+it so that m/s and g mean what they say.
+--gimbal-near is a sphere in FILE units around the camera gimbal: meshes
+whose centre lies inside are stabilised about that point. For the Air 3:
+0,0.94,-0.49,0.13.
 """
 
 import argparse
@@ -61,38 +85,64 @@ import sys
 import bpy
 from mathutils import Matrix, Quaternion, Vector
 
-G = 9.81                      # m/s^2, the model is assumed to be in metres
+G = 9.81
 PROP_NAME = re.compile(r"(prop|rotor|blade|elic|helic)", re.I)
 
 # The flight plan: (label, body-frame target velocity in m/s, yaw rate in
 # deg/s, seconds). Body frame is (forward, right, up) and turns with the
-# heading, so a TURN is forward speed plus a yaw rate, and the roll into
-# it is not scripted: it falls out of the centripetal acceleration the
-# same way the pitch falls out of the linear one. Speeds are modest so
-# the tilt stays readable; an Air 3 will do 21 m/s, which is not the
-# point.
+# heading. Speeds are a fast-cruise Air 3 rather than its 21 m/s sport
+# maximum, chosen so the lean is clearly visible without pinning the
+# tilt limit the whole time.
 PLAN = [
-    ("HOVER",          (0.0,  0.0,  0.0),   0.0, 1.5),
-    ("FORWARD",        (6.0,  0.0,  0.0),   0.0, 3.0),
+    ("HOVER",          (0.0,  0.0,  0.0),   0.0, 2.0),
+    ("FORWARD",        (10.0, 0.0,  0.0),   0.0, 3.5),
     ("TURN",           (5.0,  0.0,  0.0),  60.0, 3.0),
-    ("FORWARD",        (6.0,  0.0,  0.0),   0.0, 1.5),
-    ("BRAKE",          (0.0,  0.0,  0.0),   0.0, 2.0),
-    ("BACKWARD",       (-4.0, 0.0,  0.0),   0.0, 3.0),
-    ("STOP",           (0.0,  0.0,  0.0),   0.0, 1.5),
-    ("SLIDE RIGHT",    (0.0,  4.0,  0.0),   0.0, 2.5),
-    ("SLIDE LEFT",     (0.0, -4.0,  0.0),   0.0, 3.0),
-    ("STOP",           (0.0,  0.0,  0.0),   0.0, 1.5),
-    ("DESCEND",        (0.0,  0.0, -2.5),   0.0, 2.5),
-    ("CLIMB",          (0.0,  0.0,  3.0),   0.0, 2.5),
-    ("HOVER",          (0.0,  0.0,  0.0),   0.0, 1.5),
+    ("FORWARD",        (10.0, 0.0,  0.0),   0.0, 2.0),
+    ("BRAKE",          (0.0,  0.0,  0.0),   0.0, 2.5),
+    ("BACKWARD",       (-6.0, 0.0,  0.0),   0.0, 3.0),
+    ("STOP",           (0.0,  0.0,  0.0),   0.0, 2.0),
+    ("SLIDE RIGHT",    (0.0,  6.0,  0.0),   0.0, 2.5),
+    ("SLIDE LEFT",     (0.0, -6.0,  0.0),   0.0, 3.0),
+    ("STOP",           (0.0,  0.0,  0.0),   0.0, 2.0),
+    ("DESCEND",        (0.0,  0.0, -3.0),   0.0, 2.5),
+    ("CLIMB",          (0.0,  0.0,  4.0),   0.0, 2.5),
+    ("HOVER",          (0.0,  0.0,  0.0),   0.0, 2.0),
 ]
-TAU_S = 1.2          # velocity time constant: how quickly it reaches target
-DRAG = 0.30          # 1/s. c_d * v is the steady tilt at cruise: 6 m/s -> 10 deg
-MAX_TILT_DEG = 32.0  # DJI's own limit is ~35 deg in sport mode
+
+# Airframe and controller, calibrated to a DJI Air 3 where a public number
+# exists and stated where it is a judgement.
+MAX_TILT_DEG = 32.0    # DJI limits sport mode to ~35 deg; a little margin
+A_MAX = 6.5            # m/s^2. 0 to 21 m/s in about 3.5 s, as the Air 3 does
+DRAG_K = 0.0156        # 1/m, quadratic: g*tan(35deg) / 21^2, the top-speed balance
+KV = 1.2               # 1/s, velocity loop gain: 1 m/s error asks 1.2 m/s^2
+ATT_TAU = 0.15         # s, attitude loop time constant. DJI inner loops are fast
+ATT_RATE_DPS = 120.0   # deg/s, attitude slew limit, the rotors' authority
+VZ_TAU = 0.6           # s, vertical speed response
+YAW_TAU = 0.3          # s, yaw rate response
+YAW_RATE_MAX_DPS = 100.0
+
+# Rotor speed model. Thrust goes with the square of rotor speed.
+TL_DIP = 0.03          # fractional speed dip from translational lift...
+TL_SPEED = 7.0         # ...centred here (m/s)...
+TL_WIDTH = 5.0         # ...and this wide. ~9% power is ~3% speed (power ~ w^3)
+ATT_DIFF = 0.08        # +-8% across the airframe at full attitude acceleration
+ATT_DIFF_REF = 14.0    # rad/s^2: the slew limit reached in one time constant
+YAW_DIFF = 0.08        # +-8% between CW and CCW pairs at...
+YAW_DIFF_REF = 3.5     # ...rad/s^2 of yaw acceleration
+YAW_DAMP_DIFF = 0.02   # steady differential holding a 60 deg/s yaw against drag
+
+# Hover noise: the flight controller correcting a body that drifts in its
+# own downwash. Sub-degree, sub-Hertz to a couple of Hertz, a few cm.
+NOISE_LEAN_DEG = (0.45, 0.30, 0.20)
+NOISE_LEAN_HZ = (0.37, 0.91, 1.70)
+NOISE_ALT_M = 0.03
+NOISE_ALT_HZ = 0.29
+NOISE_YAW_DEG = 0.4
+NOISE_YAW_HZ = 0.23
 
 
 # ----------------------------------------------------------------------------
-# Loading
+# Loading and geometry
 # ----------------------------------------------------------------------------
 def load(path):
     ext = os.path.splitext(path)[1].lower()
@@ -128,41 +178,62 @@ def scene_bbox(objs):
     return lo, hi
 
 
+def bbox_centre(obj):
+    lo, hi = world_bbox(obj)
+    return (lo + hi) / 2
+
+
+def reparent(obj, parent, parent_world):
+    """Parent with explicit matrices. A freshly made object's matrix_world is
+    identity until the depsgraph runs, so reading it back to build the
+    parent inverse silently parents with a zero offset. Been there."""
+    mw = obj.matrix_world.copy()
+    obj.parent = parent
+    obj.matrix_parent_inverse = parent_world.inverted()
+    obj.matrix_basis = mw
+
+
+def fcurves_of(obj):
+    act = obj.animation_data.action
+    if hasattr(act, "fcurves"):
+        return act.fcurves
+    slot = obj.animation_data.action_slot
+    for layer in act.layers:
+        for strip in layer.strips:
+            bag = strip.channelbag(slot)
+            if bag is not None:
+                return bag.fcurves
+    return []
+
+
 # ----------------------------------------------------------------------------
 # Propellers
 # ----------------------------------------------------------------------------
-def looks_like_blade(obj, airframe_size, centre):
-    """A blade: a sheet, a fifth to a third of the airframe long, out at a
-    corner. Measured on the DJI Air 3 (polyman): blades 0.96 x 0.76 x 0.19
-    at ~1500 tris, flatness 4.4-5.4 because the blade is pitched so its
-    box is not flat; the arm beside it is 1.51 long (0.38 of the
-    airframe) and the body is 1.66. On assault_drone_concept the blades
-    are 0.93 long at flatness 10.5 and the arms 0.93 at 5.1 but sit
-    inboard. Length band plus flatness separates all of them."""
-    lo, hi = world_bbox(obj)
-    d = sorted([hi.x - lo.x, hi.y - lo.y, hi.z - lo.z])
-    thin, mid, long = d
-    if not (0.15 * airframe_size <= long <= 0.35 * airframe_size):
-        return False
-    if thin <= 0 or long / thin < 4.0:         # not a sheet
-        return False
-    c = (lo + hi) / 2
-    if (c - centre).xy.length < 0.2 * airframe_size:   # on the body
-        return False
-    if len(obj.data.polygons) < 100:
-        return False
-    return True
-
-
 def blade_length(obj):
     lo, hi = world_bbox(obj)
     return max(hi.x - lo.x, hi.y - lo.y, hi.z - lo.z)
 
 
+def looks_like_blade(obj, airframe_size, centre):
+    """A sheet, a fifth to a third of the airframe long, out at a corner.
+    Measured on the DJI Air 3: blades 0.96 x 0.76 x 0.19 at ~1500 tris,
+    flatness 4.4-5.4 because a pitched blade's box is not flat; the arm
+    beside it is 1.51 long and the body 1.66."""
+    lo, hi = world_bbox(obj)
+    thin, mid, long = sorted([hi.x - lo.x, hi.y - lo.y, hi.z - lo.z])
+    if not (0.15 * airframe_size <= long <= 0.35 * airframe_size):
+        return False
+    if thin <= 0 or long / thin < 4.0:
+        return False
+    if (((lo + hi) / 2) - centre).xy.length < 0.2 * airframe_size:
+        return False
+    return len(obj.data.polygons) >= 100
+
+
 def majority_size(cands):
-    """The blades are the largest set of near-identical sheets. On the Air 3
-    the shape test also passes the two rear arms (1.51 long against the
-    blades' 0.96 to 1.05); eight of one length beats two of another."""
+    """The blades are the largest set of near-identical sheets. The Air 3's
+    two rear arms also pass the shape test; eight of one length beats two
+    of another."""
     groups = []
     for o in sorted(cands, key=blade_length):
         L = blade_length(o)
@@ -185,8 +256,6 @@ def find_props(centre, airframe_size, name_re):
     if len(named) >= 2:
         print(f"props by name: {[o.name for o in named]}")
         return named
-
-    # Many exports already have one object per part; test those first.
     blades = majority_size([o for o in meshes() if looks_like_blade(o, airframe_size, centre)])
     if len(blades) >= 2:
         print(f"props by geometry (separate objects): {[o.name for o in blades]}")
@@ -201,22 +270,21 @@ def find_props(centre, airframe_size, name_re):
     bpy.ops.mesh.select_all(action="SELECT")
     bpy.ops.mesh.separate(type="LOOSE")
     bpy.ops.object.mode_set(mode="OBJECT")
-
+    bpy.context.view_layer.update()
     blades = majority_size([o for o in meshes() if looks_like_blade(o, airframe_size, centre)])
     print(f"props by geometry (loose parts): {[o.name for o in blades]}")
     return blades
 
 
-def cluster_by_hub(blades, airframe_size):
-    """Blades that share a hub spin together. Two blades of one rotor sit
-    about one blade-length apart, centre to centre; neighbouring rotors sit
-    more than two apart. 1.6 blade lengths splits them."""
+def cluster_by_hub(blades):
+    """Two blades of one rotor sit about one blade-length apart, centre to
+    centre; neighbouring rotors more than two. 1.6 blade lengths splits
+    them."""
     Ls = sorted(blade_length(b) for b in blades)
     radius = 1.6 * Ls[len(Ls) // 2]
     groups = []
     for b in blades:
-        lo, hi = world_bbox(b)
-        c = (lo + hi) / 2
+        c = bbox_centre(b)
         for g in groups:
             if (g["centre"] - c).xy.length < radius:
                 g["objs"].append(b)
@@ -228,109 +296,187 @@ def cluster_by_hub(blades, airframe_size):
     return groups
 
 
-def fcurves_of(obj):
-    """Blender 4.4+ stores F-curves in layered actions; older ones on the action."""
-    act = obj.animation_data.action
-    if hasattr(act, "fcurves"):
-        return act.fcurves
-    slot = obj.animation_data.action_slot
-    for layer in act.layers:
-        for strip in layer.strips:
-            bag = strip.channelbag(slot)
-            if bag is not None:
-                return bag.fcurves
-    return []
-
-
-def rig_props(groups, root, centre, fwd, right, rps, fps, frame_end):
-    hubs = []
+def rig_props(groups, root, root_world, cg, fwd, right):
+    """One empty per rotor at its hub, blades parented to it. Returns the
+    rotor records fly() needs: the hub, its spin axis, its sense, and its
+    position in the body frame."""
+    rotors = []
     for i, g in enumerate(groups, 1):
         lo, hi = scene_bbox(g["objs"])
         hub_pos = (lo + hi) / 2
         ext = [hi.x - lo.x, hi.y - lo.y, hi.z - lo.z]
-        axis_i = ext.index(min(ext))           # the disc is thin along its axis
         axis = Vector((0, 0, 0))
-        axis[axis_i] = 1.0
+        axis["XYZ".index("XYZ"[ext.index(min(ext))])] = 1.0
 
-        # Explicit matrices throughout. A freshly made object's
-        # matrix_world is identity until the depsgraph runs, so reading
-        # it back here to build the parent inverse parented every blade
-        # with a zero offset and the hub's translation was then applied
-        # twice: the blades sat one hub-offset outboard and, once the rig
-        # moved, drifted loose of the airframe altogether.
         hub = bpy.data.objects.new(f"PropHub_{i}", None)
         hub.empty_display_size = 0.05
         bpy.context.scene.collection.objects.link(hub)
         hub_world = Matrix.Translation(hub_pos)
         hub.parent = root
-        hub.matrix_parent_inverse = root.matrix_world.inverted()
-        hub.matrix_basis = hub_world            # root_world @ root_world^-1 @ this
+        hub.matrix_parent_inverse = root_world.inverted()
+        hub.matrix_basis = hub_world
         for o in g["objs"]:
-            mw = o.matrix_world.copy()           # valid: the import was evaluated
-            o.parent = hub
-            o.matrix_parent_inverse = hub_world.inverted()
-            o.matrix_basis = mw                  # hub_world @ hub_world^-1 @ mw = mw
+            reparent(o, hub, hub_world)
 
+        rel = hub_pos - cg
+        bf, br = rel.dot(fwd), rel.dot(right)
         # DJI sense: front-right and rear-left anticlockwise from above.
-        rel = hub_pos - centre
-        sense = 1.0 if (rel.dot(fwd) * rel.dot(right)) > 0 else -1.0
-        if axis.z < 0:  # keep "from above" meaning the same whichever way the axis came out
+        sense = 1.0 if bf * br > 0 else -1.0
+        if axis.z < 0:
             sense = -sense
-        total = sense * 2 * math.pi * rps * (frame_end - 1) / fps
         hub.rotation_mode = "AXIS_ANGLE"
-        hub.rotation_axis_angle = (0.0, axis.x, axis.y, axis.z)
-        hub.keyframe_insert("rotation_axis_angle", frame=1)
-        hub.rotation_axis_angle = (total, axis.x, axis.y, axis.z)
-        hub.keyframe_insert("rotation_axis_angle", frame=frame_end)
-        for fc in fcurves_of(hub):
-            for kp in fc.keyframe_points:
-                kp.interpolation = "LINEAR"
+        rotors.append({"hub": hub, "axis": axis, "sense": sense,
+                       "bf": bf, "br": br, "pos": hub_pos})
         print(f"  {hub.name}: {len(g['objs'])} blade(s) at {tuple(round(v, 3) for v in hub_pos)} "
-              f"axis={'XYZ'[axis_i]} {'CCW' if sense > 0 else 'CW'} {rps} rps")
-        hubs.append(hub)
-    return hubs
+              f"axis={'XYZ'[ext.index(min(ext))]} {'CCW' if sense > 0 else 'CW'}"
+              f" body=({bf:+.2f} fwd, {br:+.2f} right)")
+    return rotors
+
+
+# ----------------------------------------------------------------------------
+# Gimbal
+# ----------------------------------------------------------------------------
+def rig_gimbal(spec, root, root_world):
+    if not spec:
+        return None
+    x, y, z, r = (float(v) for v in spec.split(","))
+    pivot = Vector((x, y, z))
+    parts = [o for o in meshes() if (bbox_centre(o) - pivot).length <= r]
+    if not parts:
+        print("gimbal: nothing inside the sphere, skipping")
+        return None
+    gim = bpy.data.objects.new("Gimbal", None)
+    gim.empty_display_size = 0.05
+    bpy.context.scene.collection.objects.link(gim)
+    gim_world = Matrix.Translation(pivot)
+    gim.parent = root
+    gim.matrix_parent_inverse = root_world.inverted()
+    gim.matrix_basis = gim_world
+    gim.rotation_mode = "QUATERNION"
+    for o in parts:
+        reparent(o, gim, gim_world)
+    print(f"gimbal: {len(parts)} mesh(es) about {tuple(round(v, 3) for v in pivot)}: "
+          f"{[o.name for o in parts]}")
+    return gim
 
 
 # ----------------------------------------------------------------------------
 # Flight
 # ----------------------------------------------------------------------------
-def fly(root, fwd, right, fps):
+def clamp_len(v, m):
+    return v * (m / v.length) if v.length > m else v
+
+
+def noise(t, amps, hzs, phase):
+    return sum(a * math.sin(2 * math.pi * h * t + phase + 0.7 * k)
+               for k, (a, h) in enumerate(zip(amps, hzs)))
+
+
+def fly(root, rotors, gimbal, fwd, right, fps, rps):
     up = Vector((0, 0, 1))
     root.rotation_mode = "QUATERNION"
     dt = 1.0 / fps
     pos = root.location.copy()
-    v = Vector((0, 0, 0))
+    z0 = pos.z
+    v = Vector((0, 0, 0))            # world velocity, m/s
+    lean = Vector((0, 0, 0))         # horizontal lean vector, radians, world
+    lean_rate_prev = Vector((0, 0, 0))
+    yaw, yaw_rate, yaw_rate_prev = 0.0, 0.0, 0.0
+    theta = [0.0] * len(rotors)      # accumulated prop angle, rad
     max_tilt = math.radians(MAX_TILT_DEG)
+    slew = math.radians(ATT_RATE_DPS) * dt
+    yaw_max = math.radians(YAW_RATE_MAX_DPS)
+    lean_amps = [math.radians(a) for a in NOISE_LEAN_DEG]
+
     frame = 1
     phase_frames = []
-    yaw = 0.0
     for label, body_v, yaw_dps, secs in PLAN:
         start = frame
         for _ in range(int(round(secs * fps))):
-            yaw += math.radians(yaw_dps) * dt
+            t = frame * dt
+
+            # --- yaw: rate command, first-order response, rate limit
+            yaw_rate_cmd = max(-yaw_max, min(yaw_max, math.radians(yaw_dps)))
+            yaw_rate += (yaw_rate_cmd - yaw_rate) * (1 - math.exp(-dt / YAW_TAU))
+            yaw_acc = (yaw_rate - yaw_rate_prev) / dt
+            yaw_rate_prev = yaw_rate
+            yaw += yaw_rate * dt
             yaw_q = Quaternion(up, yaw)
-            target = (yaw_q @ fwd) * body_v[0] + (yaw_q @ right) * body_v[1] + up * body_v[2]
-            v_new = v + (target - v) * (1 - math.exp(-dt / TAU_S))
-            a = (v_new - v) / dt
-            v = v_new
+            f_w, r_w = yaw_q @ fwd, yaw_q @ right
+
+            # --- horizontal: velocity loop -> lean demand -> attitude -> accel
+            v_t = f_w * body_v[0] + r_w * body_v[1]
+            v_h = Vector((v.x, v.y, 0.0))
+            a_des = clamp_len((v_t - v_h) * KV, A_MAX)
+            drag = v_h * (DRAG_K * v_h.length)
+            need = a_des + drag                      # what the thrust must supply
+            lean_des = Vector((0, 0, 0))
+            if need.length > 1e-6:
+                lean_des = need.normalized() * min(max_tilt, math.atan(need.length / G))
+            step = (lean_des - lean) * (1 - math.exp(-dt / ATT_TAU))
+            lean += clamp_len(step, slew)
+            lean_rate = (lean - (lean - clamp_len(step, slew))) / dt
+            lean_acc = (lean_rate - lean_rate_prev) / dt
+            lean_rate_prev = lean_rate
+            a_h = Vector((0, 0, 0))
+            if lean.length > 1e-9:
+                a_h = lean.normalized() * (G * math.tan(lean.length)) - drag
+
+            # --- vertical: throttle, first-order response
+            vz_t = body_v[2]
+            v.z += (vz_t - v.z) * (1 - math.exp(-dt / VZ_TAU))
+            az = (vz_t - v.z) / VZ_TAU
+            v.x += a_h.x * dt
+            v.y += a_h.y * dt
             pos += v * dt
-            # Thrust must cancel drag and provide the acceleration, so the
-            # body tilts toward a + c_d v. Vertical speed is throttle only.
-            eff = Vector((a.x + DRAG * v.x, a.y + DRAG * v.y, 0.0))
-            if eff.length > 1e-6:
-                angle = min(max_tilt, math.atan(eff.length / G))
-                tilt_q = Quaternion(up.cross(eff).normalized(), angle)
-            else:
-                tilt_q = Quaternion((1, 0, 0, 0))
-            # Yaw in the body first, then tilt about a world-horizontal
-            # axis, so the thrust leans toward where it is going whatever
-            # way the nose points.
-            root.location = pos
-            root.rotation_quaternion = tilt_q @ yaw_q
+
+            # --- hover noise on top; the gimbal will cancel the attitude part
+            n_lean = Vector((noise(t, lean_amps, NOISE_LEAN_HZ, 0.0),
+                             noise(t, lean_amps, NOISE_LEAN_HZ, 2.1), 0.0))
+            n_alt = NOISE_ALT_M * math.sin(2 * math.pi * NOISE_ALT_HZ * t)
+            n_yaw = math.radians(NOISE_YAW_DEG) * math.sin(2 * math.pi * NOISE_YAW_HZ * t + 1.3)
+            lean_shown = lean + n_lean
+            yaw_shown_q = Quaternion(up, yaw + n_yaw)
+            tilt_q = Quaternion((1, 0, 0, 0))
+            if lean_shown.length > 1e-9:
+                tilt_q = Quaternion(up.cross(lean_shown).normalized(), lean_shown.length)
+
+            root.location = Vector((pos.x, pos.y, pos.z + n_alt))
+            root.rotation_quaternion = tilt_q @ yaw_shown_q
             root.keyframe_insert("location", frame=frame)
             root.keyframe_insert("rotation_quaternion", frame=frame)
+
+            if gimbal is not None:
+                # World rotation must be yaw only: body @ local = yaw.
+                gimbal.rotation_quaternion = yaw_shown_q.inverted() @ tilt_q.inverted() @ yaw_shown_q
+                gimbal.keyframe_insert("rotation_quaternion", frame=frame)
+
+            # --- rotor speeds
+            thrust_w = math.sqrt((need.length / G) ** 2 + (1 + az / G) ** 2)
+            speed = v_h.length
+            tl = 1 - TL_DIP * math.exp(-((speed - TL_SPEED) / TL_WIDTH) ** 2)
+            base = rps * math.sqrt(max(0.2, thrust_w)) * tl
+            # Leaning toward d needs the rotors on the +d side to drop and
+            # the -d side to rise. lean_acc is in world; take it to body.
+            acc_f, acc_r = lean_acc.dot(f_w), lean_acc.dot(r_w)
+            for i, R in enumerate(rotors):
+                reach = math.hypot(R["bf"], R["br"]) or 1.0
+                d_att = -ATT_DIFF * (R["bf"] * acc_f + R["br"] * acc_r) / reach / ATT_DIFF_REF
+                # Reaction torque opposes spin: to yaw the body anticlockwise
+                # the CLOCKWISE rotors speed up. Hence minus sense.
+                d_yaw = -R["sense"] * (YAW_DIFF * yaw_acc / YAW_DIFF_REF
+                                       + YAW_DAMP_DIFF * yaw_rate / math.radians(60))
+                w = base * (1 + max(-0.2, min(0.2, d_att + d_yaw)))
+                theta[i] += R["sense"] * 2 * math.pi * w * dt
+                R["hub"].rotation_axis_angle = (theta[i], R["axis"].x, R["axis"].y, R["axis"].z)
+                R["hub"].keyframe_insert("rotation_axis_angle", frame=frame)
             frame += 1
         phase_frames.append((label, start, frame - 1))
+
+    for R in rotors:
+        for fc in fcurves_of(R["hub"]):
+            for kp in fc.keyframe_points:
+                kp.interpolation = "LINEAR"
     return frame - 1, phase_frames
 
 
@@ -341,11 +487,6 @@ def stage(root, size, phase_frames, res):
     scene = bpy.context.scene
     coll = scene.collection
 
-    # Ground: a checker so translation is visible even though the camera
-    # follows the aircraft.
-    # Big enough that forty metres of travel never reaches an edge, and
-    # far enough below that four metres of descent never reaches it. A
-    # quadcopter in a demo flies at a few metres, not at arm's length.
     floor = root.location.z - max(1.5 * size, 6.0)
     bpy.ops.mesh.primitive_plane_add(size=max(size * 600, 400.0), location=(0, 0, floor))
     ground = bpy.context.active_object
@@ -355,10 +496,7 @@ def stage(root, size, phase_frames, res):
     nt = mat.node_tree
     bsdf = nt.nodes["Principled BSDF"]
     chk = nt.nodes.new("ShaderNodeTexChecker")
-    # Checker scale is cells per object unit, and the plane's object
-    # units are metres, so 1/size gives one cell per airframe length.
-    # At 60 the cells were 1.7 cm and averaged to a flat grey.
-    chk.inputs["Scale"].default_value = 1.0 / size
+    chk.inputs["Scale"].default_value = 1.0 / size      # one cell per airframe length
     chk.inputs["Color1"].default_value = (0.22, 0.24, 0.27, 1)
     chk.inputs["Color2"].default_value = (0.42, 0.44, 0.48, 1)
     coord = nt.nodes.new("ShaderNodeTexCoord")
@@ -367,8 +505,6 @@ def stage(root, size, phase_frames, res):
     bsdf.inputs["Roughness"].default_value = 0.9
     ground.data.materials.append(mat)
 
-    # Camera on a pivot that copies the aircraft's position, so the
-    # aircraft stays framed while the ground slides past.
     pivot = bpy.data.objects.new("CamPivot", None)
     coll.objects.link(pivot)
     c = pivot.constraints.new("COPY_LOCATION")
@@ -400,8 +536,6 @@ def stage(root, size, phase_frames, res):
         bg.inputs["Color"].default_value = (0.55, 0.62, 0.72, 1)
         bg.inputs["Strength"].default_value = 1.0
 
-    # One text label per phase, parented to the camera, shown only for
-    # its own frames.
     font_mat = bpy.data.materials.new("Label")
     font_mat.use_nodes = True
     font_mat.node_tree.nodes["Principled BSDF"].inputs["Emission Color"].default_value = (1, 1, 1, 1)
@@ -447,16 +581,16 @@ def main():
     ap.add_argument("--out", required=True)
     ap.add_argument("--forward", default="-Y", help="nose axis in Blender space: +X -X +Y -Y")
     ap.add_argument("--prop-rps", type=float, default=18.0,
-                    help="revolutions per second. An Air 3 hovers at ~92, but at 30 fps with "
-                         "motion blur that is over a turn per frame and renders as a clear disc, "
-                         "which is what a camera sees and reads as no propellers at all. 18 gives "
-                         "a 65 degree blur arc per frame: visibly spinning blades. Pass 92 for "
-                         "the physical rate.")
+                    help="hover rotor speed, revolutions per second. An Air 3 hovers at ~92, "
+                         "which under motion blur at 30 fps renders as a clear disc and reads "
+                         "as no propellers. 18 is a visible 65 degree blur arc per frame.")
     ap.add_argument("--size-m", type=float, default=None,
-                    help="real length of the airframe's longest extent in metres; the file is "
-                         "scaled to it so m/s and g mean what they say")
+                    help="real length of the airframe's longest extent in metres")
     ap.add_argument("--props", default=PROP_NAME.pattern,
                     help="regex for propeller object or parent names, overrides the shape test")
+    ap.add_argument("--gimbal-near", default=None,
+                    help="x,y,z,r in file units: meshes centred inside the sphere are the "
+                         "camera gimbal and are kept level about (x,y,z)")
     ap.add_argument("--fps", type=int, default=30)
     ap.add_argument("--resolution", default="1280x720")
     ap.add_argument("--render", action="store_true", help="also render the MP4")
@@ -468,10 +602,9 @@ def main():
     stem = os.path.splitext(os.path.basename(args.input))[0]
     scene = bpy.context.scene
     scene.render.fps = args.fps
-
-    # Drop any camera or light the file came with; we stage our own.
     for o in [o for o in bpy.data.objects if o.type in ("CAMERA", "LIGHT")]:
         bpy.data.objects.remove(o)
+    bpy.context.view_layer.update()
 
     ms = meshes()
     if not ms:
@@ -488,40 +621,38 @@ def main():
     right = fwd.cross(up)
     print(f"forward {tuple(fwd)}, right {tuple(right)}")
 
-    # One root empty everything hangs from; the flight is keyframed on it.
+    # Find the blades before anything is reparented, then put the pivot at
+    # the centre of mass: rotor centroid in plan, body centre in height.
+    blades = find_props(centre, size, re.compile(args.props, re.I))
+    if not blades:
+        sys.exit("no propellers found: name them, pass --props, or check the shape test")
+    groups = cluster_by_hub(blades)
+    hub_xy = sum((g["centre"] for g in groups), Vector()) / len(groups)
+    cg = Vector((hub_xy.x, hub_xy.y, centre.z))
+    print(f"{len(blades)} blade(s) in {len(groups)} rotor(s); pivot at {tuple(round(v,3) for v in cg)}")
+
     root = bpy.data.objects.new("FlightRig", None)
     root.empty_display_size = size * 0.5
     scene.collection.objects.link(root)
-    root.location = centre
+    root_world = Matrix.Translation(cg)
+    root.matrix_basis = root_world
     for o in [o for o in bpy.data.objects if o.parent is None and o is not root]:
-        mw = o.matrix_world.copy()
-        o.parent = root
-        o.matrix_parent_inverse = root.matrix_world.inverted()
-        o.matrix_world = mw
-
-    bpy.context.view_layer.update()
-    blades = find_props(centre, size, re.compile(args.props, re.I))
-    if not blades:
-        sys.exit("no propellers found: name them, or check the geometry heuristics")
-    groups = cluster_by_hub(blades, size)
-    print(f"{len(blades)} blade(s) in {len(groups)} rotor(s)")
-
-    total_s = sum(p[3] for p in PLAN)
-    frame_end = int(round(total_s * args.fps))
-    scene.frame_start = 1
-    scene.frame_end = frame_end
-    rig_props(groups, root, centre, fwd, right, args.prop_rps, args.fps, frame_end)
-    bpy.context.view_layer.update()
+        reparent(o, root, root_world)
+    rotors = rig_props(groups, root, root_world, cg, fwd, right)
+    gimbal = rig_gimbal(args.gimbal_near, root, root_world)
 
     if args.size_m:
         k = args.size_m / size
         root.scale = (k, k, k)
-        root.location = centre * k
+        root.location = cg * k
         size = args.size_m
         print(f"scaled by {k:.4f} to {size} m")
     bpy.context.view_layer.update()
 
-    frame_end, phase_frames = fly(root, fwd, right, args.fps)
+    total_s = sum(p[3] for p in PLAN)
+    scene.frame_start = 1
+    scene.frame_end = int(round(total_s * args.fps))
+    frame_end, phase_frames = fly(root, rotors, gimbal, fwd, right, args.fps, args.prop_rps)
     scene.frame_end = frame_end
     w, h = (int(x) for x in args.resolution.lower().split("x"))
     stage(root, size, phase_frames, (w, h))
@@ -544,8 +675,6 @@ def main():
             print(f"wrote {scene.render.filepath}")
 
     if args.render:
-        # Blender 5 gates the movie formats behind media_type; older
-        # builds expose FFMPEG directly on file_format.
         if hasattr(scene.render.image_settings, "media_type"):
             scene.render.image_settings.media_type = "VIDEO"
         scene.render.image_settings.file_format = "FFMPEG"
