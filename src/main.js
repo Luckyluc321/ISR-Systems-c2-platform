@@ -3106,49 +3106,6 @@ async function main() {
     return working.length / all.length;
   }
 
-  // IS A LIVE TRACK INSIDE THIS SENSOR'S RADIUS RIGHT NOW.
-  //
-  // Pulled out of updateContributingRings so the ring can be carried by
-  // the sensor entity itself rather than by a second entity alongside
-  // it. Two entities clamp to the ground independently, and the pulse
-  // ring kept landing a little off its own dot. One entity has one
-  // position, so the ring is concentric by construction and there is
-  // nothing left to drift.
-  //
-  // WRAPPED, BECAUSE THIS IS CALLED FROM A CALLBACK ON AN ENTITY BUILT
-  // AT BOOT. renderSite runs at about line 3300 and droneState is
-  // declared at about 4300, so anything that evaluates this predicate
-  // before that line executes reads a const in its temporal dead zone.
-  // Cesium evaluates a CallbackProperty lazily on the first render,
-  // which is after boot, so it should never happen. "Should never
-  // happen" is how the ring icon cache took the whole page down an hour
-  // ago, and a sensor pulse is not worth a blank app.
-  function _liveTrackInSensorRange(sensor) {
-    try {
-      return _liveTrackInSensorRangeInner(sensor);
-    } catch (_) {
-      return false;
-    }
-  }
-  function _liveTrackInSensorRangeInner(sensor) {
-    const lat = sensor.lat, lon = sensor.lon, r = sensor.coverageRadius;
-    for (const [eid] of droneState) {
-      const evt = getEvent(eid);
-      if (!evt || evt.status !== 'active') continue;
-      if (evt.lastPosition?.lat != null
-          && haversineM(evt.lastPosition.lat, evt.lastPosition.lon, lat, lon) <= r) return true;
-      const st = droneState.get(eid);
-      if (st?.swarmBillboards) {
-        for (const sw of st.swarmBillboards) {
-          if (sw.neutralised) continue;
-          if (sw.stats?.lat != null
-              && haversineM(sw.stats.lat, sw.stats.lon, lat, lon) <= r) return true;
-        }
-      }
-    }
-    return false;
-  }
-
   function renderSite(site) {
     // Outer site boundary — dashed cyan line, slightly thicker than sub-areas
     if (site.siteBoundary && site.siteBoundary.length > 0) {
@@ -3258,23 +3215,6 @@ async function main() {
           color: color,
           outlineColor: color.withAlpha(0.4),
           outlineWidth: sensor.isCore ? 5 : 3,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
-        },
-        // THE PULSE RIDES ON THE SENSOR, not beside it. Offline sensors
-        // get none: a dead sensor detects nothing and the gap should be
-        // visible. Degraded ones do, dashed and amber, because they are
-        // still feeding the estimate.
-        billboard: sensor.status === 'offline' ? undefined : {
-          image: ringIcon(sensor.status === 'degraded'),
-          width: 26, height: 26,
-          show: new Cesium.CallbackProperty(() => _liveTrackInSensorRange(sensor), false),
-          scale: new Cesium.CallbackProperty(() => 1.0 + 0.18 * Math.sin(performance.now() / 250), false),
-          color: new Cesium.CallbackProperty(() => {
-            const pulse = 0.35 + 0.40 * Math.sin(performance.now() / 250);
-            return Cesium.Color.fromCssColorString(
-              sensor.status === 'degraded' ? '#ff8c3d' : '#4dd2ff').withAlpha(pulse);
-          }, false),
           heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
@@ -4286,39 +4226,20 @@ async function main() {
   // the same convention the crossing markers already use for "this is
   // provisional", and it says at a glance that the sensor is holding
   // the track with fewer senses than it was built with.
-  // THE CACHE HANGS OFF THE FUNCTION, NOT A CONST BESIDE IT.
-  //
-  // It was a const on the line above this one, and renderSite calls
-  // ringIcon at boot roughly a thousand lines before that const
-  // executes. A const is in the temporal dead zone until its own line
-  // runs, so it threw on the very first sensor and took the whole boot
-  // with it: the globe came up and every panel stayed empty.
-  //
-  // A function declaration is hoisted together with its binding, so a
-  // property hung on it is reachable from anywhere in this scope, which
-  // is what makes this safe to call from earlier code.
-  //
-  // check:undeclared did not catch it because the name WAS declared,
-  // just later. That gate reads spelling, not order of execution.
+  const _ringIcons = new Map();
   function ringIcon(dashed = false) {
-    const cache = ringIcon._cache || (ringIcon._cache = new Map());
     const key = dashed ? 'dashed' : 'solid';
-    if (cache.has(key)) return cache.get(key);
+    if (_ringIcons.has(key)) return _ringIcons.get(key);
     const c = document.createElement('canvas');
     c.width = 64; c.height = 64;
     const ctx = c.getContext('2d');
     ctx.beginPath();
     ctx.arc(32, 32, 26, 0, Math.PI * 2);
-    // WHITE, so the tint below is the only thing that colours it.
-    // This was drawn in cyan and the billboard colour MULTIPLIES the
-    // image, so the amber tint for a degraded sensor came out as a
-    // muddy green over an orange dot. A white source multiplies to
-    // exactly the tint it is given.
-    ctx.strokeStyle = '#ffffff';
+    ctx.strokeStyle = '#4dd2ff';
     ctx.lineWidth = 3;
     if (dashed) ctx.setLineDash([7, 6]);
     ctx.stroke();
-    cache.set(key, c);
+    _ringIcons.set(key, c);
     return c;
   }
 
@@ -19761,28 +19682,79 @@ async function main() {
   // Contributing sensor pulsing rings (cyan) around each contributing sensor of any live event
   let contributingRingEntities = [];
   function updateContributingRings() {
-    // THE RINGS LIVE ON THE SENSORS NOW.
+    contributingRingEntities.forEach(e => viewer.entities.remove(e));
+    contributingRingEntities = [];
+    // Iterate every online sensor across every site the ACTIVE ACCOUNT
+    // can see. Any such sensor that currently has a live-event drone
+    // inside its coverage radius gets the pulsing ring. Degraded
+    // (orange) and offline (red) sensors never pulse. Previously scoped
+    // to event.contributingSensors which was a subset: sensors on the
+    // same site whose radius the drone fell into but which weren't yet
+    // added to contributingSensors got no pulse. This iterates the
+    // ground truth, narrowed to the viewer's own sites.
     //
-    // This used to build a second entity per sensor every tick and
-    // position it alongside the dot. Two entities clamp to the ground
-    // independently, so the pulse kept landing a little off its own
-    // sensor, by a different amount for each one. The ring is a
-    // billboard on the sensor entity itself now: one position, one
-    // clamp, concentric by construction, and it updates itself through
-    // its own callback rather than being torn down and rebuilt 60 times
-    // a second.
-    //
-    // Account scoping comes free with that. The ring is part of the
-    // sensor, so applySiteScopeVisibility hiding another operator's
-    // sensors hides their pulses too, which this function previously
-    // had to do by hand.
-    //
-    // Kept as a function because a dozen callers invoke it on events
-    // that used to need a rebuild, and because it still sweeps up ring
-    // entities left behind by an older build after a hot reload.
-    if (contributingRingEntities.length) {
-      contributingRingEntities.forEach(e => { try { viewer.entities.remove(e); } catch (_) {} });
-      contributingRingEntities = [];
+    // The account filter matters most here. This runs on every tick, so
+    // without it a threat over one operator's substation pulses that
+    // operator's sensors live inside a different operator's session.
+    for (const sid of _visibleSiteIds()) {
+      const site = SITES[sid];
+      if (!site?.sensors?.length) continue;
+      for (const sensor of site.sensors) {
+        // DEGRADED SENSORS PULSE, OFFLINE ONES DO NOT.
+        //
+        // This skipped both, while the detection path skips only
+        // offline. So a degraded sensor fed the fused estimate and
+        // showed nothing on the map: the operator saw a confidence
+        // number with no visible source, and silence reads as broken
+        // when the sensor is in fact working and contributing.
+        //
+        // It pulses in its own amber rather than the usual white, so
+        // the map says both things at once: contributing, and sick.
+        if (sensor.status === 'offline') continue;
+        const _degraded = sensor.status === 'degraded';
+        const _sensorLat = sensor.lat, _sensorLon = sensor.lon, _covR = sensor.coverageRadius;
+        const _showInRange = new Cesium.CallbackProperty(() => {
+          // Walk every active event's live drone positions. Any drone
+          // inside this sensor's radius flips the pulse on.
+          for (const [eid] of droneState) {
+            const evt = getEvent(eid);
+            if (!evt || evt.status !== 'active') continue;
+            if (evt.lastPosition?.lat != null
+                && haversineM(evt.lastPosition.lat, evt.lastPosition.lon, _sensorLat, _sensorLon) <= _covR) {
+              return true;
+            }
+            const st = droneState.get(eid);
+            if (st?.swarmBillboards) {
+              for (const sw of st.swarmBillboards) {
+                if (sw.neutralised) continue;
+                if (sw.stats?.lat != null
+                    && haversineM(sw.stats.lat, sw.stats.lon, _sensorLat, _sensorLon) <= _covR) {
+                  return true;
+                }
+              }
+            }
+          }
+          return false;
+        }, false);
+        contributingRingEntities.push(viewer.entities.add({
+          // SAME POSITION AS THE SENSOR DOT, exactly.
+          position: Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
+          billboard: {
+            image: ringIcon(_degraded),
+            width: 26, height: 26,
+            show: _showInRange,
+            scale: new Cesium.CallbackProperty(() => 1.0 + 0.18 * Math.sin(performance.now() / 250), false),
+            color: new Cesium.CallbackProperty(() => {
+              const pulse = 0.35 + 0.40 * Math.sin(performance.now() / 250);
+              return (_degraded
+                ? Cesium.Color.fromCssColorString('#ff8c3d')
+                : Cesium.Color.WHITE).withAlpha(pulse);
+            }, false),
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          },
+        }));
+      }
     }
   }
 
