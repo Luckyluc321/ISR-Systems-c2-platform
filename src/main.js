@@ -19768,7 +19768,15 @@ async function main() {
           }
           return false;
         }, false);
+        // NAMED, so it can be paired with its own dot in an audit. It
+        // was anonymous, so Cesium gave it a GUID and the only way to
+        // tell a pulse ring from any other billboard was to guess.
+        // removeById first because a failed teardown would otherwise
+        // make the add throw on a duplicate id and kill the tick.
+        const _pulseId = `sensor-pulse-${sid}-${sensor.id}`;
+        try { viewer.entities.removeById(_pulseId); } catch (_) {}
         contributingRingEntities.push(viewer.entities.add({
+          id: _pulseId,
           // SAME POSITION AS THE SENSOR DOT, exactly, and the same pin.
           position: _sensorPinnedPos(sid, sensor)
             || Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
@@ -20123,10 +20131,42 @@ async function main() {
       try { show = e.billboard?.show?.getValue?.(viewer.clock.currentTime) ?? e.billboard?.show ?? null; } catch (_) {}
       rows.push({ id: id.slice(0, 44), kind: isSensor ? 'sensor' : 'billboard', lat, lon, alt, show });
     }
-    const rings = rows.filter(r => r.kind === 'billboard' && r.show === true);
-    console.log(`${rows.length} candidate entities, ${rings.length} billboards currently shown`);
-    console.table(rows.filter(r => r.show === true || r.kind === 'sensor').slice(0, 60));
-    return rows;
+    // PAIR EACH DOT WITH ITS OWN PULSE, which is the only comparison
+    // that answers "why is the ring beside the sensor". A height delta
+    // of zero and a position delta of zero means they are the same
+    // point and anything still visible is not a placement fault.
+    const pairs = [];
+    for (const sid of Object.keys(SITES)) {
+      for (const sn of (SITES[sid].sensors || [])) {
+        const dot = viewer.entities.getById(`sensor-${sid}-${sn.id}`);
+        const ring = viewer.entities.getById(`sensor-pulse-${sid}-${sn.id}`);
+        if (!dot || !ring) continue;
+        const read = (e) => {
+          try {
+            const c = e.position?.getValue?.(viewer.clock.currentTime);
+            if (!c) return null;
+            const g = Cesium.Cartographic.fromCartesian(c);
+            return { lat: Cesium.Math.toDegrees(g.latitude), lon: Cesium.Math.toDegrees(g.longitude), h: g.height };
+          } catch (_) { return null; }
+        };
+        const a = read(dot), b = read(ring);
+        if (!a || !b) continue;
+        pairs.push({
+          sensor: `${sid}-${sn.id}`,
+          dotH: +a.h.toFixed(1),
+          ringH: +b.h.toFixed(1),
+          dH: +(b.h - a.h).toFixed(1),
+          dMetres: +Math.hypot((b.lat - a.lat) * 111320, (b.lon - a.lon) * 111320 * Math.cos(a.lat * Math.PI / 180)).toFixed(2),
+          dotClamp: dot.point?.heightReference === undefined ? 'pinned' : 'clamped',
+          ringClamp: ring.billboard?.heightReference === undefined ? 'pinned' : 'clamped',
+        });
+      }
+    }
+    const bad = pairs.filter(p => Math.abs(p.dH) > 0.05 || p.dMetres > 0.05);
+    console.log(`${rows.length} entities scanned, ${pairs.length} dot/pulse pairs live, ${bad.length} not coincident`);
+    if (pairs.length) console.table((bad.length ? bad : pairs).slice(0, 40));
+    else console.log('no pulse rings exist right now: they are only built while a track is in range');
+    return { rows, pairs, bad };
   };
 
   window.__isr_sensorAudit = () => {
