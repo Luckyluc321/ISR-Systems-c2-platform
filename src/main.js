@@ -3076,6 +3076,36 @@ async function main() {
   // SITE RENDERING
   // ══════════════════════════════════════════
 
+  // ONE FIXED ANCHOR PER SENSOR, RESOLVED ONCE.
+  //
+  // The dot and its pulse ring both used CLAMP_TO_GROUND together with
+  // disableDepthTestDistance: Infinity, and those two fight each other.
+  // The clamp re-samples the surface every frame, and over photogrammetry
+  // the sampled height depends on which tile LOD happens to be loaded, so
+  // moving the camera changed the height. The depth override then drew
+  // the marker on top regardless. A marker whose height changes renders
+  // at a different world point, and from an oblique angle that reads as
+  // it sliding across the ground, which is exactly what it was doing.
+  //
+  // A sensor does not move. It gets one height, sampled the first frame
+  // the terrain under it is loaded and then frozen forever. Terrain
+  // rather than the mesh on purpose: sampling the rendered scene would
+  // pick up the marker's own billboard, and a stable anchor at ground
+  // level beats a correct one that wanders.
+  const _sensorAnchorH = new Map();
+  function _sensorAnchor(siteId, sensor) {
+    const key = `${siteId}-${sensor.id}`;
+    return new Cesium.CallbackProperty(() => {
+      let h = _sensorAnchorH.get(key);
+      if (h == null) {
+        const t = viewer.scene.globe.getHeight(
+          Cesium.Cartographic.fromDegrees(sensor.lon, sensor.lat));
+        if (typeof t === 'number') { h = t; _sensorAnchorH.set(key, h); }
+      }
+      return Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, h ?? 0);
+    }, false);
+  }
+
   function renderSite(site) {
     // Outer site boundary — dashed cyan line, slightly thicker than sub-areas
     if (site.siteBoundary && site.siteBoundary.length > 0) {
@@ -3179,13 +3209,15 @@ async function main() {
 
       viewer.entities.add({
         id: `sensor-${site.id}-${sensor.id}`,
-        position: Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
+        position: _sensorAnchor(site.id, sensor),
         point: {
           pixelSize: sensor.isCore ? 11 : 8,
           color: color,
           outlineColor: color.withAlpha(0.4),
           outlineWidth: sensor.isCore ? 5 : 3,
-          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+          // NO heightReference. The anchor above already resolves the
+          // height once and freezes it. Clamping on top of that is what
+          // re-introduced the per-frame resample.
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
         properties: {
@@ -19648,7 +19680,18 @@ async function main() {
       const site = SITES[sid];
       if (!site?.sensors?.length) continue;
       for (const sensor of site.sensors) {
-        if (sensor.status !== 'online') continue;   // skip degraded + offline
+        // DEGRADED SENSORS PULSE, OFFLINE ONES DO NOT.
+        //
+        // This skipped both, while the detection path skips only
+        // offline. So a degraded sensor fed the fused estimate and
+        // showed nothing on the map: the operator saw a confidence
+        // number with no visible source, and silence reads as broken
+        // when the sensor is in fact working and contributing.
+        //
+        // It pulses in its own amber rather than the usual white, so
+        // the map says both things at once: contributing, and sick.
+        if (sensor.status === 'offline') continue;
+        const _degraded = sensor.status === 'degraded';
         const _sensorLat = sensor.lat, _sensorLon = sensor.lon, _covR = sensor.coverageRadius;
         const _showInRange = new Cesium.CallbackProperty(() => {
           // Walk every active event's live drone positions. Any drone
@@ -19674,13 +19717,11 @@ async function main() {
           return false;
         }, false);
         contributingRingEntities.push(viewer.entities.add({
-          // SAME POSITION AS THE SENSOR DOT, exactly. This sat at 2 m
-          // with RELATIVE_TO_GROUND while the dot sits at 0 clamped to
-          // the terrain, so the two coincided only when viewed from
-          // straight above. From any oblique angle the ring floated two
-          // metres over its own sensor, which read as the pulse being
-          // off its sensor rather than around it.
-          position: Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
+          // THE SAME ANCHOR OBJECT THE DOT USES, so the two cannot drift
+          // apart. They were separately positioned and separately
+          // clamped, which is how a ring ended up floating off its own
+          // sensor from an oblique angle.
+          position: _sensorAnchor(sid, sensor),
           billboard: {
             image: ringIcon(),
             width: 26, height: 26,
@@ -19688,9 +19729,11 @@ async function main() {
             scale: new Cesium.CallbackProperty(() => 1.0 + 0.18 * Math.sin(performance.now() / 250), false),
             color: new Cesium.CallbackProperty(() => {
               const pulse = 0.35 + 0.40 * Math.sin(performance.now() / 250);
-              return Cesium.Color.WHITE.withAlpha(pulse);
+              return (_degraded
+                ? Cesium.Color.fromCssColorString('#ff8c3d')
+                : Cesium.Color.WHITE).withAlpha(pulse);
             }, false),
-            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+            // No heightReference, for the reason given on _sensorAnchor.
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
         }));
