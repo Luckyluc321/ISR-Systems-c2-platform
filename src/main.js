@@ -19792,64 +19792,46 @@ async function main() {
           }
           return false;
         }, false);
-        // THE RING IS A POINT, NOT A BILLBOARD, AND THAT IS THE WHOLE
-        // FIX.
-        //
-        // The dot is a point and the ring was a billboard, and Cesium
-        // clamps those two through different visualisers: a point
-        // resolves against the photogrammetry mesh, a billboard against
-        // terrain. At CPH that is 38 m apart vertically. From overhead
-        // they coincide and every degree of camera tilt smears the gap
-        // across the ground, which is the pulse sitting beside its own
-        // sensor and moving as the camera moves.
-        //
-        // Measuring one height for both and pinning them solved it and
-        // cost a tile storm at boot, a pin frozen at coarse detail that
-        // buried every marker under the ground, and a render pass on a
-        // timer that made the whole application crawl. All of that to
-        // reconcile two things that never had to disagree.
-        //
-        // A point with a transparent fill and a thick outline IS a
-        // ring. Same graphics type as the dot, same clamp, same
-        // resolved height, by construction and at every camera angle.
-        // No sampling, no pin, no command to remember, nothing to drift.
-        //
-        // The cost is the dashed outline for a degraded sensor: points
-        // cannot dash. Degraded is carried by colour alone now, amber
-        // against cyan, which is the same thing its dot already does.
+        // NAMED, so it can be paired with its own dot in an audit. It
+        // was anonymous, so Cesium gave it a GUID and the only way to
+        // tell a pulse ring from any other billboard was to guess.
+        // removeById first because a failed teardown would otherwise
+        // make the add throw on a duplicate id and kill the tick.
         const _pulseId = `sensor-pulse-${sid}-${sensor.id}`;
         try { viewer.entities.removeById(_pulseId); } catch (_) {}
         contributingRingEntities.push(viewer.entities.add({
           id: _pulseId,
+          // SAME POSITION AS THE SENSOR DOT, exactly, and the same pin.
           position: _sensorPinnedPos(sid, sensor)
             || Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
-          point: {
+          billboard: {
+            image: ringIcon(_degraded),
+            width: 26, height: 26,
             show: _showInRange,
-            // A FAINT FILL, NOT A FULLY TRANSPARENT ONE.
-            //
-            // Cesium's point shader builds the fragment as
-            // mix(outlineColor, color, innerAlpha) and then discards
-            // fully transparent fragments. A Color.TRANSPARENT fill is
-            // the one configuration where that discard can take the
-            // whole primitive, which is why the pulses stopped
-            // appearing at all. The sensor dot renders reliably because
-            // it has a real fill, so the ring gets one too, at an alpha
-            // low enough to read as hollow.
-            color: new Cesium.CallbackProperty(() => Cesium.Color
-              .fromCssColorString(_degraded ? '#ff8c3d' : '#4dd2ff')
-              .withAlpha(0.10), false),
-            pixelSize: new Cesium.CallbackProperty(
-              () => 24 + 5 * Math.sin(performance.now() / 250), false),
-            outlineColor: new Cesium.CallbackProperty(() => {
+            scale: new Cesium.CallbackProperty(() => 1.0 + 0.18 * Math.sin(performance.now() / 250), false),
+            color: new Cesium.CallbackProperty(() => {
               const pulse = 0.35 + 0.40 * Math.sin(performance.now() / 250);
-              return Cesium.Color.fromCssColorString(
-                _degraded ? '#ff8c3d' : '#4dd2ff').withAlpha(pulse);
+              return (_degraded
+                ? Cesium.Color.fromCssColorString('#ff8c3d')
+                : Cesium.Color.WHITE).withAlpha(pulse);
             }, false),
-            outlineWidth: 3,
-            // Identical to the dot's, so the two cannot resolve apart.
             heightReference: _sensorPinnedPos(sid, sensor)
               ? undefined : Cesium.HeightReference.CLAMP_TO_GROUND,
-            disableDepthTestDistance: _sensorDepthValue(),
+            // THE RING ALWAYS DRAWS ON TOP. Not the shared switch.
+            //
+            // A billboard clamps to TERRAIN while the dot, being a
+            // point, clamps to the photogrammetry mesh: 5 m against
+            // 43 m at CPH. The ring has therefore always been about
+            // 38 m underground. Nobody noticed while every marker drew
+            // over everything, and the moment depth testing went on by
+            // default it did exactly what it should and hid a thing
+            // that is below the surface. Every pulse disappeared.
+            //
+            // Until the ring and the dot resolve the same height this
+            // has to opt out of the depth test, or there is no pulse at
+            // all. The dot stays depth tested, which is the part that
+            // made markers sit correctly in the scene.
+            disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
         }));
       }
@@ -20259,7 +20241,7 @@ async function main() {
           dH: +(b.h - a.h).toFixed(1),
           dMetres: +Math.hypot((b.lat - a.lat) * 111320, (b.lon - a.lon) * 111320 * Math.cos(a.lat * Math.PI / 180)).toFixed(2),
           dotClamp: dot.point?.heightReference === undefined ? 'pinned' : 'clamped',
-          ringClamp: ring.point?.heightReference === undefined ? 'pinned' : 'clamped',
+          ringClamp: ring.billboard?.heightReference === undefined ? 'pinned' : 'clamped',
         });
       }
     }
