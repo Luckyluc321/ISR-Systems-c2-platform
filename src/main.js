@@ -3076,31 +3076,14 @@ async function main() {
   // SITE RENDERING
   // ══════════════════════════════════════════
 
-  // ONE FIXED ANCHOR PER SENSOR, RESOLVED ONCE.
-  //
-  // The dot and its pulse ring both used CLAMP_TO_GROUND together with
-  // disableDepthTestDistance: Infinity, and those two fight each other.
-  // The clamp re-samples the surface every frame, and over photogrammetry
-  // the sampled height depends on which tile LOD happens to be loaded, so
-  // moving the camera changed the height. The depth override then drew
-  // the marker on top regardless. A marker whose height changes renders
-  // at a different world point, and from an oblique angle that reads as
-  // it sliding across the ground, which is exactly what it was doing.
-  //
-  // A sensor does not move. It gets one height, sampled the first frame
-  // the terrain under it is loaded and then frozen forever. Terrain
-  // rather than the mesh on purpose: sampling the rendered scene would
-  // pick up the marker's own billboard, and a stable anchor at ground
-  // level beats a correct one that wanders.
   // HOW MUCH OF A SENSOR IS STILL WORKING.
   //
   // `status: degraded` is one word doing a job that needs three, so the
   // weighting reads `degradedModalities` instead: the fraction of a
-  // sensor's senses that still function. A unit with three modalities
-  // and one out contributes at two thirds. One whose every modality is
-  // down contributes nothing at all, which is the case Lucas asked for:
-  // a sensor can be nominally alive and still be deaf to the particular
-  // thing in front of it.
+  // sensor's senses that still function. Three modalities with one out
+  // contributes at two thirds. One whose every modality is down
+  // contributes nothing, which is the case where a sensor is nominally
+  // alive and still deaf to the thing in front of it.
   //
   // NO HIERARCHY OF SENSES. An earlier version of this reasoning
   // assumed radio was the primary sense and the rest were support. That
@@ -3110,9 +3093,7 @@ async function main() {
   // the same here until there is per-target data to weight them with.
   //
   // NEXT STEP, NOT BUILT. Once a track declares which senses can
-  // actually perceive it, this becomes an intersection rather than a
-  // fraction: a sensor whose remaining senses cannot perceive THIS
-  // target contributes zero even though it is healthy for others.
+  // perceive it, this becomes an intersection rather than a fraction.
   function _sensorHealth(sensor) {
     if (!sensor) return 0;
     if (sensor.status === 'offline') return 0;
@@ -3123,20 +3104,6 @@ async function main() {
     const working = all.filter(m => !lower.includes(String(m).toLowerCase()));
     if (!working.length) return 0;
     return working.length / all.length;
-  }
-
-  const _sensorAnchorH = new Map();
-  function _sensorAnchor(siteId, sensor) {
-    const key = `${siteId}-${sensor.id}`;
-    return new Cesium.CallbackProperty(() => {
-      let h = _sensorAnchorH.get(key);
-      if (h == null) {
-        const t = viewer.scene.globe.getHeight(
-          Cesium.Cartographic.fromDegrees(sensor.lon, sensor.lat));
-        if (typeof t === 'number') { h = t; _sensorAnchorH.set(key, h); }
-      }
-      return Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, h ?? 0);
-    }, false);
   }
 
   function renderSite(site) {
@@ -3242,15 +3209,13 @@ async function main() {
 
       viewer.entities.add({
         id: `sensor-${site.id}-${sensor.id}`,
-        position: _sensorAnchor(site.id, sensor),
+        position: Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
         point: {
           pixelSize: sensor.isCore ? 11 : 8,
           color: color,
           outlineColor: color.withAlpha(0.4),
           outlineWidth: sensor.isCore ? 5 : 3,
-          // NO heightReference. The anchor above already resolves the
-          // height once and freezes it. Clamping on top of that is what
-          // re-introduced the per-frame resample.
+          heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
           disableDepthTestDistance: Number.POSITIVE_INFINITY,
         },
         properties: {
@@ -12954,7 +12919,6 @@ async function main() {
   // is ever created for a live event: _sweepUnobservedActiveEvents owns
   // its close.
   const _liveSensors = createLiveSensorRuntime({
-    anchorFor: _sensorAnchor,
     sites: SITES, viewer, Cesium, events: EVENTS, addEvent, getEvent, mutateEvent, addNote,
     nextEventId, applyDetectionBatch: _applyDetectionBatchToEvent, selectEvent, renderAlertStrip,
     renderDetailPanel: renderDetailPanelThrottled, toast, ringIcon,
@@ -19773,11 +19737,8 @@ async function main() {
           return false;
         }, false);
         contributingRingEntities.push(viewer.entities.add({
-          // THE SAME ANCHOR OBJECT THE DOT USES, so the two cannot drift
-          // apart. They were separately positioned and separately
-          // clamped, which is how a ring ended up floating off its own
-          // sensor from an oblique angle.
-          position: _sensorAnchor(sid, sensor),
+          // SAME POSITION AS THE SENSOR DOT, exactly.
+          position: Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
           billboard: {
             image: ringIcon(_degraded),
             width: 26, height: 26,
@@ -19789,7 +19750,7 @@ async function main() {
                 ? Cesium.Color.fromCssColorString('#ff8c3d')
                 : Cesium.Color.WHITE).withAlpha(pulse);
             }, false),
-            // No heightReference, for the reason given on _sensorAnchor.
+            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
             disableDepthTestDistance: Number.POSITIVE_INFINITY,
           },
         }));
@@ -20033,6 +19994,42 @@ async function main() {
   // list. Two different numbers means two different events.
   //
   //   __isr_sensorAudit()
+  // WHERE EVERY PULSE RING ACTUALLY IS, and whether it is showing.
+  //
+  // Added because a ring was reported in the middle of the Oresund and
+  // I could not tell from the source whether it was a sensor ring at a
+  // bad position, a ring that was fine, or something else entirely
+  // wearing a circle. This answers it in one line instead of three
+  // rounds of guessing.
+  //
+  //   __isr_ringAudit()
+  window.__isr_ringAudit = () => {
+    const rows = [];
+    for (const e of viewer.entities.values) {
+      const id = String(e.id || '');
+      const isSensor = /^sensor-(cov-)?/.test(id);
+      const hasBillboard = !!e.billboard;
+      if (!isSensor && !hasBillboard) continue;
+      let lat = null, lon = null, alt = null;
+      try {
+        const c = e.position?.getValue?.(viewer.clock.currentTime);
+        if (c) {
+          const g = Cesium.Cartographic.fromCartesian(c);
+          lat = +Cesium.Math.toDegrees(g.latitude).toFixed(5);
+          lon = +Cesium.Math.toDegrees(g.longitude).toFixed(5);
+          alt = Math.round(g.height);
+        }
+      } catch (_) { /* unresolvable position is itself the answer */ }
+      let show = null;
+      try { show = e.billboard?.show?.getValue?.(viewer.clock.currentTime) ?? e.billboard?.show ?? null; } catch (_) {}
+      rows.push({ id: id.slice(0, 44), kind: isSensor ? 'sensor' : 'billboard', lat, lon, alt, show });
+    }
+    const rings = rows.filter(r => r.kind === 'billboard' && r.show === true);
+    console.log(`${rows.length} candidate entities, ${rings.length} billboards currently shown`);
+    console.table(rows.filter(r => r.show === true || r.kind === 'sensor').slice(0, 60));
+    return rows;
+  };
+
   window.__isr_sensorAudit = () => {
     const sel = getSelectedEventId();
     // WHAT THE PANEL IS SHOWING, read back off the DOM.
