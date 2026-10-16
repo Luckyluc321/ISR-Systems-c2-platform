@@ -379,7 +379,11 @@ export function createLiveSensorRuntime(deps) {
         scale: new Cesium.CallbackProperty(() => 1.0 + 0.18 * Math.sin(nowMs() / 250), false),
         color: new Cesium.CallbackProperty(() => {
           const pulse = 0.35 + 0.40 * Math.sin(nowMs() / 250);
-          return Cesium.Color.WHITE.withAlpha(pulse);
+          // Cyan explicitly. ringIcon() draws in white now so the tint
+          // is the only thing that colours it, and a WHITE tint on a
+          // white image gave a white ring instead of the cyan every
+          // other pulse uses.
+          return Cesium.Color.fromCssColorString('#4dd2ff').withAlpha(pulse);
         }, false),
         heightReference: Cesium.HeightReference.RELATIVE_TO_GROUND,
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
