@@ -419,16 +419,20 @@ A warm key resolves *synchronously* inside the visualizer pass, which is
 why a ring rebuilt on every tick still draws on the tick that built it.
 
 **`disableDepthTestDistance` must match between marks that must look
-joined.** Infinity draws a mark over everything in front of it. From
-above nothing is in front. From the side, a sensor at 40 m behind a 50 m
-hangar still draws over the hangar and reads as stuck to the near wall,
-and it shifts as the camera moves because what is in front of it
-changes. Fixed position, moving appearance. The dot was depth tested and
-the ring was not, so the pair came apart at an oblique angle for that
-reason alone and not because of any height disagreement. Both use
-`_sensorDepthValue()` now and both answer to `__isr_sensorDepth()`
-together. The accepted cost is that a sensor behind a terminal is hidden
-until the camera moves.
+joined**, and for sensors it is Infinity on both. The dot was depth
+tested while the ring was not, so the pair came apart at an oblique
+angle for that reason alone, with no height disagreement involved.
+
+Depth testing both was tried as the default and it hides the pulse. The
+ring is a 26 px mark clamped to the surface, so its anchor depth is
+level with the ground it is drawn on and the per-fragment depth test
+discards it, while the 8 px dot is small enough to survive. Verified on
+the map rather than argued. `__isr_sensorDepth(true)` turns it on for a
+shot that wants it.
+
+The cost of drawing on top is that a sensor behind a terminal shows
+through it. For an operator that is the right failure: never losing
+sight of a sensor beats a prettier oblique view.
 
 The ring also reads its position off its own dot
 (`dotEntity.position.getValue(...)`) rather than recomputing
