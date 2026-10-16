@@ -110,8 +110,13 @@ check('same outline alpha', spec.point.outlineColor.a === 0.4 && /outlineColor: 
 // that the line is spelled a particular way.
 check('clamped to ground like the others', spec.point.heightReference === 'CLAMP_TO_GROUND'
   && /Cesium\.HeightReference\.CLAMP_TO_GROUND/.test(renderSiteBlock));
+// Drawing on top is still the default on both paths. renderSite reaches
+// it through _sensorDepthValue() now, because __isr_sensorDepth(true)
+// lets scene geometry occlude a marker instead, which is a switch rather
+// than a decision. The assertion is the default behaviour, not the
+// spelling of the line.
 check('depth test disabled like the others', spec.point.disableDepthTestDistance === Infinity
-  && /disableDepthTestDistance: Number\.POSITIVE_INFINITY/.test(renderSiteBlock));
+  && /disableDepthTestDistance: (Number\.POSITIVE_INFINITY|_sensorDepthValue\(\))/.test(renderSiteBlock));
 check('picked as a sensor by the click handler', spec.properties.type === 'sensor' && spec.properties.sensorId === live.id
   && /type: 'sensor',/.test(renderSiteBlock));
 check('repainted by the night tint like the others', spec.properties.online === true && /online: sensor\.status === 'online'/.test(renderSiteBlock));

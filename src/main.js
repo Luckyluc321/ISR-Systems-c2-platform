@@ -3106,6 +3106,25 @@ async function main() {
     return working.length / all.length;
   }
 
+  // DRAW ON TOP, OR LET THE SCENE OCCLUDE IT. Off by default, meaning
+  // markers keep drawing on top exactly as they always have.
+  //
+  // disableDepthTestDistance: Infinity makes a marker ignore everything
+  // in front of it. From overhead nothing is in front, so it looks
+  // right. From an oblique angle a sensor at 40 m with a 50 m hangar
+  // between it and the camera still draws over the hangar, so it reads
+  // as stuck to the near wall rather than hidden behind the building,
+  // and it changes as the camera moves because what is in front of it
+  // changes. That is camera-dependent placement with a fixed position,
+  // which is the thing that kept looking like a coordinate fault.
+  //
+  // Depth testing fixes the look and costs something real: a sensor
+  // behind a terminal becomes invisible rather than showing through it.
+  // Which of those an operator wants is Lucas's call, so it is a switch
+  // rather than a decision I make for him.
+  let _sensorDepthTested = false;
+  const _sensorDepthValue = () => (_sensorDepthTested ? 0 : Number.POSITIVE_INFINITY);
+
   // RESOLVED SENSOR HEIGHTS, EMPTY BY DEFAULT.
   //
   // While this map is empty every marker behaves exactly as it always
@@ -3248,7 +3267,7 @@ async function main() {
           // must not also clamp or the pin is immediately overwritten.
           heightReference: _sensorPinnedPos(site.id, sensor)
             ? undefined : Cesium.HeightReference.CLAMP_TO_GROUND,
-          disableDepthTestDistance: Number.POSITIVE_INFINITY,
+          disableDepthTestDistance: _sensorDepthValue(),
         },
         properties: {
           type: 'sensor',
@@ -19793,7 +19812,7 @@ async function main() {
             }, false),
             heightReference: _sensorPinnedPos(sid, sensor)
               ? undefined : Cesium.HeightReference.CLAMP_TO_GROUND,
-            disableDepthTestDistance: Number.POSITIVE_INFINITY,
+            disableDepthTestDistance: _sensorDepthValue(),
           },
         }));
       }
@@ -20108,6 +20127,21 @@ async function main() {
     _sensorPinH.clear();
     updateContributingRings();
     console.log('[pin] cleared, markers are clamping again');
+  };
+
+  // __isr_sensorDepth(true)  let buildings hide a sensor behind them
+  // __isr_sensorDepth(false) back to drawing on top of everything
+  window.__isr_sensorDepth = (on = true) => {
+    _sensorDepthTested = !!on;
+    const v = _sensorDepthValue();
+    for (const sid of Object.keys(SITES)) {
+      for (const sn of (SITES[sid].sensors || [])) {
+        const ent = viewer.entities.getById(`sensor-${sid}-${sn.id}`);
+        if (ent?.point) ent.point.disableDepthTestDistance = v;
+      }
+    }
+    updateContributingRings();
+    console.log(`[sensors] depth testing ${on ? 'ON, scene geometry can now hide a marker' : 'OFF, markers draw on top again'}`);
   };
 
   window.__isr_ringAudit = () => {
