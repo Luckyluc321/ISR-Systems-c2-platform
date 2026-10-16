@@ -20095,16 +20095,24 @@ async function main() {
         targets.push({ sid, sn, carto: Cesium.Cartographic.fromDegrees(sn.lon, sn.lat) });
       }
     }
-    try {
-      await scene.sampleHeightMostDetailed(targets.map(t => t.carto), dots);
-    } catch (err) {
-      console.warn('[pin] sampling failed, nothing changed:', err?.message || err);
-      return [];
-    }
+    // sampleHeight, NOT sampleHeightMostDetailed.
+    //
+    // MostDetailed requests the highest-detail tile under every point it
+    // is given and waits for them. Called at boot with 130 sensors
+    // spread across Denmark, from the planet view where nothing is
+    // loaded, that is 130 tile pyramids streaming at once and the globe
+    // visibly churns while they land.
+    //
+    // sampleHeight reads what is ALREADY rendered and requests nothing.
+    // It returns undefined where tiles have not arrived, which is the
+    // correct answer at that moment, and the sweeper below simply tries
+    // again later. A sensor is pinned when its ground is actually on
+    // screen, and until then it clamps exactly as it always did.
     const rows = [];
     for (let i = 0; i < targets.length; i++) {
       const { sid, sn, carto } = targets[i];
-      const h = carto.height;
+      let h;
+      try { h = scene.sampleHeight(carto, dots); } catch (_) { h = undefined; }
       if (!Number.isFinite(h)) { rows.push({ sensor: `${sid}-${sn.id}`, pinned: 'no sample' }); continue; }
       _sensorPinH.set(_sensorPinKey(sid, sn.id), h);
       const ent = viewer.entities.getById(`sensor-${sid}-${sn.id}`);
@@ -31676,20 +31684,26 @@ async function main() {
   // WRAPPED, AND THAT IS NOT DECORATION. Two changes to this code took
   // the whole application down today, one of them on boot. Nothing in
   // here is allowed to throw into the boot path.
-  (async () => {
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      await new Promise(r => setTimeout(r, attempt * 1500));
+  (() => {
+    let _expected = 0;
+    for (const sid of Object.keys(SITES)) _expected += (SITES[sid].sensors || []).length;
+    let _passes = 0;
+    const _timer = setInterval(async () => {
+      _passes++;
       try {
         await window.__isr_pinSensors?.({ quiet: true });
-        if (_sensorPinH.size) {
-          console.log(`[sensors] ${_sensorPinH.size} pinned to measured heights, depth testing on`);
-          return;
-        }
       } catch (err) {
-        console.warn('[sensors] pin attempt', attempt, 'failed:', err?.message || err);
+        console.warn('[sensors] pin pass failed:', err?.message || err);
       }
-    }
-    console.warn('[sensors] could not measure heights, markers stay clamped');
+      // Stop once everything is pinned, or after five minutes of
+      // trying. Sites nobody has looked at never load their ground, so
+      // waiting forever would be waiting for something that is not
+      // coming.
+      if (_sensorPinH.size >= _expected || _passes > 100) {
+        clearInterval(_timer);
+        console.log(`[sensors] ${_sensorPinH.size}/${_expected} pinned to measured heights, depth testing on`);
+      }
+    }, 3000);
   })();
 }
 

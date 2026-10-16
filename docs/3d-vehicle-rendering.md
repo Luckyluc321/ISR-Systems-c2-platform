@@ -362,11 +362,19 @@ dot and its pulse ring at the same latitude and longitude and they sit
 camera tilt smears that gap across the ground.
 
 The fix is one measured height for both, with no clamp left to
-re-sample. Measure from the RENDERED scene with
-`scene.sampleHeightMostDetailed`, not `globe.getHeight`: the latter is
-terrain only and using it sank every marker 38 m and put a pulse ring
-out in the Oresund. Boot does this automatically now, deferred and
-retried, because the tiles under each sensor have to exist first.
+re-sample. Measure from the RENDERED scene, not with `globe.getHeight`:
+that is terrain only, and using it sank every marker 38 m and put a
+pulse ring out in the Oresund.
+
+Use `scene.sampleHeight`, never `sampleHeightMostDetailed`, for this.
+MostDetailed requests the highest-detail tile under every point it is
+given and waits. Called at boot with 130 sensors spread across Denmark,
+from the planet view where nothing is loaded, that is 130 tile pyramids
+streaming at once and the globe visibly churns while they land.
+`sampleHeight` reads what is already rendered and requests nothing,
+returning undefined where tiles have not arrived. A sweeper retries
+every three seconds and a sensor is pinned when its ground is actually
+on screen, which is also the only moment the pin matters.
 
 **`disableDepthTestDistance: Infinity` is camera-dependent by design.**
 It draws the marker over everything in front of it. From above nothing
