@@ -597,68 +597,66 @@ nose-reversed like the Shahed. Expect the extra -90 on heading and
 the assault drone's 18k; simplify with meshoptimizer as the Shahed was
 if it costs frame time at swarm counts.
 
-## 8e. The wingmen had a pixel floor and the lead never did
+## 8e. A pixel floor with no ceiling, and a lead that had neither
 
-Reported as "drones scaling WAY TOO MUCH when you expand, why can't they stay
-the same size no matter your POV". Two separate faults, both measured before
-either was touched.
+Reported twice, in opposite directions, which is what pinned it down:
+"drones scaling WAY TOO MUCH when you expand, why can't they stay the same size
+no matter your POV", then after the first fix, "only one drone in the swarm is
+present, and they are too small".
 
 **`minimumPixelSize` means "never smaller than N pixels at ANY distance."** The
 helicopter and the F-35 each bound that with a `maximumScale` of twelve times
-life size. The swarm wingmen had the floor and no bound, so a wingman held its
-pixel count while the ground shrank underneath it:
+life size. The swarm wingmen had the floor and no bound.
 
-| camera distance | a 1 m drone, life size | drawn at a 14 px floor |
-|---|---|---|
-| 100 m | 8.7 px | 14 px, 1.6x life |
-| 480 m | 1.8 px | 14 px, 8x life |
-| 3 km | 0.29 px | 14 px, 48x life |
-| 20 km | 0.04 px | 14 px, **324x life** |
+**The lead had neither.** `_droneEntitySpec.model` set no `minimumPixelSize` at
+all, so a lead drew at true world scale while its four wingmen sat on a 14 px
+floor. Four drones ballooning around one that did not is why it read as a
+scaling bug rather than a size setting.
 
-**The lead was never in that list.** `_droneEntitySpec.model` sets no
-`minimumPixelSize` at all, so the lead has always drawn at true world scale and
-shrunk correctly. A five-drone formation was therefore four ballooning wingmen
-around one correct lead, which is why it read as a scaling bug rather than as a
-size setting.
+Removing the floor fixed the ballooning and produced the second report: at 480 m
+a 1 m drone is 1.8 px, so the formation became five dots, and at the ranges the
+WITHOUT ISR camera actually uses only the nearest was picked out at all.
 
-It is worst in the WITHOUT ISR run because that scenario raises the model draw
-distance to 20 km (`MODEL_ALWAYS_M`) so the formation reads as objects at the
-480 m break-off. The same floor then applies across the whole flight.
+**Both now carry the same floor and the same bound**, quads only:
 
-**The wingmen now match the lead**: true world scale, no floor.
+| distance | life size | before: floor, no bound | now: floor + 12x bound |
+|---|---|---|---|
+| 250 m | 3.46 px | 14 px, 4x life | 14 px, 4x life |
+| 480 m | 1.80 px | 14 px, 8x life | 14 px, 7.8x life |
+| 740 m | 1.17 px | 14 px, 12x life | 14 px, the bound takes over |
+| 3 km | 0.29 px | 14 px, 48x life | 3.46 px, 12x life |
+| 20 km | 0.04 px | 14 px, **323x life** | 0.52 px, 12x life |
+
+The floor governs up close, where the formation has to read as aircraft. The
+bound governs beyond about 740 m, where the drone shrinks proportionally and
+cannot run away. The airliner, the Mi-24 and the Shahed each carry their own
+sizing and none of them was reported, so the block is skipped for them and the
+Shahed keeps the 24 it was tuned at.
 
 **The key is `swarmMinimumPixelSize`, not `minimumPixelSize`.** The shared
-`__isr_quad_tuning` object is SEEDED with `minimumPixelSize: 14`, so a `?? 0`
-fallback against that key is dead code; the key is always present. The shared
-key is also read by the interceptor quad, a different vehicle that was not
-reported and must not move. Hence a dedicated key, which also gives a live
-knob:
+`__isr_quad_tuning` object is SEEDED with `minimumPixelSize: 14`, so a fallback
+against that key is dead code; the key is always present. The shared key is also
+read by the interceptor quad, a different vehicle that was not reported and must
+not move. Both knobs are live:
 
 ```js
-__isr_quad_tuning.swarmMinimumPixelSize = 14   // restore the old floor, no rebuild
+__isr_quad_tuning.swarmMinimumPixelSize = 20   // bigger up close
+__isr_quad_tuning.swarmMaxExaggeration  = 8    // shrink harder at range
 ```
-
-The Shahed keeps its 24. It is a 3.5 m airframe tuned against the terrain.
 
 **Verified in a browser, not from the source.** The first attempt edited the
-`?? 20` fallback at the spec and changed nothing, because of the seeded key
-above. Reading the live entities is what caught it:
+`?? 20` fallback at the spec and changed nothing at all, because of the seeded
+key above. Reading the live entities is what caught it, and is how the final
+state was confirmed:
 
 ```
-drone-DET-...-9001            minPx (none)     <- the lead, unchanged
-drone-DET-...-9001-swarm-1    minPx 0          <- was 14
-drone-DET-...-9001-swarm-2    minPx 0
-drone-DET-...-9001-swarm-3    minPx 0
-drone-DET-...-9001-swarm-4    minPx 0
+entity           scale   minPx   maxScale
+9001             0.5     14      6          <- the lead, which had none of this
+9001-swarm-1     0.5     14      6
+9001-swarm-2     0.5     14      6
+9001-swarm-3     0.5     14      6
+9001-swarm-4     0.5     14      6
 ```
-
-**Consequence to expect.** At 480 m a 1 m drone is 1.8 px. They are dots at the
-break-off now, not objects. That readability was a design choice written into
-the `MODEL_ALWAYS_M` comment, never a stated requirement, and the stated
-requirement was the opposite: invisible until close, as in real life. If the
-cockpit shot needs them bigger, the right fix is the floor PLUS a
-`maximumScale` bound of the kind the helicopter already has, so the floor
-cannot run away again.
 
 ## 8f. Altitude was linear in time, so the vertical rate was a staircase
 
@@ -716,3 +714,33 @@ path, not a terrain-following one, so the flag is arguably wrong for this
 airframe, but changing it touches the landing visuals in the other scenarios
 and has not been done.
 
+## 8g. The landing jump was the terrain reference, sampled at 150 ms and followed in 100 ms
+
+Reported as the aircraft jumping up and down when it is about to land, while
+being clean for the rest of the flight.
+
+A `terrainRelativeAlt` track's altitude is the sampled surface plus its own
+height, so every step in the surface reference moves the aircraft. Below 80 m
+the reference came from `scene.sampleHeight`, which reads the RENDERED surface,
+re-sampled every 150 ms, and the offset eased toward each new sample at 0.12 per
+frame: about a tenth of a second.
+
+Over an airport that rendered surface is the photogrammetry mesh. Hangars,
+fences, parked aircraft, and a level of detail that refines as the camera
+approaches. Successive samples differ by metres, and the aircraft was on each
+new one within a tenth of a second.
+
+The 0.12 was tuned for the ROLLOUT, where the wheels are genuinely on a runway
+that rises along its length and lagging it sinks them. 80 m is far too high a
+threshold for that: an aircraft in the air is not following the ground, it is
+flying a straight glide path to one runway. The WITHOUT ISR run breaks off at
+37 m and never touches a runway, so it spent its last 26 seconds inside that
+branch for no reason at all.
+
+**Threshold moved to 10 m.** Below it the wheels really are about to be on the
+surface. Above it, the slow 0.02 ease that already governs every approach above
+80 m governs this part too, and the aircraft has never been reported twitching
+up there.
+
+The hold path in the WITH ISR run never showed this: it orbits over Køge Bugt,
+where the surface under a terrain-relative track is flat water.

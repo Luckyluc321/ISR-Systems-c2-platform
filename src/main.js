@@ -17518,6 +17518,24 @@ async function main() {
         // Floor derived from real metres like everything else.
         scale: isAirliner ? 1
           : (isHostileHeli ? 1.121 : (isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5))),
+        // THE LEAD GETS WHAT ITS OWN WINGMEN GET.
+        //
+        // This spec has never set either, so a swarm lead drew at true
+        // world scale while its four wingmen sat on a 14 px floor. Four
+        // drones ballooning around one that did not is what read as a
+        // scaling bug rather than a size setting, and with the floor
+        // removed the formation went the other way and became five
+        // dots. Same floor, same bound, so the five match each other at
+        // every range.
+        //
+        // Quads only. The airliner, the Mi-24 and the Shahed each carry
+        // their own sizing a few lines up and none of them was
+        // reported; isLoiterMun keeps the 24 it was tuned at.
+        ...(isAirliner || isHostileHeli ? {} : {
+          minimumPixelSize: isLoiterMun ? 24 : (_qT.swarmMinimumPixelSize ?? 14),
+          maximumScale: (isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5))
+            * (_qT.swarmMaxExaggeration ?? MODEL_MAX_EXAGGERATION),
+        }),
         // THE BUILDER'S OWN LANDING SEQUENCE, PLAYED ONCE.
         //
         // `runAnimations: true` is not "play it": Cesium's ModelVisualizer
@@ -17862,21 +17880,41 @@ async function main() {
             // they shrink to nothing as the camera pulls back, which is
             // what a 1 m object does.
             //
+            // A FLOOR, AND A CEILING. The floor alone is what made a
+            // wingman read as a tank: minimumPixelSize means "never
+            // smaller than N pixels at ANY distance", so a 14 px floor
+            // held 14 px while the ground shrank, which at 20 km is
+            // 324 times life size. Dropping the floor to zero fixed
+            // that and made them 1.8 px at the 480 m break-off, which
+            // is a dot rather than an aircraft.
+            //
+            // So the floor comes back and maximumScale bounds it, the
+            // same pairing the helicopter and the F-35 have always had.
+            // The floor governs up close, the bound governs far away:
+            //
+            //     480 m    14 px, the floor          (8x life)
+            //     740 m    the bound takes over
+            //       3 km   3.5 px                   (12x life)
+            //      20 km   0.5 px                   (12x life)
+            //
             // A SEPARATE KEY, deliberately, and not the shared
             // _qT.minimumPixelSize. That one is seeded with 14 in the
             // quad tuning defaults and is also read by the interceptor
             // quad, which is a different vehicle that nobody reported
-            // and which should not move. Writing `?? 0` against the
-            // shared key does nothing at all, because the key is always
+            // and which should not move. Writing a fallback against
+            // the shared key does nothing, because the key is always
             // present.
             //
-            // Live knob to put a floor back without a rebuild, if they
-            // read too small in the cockpit shot:
-            //   __isr_quad_tuning.swarmMinimumPixelSize = 14
+            // Both knobs are live, so the cockpit shot can be tuned
+            // without a rebuild:
+            //   __isr_quad_tuning.swarmMinimumPixelSize = 20
+            //   __isr_quad_tuning.swarmMaxExaggeration  = 8
             //
             // The Shahed keeps its 24: it is a 3.5 m airframe that was
             // tuned against the terrain and is not what was reported.
-            minimumPixelSize: isLoiterMun ? 24 : (_qT.swarmMinimumPixelSize ?? 0),
+            minimumPixelSize: isLoiterMun ? 24 : (_qT.swarmMinimumPixelSize ?? 14),
+            maximumScale: (isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5))
+              * (_qT.swarmMaxExaggeration ?? MODEL_MAX_EXAGGERATION),
             distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
             shadows: Cesium.ShadowMode.DISABLED,
             // Swarm members, same reasoning as the single-drone spec above.
@@ -18891,15 +18929,29 @@ async function main() {
               //
               // Near the ground the offset HAS to track the surface
               // closely, because the wheels are on it and a runway that
-              // rises along its length will otherwise swallow them. So
-              // the tuned 0.12 is kept for everything below 80 m, which
-              // is the same threshold the precise sampler already uses.
+              // rises along its length will otherwise swallow them.
               //
-              // Above that nobody can see the surface the aircraft is
-              // referenced to, only the aircraft, so the reference eases
-              // over about a second and a half and tile steps disappear
-              // into it.
-              const _ease = (p.alt || 0) < 80 ? 0.12 : 0.02;
+              // That was tuned at 80 m and 80 m is far too high for it.
+              // An aircraft in the air is not following the ground, it
+              // is flying a straight glide path to one runway, and
+              // scene.sampleHeight re-reads the RENDERED surface every
+              // 150 ms. Over an airport that surface is the
+              // photogrammetry mesh: hangars, fences, parked aircraft,
+              // and a level of detail that refines as you approach. Each
+              // new sample can differ by metres and at 0.12 a frame the
+              // aircraft was on it within a tenth of a second.
+              //
+              // The WITHOUT ISR run breaks off at 37 m, so it spent its
+              // last 26 seconds inside this branch and never touched a
+              // runway at all. That is the "jumping up and down when
+              // it's about to land".
+              //
+              // 10 m instead. Below that the wheels really are about to
+              // be on the surface and tracking it is the point; above
+              // it, the slow ease that governs the whole rest of every
+              // approach governs this part too, and nobody has ever
+              // reported the aircraft twitching up there.
+              const _ease = (p.alt || 0) < 10 ? 0.12 : 0.02;
               state._terrOff += (_g - state._terrOff) * _ease;
             }
           }
