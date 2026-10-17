@@ -134,6 +134,58 @@ function _cphHoldPath() {
 }
 const _CPH_HOLD_PATH = _cphHoldPath();
 
+// ── A HAND-WRITTEN PATH TURNS IN ONE FRAME ──
+//
+// interpolate() is linear in latitude and longitude, so heading is
+// CONSTANT inside a segment and steps at the waypoint. The go-around
+// climb-out is three waypoints 26 to 40 seconds apart that between them
+// swing 41 degrees to 110, so the aircraft held one heading for half a
+// minute and then changed by 22 degrees in a single frame, three times.
+// Averaged over the segment that reads as a gentle 0.8 deg/s; on screen
+// it is a snap, and the bank derived from it snaps with it.
+//
+// Resampling through a Catmull-Rom spline fixes it without moving the
+// path: the curve passes through every original waypoint, so the route,
+// the timings and the altitude profile are the ones that were authored.
+// It only fills in what happens between them, and collinear points stay
+// collinear, so the long straight approach is untouched.
+//
+// Same reasoning as _cphHoldPath below, which generates rather than
+// resamples because it had no hand-written path to preserve.
+function _smoothPath(waypoints, dt = 0.25) {
+  const n = waypoints.length;
+  if (n < 3) return waypoints;
+  const at = i => waypoints[Math.max(0, Math.min(n - 1, i))];
+  const cr = (p0, p1, p2, p3, t) => {
+    const t2 = t * t, t3 = t2 * t;
+    return 0.5 * ((2 * p1) + (-p0 + p2) * t
+      + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
+      + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+  };
+  const out = [];
+  for (let i = 0; i < n - 1; i++) {
+    const a = at(i), b = at(i + 1), p0 = at(i - 1), p3 = at(i + 2);
+    const span = b.tSec - a.tSec;
+    if (span <= 0) continue;
+    const steps = Math.max(1, Math.round(span / dt));
+    for (let k = 0; k < steps; k++) {
+      const u = k / steps;
+      out.push({
+        lat: cr(p0.lat, a.lat, b.lat, p3.lat, u),
+        lon: cr(p0.lon, a.lon, b.lon, p3.lon, u),
+        // Altitude stays LINEAR in time. A spline on altitude overshoots
+        // at a level-off and would put the aircraft through its own
+        // glidepath on the flare.
+        alt: a.alt + (b.alt - a.alt) * u,
+        heading: 0,
+        tSec: +(a.tSec + span * u).toFixed(2),
+      });
+    }
+  }
+  out.push({ ...waypoints[n - 1] });
+  return out;
+}
+
 // ── Trajectory templates ──
 // Each template is a full flight path (list of waypoints). Spawn wraps it into
 // a live track with startTime = now.
@@ -620,7 +672,7 @@ export const TEMPLATES = {
       evidenceSize: '1.2 MB',
       note: 'Scheduled arrival on 04R. Established on the approach, lined up and descending on a 3 degree path, and 27 km out through 1415 m when the tower turned it off. The first sensor had the formation at 8 seconds and three were holding it by 26, so the call reached the crew 62 seconds after the grid first heard anything and the approach was never commenced. It turned right, away from the city and the field, and is holding over Koge Bugt between 24 and 30 km out in contact with the tower, waiting on the next approach slot.',
     },
-    waypoints: [
+    waypoints: _smoothPath([
       { lat: 55.41592, lon: 12.33230, alt: 1363, heading: 0, tSec: 0 },   // spawn, 26 km out on the extended 04R centreline
       { lat: 55.44982, lon: 12.38446, alt: 1101, heading: 0, tSec: 59.5 },
       { lat: 55.47694, lon: 12.42618, alt:  891, heading: 0, tSec: 108.3 },
@@ -636,7 +688,7 @@ export const TEMPLATES = {
       { lat: 55.62037, lon: 12.67216, alt: 1688, heading: 0, tSec: 379.4 },   // turning right, clear of the field
       { lat: 55.61896, lon: 12.73320, alt: 1978, heading: 0, tSec: 420.3 },
       { lat: 55.60588, lon: 12.78892, alt: 2238, heading: 0, tSec: 459.8 },   // outbound over the Oresund
-    ],
+    ]),
     durationSec: 460,
   },
 
@@ -772,7 +824,7 @@ export const TEMPLATES = {
       evidenceSize: '1.2 MB',
       note: 'Scheduled arrival on 04R. Broke off the approach at 398 m, 7.6 km from the threshold, after the runway incursion was passed to the tower. Standard missed approach, climbed on runway heading and turned out over the Oresund.',
     },
-    waypoints: [
+    waypoints: _smoothPath([
       // THE BREAK-OFF IS WHERE THE CREW COULD ACTUALLY SEE THEM.
       //
       // Lucas's point: a flight deck does not see the big red icons the
@@ -820,7 +872,7 @@ export const TEMPLATES = {
       { lat: 55.61807, lon: 12.66230, alt:  857, heading: 0, tSec: 444.7 },   // turning right, clear of the field
       { lat: 55.61775, lon: 12.71870, alt: 1157, heading: 0, tSec: 482.4 },
       { lat: 55.60653, lon: 12.77306, alt: 1417, heading: 0, tSec: 520.3 },   // outbound over the Oresund
-    ],
+    ]),
     durationSec: 520,
   },
 
