@@ -227,22 +227,26 @@ check('each wingman\'s roster confidence is scoped to that wingman',
 
 console.log('\nThe operator can see which sensors hold the focused airframe');
 
-check('the panel renders a per-member sensor section',
-  /data-live-member-sensors="1" data-member-key="\$\{_key\}"/.test(main));
+// ONE SENSOR SECTION, AND IT IS THE CASE-LEVEL ONE.
+//
+// Per-member attribution briefly shipped a SECOND list above the
+// existing "Contributing Sensors". On a lead held by every sensor the
+// two were identical: same rows, same numbers, twice. It was removed on
+// sight and the original section is untouched.
+//
+// Per-member sensor data still exists and is still what member
+// confidence is computed from. It is reachable through
+// __isr_sensorAudit(). It is not a panel section.
+check('the panel has exactly one sensor section',
+  !/data-live-member-sensors/.test(main)
+  && (main.match(/data-live-case-sensors/g) || []).length >= 1);
 
-check('that section is keyed off the FOCUSED member, not the lead',
-  /_idx === 0\s*\n?\s*\? _st\.leadSwarmMember\?\.memberId\s*\n?\s*: _st\.swarmBillboards\?\.\[_idx - 1\]\?\.memberId/.test(main));
+check('the case section is unchanged: case union, original title',
+  /const _enrichedSensors = \(e\.contributingSensors \|\| \[\]\)\.map/.test(main)
+  && /Contributing Sensors · \$\{e\.contributingSensors\.filter/.test(main));
 
-check('the case-level section is kept alongside it',
-  /Contributing Sensors · \$\{e\.contributingSensors\.filter/.test(main),
-  'the alert strip and the case file need the union');
-
-check('the per-member section is live-patched, not only full-rendered',
-  /_memberSensorRowsHtml\(event, _key\)/.test(main)
-  && /\[data-live-member-sensors="1"\]/.test(main),
-  'the hover gate blocks the full render, so a sensor acquiring an '
-  + 'airframe while the pointer is on the panel would not appear until '
-  + 'the operator clicked something');
+check('the sensor section is live-patched, not only full-rendered',
+  /\[data-live-case-sensors="1"\]/.test(main));
 
 check('a change in the case union\'s membership forces a full render',
   /_caseSection\.dataset\.sensorSig !== _sigNow/.test(main),
@@ -256,14 +260,13 @@ check('each member carries its own sensor count and mass on its stats',
   'the roster reads this per row; recomputing it per row per frame '
   + 'would walk the buckets five times a tick for nothing');
 
-check('the roster row says how many sensors hold that airframe',
-  /title="\$\{_rosterRowTitle\(d\)\}"/.test(main)
-  && /held by \$\{n\} sensor/.test(main),
-  'a tooltip, not an eleventh grid column: widening the roster grid '
-  + 'reflows every row');
-
-check('the roster tooltip is live-patched too',
-  /if \(row\.title !== _t\) row\.title = _t;/.test(main));
+// The roster row tooltip carried the per-member count for one commit.
+// It went out in the same change as the duplicate panel section and came
+// back out with it: the roster is the roster, as it has always read.
+check('the roster row tooltip is the original literal',
+  /title="Click to focus \$\{d\.id\} \(\$\{d\.model\}\)"/.test(main)
+  && !/_rosterRowTitle/.test(main)
+  && !/row\.title = _t/.test(main));
 
 check('the audit handle reports per member',
   /const store = ev\.memberSensors;/.test(main)

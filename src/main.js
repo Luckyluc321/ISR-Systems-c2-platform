@@ -12710,64 +12710,13 @@ async function main() {
     }
     targetEvent.contributingSensors = [...merged.values()];
   }
-
-  // One member's sensors, strongest first. Confidence ranks them rather
-  // than distance: for ONE airframe the geometry floor is monotonic in
-  // range, so the strongest reading is the nearest sensor, and it costs
-  // no haversine per row per frame to say so.
-  function _memberSensorsRanked(event, memberKey) {
-    return _memberSensorsFor(event, memberKey)
-      .filter(c => c.offline || (c.confidence || 0) > 0 || (c.peakConfidence || 0) > 0)
-      .slice()
-      .sort((a, b) => {
-        if (!!a.offline !== !!b.offline) return a.offline ? 1 : -1;
-        return (b.confidence || 0) - (a.confidence || 0);
-      });
-  }
-
-  // Title line for the focused member's sensor section. Reports the
-  // member, how many sensors hold it NOW, and how many have ever held
-  // it, because a sensor fading out of a member's list is a different
-  // event from one that never saw it.
-  // The drone id sits AFTER the first '·' on purpose. _dpSectionKey
-  // keys a section's collapse state on the text before that separator,
-  // so putting the id first would mint a new key per focused drone and
-  // a section collapsed on DRONE-1 would spring open on DRONE-2.
-  function _memberSensorTitle(event, memberKey, slotIdx) {
-    const ranked = _memberSensorsRanked(event, memberKey);
-    const live = ranked.filter(c => !c.offline && (c.confidence || 0) >= 0.08).length;
-    return `Sensors Holding This Airframe · DRONE-${(slotIdx ?? 0) + 1} · ${live} now / ${ranked.length} ever`;
-  }
-
-  // Roster row tooltip. Carries this airframe's OWN sensor attribution.
-  //
-  // A tooltip rather than an eleventh column: the roster grid is ten
-  // fixed columns and widening it for this would reflow every row,
-  // which is a visible change nobody asked for. The focused member's
-  // full list is the panel section above; this is the at-a-glance
-  // "DRONE-4 is held by one sensor and DRONE-1 by four" that the
-  // operator needs while scanning the roster.
-  function _rosterRowTitle(d) {
-    const n = d?.stats?.sensorCount;
-    const m = d?.stats?.sensorMass;
-    const held = (typeof n === 'number')
-      ? ` · held by ${n} sensor${n === 1 ? '' : 's'}${typeof m === 'number' ? ` (mass ${m.toFixed(2)})` : ''}`
-      : '';
-    return `Click to focus ${d.id} (${d.model})${held}`;
-  }
-
-  function _memberSensorRowsHtml(event, memberKey) {
-    const ranked = _memberSensorsRanked(event, memberKey);
-    if (!ranked.length) {
-      return `<div class="dp-note dp-dim">No sensor is holding this airframe. The case may still be held by sensors that have the rest of the formation.</div>`;
-    }
-    return ranked.slice(0, 8).map(s => `
-      <div class="sensor-row member-sensor-row ${s.offline ? 'off' : ''}">
-        <span class="s-lbl">${s.id}</span>
-        <div class="s-bar"><div class="s-fill" style="width:${Math.round((s.confidence || 0) * 100)}%;"></div></div>
-        <span class="s-val">${s.offline ? 'off' : (s.confidence || 0).toFixed(2)}</span>
-      </div>`).join('');
-  }
+  // _memberSensorsRanked / _memberSensorTitle / _memberSensorRowsHtml
+  // stood here. They rendered the per-member sensor list that briefly
+  // appeared above Contributing Sensors and was removed on sight; with
+  // the section gone nothing called them. The per-member buckets
+  // themselves are untouched — they are what member confidence is
+  // computed from — and __isr_sensorAudit() prints them straight off
+  // event.memberSensors.
 
   // FUSED CONFIDENCE, DRIVEN BY OBSERVATION QUALITY.
   //
@@ -24860,28 +24809,6 @@ async function main() {
     //
     // Runs before the `stats` bail-out below: a case with no live
     // kinematics yet still has sensors acquiring it.
-    const _msSection = document.querySelector('[data-live-member-sensors="1"]');
-    if (_msSection) {
-      const _key = _msSection.dataset.memberKey;
-      const _rows = _msSection.querySelector('[data-live="memberSensorRows"]');
-      const _title = _msSection.querySelector('[data-live="memberSensorTitle"]');
-      if (_rows) {
-        const _html = _memberSensorRowsHtml(event, _key);
-        if (_rows.innerHTML !== _html) _rows.innerHTML = _html;
-      }
-      // The title carries the collapse caret inserted by
-      // _decorateActiveSectionsCollapsible, so only the text node that
-      // holds the label is replaced and the caret element is left alone.
-      if (_title) {
-        const _txt = _memberSensorTitle(event, _key, _selectedSwarmIndex);
-        for (const node of _title.childNodes) {
-          if (node.nodeType === 3 && node.textContent.trim()) { // Node.TEXT_NODE
-            if (node.textContent !== _txt) node.textContent = _txt;
-            break;
-          }
-        }
-      }
-    }
     const _caseSection = document.querySelector('[data-live-case-sensors="1"]');
     if (_caseSection) {
       const _union = (event.contributingSensors || []);
@@ -24967,20 +24894,6 @@ async function main() {
         if (confSpan) {
           const rowConf = rowStats.confidence ?? event.confidence ?? 0;
           confSpan.textContent = `${Math.round(rowConf * 100)}%`;
-        }
-        // Per-member sensor attribution rides the tooltip, so it stays
-        // live without the roster grid gaining an eleventh column. The
-        // id and the model come off the row rather than the droneList,
-        // which the patcher does not build.
-        {
-          const _n = rowStats.sensorCount, _m = rowStats.sensorMass;
-          if (typeof _n === 'number') {
-            const _id = row.querySelector('.dp-swarm-id')?.textContent || `DRONE-${idx + 1}`;
-            const _model = row.querySelector('.dp-swarm-model')?.textContent || '';
-            const _t = `Click to focus ${_id} (${_model}) · held by ${_n} sensor${_n === 1 ? '' : 's'}`
-              + `${typeof _m === 'number' ? ` (mass ${_m.toFixed(2)})` : ''}`;
-            if (row.title !== _t) row.title = _t;
-          }
         }
         // THE NAME AND THE SIGNAL RESOLVE ON THEIR OWN SCHEDULE, so they
         // are patched here at 4 Hz with everything else.
@@ -25276,40 +25189,13 @@ async function main() {
         ${_sensorToggleHtml}
       </div>` : '';
 
-    // ── WHICH SENSORS HOLD THE FOCUSED AIRFRAME ──────────────────────
+    // Contributing Sensors is the CASE: the union across every member,
+    // which is what the alert strip and the case file need. A second
+    // per-member list briefly shipped above it and was removed on sight
+    // — on a lead held by every sensor it was the same rows twice. The
+    // per-member buckets still exist and still drive member confidence;
+    // __isr_sensorAudit() prints them.
     //
-    // The section above is the CASE: the union across every member, and
-    // it is what the alert strip and the case file need. It cannot
-    // answer the operator's actual question about a formation, which is
-    // "what is holding THIS one", because a union says yes to a sensor
-    // that holds any of them.
-    //
-    // So the focused member gets its own list, off its own bucket. An
-    // empty list is rendered rather than hidden: "no sensor holds this
-    // airframe right now" is the answer in the gap between a member
-    // crossing into coverage and the one in front of it doing so, and
-    // hiding it is what made the union look like per-member truth.
-    //
-    // data-live-member-sensors is the patcher's anchor. The case section
-    // is painted only by a full render, which the hover gate blocks
-    // while the pointer is on the panel; this one updates at 4 Hz
-    // regardless, so a sensor acquiring an airframe shows up when it
-    // happens rather than on the operator's next click.
-    const memberSensorsSection = (() => {
-      const _st = droneState.get(e.id);
-      const _tpl = TEMPLATES[e.templateKey];
-      if (!_tpl?.swarm || !_st) return '';
-      const _idx = _selectedSwarmIndex;
-      const _key = (_idx === 0
-        ? _st.leadSwarmMember?.memberId
-        : _st.swarmBillboards?.[_idx - 1]?.memberId) || _memberKeyForSlot(e, _idx);
-      return `
-      <div class="dp-section" data-live-member-sensors="1" data-member-key="${_key}">
-        <div class="dp-section-title" data-live="memberSensorTitle">${_memberSensorTitle(e, _key, _idx)}</div>
-        <div class="dp-member-sensor-rows" data-live="memberSensorRows">${_memberSensorRowsHtml(e, _key)}</div>
-      </div>`;
-    })();
-
     // The "Brief Incident Summary" section that stood here is removed.
     // It shipped in f798e41 with the Agent 3 narrative work and was never
     // signed off. Nothing renders it now. sendBriefToIntelligence and
@@ -25391,7 +25277,7 @@ async function main() {
       var totalDrones = droneList.length;
 
       const fmtRow = (d, idx) => `
-        <div class="dp-swarm-row ${idx === _selectedSwarmIndex ? 'is-focused' : ''} ${d.status === 'neutralised' ? 'is-downed' : ''} ${d.status === 'lost' ? 'is-lost' : ''}" data-swarm-idx="${idx}" title="${_rosterRowTitle(d)}">
+        <div class="dp-swarm-row ${idx === _selectedSwarmIndex ? 'is-focused' : ''} ${d.status === 'neutralised' ? 'is-downed' : ''} ${d.status === 'lost' ? 'is-lost' : ''}" data-swarm-idx="${idx}" title="Click to focus ${d.id} (${d.model})">
           <span class="dp-swarm-id">${d.id}</span>
           <span class="dp-swarm-model">${d.model}</span>
           <span class="dp-swarm-role">${d.role}</span>
@@ -25923,7 +25809,6 @@ async function main() {
       ${preIngress ? '' : pir}
       ${preIngress ? '' : swarmRoster}
       ${preIngress ? '' : reacquired}
-      ${preIngress ? '' : memberSensorsSection}
       ${preIngress ? '' : sensors}
       ${preIngress ? '' : perimeter}
       ${preIngress ? '' : projected}
