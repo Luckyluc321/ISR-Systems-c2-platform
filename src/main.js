@@ -20652,6 +20652,74 @@ async function main() {
   //
   //   __isr_attitude()        one reading
   //   __isr_attitude(5)       a reading a second for five seconds
+  // WHY ARE THE PROPELLERS NOT TURNING. Read-only.
+  //
+  // Three different things read as "no props" and they are fixed in
+  // three different places, so the point of this is to say which one it
+  // is rather than reason about it:
+  //   the model is not on screen at all, so there is nothing to turn
+  //   the model is on screen but its rotor nodes are not wired
+  //   both are fine and the spin is frozen, which means the sim clock is
+  //
+  //   __isr_propCheck()      one reading
+  //   __isr_propCheck(3)     three readings a second apart, to see motion
+  window.__isr_propCheck = (seconds = 0) => {
+    const camPos = viewer.camera.positionWC;
+    const read = () => {
+      const rows = [];
+      const push = (label, ent) => {
+        if (!ent) return;
+        const pos = ent.position?.getValue?.(viewer.clock.currentTime);
+        const distM = pos ? Cesium.Cartesian3.distance(camPos, pos) : null;
+        const m = ent.model;
+        const ddc = m?.distanceDisplayCondition?.getValue?.(viewer.clock.currentTime)
+          || m?.distanceDisplayCondition;
+        const nt = m?.nodeTransformations;
+        const rotorNames = nt ? Object.keys(nt).filter(k => /rotor/i.test(k)) : [];
+        let angleDeg = null;
+        try {
+          const r = nt?.[rotorNames[0]]?.rotation;
+          const q = r?.getValue?.(viewer.clock.currentTime) || r;
+          if (q) {
+            const hpr = Cesium.HeadingPitchRoll.fromQuaternion(q);
+            angleDeg = +(Cesium.Math.toDegrees(hpr.heading)).toFixed(1);
+          }
+        } catch (_) { /* a rotor that cannot be read is itself the answer */ }
+        rows.push({
+          drone: label,
+          camDistM: distM == null ? null : Math.round(distM),
+          swapWithinM: ddc ? Math.round(ddc.far) : 'no model spec',
+          modelOnScreen: distM != null && ddc ? (distM >= ddc.near && distM <= ddc.far) : null,
+          rotorNodes: rotorNames.length,
+          rotorAngleDeg: angleDeg,
+        });
+      };
+      for (const [eid, st] of droneState) {
+        push(`${eid} lead`, st.billboard);
+        (st.swarmBillboards || []).forEach((sw, i) => push(`${eid} m${i + 1}`, sw.billboard));
+      }
+      console.table(rows);
+      if (rows.length && rows.every(r => r.modelOnScreen === false)) {
+        console.log('Every model is out of range, so there is nothing to spin. '
+          + 'A quadcopter becomes a 3D model only within its swap distance; '
+          + 'beyond it you are looking at the flat icon, which has no propellers.');
+      }
+      if (rows.some(r => r.rotorNodes === 0)) {
+        console.log('A drone above reports 0 rotor nodes: its model spec carries no '
+          + 'nodeTransformations, so nothing is driving its propellers.');
+      }
+      if (simIsPaused()) {
+        console.log('The simulation clock is FROZEN. Rotor angle is a function of it, '
+          + 'so the propellers are stopped on purpose.');
+      }
+      return rows;
+    };
+    if (!seconds) return read();
+    let n = 0;
+    const t = setInterval(() => { read(); if (++n >= seconds) clearInterval(t); }, 1000);
+    return `sampling for ${seconds} s — compare rotorAngleDeg between readings`;
+  };
+
   window.__isr_attitude = (seconds = 0) => {
     const read = () => {
       const rows = [];
