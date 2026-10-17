@@ -116,7 +116,13 @@ function _sensorsRestore() {
 // is signed in. A bare /^sensor-/ hid 130 sensors across ten sites
 // instead of this site's 35, which is the one thing this scenario must
 // never do.
-const _SENSOR_RE = new RegExp(`^sensor-(cov-)?${SITE_ID}-`);
+// PULSE RINGS COUNT AS SENSORS. They did not when this was written,
+// because they were anonymous entities rebuilt every tick. They are
+// `sensor-pulse-<site>-<id>` now, built once, and `^sensor-(cov-)?cph-`
+// does not match that, so a blacked-out site still drew a pulse ring
+// over a sensor that was not there. One cyan circle floating on an
+// empty airport, which is the exact opposite of what this run is for.
+const _SENSOR_RE = new RegExp(`^sensor-(cov-|pulse-)?${SITE_ID}-`);
 
 function _hideSensorEntities() {
   const v = _viewer();
