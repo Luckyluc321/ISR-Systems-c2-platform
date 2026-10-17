@@ -744,3 +744,96 @@ up there.
 
 The hold path in the WITH ISR run never showed this: it orbits over Køge Bugt,
 where the surface under a terrain-relative track is flat water.
+
+## 8h. Two quadcopter models, two axis conventions, one switch
+
+The gun drone stays. `assault_drone_concept.glb` is the default and is what the
+interceptor quad hardcodes, because the gun pod IS that airframe. Nothing about
+the swap touches it.
+
+`dji_air_3.glb` (CC-BY polyman, rotor nodes added in `da1bdbb`) is selectable:
+
+```js
+__isr_quad_tuning.model = 'dji_air_3'    // then launch a scenario
+```
+
+The uri is read when the entity is built, so it applies to the next spawn, not
+to one already flying.
+
+**Why the orientation lives with the model and not in the tuning object.**
+`assault_drone_concept` is authored nose on body +X. `dji_air_3` is nose on
+glTF -Z, reversed like the Shahed. One shared set of `headingOffsetDeg`,
+`pitchSign` and `rollSign` cannot describe both, and the wrong one flies the
+airframe sideways. So `_QUAD_MODELS` carries uri, scale and axis convention
+together and `_quadModelSpec()` resolves it:
+
+| | assault_drone_concept | dji_air_3 |
+|---|---|---|
+| longest axis, composed | 2.315 m | 4.672 m |
+| scale | 0.5 | 0.248 |
+| rendered size | 1.158 m | 1.158 m |
+| headingOffsetDeg | 270 | 180 |
+| pitchSign / rollSign | 1 / 1 | -1 / -1 |
+| triangles | 24,896 | 311,072 |
+
+Scale is chosen so both render at 1.158 m, which is what the map has always
+drawn and what three signed-off scenarios were judged against. Both are
+deliberately larger than life: a real Air 3 is about 0.25 m across and would be
+a single pixel.
+
+Sizes come from composing each asset's FULL node transform chain. The raw
+accessor extents are meaningless for the Air 3, whose geometry sits under
+folding-arm hinge matrices, a 0.01 scale and two up-axis swaps. Raw it reads
+322 x 190 x 167; composed it is 4.672 x 1.050 x 4.010.
+
+Rotor hub positions, composed the same way, confirm the diagonals the spin code
+assumes (1 and 4 one way, 2 and 3 the other):
+
+```
+dji_air_3               assault_drone_concept
+  Rotor_1  +X -Z          Rotor_1  -X +Z
+  Rotor_2  +X +Z          Rotor_2  -X -Z
+  Rotor_3  -X -Z          Rotor_3  +X +Z
+  Rotor_4  -X +Z          Rotor_4  +X -Z
+```
+
+**Two things only a real GPU can settle,** which is why the default did not
+change:
+- Nose direction. 180 / -1 / -1 comes from the asset work, not from anyone's
+  eyes. If the nose points wrong, `__isr_quad_tuning.modelOverride = { headingOffsetDeg: 90 }`
+  and try 0, 90, 180, 270. That is the same workflow the Shahed and the quad
+  tuning comments have always prescribed.
+- 311k triangles against 24.9k, times five in a formation. Software rendering
+  says nothing useful about frame time.
+
+**`modelOverride` is a separate namespace on purpose.** `__isr_quad_tuning` is
+SEEDED with the assault drone's `scale: 0.5`, `headingOffsetDeg: 270` and
+`minimumPixelSize: 14`, so a `?? fallback` against any of those keys can never
+reach another model's value: the key is always present. That trap has now
+produced three no-op fixes in this file. `t.scale` still governs while the
+default model is selected, because 0.5 IS its correct value and the knob is
+documented; a selected model brings its own.
+
+## 8i. The lead drone's propellers never turned
+
+`nodeTransformations` was set in exactly three places: the interceptor quad, the
+swarm WINGMEN, and the helicopter. Not on `_droneEntitySpec.model`. So a single
+hostile quad's propellers stood still, and in a formation the four wingmen
+turned while the lead did not.
+
+The comment beside the wingmen read "same reasoning as the single-drone spec
+above", which had stopped being true. `__isr_propCheck()` already carried a line
+for this exact case, "nothing is driving its propellers", and it was never hit
+because nobody ran it against a lead.
+
+Fixed by giving the lead spec the same `_quadRotorTransforms` call, quads only:
+the Shahed has no rotors, the Mi-24 drives its own main and tail rotor, and the
+airliner runs the builder's animation clip.
+
+Verified on the live entities rather than from the source:
+
+```
+before                              after
+9001          rotors (none)         9001          Rotor_1..4
+9001-swarm-1  Rotor_1..4            9001-swarm-1  Rotor_1..4
+```

@@ -6596,6 +6596,76 @@ async function main() {
   // Rotor_1 and Rotor_4 are one diagonal, Rotor_2 and Rotor_3 the other.
   const _QUAD_ROTOR_NODES = ['Rotor_1', 'Rotor_2', 'Rotor_3', 'Rotor_4'];
 
+  // ── WHICH QUADCOPTER MODEL THE THREAT DRONES WEAR ────────────────
+  //
+  // Two assets, two axis conventions, and the tuning object above can
+  // only describe one of them. assault_drone_concept is authored nose on
+  // body +X; dji_air_3 is nose on glTF -Z, reversed like the Shahed. So
+  // the orientation travels WITH the model rather than sitting in one
+  // shared object, which is what would otherwise fly one of them
+  // sideways.
+  //
+  // Scale is chosen so both render at the same apparent size. Measured
+  // by composing each asset's full node transform chain, because the raw
+  // accessor extents are meaningless under the Air 3's folding-arm hinge
+  // matrices, a 0.01 scale and two up-axis swaps:
+  //
+  //     assault_drone_concept   2.315 m longest axis x 0.5   = 1.158 m
+  //     dji_air_3               4.672 m longest axis x 0.248 = 1.158 m
+  //
+  // Both are deliberately larger than a real airframe. A DJI Air 3 is
+  // about 0.25 m across and would be a pixel; 1.16 m is what the map has
+  // always drawn and what Lucas has signed off three scenarios against.
+  //
+  // THE DEFAULT DOES NOT CHANGE. assault_drone_concept stays until the
+  // Air 3 has been looked at on a real GPU, for two reasons that cannot
+  // be settled headless:
+  //   - nose direction. 180/-1/-1 comes from the asset work in da1bdbb,
+  //     not from my own eyes. If the nose points wrong, try
+  //     modelOverride.headingOffsetDeg at 0, 90, 180, 270.
+  //   - 311k triangles against 24.9k, times five in a formation.
+  //     Software rendering says nothing useful about that.
+  //
+  // To try it:  __isr_quad_tuning.model = 'dji_air_3'   then launch a
+  // scenario. The uri is read when the entity is built, so it applies to
+  // the next spawn rather than to one already flying.
+  //
+  // The interceptor quad is NOT in here. It hardcodes
+  // assault_drone_concept because the gun pod IS that airframe, and it
+  // keeps the shared tuning's orientation.
+  const _QUAD_MODELS = {
+    assault_drone_concept: {
+      uri: '/aircraft/assault_drone_concept.glb',
+      scale: 0.5,
+      headingOffsetDeg: 270, pitchSign: 1, rollSign: 1, pitchOffsetDeg: 0,
+    },
+    dji_air_3: {
+      uri: '/aircraft/dji_air_3.glb',
+      scale: 0.248,
+      headingOffsetDeg: 180, pitchSign: -1, rollSign: -1, pitchOffsetDeg: 0,
+    },
+  };
+
+  // The selected model, plus any live tweak. modelOverride is a separate
+  // namespace on purpose: the tuning object is SEEDED with the assault
+  // drone's values, so `T.headingOffsetDeg ?? x` can never fall through
+  // to another model's. Same trap that made the first pixel-floor fix a
+  // no-op.
+  function _quadModelSpec() {
+    const t = window.__isr_quad_tuning || {};
+    const sel = _QUAD_MODELS[t.model] || null;
+    const m = sel || _QUAD_MODELS.assault_drone_concept;
+    // t.scale is SEEDED with 0.5, which IS the assault drone's value and
+    // is the knob the comments have always advertised, so it keeps
+    // governing while the default model is selected. A selected model
+    // brings its own, because 0.5 on the Air 3 draws 2.34 m against the
+    // 1.16 m this map has always drawn. Reading `t.scale ?? m.scale`
+    // unconditionally silently kept 0.5 for both, which is the same
+    // seeded-key trap that made the first pixel-floor fix a no-op.
+    const scale = sel ? m.scale : (t.scale ?? m.scale);
+    return { ...m, scale, ...(t.modelOverride || {}) };
+  }
+
   function _quadRotorTransforms(rpsGetter) {
     const out = {};
     _QUAD_ROTOR_NODES.forEach((name, i) => {
@@ -16947,7 +17017,7 @@ async function main() {
     const MODEL_SWAP_M = isHostileHeli ? 6000 : (isAirliner ? 5000 : 250);
     const _modelUri = isLoiterMun
       ? '/aircraft/shahed_238_drone.glb'
-      : (isQuadcopter ? '/aircraft/assault_drone_concept.glb'
+      : (isQuadcopter ? _quadModelSpec().uri
         : (isHostileHeli ? '/aircraft/mi-24_hind.glb'
           // THE RIGGED SOURCE, running its OWN animation. The builder
           // authored 28 seconds of gear, doors, flaps, ailerons and air
@@ -17382,13 +17452,20 @@ async function main() {
       const cart = _billboardRef?.position?.getValue?.(Cesium.JulianDate.now());
       if (!cart) return undefined;
       const T = window.__isr_quad_tuning || {};
-      const headingOffset  = ((T.headingOffsetDeg || 0) * Math.PI) / 180;
-      const pitchOffset    = ((T.pitchOffsetDeg   || 0) * Math.PI) / 180;
+      // AXIS CONVENTION TRAVELS WITH THE MODEL. Threat drone rig.
+      // assault_drone_concept is nose on body +X, dji_air_3 is
+      // nose on glTF -Z, and one shared set of values cannot
+      // describe both: the wrong one flies the airframe
+      // sideways. _quadModelSpec() returns the selected
+      // model's own, with modelOverride for a live tweak.
+      const _qM = _quadModelSpec();
+      const headingOffset  = ((_qM.headingOffsetDeg || 0) * Math.PI) / 180;
+      const pitchOffset    = ((_qM.pitchOffsetDeg   || 0) * Math.PI) / 180;
       // Asset-space axis flips. 1 for a model whose nose sits on body
       // +X, -1 for one authored nose-reversed. Applied at the HPR
       // boundary below so everything above stays world-semantic.
-      const pitchSign      = T.pitchSign          ?? 1;
-      const rollSign       = T.rollSign           ?? 1;
+      const pitchSign      = _qM.pitchSign        ?? 1;
+      const rollSign       = _qM.rollSign         ?? 1;
       const headingSmooth  = T.headingSmoothing   ?? 0.20;
       const pitchSmooth    = T.pitchSmoothing     ?? 0.15;
       const rollSmooth     = T.rollSmoothing      ?? 0.12;
@@ -17517,7 +17594,8 @@ async function main() {
         // Mi-24: 21.5 m over all, model longest axis 19.18, so 1.121.
         // Floor derived from real metres like everything else.
         scale: isAirliner ? 1
-          : (isHostileHeli ? 1.121 : (isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5))),
+          : (isHostileHeli ? 1.121 : (isLoiterMun ? SHAHED_SCALE
+            : _quadModelSpec().scale)),
         // THE LEAD GETS WHAT ITS OWN WINGMEN GET.
         //
         // This spec has never set either, so a swarm lead drew at true
@@ -17533,8 +17611,28 @@ async function main() {
         // reported; isLoiterMun keeps the 24 it was tuned at.
         ...(isAirliner || isHostileHeli ? {} : {
           minimumPixelSize: isLoiterMun ? 24 : (_qT.swarmMinimumPixelSize ?? 14),
-          maximumScale: (isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5))
+          maximumScale: (isLoiterMun ? SHAHED_SCALE : _quadModelSpec().scale)
             * (_qT.swarmMaxExaggeration ?? MODEL_MAX_EXAGGERATION),
+        }),
+        // PROPELLERS, WHICH THIS SPEC HAS NEVER TURNED.
+        //
+        // nodeTransformations was set in exactly three places: the
+        // interceptor quad, the swarm WINGMEN, and the helicopter. Not
+        // here. So a single hostile quad's propellers stood still, and
+        // in a formation the four wingmen turned while the lead did
+        // not. The comment beside the wingmen says "same reasoning as
+        // the single-drone spec above", which had stopped being true.
+        //
+        // __isr_propCheck() already had a line for this case ("nothing
+        // is driving its propellers") and it was never hit because
+        // nobody ran it against a lead.
+        //
+        // Quads only: the Shahed has no rotors, the Mi-24 drives its
+        // own main and tail rotor a few hundred lines up, and the
+        // airliner runs the builder's own animation clip.
+        ...(isAirliner || isHostileHeli || isLoiterMun ? {} : {
+          nodeTransformations: _quadRotorTransforms(
+            () => (window.__isr_quad_tuning || {}).rotorRps ?? 12),
         }),
         // THE BUILDER'S OWN LANDING SEQUENCE, PLAYED ONCE.
         //
@@ -17763,11 +17861,18 @@ async function main() {
           const cart = _swBbRef?.position?.getValue?.(Cesium.JulianDate.now());
           if (!cart) return undefined;
           const T = window.__isr_quad_tuning || {};
-          const headingOffset  = ((T.headingOffsetDeg || 0) * Math.PI) / 180;
-          const pitchOffset    = ((T.pitchOffsetDeg   || 0) * Math.PI) / 180;
+          // AXIS CONVENTION TRAVELS WITH THE MODEL. Threat drone rig.
+          // assault_drone_concept is nose on body +X, dji_air_3 is
+          // nose on glTF -Z, and one shared set of values cannot
+          // describe both: the wrong one flies the airframe
+          // sideways. _quadModelSpec() returns the selected
+          // model's own, with modelOverride for a live tweak.
+          const _qM = _quadModelSpec();
+          const headingOffset  = ((_qM.headingOffsetDeg || 0) * Math.PI) / 180;
+          const pitchOffset    = ((_qM.pitchOffsetDeg   || 0) * Math.PI) / 180;
           // Asset-space axis flips. See the lead rig for the rationale.
-          const pitchSign      = T.pitchSign          ?? 1;
-          const rollSign       = T.rollSign           ?? 1;
+          const pitchSign      = _qM.pitchSign        ?? 1;
+          const rollSign       = _qM.rollSign         ?? 1;
           const headingSmooth  = T.headingSmoothing   ?? 0.20;
           const pitchSmooth    = T.pitchSmoothing     ?? 0.15;
           const rollSmooth     = T.rollSmoothing      ?? 0.12;
@@ -17860,7 +17965,7 @@ async function main() {
           const _qT = window.__isr_quad_tuning || {};
           _swEntitySpec.model = {
             uri: _modelUri,
-            scale: isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5),
+            scale: isLoiterMun ? SHAHED_SCALE : _quadModelSpec().scale,
             // NO PIXEL FLOOR ON A SWARM QUAD, because the LEAD has
             // never had one and the wingmen did.
             //
@@ -17913,11 +18018,11 @@ async function main() {
             // The Shahed keeps its 24: it is a 3.5 m airframe that was
             // tuned against the terrain and is not what was reported.
             minimumPixelSize: isLoiterMun ? 24 : (_qT.swarmMinimumPixelSize ?? 14),
-            maximumScale: (isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5))
+            maximumScale: (isLoiterMun ? SHAHED_SCALE : _quadModelSpec().scale)
               * (_qT.swarmMaxExaggeration ?? MODEL_MAX_EXAGGERATION),
             distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
             shadows: Cesium.ShadowMode.DISABLED,
-            // Swarm members, same reasoning as the single-drone spec above.
+            // Swarm members, same reasoning as the lead spec above.
             ...(isLoiterMun ? {} : { nodeTransformations: _quadRotorTransforms(
               () => (window.__isr_quad_tuning || {}).rotorRps ?? 12) }),
           };
