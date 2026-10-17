@@ -18845,7 +18845,29 @@ async function main() {
             if (state._terrOff == null || _onGround) {
               state._terrOff = _g;
             } else {
-              state._terrOff += (_g - state._terrOff) * 0.12;
+              // EASE RATE DEPENDS ON HEIGHT, AND THAT IS THE WHOLE POINT.
+              //
+              // The aircraft's altitude is terrain plus its own height,
+              // so every step in the terrain reference moves the
+              // aircraft. globe.getHeight does step, by metres, as tile
+              // detail refines, and at 0.12 a frame that is followed in
+              // about a tenth of a second: a visible twitch. Worst at
+              // the start of a run, when tiles are still arriving and
+              // the reference is refining constantly, which is exactly
+              // where Lucas saw it.
+              //
+              // Near the ground the offset HAS to track the surface
+              // closely, because the wheels are on it and a runway that
+              // rises along its length will otherwise swallow them. So
+              // the tuned 0.12 is kept for everything below 80 m, which
+              // is the same threshold the precise sampler already uses.
+              //
+              // Above that nobody can see the surface the aircraft is
+              // referenced to, only the aircraft, so the reference eases
+              // over about a second and a half and tile steps disappear
+              // into it.
+              const _ease = (p.alt || 0) < 80 ? 0.12 : 0.02;
+              state._terrOff += (_g - state._terrOff) * _ease;
             }
           }
           // GROUND OFFSET, trimmed by eye and then written down.
