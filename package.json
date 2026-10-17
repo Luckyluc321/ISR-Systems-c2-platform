@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check:id-namespaces && npm run check:receiver-ctas && npm run check:event-mutations && npm run check:tenant-stamping && npm run check:impact-cascade && npm run check:scene-lifecycle && npm run check:coverage-gate && npm run check:track-clustering && npm run check:undeclared && npm run check:site-assets && npm run check:attribution && npm run check:provenance && npm run check:track-identity && npm run check:signal-tier && npm run check:eval-fixtures && npm run check:sim-clock && npm run check:sim-clock-runtime && npm run check:live-sensor && npm run check:sensor-pulse && npm run check:member-sensors && vite build",
+    "build": "npm run check:id-namespaces && npm run check:receiver-ctas && npm run check:event-mutations && npm run check:tenant-stamping && npm run check:impact-cascade && npm run check:scene-lifecycle && npm run check:coverage-gate && npm run check:track-clustering && npm run check:undeclared && npm run check:site-assets && npm run check:attribution && npm run check:provenance && npm run check:track-identity && npm run check:signal-tier && npm run check:eval-fixtures && npm run check:sim-clock && npm run check:sim-clock-runtime && npm run check:live-sensor && npm run check:sensor-pulse && npm run check:member-sensors && npm run check:quad-flight && vite build",
     "preview": "vite preview",
     "check:event-mutations": "node scripts/check-event-mutations.mjs",
     "check:tenant-stamping": "node scripts/check-tenant-stamping.mjs",
@@ -28,7 +28,8 @@
     "check:receiver-ctas": "node scripts/check-receiver-ctas.mjs",
     "check:live-sensor": "node scripts/check-live-sensor.mjs",
     "check:sensor-pulse": "node scripts/check-sensor-pulse.mjs",
-    "check:member-sensors": "node scripts/check-member-sensor-attribution.mjs"
+    "check:member-sensors": "node scripts/check-member-sensor-attribution.mjs",
+    "check:quad-flight": "node scripts/check-quad-flight.mjs"
   },
   "devDependencies": {
     "vite": "^8.1.1"

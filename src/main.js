@@ -713,6 +713,7 @@ import { initSovereignLayers } from './sovereign_layers.js';
 import { initSovereignServices, DK_SERVICES, lookupBBR, reverseGeocodeDAR, findNearestWeatherStations } from './sovereign_services.js';
 import { initLiveFeeds } from './sovereign_live_feeds.js';
 // First real sensor node. Console entry points + the bridge feed consumer.
+import { createQuadFlightModel, rotorsFromHubs } from './quad_flight_model.js';
 import { createLiveSensorRuntime } from './live_sensor.js';
 import { activateManhattanDemo, deactivateManhattanDemo, setManhattanChase } from './manhattan_demo.js';
 // Cooperative-traffic adapters self-register on import. Order matters
@@ -936,14 +937,22 @@ async function main() {
     // window.__isr_quad_tuning.scale if it reads too large or small.
     scale: 0.5,
     minimumPixelSize: 14,      // floor so the model stays visible when zoomed
-    headingSmoothing: 0.22,    // quads yaw fast — snap follow direction of travel
-    pitchSmoothing:   0.16,    // pitch follows accel envelope
-    rollSmoothing:    0.14,    // bank into turns
-    bankFactor:       4.0,     // radians of roll per rad/s yaw rate. Bumped from 3.0 for a more visible turn-bank.
-    forwardPitchDeg:  15,      // extra nose-down pitch at cruise forward speed
-    cruiseMs:         15,      // reference cruise speed for forward-pitch scaling
-    bankClampDeg:     35,      // ±maximum bank angle (bumped from 30 for clearer visual on hard turns)
-    pitchClampDeg:    30,
+    // THESE EIGHT NO LONGER DRIVE A THREAT DRONE. They were the
+    // cosmetic rig: smooth the heading, bias the pitch by speed, set
+    // the roll to yaw rate times a made-up factor, clamp both. Threat
+    // quads now run the Blender flight model in
+    // src/quad_flight_model.js, which derives attitude from the
+    // acceleration the path demands. Kept because the INTERCEPTOR quad
+    // still uses them and because deleting a documented knob out from
+    // under someone's console is worse than leaving it.
+    headingSmoothing: 0.22,    // interceptor only
+    pitchSmoothing:   0.16,    // interceptor only
+    rollSmoothing:    0.14,    // interceptor only
+    bankFactor:       4.0,     // interceptor only
+    forwardPitchDeg:  15,      // interceptor only
+    cruiseMs:         15,      // interceptor only
+    bankClampDeg:     35,      // interceptor only
+    pitchClampDeg:    30,      // interceptor only
     // Propeller speed, revolutions per second. Declared here rather than
     // left to live only as a `?? 12` fallback at its three call sites, so
     // a reader scanning this block learns the knob exists. Diagonal pairs
@@ -6594,7 +6603,39 @@ async function main() {
   // Diagonal pairs turn opposite ways, which is how a quadcopter actually
   // flies: without opposed pairs the airframe would spin up its own yaw.
   // Rotor_1 and Rotor_4 are one diagonal, Rotor_2 and Rotor_3 the other.
+  // Last flight-model output per airframe, for __isr_quadFlight().
+  // Written by the rigs every frame, read only by the diagnostic.
+  const _quadFlightDiag = new Map();
+
   const _QUAD_ROTOR_NODES = ['Rotor_1', 'Rotor_2', 'Rotor_3', 'Rotor_4'];
+  // Spin sense per node, in that order. 1 and 4 one way, 2 and 3 the
+  // other, which is the diagonal pairing both assets are built with.
+  const _QUAD_ROTOR_SENSE = [1, -1, -1, 1];
+
+  // COMPOSED hub positions, in each model's own space, Rotor_1..4.
+  //
+  // Read by walking the asset's full node transform chain, which is the
+  // only way on a model whose arms fold under hinge matrices: the raw
+  // accessor extents of dji_air_3 read 322 x 190 x 167 and mean
+  // nothing. Used for the flight model's rotor differential, where only
+  // the RATIO between arms matters, so the model scale cancels.
+  const _QUAD_ROTOR_HUBS = {
+    dji_air_3: {
+      hubs: [[1.519, -0.198, -0.813], [1.298, -0.242, 1.437],
+             [-1.519, -0.199, -0.813], [-1.296, -0.258, 1.438]],
+      nose: '-z', up: '+y',
+    },
+    assault_drone_concept: {
+      hubs: [[-0.729, 0.043, 0.725], [-0.729, 0.043, -0.722],
+             [0.729, 0.043, 0.725], [0.729, 0.043, -0.722]],
+      nose: '+x', up: '+y',
+    },
+  };
+
+  function _quadRotorGeometry(key) {
+    const g = _QUAD_ROTOR_HUBS[key] || _QUAD_ROTOR_HUBS.assault_drone_concept;
+    return rotorsFromHubs(g.hubs, g.nose, g.up, _QUAD_ROTOR_SENSE);
+  }
 
   // ── WHICH QUADCOPTER MODEL THE THREAT DRONES WEAR ────────────────
   //
@@ -6633,6 +6674,14 @@ async function main() {
   // The interceptor quad is NOT in here. It hardcodes
   // assault_drone_concept because the gun pod IS that airframe, and it
   // keeps the shared tuning's orientation.
+  // THE DEFAULT AIRFRAME FOR A THREAT QUADCOPTER.
+  //
+  // The gun drone is still in the repo, still what the interceptor
+  // quad hardcodes because the gun pod IS that airframe, and still one
+  // word away for any scenario that wants it:
+  //   __isr_quad_tuning.model = 'assault_drone_concept'
+  const _QUAD_MODEL_DEFAULT = 'dji_air_3';
+
   const _QUAD_MODELS = {
     assault_drone_concept: {
       uri: '/aircraft/assault_drone_concept.glb',
@@ -6666,7 +6715,7 @@ async function main() {
   function _quadModelSpec(key) {
     const t = window.__isr_quad_tuning || {};
     const sel = _QUAD_MODELS[key || t.model] || null;
-    const m = sel || _QUAD_MODELS.assault_drone_concept;
+    const m = sel || _QUAD_MODELS[_QUAD_MODEL_DEFAULT];
     // t.scale is SEEDED with 0.5, which IS the assault drone's value and
     // is the knob the comments have always advertised, so it keeps
     // governing while the default model is selected. A selected model
@@ -6678,16 +6727,24 @@ async function main() {
     return { ...m, scale, ...(t.modelOverride || {}) };
   }
 
+  // rpsGetter may return a NUMBER, the old one-speed-for-all behaviour
+  // kept for the interceptor and anything else that has no flight
+  // model, or an ARRAY of four, which is what the flight model
+  // produces. A quadcopter differentiates its rotors to tilt and to
+  // yaw, by about 8% at full attitude acceleration, and that
+  // differential is visible on a close pass.
   function _quadRotorTransforms(rpsGetter) {
     const out = {};
     _QUAD_ROTOR_NODES.forEach((name, i) => {
-      // 1 and 4 one way, 2 and 3 the other.
-      const dir = (i === 0 || i === 3) ? 1 : -1;
+      const dir = _QUAD_ROTOR_SENSE[i];
       out[name] = {
         translation: Cesium.Cartesian3.ZERO,
         scale: new Cesium.Cartesian3(1, 1, 1),
-        rotation: new Cesium.CallbackProperty(
-          () => _rotorSpin(Cesium.Cartesian3.UNIT_Z, dir * rpsGetter()), false),
+        rotation: new Cesium.CallbackProperty(() => {
+          const r = rpsGetter();
+          const rps = Array.isArray(r) ? (r[i] ?? r[0] ?? 0) : r;
+          return _rotorSpin(Cesium.Cartesian3.UNIT_Z, dir * rps);
+        }, false),
       };
     });
     return out;
@@ -17014,7 +17071,7 @@ async function main() {
     // the instant the switch was flipped: old body, new axis
     // convention. One captured value cannot disagree with itself.
     const _quadKey = (window.__isr_quad_tuning || {}).model
-      || 'assault_drone_concept';
+      || _QUAD_MODEL_DEFAULT;
     // COMMERCIAL AIRLINER. Only the 'jet' platform reaches this, which
     // today is one template, the SAS approach onto 04R, so nothing else
     // changes shape.
@@ -17457,106 +17514,72 @@ async function main() {
       return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
     };
 
-    // Quadcopter orientation rig — same physics shape as _bankedOrientation
-    // (bank-on-yaw for real banked turns, pitch from vertical velocity for
-    // climb/descent) PLUS an additive forward-pitch bias proportional to
-    // horizontal speed (thrust-vector tilt when the quad accelerates
-    // forward). Reads live from window.__isr_quad_tuning per frame so
-    // console tweaks apply without rebuild.
-    let _qSmoothedHeading = null;
-    let _qSmoothedPitch = 0;
-    let _qSmoothedRoll = 0;
-    let _qPrevHeadingRad = null;
-    let _qPrevPosCart = null;
+    // ── QUADCOPTER FLIGHT MODEL, not a smoothing rig ────────────────
+    //
+    // This used to be eight cosmetic constants: smooth the heading
+    // toward the direction of travel, bias the pitch by speed, set the
+    // roll to yaw-rate times a made-up factor, clamp both. It described
+    // how an icon should look.
+    //
+    // It is now the airframe and controller from
+    // scripts/blender_drone_flight_demo.py, the model the flight demo
+    // was rendered with. Same constants, same names, same values:
+    // MAX_TILT 32 deg, A_MAX 6.5, DRAG_K 0.0156, ATT_TAU 0.15,
+    // ATT_RATE 120 deg/s, VZ_TAU 0.6, YAW_TAU 0.3, plus the rotor speed
+    // model and the hover noise. See src/quad_flight_model.js for the
+    // one difference, which is that the map OWNS the position and the
+    // model is therefore driven by measuring the path rather than by
+    // generating it.
+    //
+    // Live tuning still works, and now moves real quantities:
+    //   __isr_quad_tuning.rotorRps = 20
+    //   __isr_quad_tuning.modelOverride = { headingOffsetDeg: 90 }
+    const _quadFlight = createQuadFlightModel({
+      rotors: _quadRotorGeometry(_quadKey),
+      rps: (window.__isr_quad_tuning || {}).rotorRps ?? 12,
+      seed: 0,
+    });
+    let _quadLastHpr = null;
+    // Per-rotor speeds, written by the rig below and read by the
+    // model's node transforms. A quadcopter differentiates its rotors
+    // to turn and to yaw; one shared number cannot show that.
+    let _quadRotorRps = null;
     let _qPrevTime = performance.now();
     const _quadOrientation = () => {
       const cart = _billboardRef?.position?.getValue?.(Cesium.JulianDate.now());
       if (!cart) return undefined;
-      const T = window.__isr_quad_tuning || {};
-      // AXIS CONVENTION TRAVELS WITH THE MODEL. Threat drone rig.
-      // assault_drone_concept is nose on body +X, dji_air_3 is
-      // nose on glTF -Z, and one shared set of values cannot
-      // describe both: the wrong one flies the airframe
-      // sideways. _quadModelSpec() returns the selected
-      // model's own, with modelOverride for a live tweak.
       const _qM = _quadModelSpec(_quadKey);
-      const headingOffset  = ((_qM.headingOffsetDeg || 0) * Math.PI) / 180;
-      const pitchOffset    = ((_qM.pitchOffsetDeg   || 0) * Math.PI) / 180;
-      // Asset-space axis flips. 1 for a model whose nose sits on body
-      // +X, -1 for one authored nose-reversed. Applied at the HPR
-      // boundary below so everything above stays world-semantic.
-      const pitchSign      = _qM.pitchSign        ?? 1;
-      const rollSign       = _qM.rollSign         ?? 1;
-      const headingSmooth  = T.headingSmoothing   ?? 0.20;
-      const pitchSmooth    = T.pitchSmoothing     ?? 0.15;
-      const rollSmooth     = T.rollSmoothing      ?? 0.12;
-      const bankFactor     = T.bankFactor         ?? 3.0;
-      const bankClamp      = ((T.bankClampDeg  || 30) * Math.PI) / 180;
-      const pitchClamp     = ((T.pitchClampDeg || 30) * Math.PI) / 180;
-      const forwardPitch   = ((T.forwardPitchDeg || 15) * Math.PI) / 180;
-      const cruiseMs       = T.cruiseMs           ?? 15;
+      const headingOffset = ((_qM.headingOffsetDeg || 0) * Math.PI) / 180;
+      const pitchOffset   = ((_qM.pitchOffsetDeg   || 0) * Math.PI) / 180;
+      const pitchSign     = _qM.pitchSign ?? 1;
+      const rollSign      = _qM.rollSign  ?? 1;
 
       const now = performance.now();
-      const dt = Math.max(0.016, (now - _qPrevTime) / 1000);
-      const targetHeading = -stateHolder.headingRad;
-
-      // Pitch A: climb/descent from vertical velocity + horizontal delta.
-      let climbPitch = 0;
-      let speedMs = 0;
-      if (_qPrevPosCart) {
-        const prev = Cesium.Cartographic.fromCartesian(_qPrevPosCart);
-        const curr = Cesium.Cartographic.fromCartesian(cart);
-        const dAlt = curr.height - prev.height;
-        const meanLat = (curr.latitude + prev.latitude) / 2;
-        const R = 6371000;
-        const dNorth = (curr.latitude  - prev.latitude)  * R;
-        const dEast  = (curr.longitude - prev.longitude) * R * Math.cos(meanLat);
-        const dHoriz = Math.sqrt(dNorth * dNorth + dEast * dEast);
-        speedMs = dHoriz / dt;
-        if (dHoriz > 0.1) climbPitch = Math.atan2(dAlt, dHoriz);
-      }
-      // Pitch B: forward thrust-vector tilt (nose-down at cruise speed).
-      const thrustPitch = -forwardPitch * Math.min(1, speedMs / cruiseMs);
-      // Combined pitch = climb angle + forward thrust bias, clamped.
-      let targetPitch = climbPitch + thrustPitch;
-      if (targetPitch >  pitchClamp) targetPitch =  pitchClamp;
-      if (targetPitch < -pitchClamp) targetPitch = -pitchClamp;
-
-      // Roll: bank into turns from yaw rate. Same physics as fixed-wing
-      // — turning right (+ yaw rate) rolls right rotor down (+ roll).
-      let targetRoll = 0;
-      if (_qPrevHeadingRad !== null) {
-        let dh = targetHeading - _qPrevHeadingRad;
-        while (dh >  Math.PI) dh -= 2 * Math.PI;
-        while (dh < -Math.PI) dh += 2 * Math.PI;
-        const yawRate = dh / dt;
-        targetRoll = yawRate * bankFactor;
-        if (targetRoll >  bankClamp) targetRoll =  bankClamp;
-        if (targetRoll < -bankClamp) targetRoll = -bankClamp;
-      }
-
-      if (_qSmoothedHeading === null) _qSmoothedHeading = targetHeading;
-      else {
-        let dh = targetHeading - _qSmoothedHeading;
-        while (dh >  Math.PI) dh -= 2 * Math.PI;
-        while (dh < -Math.PI) dh += 2 * Math.PI;
-        _qSmoothedHeading += dh * headingSmooth;
-      }
-      _qSmoothedPitch += (targetPitch - _qSmoothedPitch) * pitchSmooth;
-      _qSmoothedRoll  += (targetRoll  - _qSmoothedRoll)  * rollSmooth;
-
-      _qPrevHeadingRad = targetHeading;
-      _qPrevPosCart = Cesium.Cartesian3.clone(cart);
+      const dt = (now - _qPrevTime) / 1000;
       _qPrevTime = now;
 
+      const c = Cesium.Cartographic.fromCartesian(cart);
+      const out = _quadFlight.update(
+        Cesium.Math.toDegrees(c.latitude),
+        Cesium.Math.toDegrees(c.longitude),
+        c.height, dt);
+      // Until there are two samples to differentiate there is no
+      // attitude to report, so hold the last one rather than snapping
+      // to level for a frame.
+      if (out) {
+        _quadLastHpr = out;
+        _quadRotorRps = out.rotorRps;
+        _quadFlightDiag.set(`${event.id}`, out);
+      }
+      if (!_quadLastHpr) return undefined;
+
       const hpr = new Cesium.HeadingPitchRoll(
-        _qSmoothedHeading + headingOffset,
-        (_qSmoothedPitch + pitchOffset) * pitchSign,
-        _qSmoothedRoll * rollSign,
+        _quadLastHpr.headingRad + headingOffset,
+        (_quadLastHpr.pitchRad + pitchOffset) * pitchSign,
+        _quadLastHpr.rollRad * rollSign,
       );
       return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
     };
-
     const _droneEntitySpec = {
       id: `drone-${event.id}`,
       position: Cesium.Cartesian3.fromDegrees(...startPos),
@@ -17653,7 +17676,7 @@ async function main() {
         // airliner runs the builder's own animation clip.
         ...(isAirliner || isHostileHeli || isLoiterMun ? {} : {
           nodeTransformations: _quadRotorTransforms(
-            () => (window.__isr_quad_tuning || {}).rotorRps ?? 12),
+            () => _quadRotorRps || ((window.__isr_quad_tuning || {}).rotorRps ?? 12)),
         }),
         // THE BUILDER'S OWN LANDING SEQUENCE, PLAYED ONCE.
         //
@@ -17872,89 +17895,45 @@ async function main() {
         // Swarm-member quadcopter orientation rig. Same physics as
         // _quadOrientation (bank on turns + climb pitch + forward
         // thrust bias) with independent smoothing state per member.
-        let _swQSmoothedHeading = null;
-        let _swQSmoothedPitch = 0;
-        let _swQSmoothedRoll = 0;
-        let _swQPrevHeadingRad = null;
-        let _swQPrevPosCart = null;
+        // Each member runs its OWN flight model instance. A formation
+        // is five airframes, not one attitude copied five times: the
+        // wingmen are flying a different path, so they lean and
+        // differentiate their rotors differently, and the hover noise
+        // is decorrelated by seed so they do not breathe in unison.
+        const _swFlight = createQuadFlightModel({
+          rotors: _quadRotorGeometry(_quadKey),
+          rps: (window.__isr_quad_tuning || {}).rotorRps ?? 12,
+          seed: (i + 1) * 1.7,
+        });
+        let _swLastHpr = null;
+        let _swRotorRps = null;
         let _swQPrevTime = performance.now();
         const _swQuadOrientation = () => {
           const cart = _swBbRef?.position?.getValue?.(Cesium.JulianDate.now());
           if (!cart) return undefined;
-          const T = window.__isr_quad_tuning || {};
-          // AXIS CONVENTION TRAVELS WITH THE MODEL. Threat drone rig.
-          // assault_drone_concept is nose on body +X, dji_air_3 is
-          // nose on glTF -Z, and one shared set of values cannot
-          // describe both: the wrong one flies the airframe
-          // sideways. _quadModelSpec() returns the selected
-          // model's own, with modelOverride for a live tweak.
           const _qM = _quadModelSpec(_quadKey);
-          const headingOffset  = ((_qM.headingOffsetDeg || 0) * Math.PI) / 180;
-          const pitchOffset    = ((_qM.pitchOffsetDeg   || 0) * Math.PI) / 180;
-          // Asset-space axis flips. See the lead rig for the rationale.
-          const pitchSign      = _qM.pitchSign        ?? 1;
-          const rollSign       = _qM.rollSign         ?? 1;
-          const headingSmooth  = T.headingSmoothing   ?? 0.20;
-          const pitchSmooth    = T.pitchSmoothing     ?? 0.15;
-          const rollSmooth     = T.rollSmoothing      ?? 0.12;
-          const bankFactor     = T.bankFactor         ?? 3.0;
-          const bankClamp      = ((T.bankClampDeg  || 30) * Math.PI) / 180;
-          const pitchClamp     = ((T.pitchClampDeg || 30) * Math.PI) / 180;
-          const forwardPitch   = ((T.forwardPitchDeg || 15) * Math.PI) / 180;
-          const cruiseMs       = T.cruiseMs           ?? 15;
+          const headingOffset = ((_qM.headingOffsetDeg || 0) * Math.PI) / 180;
+          const pitchOffset   = ((_qM.pitchOffsetDeg   || 0) * Math.PI) / 180;
+          const pitchSign     = _qM.pitchSign ?? 1;
+          const rollSign      = _qM.rollSign  ?? 1;
 
           const now = performance.now();
-          const dt = Math.max(0.016, (now - _swQPrevTime) / 1000);
-          const targetHeading = -stateHolder.headingRad;
-
-          let climbPitch = 0;
-          let speedMs = 0;
-          if (_swQPrevPosCart) {
-            const prev = Cesium.Cartographic.fromCartesian(_swQPrevPosCart);
-            const curr = Cesium.Cartographic.fromCartesian(cart);
-            const dAlt = curr.height - prev.height;
-            const meanLat = (curr.latitude + prev.latitude) / 2;
-            const R = 6371000;
-            const dNorth = (curr.latitude  - prev.latitude)  * R;
-            const dEast  = (curr.longitude - prev.longitude) * R * Math.cos(meanLat);
-            const dHoriz = Math.sqrt(dNorth * dNorth + dEast * dEast);
-            speedMs = dHoriz / dt;
-            if (dHoriz > 0.1) climbPitch = Math.atan2(dAlt, dHoriz);
-          }
-          const thrustPitch = -forwardPitch * Math.min(1, speedMs / cruiseMs);
-          let targetPitch = climbPitch + thrustPitch;
-          if (targetPitch >  pitchClamp) targetPitch =  pitchClamp;
-          if (targetPitch < -pitchClamp) targetPitch = -pitchClamp;
-
-          let targetRoll = 0;
-          if (_swQPrevHeadingRad !== null) {
-            let dh = targetHeading - _swQPrevHeadingRad;
-            while (dh >  Math.PI) dh -= 2 * Math.PI;
-            while (dh < -Math.PI) dh += 2 * Math.PI;
-            const yawRate = dh / dt;
-            targetRoll = yawRate * bankFactor;
-            if (targetRoll >  bankClamp) targetRoll =  bankClamp;
-            if (targetRoll < -bankClamp) targetRoll = -bankClamp;
-          }
-
-          if (_swQSmoothedHeading === null) _swQSmoothedHeading = targetHeading;
-          else {
-            let dh = targetHeading - _swQSmoothedHeading;
-            while (dh >  Math.PI) dh -= 2 * Math.PI;
-            while (dh < -Math.PI) dh += 2 * Math.PI;
-            _swQSmoothedHeading += dh * headingSmooth;
-          }
-          _swQSmoothedPitch += (targetPitch - _swQSmoothedPitch) * pitchSmooth;
-          _swQSmoothedRoll  += (targetRoll  - _swQSmoothedRoll)  * rollSmooth;
-
-          _swQPrevHeadingRad = targetHeading;
-          _swQPrevPosCart = Cesium.Cartesian3.clone(cart);
+          const dt = (now - _swQPrevTime) / 1000;
           _swQPrevTime = now;
 
+          const c = Cesium.Cartographic.fromCartesian(cart);
+          const out = _swFlight.update(
+            Cesium.Math.toDegrees(c.latitude),
+            Cesium.Math.toDegrees(c.longitude),
+            c.height, dt);
+          if (out) { _swLastHpr = out; _swRotorRps = out.rotorRps;
+            _quadFlightDiag.set(`${event.id}-swarm-${i}`, out); }
+          if (!_swLastHpr) return undefined;
+
           const hpr = new Cesium.HeadingPitchRoll(
-            _swQSmoothedHeading + headingOffset,
-            (_swQSmoothedPitch + pitchOffset) * pitchSign,
-            _swQSmoothedRoll * rollSign,
+            _swLastHpr.headingRad + headingOffset,
+            (_swLastHpr.pitchRad + pitchOffset) * pitchSign,
+            _swLastHpr.rollRad * rollSign,
           );
           return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
         };
@@ -18045,7 +18024,7 @@ async function main() {
             shadows: Cesium.ShadowMode.DISABLED,
             // Swarm members, same reasoning as the lead spec above.
             ...(isLoiterMun ? {} : { nodeTransformations: _quadRotorTransforms(
-              () => (window.__isr_quad_tuning || {}).rotorRps ?? 12) }),
+              () => _swRotorRps || ((window.__isr_quad_tuning || {}).rotorRps ?? 12)) }),
           };
           _swEntitySpec.orientation = new Cesium.CallbackProperty(
             () => (isLoiterMun ? _swBankedOrientation() : _swQuadOrientation()),
@@ -20897,6 +20876,36 @@ async function main() {
   //
   //   __isr_propCheck()      one reading
   //   __isr_propCheck(3)     three readings a second apart, to see motion
+  // WHAT THE FLIGHT MODEL IS ACTUALLY DOING, per airframe.
+  //
+  //   __isr_quadFlight()
+  //
+  // tilt is the total lean, which at a steady cruise should sit at the
+  // drag balance for that speed: atan(DRAG_K * v^2 / g). 15 m/s gives
+  // about 20 degrees. pitch and roll are that lean split along the nose
+  // and the right wing. rotor spread is the percentage difference
+  // across the four, which is how a quadcopter turns and yaws.
+  window.__isr_quadFlight = () => {
+    const rows = [];
+    for (const [key, o] of _quadFlightDiag) {
+      if (!o) continue;
+      const lo = Math.min(...o.rotorRps), hi = Math.max(...o.rotorRps);
+      rows.push({
+        airframe: key.replace(/^DET-\d+-?/, '') || key,
+        'speed m/s': +o.speedMs.toFixed(1),
+        'tilt deg': +o.tiltDeg.toFixed(1),
+        'pitch deg': +o.leanFwdDeg.toFixed(1),
+        'roll deg': +o.leanRgtDeg.toFixed(1),
+        'heading deg': +(((o.headingRad * 180 / Math.PI) % 360 + 360) % 360).toFixed(0),
+        'rotor rps': o.rotorRps.map(r => r.toFixed(2)).join(' '),
+        'spread %': +(((hi - lo) / ((hi + lo) / 2)) * 100).toFixed(1),
+      });
+    }
+    if (rows.length) console.table(rows);
+    else console.log('no quadcopter is airborne');
+    return rows;
+  };
+
   window.__isr_propCheck = (seconds = 0) => {
     const camPos = viewer.camera.positionWC;
     const read = () => {

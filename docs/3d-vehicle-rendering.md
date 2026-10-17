@@ -850,3 +850,98 @@ before                              after
 9001          rotors (none)         9001          Rotor_1..4
 9001-swarm-1  Rotor_1..4            9001-swarm-1  Rotor_1..4
 ```
+
+## 8j. The quadcopter flight model is the Blender one, running in the browser
+
+Threat drones no longer use a smoothing rig. They run the airframe and
+controller from `scripts/blender_drone_flight_demo.py`, ported to
+`src/quad_flight_model.js`: same constants, same names, same values.
+
+```mermaid
+flowchart LR
+    P["scenario waypoints<br/>position per TICK"] --> D["differentiate<br/>anchored to movement"]
+    D --> A["measured acceleration"]
+    A --> N["need = a + drag(v)<br/>DRAG_K 0.0156"]
+    N --> L["lean_des = unit(need)<br/>x min(32 deg, atan(|need|/g))"]
+    L --> F["first-order ATT_TAU 0.15 s<br/>slew limit 120 deg/s"]
+    F --> HPR["heading / pitch / roll"]
+    F --> R["rotor differential<br/>ATT_DIFF, YAW_DIFF, TL_DIP"]
+    R --> N4["four rotor speeds"]
+```
+
+**What replaced what.** The old rig was eight cosmetic constants:
+`headingSmoothing`, `pitchSmoothing`, `rollSmoothing`, `bankFactor`,
+`forwardPitchDeg`, `cruiseMs`, `bankClampDeg`, `pitchClampDeg`. It smoothed the
+heading toward the direction of travel, biased the pitch by speed, and set the
+roll to yaw rate times a made-up factor. It described how an icon should look.
+The model describes an aircraft. The eight survive for the INTERCEPTOR quad,
+which has no flight model.
+
+**The one difference from Blender, and it is structural.** In Blender the
+controller owns the trajectory: a velocity plan goes in, the velocity loop makes
+a lean, the lean makes an acceleration, and the acceleration is integrated into
+a position. On the map the position is an INPUT and nothing may move a track off
+its waypoints. So the chain is inverted. The position is differentiated to
+velocity and again to acceleration, and from there the physics is identical: the
+same question, what lean does an airframe need to produce this acceleration
+against this drag, answered with the same equation.
+
+**Two clocks, and both of them bit.**
+
+The position advances on the simulation TICK. The model runs every render FRAME.
+Dividing a tick's whole displacement by one frame's 16 ms reported a drone at
+**309 m/s**, which demands an impossible lean and saturates the tilt. The
+velocity is therefore anchored to MOVEMENT: the clock is the time since the
+position last actually changed, the velocity is held between ticks, and only the
+attitude loop runs per frame. This is the same trap that produced a 4.9 degree
+bank instead of 18.8 on the airliner.
+
+Then the integration step is clamped to 0.1 s, because integrating a half-second
+gap through a 0.15 s time constant is a jump rather than a loop. Using that same
+clamped value as the velocity clock reported **300 m/s again**, and as the
+velocity filter's time constant it reported **7.3 m/s instead of 15**. So there
+are two clocks on purpose: raw elapsed for anything measuring the world, clamped
+for anything integrating state. Neither showed at 60 fps; both showed in a
+throttled tab, which is what a headless browser is.
+
+**Per airframe, not per formation.** Each swarm member owns its own model
+instance, with the hover noise decorrelated by seed, because five drones flying
+slightly different paths lean differently and should not breathe in unison.
+
+**The rotors differentiate.** `_quadRotorTransforms` now accepts either a single
+speed, which is what the interceptor still passes, or four. A quadcopter tilts
+and yaws by driving its rotors apart, about 8 per cent at full attitude
+acceleration, and that is visible on a close pass. Rotor geometry comes from the
+composed hub positions in `_QUAD_ROTOR_HUBS`, where only the ratio between arms
+matters so the model scale cancels.
+
+**Gated.** `scripts/check-quad-flight.mjs`, in the build chain, reads every
+constant out of the Python and fails if a pair has drifted, then flies the real
+exported model and checks the physics:
+
+```
+speed is measured from MOVEMENT, not from frames
+a steady cruise settles at the drag balance     atan(DRAG_K*15^2/g) = 19.7 deg
+a cruise leans forward, not sideways
+a throttled tab still reports the real speed
+top speed does not exceed the tilt limit
+a hover is nearly level, but not perfectly still
+```
+
+That drag-balance equality is the whole airframe in one line: thrust tilt
+balancing quadratic drag, and the model holds 19.6 against a predicted 19.7.
+
+**The default airframe is now `dji_air_3`.** The gun drone is still in the repo,
+still what the interceptor quad hardcodes because the gun pod IS that airframe,
+and still one word away:
+
+```js
+__isr_quad_tuning.model = 'assault_drone_concept'
+```
+
+**Still unverified by eye:** whether the Air 3's nose points the way it flies.
+`headingOffsetDeg: 180` with pitch and roll at -1 comes from the asset work, not
+from anyone looking at a render. If it is wrong,
+`__isr_quad_tuning.modelOverride = { headingOffsetDeg: 90 }` and try 0, 90, 180,
+270. And 311k triangles against 24.9k, times five: software rendering says
+nothing useful about frame time.
