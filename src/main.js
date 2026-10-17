@@ -17843,7 +17843,40 @@ async function main() {
           _swEntitySpec.model = {
             uri: _modelUri,
             scale: isLoiterMun ? SHAHED_SCALE : (_qT.scale ?? 0.5),
-            minimumPixelSize: isLoiterMun ? 24 : (_qT.minimumPixelSize ?? 20),
+            // NO PIXEL FLOOR ON A SWARM QUAD, because the LEAD has
+            // never had one and the wingmen did.
+            //
+            // minimumPixelSize means "never smaller than N pixels at
+            // ANY distance", and nothing here capped it, so a wingman
+            // held 20 screen pixels while the ground shrank underneath
+            // it. At 20 km a correctly scaled 1 m drone is about 0.04
+            // pixels, so 20 px draws it hundreds of times life size.
+            // The lead, which sets no floor, shrank correctly. Four
+            // wingmen ballooning around a lead that did not is the
+            // "drones the size of tanks when you zoom out" Lucas saw,
+            // and it is most obvious in the WITHOUT ISR run because
+            // that scenario raises the model draw distance to 20 km so
+            // the formation reads as objects at the 480 m break-off.
+            //
+            // So the wingmen now match the lead: true world scale, and
+            // they shrink to nothing as the camera pulls back, which is
+            // what a 1 m object does.
+            //
+            // A SEPARATE KEY, deliberately, and not the shared
+            // _qT.minimumPixelSize. That one is seeded with 14 in the
+            // quad tuning defaults and is also read by the interceptor
+            // quad, which is a different vehicle that nobody reported
+            // and which should not move. Writing `?? 0` against the
+            // shared key does nothing at all, because the key is always
+            // present.
+            //
+            // Live knob to put a floor back without a rebuild, if they
+            // read too small in the cockpit shot:
+            //   __isr_quad_tuning.swarmMinimumPixelSize = 14
+            //
+            // The Shahed keeps its 24: it is a 3.5 m airframe that was
+            // tuned against the terrain and is not what was reported.
+            minimumPixelSize: isLoiterMun ? 24 : (_qT.swarmMinimumPixelSize ?? 0),
             distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
             shadows: Cesium.ShadowMode.DISABLED,
             // Swarm members, same reasoning as the single-drone spec above.

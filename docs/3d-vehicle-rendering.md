@@ -596,3 +596,123 @@ nose-reversed like the Shahed. Expect the extra -90 on heading and
 `pitchSign`/`rollSign` at -1 (section 3). It is 311k triangles against
 the assault drone's 18k; simplify with meshoptimizer as the Shahed was
 if it costs frame time at swarm counts.
+
+## 8e. The wingmen had a pixel floor and the lead never did
+
+Reported as "drones scaling WAY TOO MUCH when you expand, why can't they stay
+the same size no matter your POV". Two separate faults, both measured before
+either was touched.
+
+**`minimumPixelSize` means "never smaller than N pixels at ANY distance."** The
+helicopter and the F-35 each bound that with a `maximumScale` of twelve times
+life size. The swarm wingmen had the floor and no bound, so a wingman held its
+pixel count while the ground shrank underneath it:
+
+| camera distance | a 1 m drone, life size | drawn at a 14 px floor |
+|---|---|---|
+| 100 m | 8.7 px | 14 px, 1.6x life |
+| 480 m | 1.8 px | 14 px, 8x life |
+| 3 km | 0.29 px | 14 px, 48x life |
+| 20 km | 0.04 px | 14 px, **324x life** |
+
+**The lead was never in that list.** `_droneEntitySpec.model` sets no
+`minimumPixelSize` at all, so the lead has always drawn at true world scale and
+shrunk correctly. A five-drone formation was therefore four ballooning wingmen
+around one correct lead, which is why it read as a scaling bug rather than as a
+size setting.
+
+It is worst in the WITHOUT ISR run because that scenario raises the model draw
+distance to 20 km (`MODEL_ALWAYS_M`) so the formation reads as objects at the
+480 m break-off. The same floor then applies across the whole flight.
+
+**The wingmen now match the lead**: true world scale, no floor.
+
+**The key is `swarmMinimumPixelSize`, not `minimumPixelSize`.** The shared
+`__isr_quad_tuning` object is SEEDED with `minimumPixelSize: 14`, so a `?? 0`
+fallback against that key is dead code; the key is always present. The shared
+key is also read by the interceptor quad, a different vehicle that was not
+reported and must not move. Hence a dedicated key, which also gives a live
+knob:
+
+```js
+__isr_quad_tuning.swarmMinimumPixelSize = 14   // restore the old floor, no rebuild
+```
+
+The Shahed keeps its 24. It is a 3.5 m airframe tuned against the terrain.
+
+**Verified in a browser, not from the source.** The first attempt edited the
+`?? 20` fallback at the spec and changed nothing, because of the seeded key
+above. Reading the live entities is what caught it:
+
+```
+drone-DET-...-9001            minPx (none)     <- the lead, unchanged
+drone-DET-...-9001-swarm-1    minPx 0          <- was 14
+drone-DET-...-9001-swarm-2    minPx 0
+drone-DET-...-9001-swarm-3    minPx 0
+drone-DET-...-9001-swarm-4    minPx 0
+```
+
+**Consequence to expect.** At 480 m a 1 m drone is 1.8 px. They are dots at the
+break-off now, not objects. That readability was a design choice written into
+the `MODEL_ALWAYS_M` comment, never a stated requirement, and the stated
+requirement was the opposite: invisible until close, as in real life. If the
+cockpit shot needs them bigger, the right fix is the floor PLUS a
+`maximumScale` bound of the kind the helicopter already has, so the floor
+cannot run away again.
+
+## 8f. Altitude was linear in time, so the vertical rate was a staircase
+
+Reported as the aircraft jumping up and down in the WITHOUT ISR run while being
+stable in the WITH ISR hold. The two fly different path generators, and that is
+the whole difference.
+
+`_smoothPath` splined latitude and longitude with Catmull-Rom but left altitude
+**linear in time** between the hand-written waypoints. Each segment then has its
+own constant vertical speed and the speed STEPS at every corner. The attitude
+rig derives pitch from the climb rate, so it snapped the nose at each one.
+Measured on `cph_jet_goaround_early`:
+
+```
+ tSec    alt    rate m/s   change
+  379     37      -3.39
+  383     59      +4.78     +8.17   <- pull-up
+  389    132     +13.27     +8.49
+  445    857     +11.32     -3.29
+  482   1157      +7.96     -3.36
+```
+
+The descent itself was harmless, 0.09 to 0.16 m/s per corner. The pull-up and
+the climb-out were not.
+
+The hold path never had this: `_cphHoldPath()` generates an analytic 3.0 degree
+approach and a circular orbit sampled at 0.25 s, so its vertical rate is
+continuous by construction. It also orbits over Køge Bugt, where the terrain
+under a `terrainRelativeAlt` track is flat water.
+
+**A plain spline on altitude is the wrong fix** and the original comment said
+so: it overshoots at a level-off and would put the aircraft through its own
+glidepath on the flare.
+
+**A monotone cubic does both.** Fritsch-Carlson tangents force the derivative to
+ZERO at a local extremum, so the curve cannot leave the interval its two
+neighbouring waypoints bound. The pull-up at t=379 IS a local minimum, so the
+rate passes through zero continuously instead of stepping 8.5 m/s, and the
+altitude still cannot undershoot the 37 m the waypoint declares.
+
+```
+worst per-sample vertical rate jump   8.49 m/s  ->  1.04 m/s
+minimum altitude on the resampled path            37.00 m, exactly the waypoint
+```
+
+Every waypoint altitude is still hit exactly. Only the shape BETWEEN waypoints
+changed. Blast radius is `cph_jet_goaround_early` and `cph_jet_goaround_atc`,
+the only two templates that call `_smoothPath`; the hold path does not.
+
+**Still outstanding on that aircraft.** The go-around flies the approach over
+the city with `terrainRelativeAlt: true`, so the sampled mesh height under it
+varies building to building and moves the aircraft with it. The hold is over
+water and never sees this. An airliner on an approach flies a geometric glide
+path, not a terrain-following one, so the flag is arguably wrong for this
+airframe, but changing it touches the landing visuals in the other scenarios
+and has not been done.
+

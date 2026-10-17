@@ -152,6 +152,59 @@ const _CPH_HOLD_PATH = _cphHoldPath();
 //
 // Same reasoning as _cphHoldPath below, which generates rather than
 // resamples because it had no hand-written path to preserve.
+// VERTICAL RATE TANGENTS, Fritsch-Carlson.
+//
+// Altitude used to be linear in time between the hand-written
+// waypoints. Each segment then has its own constant vertical speed and
+// the speed STEPS at every corner, so the attitude rig, which derives
+// pitch from the climb rate, snaps the nose at each one. Measured on
+// cph_jet_goaround_early, the descent is harmless at 0.09 to 0.16 m/s
+// per corner, but the pull-up is not:
+//
+//     t=379  -3.39 m/s          the last of the descent
+//     t=383  +4.78 m/s          +8.17 in one corner
+//     t=389  +13.27 m/s         +8.49 in the next
+//     t=445  +11.32 m/s         -3.29
+//     t=482   +7.96 m/s         -3.36
+//
+// That is the aircraft "jumping". A plain Catmull-Rom on altitude would
+// fix the continuity and introduce a worse bug: it overshoots at a
+// level-off, putting the aircraft below its own glidepath on the flare,
+// which is why the altitude was left linear in the first place.
+//
+// A monotone cubic is the one that does both. The tangent at a local
+// extremum is forced to ZERO, so the curve cannot leave the interval
+// its two neighbouring waypoints bound. The pull-up at t=379 IS a local
+// minimum, so the rate passes through zero continuously instead of
+// stepping 8.5 m/s, and the altitude still cannot undershoot the 37 m
+// the waypoint declares.
+//
+// Every waypoint altitude is hit exactly. This changes the shape of the
+// vertical path BETWEEN waypoints, never the waypoints themselves.
+function _altTangents(waypoints) {
+  const n = waypoints.length;
+  const h = [], d = [];
+  for (let i = 0; i < n - 1; i++) {
+    h[i] = waypoints[i + 1].tSec - waypoints[i].tSec;
+    d[i] = h[i] > 0 ? (waypoints[i + 1].alt - waypoints[i].alt) / h[i] : 0;
+  }
+  const m = new Array(n);
+  m[0] = d[0];
+  m[n - 1] = d[n - 2];
+  for (let i = 1; i < n - 1; i++) {
+    // Opposite signs, or a flat segment, means waypoint i is a local
+    // extremum or the start of a level-off. Zero there is what makes
+    // this monotone, and it is exactly the pull-up case.
+    if (d[i - 1] * d[i] <= 0) { m[i] = 0; continue; }
+    // Weighted harmonic mean of the two secants, so the longer segment
+    // has the larger say. Standard Fritsch-Carlson.
+    const w1 = 2 * h[i] + h[i - 1];
+    const w2 = h[i] + 2 * h[i - 1];
+    m[i] = (w1 + w2) / (w1 / d[i - 1] + w2 / d[i]);
+  }
+  return m;
+}
+
 function _smoothPath(waypoints, dt = 0.25) {
   const n = waypoints.length;
   if (n < 3) return waypoints;
@@ -162,6 +215,7 @@ function _smoothPath(waypoints, dt = 0.25) {
       + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
       + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
   };
+  const m = _altTangents(waypoints);
   const out = [];
   for (let i = 0; i < n - 1; i++) {
     const a = at(i), b = at(i + 1), p0 = at(i - 1), p3 = at(i + 2);
@@ -170,13 +224,16 @@ function _smoothPath(waypoints, dt = 0.25) {
     const steps = Math.max(1, Math.round(span / dt));
     for (let k = 0; k < steps; k++) {
       const u = k / steps;
+      // Cubic Hermite on altitude with the monotone tangents above.
+      const u2 = u * u, u3 = u2 * u;
+      const h00 = 2 * u3 - 3 * u2 + 1;
+      const h10 = u3 - 2 * u2 + u;
+      const h01 = -2 * u3 + 3 * u2;
+      const h11 = u3 - u2;
       out.push({
         lat: cr(p0.lat, a.lat, b.lat, p3.lat, u),
         lon: cr(p0.lon, a.lon, b.lon, p3.lon, u),
-        // Altitude stays LINEAR in time. A spline on altitude overshoots
-        // at a level-off and would put the aircraft through its own
-        // glidepath on the flare.
-        alt: a.alt + (b.alt - a.alt) * u,
+        alt: h00 * a.alt + h10 * span * m[i] + h01 * b.alt + h11 * span * m[i + 1],
         heading: 0,
         tSec: +(a.tSec + span * u).toFixed(2),
       });
