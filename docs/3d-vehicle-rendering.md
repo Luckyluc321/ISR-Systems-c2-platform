@@ -797,6 +797,19 @@ dji_air_3               assault_drone_concept
   Rotor_4  -X +Z          Rotor_4  +X -Z
 ```
 
+**The switch is read ONCE, at the drone's birth.** `_quadKey` is captured at
+the top of `createDroneEntities` and every consumer takes it: the uri, both
+scales, both bounds, and both attitude rigs.
+
+That binding is the whole fix for the first live run of this feature, which
+produced the old gun drone flying sideways. The uri is read once when the
+entity is built; the orientation is read EVERY FRAME inside the attitude
+callback. Reading the live switch in both places meant that flipping it while
+drones were airborne left them wearing the old body with the new model's axis
+convention, and they turned on the spot. One captured constant cannot disagree
+with itself. Reproduced and confirmed fixed: flipping mid-flight now leaves the
+model and the orientation alone, and the next spawn picks the new model up.
+
 **Two things only a real GPU can settle,** which is why the default did not
 change:
 - Nose direction. 180 / -1 / -1 comes from the asset work, not from anyone's

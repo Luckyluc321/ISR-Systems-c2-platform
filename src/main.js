@@ -6651,9 +6651,21 @@ async function main() {
   // drone's values, so `T.headingOffsetDeg ?? x` can never fall through
   // to another model's. Same trap that made the first pixel-floor fix a
   // no-op.
-  function _quadModelSpec() {
+  // THE KEY A DRONE WAS BUILT WITH, not whatever the switch says now.
+  //
+  // The uri is read ONCE when the entity is created. The orientation is
+  // read EVERY FRAME, inside the attitude callback. Flipping the switch
+  // while drones were in the air therefore left them wearing the old
+  // body with the new model's axis convention, and they turned
+  // sideways on the spot. Reported from a live run, and it was the
+  // first thing the switch did.
+  //
+  // So the key is stamped on the drone state at creation and every rig
+  // resolves from THAT. The switch governs the next spawn; nothing
+  // already flying can be re-oriented out from under itself.
+  function _quadModelSpec(key) {
     const t = window.__isr_quad_tuning || {};
-    const sel = _QUAD_MODELS[t.model] || null;
+    const sel = _QUAD_MODELS[key || t.model] || null;
     const m = sel || _QUAD_MODELS.assault_drone_concept;
     // t.scale is SEEDED with 0.5, which IS the assault drone's value and
     // is the knob the comments have always advertised, so it keeps
@@ -16994,6 +17006,15 @@ async function main() {
     const isHostileHeli = platform === 'mi-24-hind'
       || platform === 'helicopter-military'
       || platform === 'helicopter';
+    // THE MODEL THIS DRONE IS BORN WITH, read once and captured.
+    //
+    // Both attitude rigs below are closures over this scope and run
+    // every frame; the uri is read once, here. Reading the live switch
+    // in both places is what turned drones already in the air sideways
+    // the instant the switch was flipped: old body, new axis
+    // convention. One captured value cannot disagree with itself.
+    const _quadKey = (window.__isr_quad_tuning || {}).model
+      || 'assault_drone_concept';
     // COMMERCIAL AIRLINER. Only the 'jet' platform reaches this, which
     // today is one template, the SAS approach onto 04R, so nothing else
     // changes shape.
@@ -17017,7 +17038,7 @@ async function main() {
     const MODEL_SWAP_M = isHostileHeli ? 6000 : (isAirliner ? 5000 : 250);
     const _modelUri = isLoiterMun
       ? '/aircraft/shahed_238_drone.glb'
-      : (isQuadcopter ? _quadModelSpec().uri
+      : (isQuadcopter ? _quadModelSpec(_quadKey).uri
         : (isHostileHeli ? '/aircraft/mi-24_hind.glb'
           // THE RIGGED SOURCE, running its OWN animation. The builder
           // authored 28 seconds of gear, doors, flaps, ailerons and air
@@ -17458,7 +17479,7 @@ async function main() {
       // describe both: the wrong one flies the airframe
       // sideways. _quadModelSpec() returns the selected
       // model's own, with modelOverride for a live tweak.
-      const _qM = _quadModelSpec();
+      const _qM = _quadModelSpec(_quadKey);
       const headingOffset  = ((_qM.headingOffsetDeg || 0) * Math.PI) / 180;
       const pitchOffset    = ((_qM.pitchOffsetDeg   || 0) * Math.PI) / 180;
       // Asset-space axis flips. 1 for a model whose nose sits on body
@@ -17595,7 +17616,7 @@ async function main() {
         // Floor derived from real metres like everything else.
         scale: isAirliner ? 1
           : (isHostileHeli ? 1.121 : (isLoiterMun ? SHAHED_SCALE
-            : _quadModelSpec().scale)),
+            : _quadModelSpec(_quadKey).scale)),
         // THE LEAD GETS WHAT ITS OWN WINGMEN GET.
         //
         // This spec has never set either, so a swarm lead drew at true
@@ -17611,7 +17632,7 @@ async function main() {
         // reported; isLoiterMun keeps the 24 it was tuned at.
         ...(isAirliner || isHostileHeli ? {} : {
           minimumPixelSize: isLoiterMun ? 24 : (_qT.swarmMinimumPixelSize ?? 14),
-          maximumScale: (isLoiterMun ? SHAHED_SCALE : _quadModelSpec().scale)
+          maximumScale: (isLoiterMun ? SHAHED_SCALE : _quadModelSpec(_quadKey).scale)
             * (_qT.swarmMaxExaggeration ?? MODEL_MAX_EXAGGERATION),
         }),
         // PROPELLERS, WHICH THIS SPEC HAS NEVER TURNED.
@@ -17867,7 +17888,7 @@ async function main() {
           // describe both: the wrong one flies the airframe
           // sideways. _quadModelSpec() returns the selected
           // model's own, with modelOverride for a live tweak.
-          const _qM = _quadModelSpec();
+          const _qM = _quadModelSpec(_quadKey);
           const headingOffset  = ((_qM.headingOffsetDeg || 0) * Math.PI) / 180;
           const pitchOffset    = ((_qM.pitchOffsetDeg   || 0) * Math.PI) / 180;
           // Asset-space axis flips. See the lead rig for the rationale.
@@ -17965,7 +17986,7 @@ async function main() {
           const _qT = window.__isr_quad_tuning || {};
           _swEntitySpec.model = {
             uri: _modelUri,
-            scale: isLoiterMun ? SHAHED_SCALE : _quadModelSpec().scale,
+            scale: isLoiterMun ? SHAHED_SCALE : _quadModelSpec(_quadKey).scale,
             // NO PIXEL FLOOR ON A SWARM QUAD, because the LEAD has
             // never had one and the wingmen did.
             //
@@ -18018,7 +18039,7 @@ async function main() {
             // The Shahed keeps its 24: it is a 3.5 m airframe that was
             // tuned against the terrain and is not what was reported.
             minimumPixelSize: isLoiterMun ? 24 : (_qT.swarmMinimumPixelSize ?? 14),
-            maximumScale: (isLoiterMun ? SHAHED_SCALE : _quadModelSpec().scale)
+            maximumScale: (isLoiterMun ? SHAHED_SCALE : _quadModelSpec(_quadKey).scale)
               * (_qT.swarmMaxExaggeration ?? MODEL_MAX_EXAGGERATION),
             distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
             shadows: Cesium.ShadowMode.DISABLED,
@@ -18117,6 +18138,7 @@ async function main() {
     } : null;
 
     droneState.set(event.id, {
+      _quadModelKey: _quadKey,
       billboard, trail, shadow,
       swarmBillboards,   // formation[1..N] only — LEAD is state.leadSwarmMember
       leadSwarmMember,   // formation[0] wrapper, same shape as swarmBillboards entries
