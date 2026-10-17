@@ -1,6 +1,6 @@
 # Swarm Individual Tracking Architecture
 
-**Status:** `[phase 2 in progress]` — designed 2026-09-16. P1.1 landed 2026-09-16 (commits 5809fd6 + 06d602b): `event.memberTracks[]` source of truth, syncMemberTrack/setMemberStatus mutators, tick-loop sync, kill-path status routing, frozen-at-spawn shadow clones. P1.2 landed 2026-09-17 (commit 501ee72): swarm roster renders per-member status from memberTracks. P2.1 landed 2026-09-17 (commits 12c99dc + 6f9225e): breakaway detection (observed-deviation grace clock, sensors-observe-only), child event promotion with provenance + cross-links, per-tick child mirroring with sticky detected, child-owned coverage-loss close, kill-path child closure, roster BREAKAWAY badge. Remaining Phase 2: rejoin semantics (P2.2), formation split (P2.3). Adversarially verified; four findings fixed in the follow-up commit. Per-member sensor attribution landed 2026-10-16: `event.memberSensors` is the per-airframe store, `contributingSensors` is the derived case union, member confidence reads member mass, and `scripts/check-member-sensor-attribution.mjs` gates it — see "Per-member sensor attribution" below.
+**Status:** `[phase 2 in progress]` — designed 2026-09-16. P1.1 landed 2026-09-16 (commits 5809fd6 + 06d602b): `event.memberTracks[]` source of truth, syncMemberTrack/setMemberStatus mutators, tick-loop sync, kill-path status routing, frozen-at-spawn shadow clones. P1.2 landed 2026-09-17 (commit 501ee72): swarm roster renders per-member status from memberTracks. P2.1 landed 2026-09-17 (commits 12c99dc + 6f9225e): breakaway detection (observed-deviation grace clock, sensors-observe-only), child event promotion with provenance + cross-links, per-tick child mirroring with sticky detected, child-owned coverage-loss close, kill-path child closure, roster BREAKAWAY badge. Remaining Phase 2: rejoin semantics (P2.2), formation split (P2.3). Adversarially verified; four findings fixed in the follow-up commit. Per-member sensor attribution landed 2026-10-16: `event.memberSensors` is the per-airframe store, `contributingSensors` is the derived case union, member confidence reads member mass, and `scripts/check-member-sensor-attribution.mjs` gates it — see "Per-member sensor attribution" below. Its PANEL section was reverted on 2026-10-17 (`1fb84fe`); the attribution is intact and is read through `__isr_sensorAudit()`.
 
 ## Problem
 
@@ -110,17 +110,26 @@ flowchart TD
   answer. An event with no store at all (every single-platform event, every historical
   event) falls back to the case union, so nothing outside swarms changed.
 
-**Operator surface.** The detail panel keeps the case-level **Contributing Sensors**
-section and adds **Sensors Holding DRONE-n** above it, off the focused member's own bucket,
-with an explicit empty state. Both are now live-patched by the 250 ms patcher: the full
-render is blocked by the panel's hover gate, so a sensor acquiring an airframe while the
-pointer was on the panel could not appear until the operator clicked something — which made
-the sensor appear at the moment another drone was selected. A change in the case union's
-membership forces one full render, because those rows carry an id and a value and nothing
-else, so there is nothing to patch when the SET changes.
+**Operator surface: the case union, and nothing new.** The detail panel shows the
+case-level **Contributing Sensors** section exactly as it always has.
 
-`__isr_sensorAudit()` prints two tables: the case union, then one row per member with the
-sensors holding it, their mass, and the confidence that mass produced.
+A second section, **Sensors Holding DRONE-n**, shipped above it on 2026-10-16 and was
+reverted the same day (commit `1fb84fe`). On a lead drone held by every sensor in range the
+two sections rendered identically — same ids, same bars, same numbers, twice — which reads
+as a bug, not as per-member truth. The roster row tooltip that carried "held by N sensors"
+went with it. Nothing per-airframe is on screen today.
+
+What survived is the live patcher on the case section (`data-live-case-sensors`). The full
+render is blocked by the panel's hover gate, so a sensor acquiring the case while the
+pointer was on the panel could not appear until the operator clicked something — which made
+the sensor appear at the moment another drone was selected. A change in the union's
+membership still forces one full render, because those rows carry an id and a value and
+nothing else, so there is nothing to patch when the SET changes.
+
+`__isr_sensorAudit()` is where per-member attribution is read. It prints two tables: the
+case union, then one row per member with the sensors holding it, their mass, and the
+confidence that mass produced. If the breakdown earns a place in the panel later it belongs
+behind a toggle on the existing section, not as a second permanent list.
 
 **Gate:** `scripts/check-member-sensor-attribution.mjs`, wired into `npm run build`. Static
 half asserts the attribution contract in the source; live half extracts the real functions
