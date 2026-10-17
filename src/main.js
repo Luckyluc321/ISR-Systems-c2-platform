@@ -12649,57 +12649,6 @@ async function main() {
     return `${event.id}-m${slotIdx}`;
   }
 
-  // WHICH AIRFRAME THE PANEL IS FOCUSED ON.
-  //
-  // _selectedSwarmIndex indexes the ROSTER, which lists only members
-  // that have been detected at least once, so it is not a formation
-  // slot and `-m${idx}` is the wrong key for it. This rebuilds the same
-  // list the roster builds, from the same two sources in the same order
-  // with the same _everDetected filter, and returns the member the index
-  // actually points at.
-  //
-  // Returns null for anything that is not a focused swarm member, which
-  // is what every single-platform event, every historical event and a
-  // roster index that has gone stale all are. The caller then reads the
-  // case union, exactly as it did before any of this existed.
-  function _focusedMemberFor(event, slotIdx) {
-    const st = droneState.get(event?.id);
-    const tpl = TEMPLATES[event?.templateKey];
-    if (!tpl?.swarm || !st?.swarmBillboards || slotIdx == null) return null;
-    const list = [];
-    if (st.leadSwarmMember?._everDetected) {
-      list.push({ key: st.leadSwarmMember.memberId || _memberKeyForSlot(event, 0), label: 'DRONE-1' });
-    }
-    st.swarmBillboards.forEach((sw, i) => {
-      if (!sw._everDetected) return;
-      list.push({ key: sw.memberId || _memberKeyForSlot(event, i + 1), label: `DRONE-${i + 2}` });
-    });
-    const hit = list[slotIdx];
-    return hit?.key ? hit : null;
-  }
-
-  // THE ROWS THE SENSOR SECTION SHOWS, for one scope.
-  //
-  // memberKey null means the case: the union across every member, which
-  // is what the alert strip, the case file and the report read. A member
-  // key means that airframe's own bucket.
-  //
-  // OFFLINE DECLARATIONS RIDE ALONG EITHER WAY. `offline: true` is a
-  // statement about a sensor, not an observation of a target, so a
-  // sensor that cannot contribute is just as true of DRONE-3 as it is of
-  // the case. A member bucket never carries one, so they are appended.
-  //
-  // One function because the full render and the 250 ms patcher must
-  // agree on the row set. They did not the first time this shipped.
-  function _panelSensorSource(event, memberKey) {
-    const union = (event?.contributingSensors || []);
-    if (!memberKey) return union;
-    const declaredOffline = union.filter(s => s?.offline);
-    const offlineIds = new Set(declaredOffline.map(s => s.id));
-    const own = _memberSensorsFor(event, memberKey).filter(s => !offlineIds.has(s?.id));
-    return [...own, ...declaredOffline];
-  }
-
   // The bucket for one member, created on demand. Returns null for an
   // event that cannot own one.
   function _memberSensorBucket(targetEvent, memberKey) {
@@ -24862,18 +24811,12 @@ async function main() {
     // kinematics yet still has sensors acquiring it.
     const _caseSection = document.querySelector('[data-live-case-sensors="1"]');
     if (_caseSection) {
-      // The section's own scope, read off the markup rather than
-      // recomputed, so the patcher cannot disagree with what is on
-      // screen about which airframe the rows belong to.
-      const _mk = _caseSection.dataset.sensorScope === 'member'
-        ? (_caseSection.dataset.memberKey || null)
-        : null;
-      const _src = _panelSensorSource(event, _mk);
-      const _sigNow = `${_src.filter(s => !s.offline).length}/${_src.length}`;
+      const _union = (event.contributingSensors || []);
+      const _sigNow = `${_union.filter(s => !s.offline).length}/${_union.length}`;
       if (_caseSection.dataset.sensorSig !== _sigNow) { renderDetailPanel(); return; }
       for (const row of _caseSection.querySelectorAll('.sensor-row')) {
         const id = row.querySelector('.s-lbl')?.textContent;
-        const entry = _src.find(s => s.id === id);
+        const entry = _union.find(s => s.id === id);
         if (!entry || entry.offline) continue;
         const fill = row.querySelector('.s-fill');
         const val = row.querySelector('.s-val');
@@ -24989,10 +24932,6 @@ async function main() {
   const _dpCollapsed = new Set();
   // Per-event "sensors expanded" state — false = top 5, true = full list.
   const _dpSensorsExpanded = new Set();
-  // Event ids whose sensor section has been switched BACK to the case
-  // union while a swarm member is focused. Empty is the default, so a
-  // focused drone shows its own sensors and the operator opts out.
-  const _dpSensorScopeCase = new Set();
   // Per-event "signal evidence expanded" state. The note is the finding;
   // the reasoning behind it is opt-in.
   const _dpEvidenceExpanded = new Set();
@@ -25213,27 +25152,7 @@ async function main() {
     const _siteMeta = SITES[e.siteId];
     const _threatLat = e.lastPosition?.lat;
     const _threatLon = e.lastPosition?.lon;
-    // ONE SECTION, AND IT FOLLOWS THE FOCUSED AIRFRAME.
-    //
-    // A union says yes to a sensor that holds ANY member of a formation,
-    // so on a swarm it cannot answer the question the operator is
-    // actually asking, which is what is holding THIS one. The first
-    // attempt put a second list above this one; on a lead held by every
-    // sensor in range the two were identical, same ids and same numbers
-    // twice, and it came out the same day. So this is the one list and
-    // the roster decides what it is about.
-    //
-    // Default is the focused drone, because on a swarm that is the
-    // honest answer and the union is the one that misleads. The button
-    // switches back to the whole case and _dpSensorScopeCase remembers
-    // it per event.
-    //
-    // Nothing changes for anything that is not a focused swarm member:
-    // _focusedMemberFor returns null and the source is the union.
-    const _focusMember = _focusedMemberFor(e, _selectedSwarmIndex);
-    const _scopeCase = !_focusMember || _dpSensorScopeCase.has(e.id);
-    const _sensorSource = _panelSensorSource(e, _scopeCase ? null : _focusMember.key);
-    const _enrichedSensors = _sensorSource.map(s => {
+    const _enrichedSensors = (e.contributingSensors || []).map(s => {
       const meta = _siteMeta?.sensors?.find(x => x.id === s.id);
       const dist = (meta && _threatLat != null)
         ? haversineM(_threatLat, _threatLon, meta.lat, meta.lon)
@@ -25249,48 +25168,25 @@ async function main() {
     const _sensorsExpanded = _dpSensorsExpanded.has(e.id);
     const _sensorTotal = _enrichedSensors.length;
     const _sensorVisible = (_sensorsExpanded || _sensorTotal <= 5) ? _enrichedSensors : _enrichedSensors.slice(0, 5);
-    const _sensorLive = _enrichedSensors.filter(s => !s.offline).length;
     const _sensorToggleHtml = _sensorTotal > 5 ? `
       <button class="dp-sensor-toggle" data-dp-sensor-toggle="${e.id}">
         ${_sensorsExpanded ? `Show top 5 only` : `See all ${_sensorTotal} sensors`}
       </button>` : '';
-    // The scope button only exists when there is a second scope to go
-    // to, so a single-platform case renders exactly the markup it did
-    // before this was built.
-    const _sensorScopeHtml = _focusMember ? `
-      <button class="dp-sensor-toggle" data-dp-sensor-scope="${e.id}">
-        ${_scopeCase ? `Show ${_focusMember.label} only` : `Show the whole case`}
-      </button>` : '';
-    // THE TITLE KEEPS "Contributing Sensors" IN FRONT.
-    //
-    // _dpSectionKey keys a section's collapse state on the text before
-    // the first separator. Leading with the drone id would mint a new
-    // key per focused airframe, so a section the operator collapsed on
-    // DRONE-1 would spring back open on DRONE-2.
-    const _sensorTitle = `Contributing Sensors${_scopeCase ? '' : ` · ${_focusMember.label}`}`
-      + (!_scopeCase && _sensorTotal === 0
-        ? ' · not held'
-        : ` · ${_sensorLive} / ${_sensorTotal}`)
-      + (_sensorTotal > 5 && !_sensorsExpanded ? ' · showing top 5 by proximity' : '');
-    const _sensorEmptyHtml = (!_scopeCase && _sensorTotal === 0) ? `
-      <div class="dp-note dp-dim">No sensor is holding this airframe right now. The case may still be held by sensors that have the rest of the formation.</div>` : '';
     // data-sensor-sig IS THE MEMBERSHIP STAMP, not decoration. The rows
     // carry a sensor id in their label and nothing else, and the section
     // shows only the top five, so the patcher cannot tell "N23 joined"
     // from "N23 is below the fold" by counting rows. It compares this
     // signature instead and forces one full render when it moves.
     const sensors = e.contributingSensors && e.contributingSensors.length ? `
-      <div class="dp-section" data-live-case-sensors="1" data-sensor-scope="${_scopeCase ? 'case' : 'member'}" data-member-key="${_scopeCase ? '' : _focusMember.key}" data-sensor-sig="${_sensorLive}/${_sensorTotal}">
-        <div class="dp-section-title">${_sensorTitle}</div>
+      <div class="dp-section" data-live-case-sensors="1" data-sensor-sig="${e.contributingSensors.filter(s => !s.offline).length}/${_sensorTotal}">
+        <div class="dp-section-title">Contributing Sensors · ${e.contributingSensors.filter(s => !s.offline).length} / ${_sensorTotal}${_sensorTotal > 5 && !_sensorsExpanded ? ' · showing top 5 by proximity' : ''}</div>
         ${_sensorVisible.map(s => `
           <div class="sensor-row ${s.offline ? 'off' : ''}">
             <span class="s-lbl">${s.id}</span>
             <div class="s-bar"><div class="s-fill" style="width:${Math.round(s.confidence*100)}%;"></div></div>
             <span class="s-val">${s.offline ? 'off' : s.confidence.toFixed(2)}</span>
           </div>`).join('')}
-        ${_sensorEmptyHtml}
         ${_sensorToggleHtml}
-        ${_sensorScopeHtml}
       </div>` : '';
 
     // Contributing Sensors is the CASE: the union across every member,
@@ -25950,17 +25846,6 @@ async function main() {
         const evId = btn.dataset.dpSensorToggle;
         if (_dpSensorsExpanded.has(evId)) _dpSensorsExpanded.delete(evId);
         else _dpSensorsExpanded.add(evId);
-        renderDetailPanel();
-      });
-    });
-
-    // Wire the sensor-section scope toggle: focused drone <-> whole case
-    detailBodyEl.querySelectorAll('[data-dp-sensor-scope]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        btn.blur();
-        const evId = btn.dataset.dpSensorScope;
-        if (_dpSensorScopeCase.has(evId)) _dpSensorScopeCase.delete(evId);
-        else _dpSensorScopeCase.add(evId);
         renderDetailPanel();
       });
     });
