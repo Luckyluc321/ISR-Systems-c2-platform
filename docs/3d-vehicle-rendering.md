@@ -575,3 +575,24 @@ degrees.
 The DJI Mavic 3 Pro listing by ikad2023/dika3d (Sketchfab, now Fab and
 Superhive) is a paid asset at USD 60 and is not downloadable without
 buying it. The Air 3 is the free stand-in.
+
+### Rotor nodes for Cesium, when the blades are already nodes
+
+`split_quad_rotors.py` cuts blades out of one merged mesh. The Air 3 is
+the other case: every blade already a node, buried four levels deep in
+hinge matrices under a 0.01 scale and two up-axis swaps.
+`scripts/group_rotor_nodes.py` composes the full 4x4 chain and
+re-parents each pair under a new `Rotor_N` translation node at the hub,
+placed under the node whose frame has the disc thin in Z (checked, since
+`_quadRotorTransforms` spins about local Z). `group_nodes.py` would not
+do: it rewrites translations only, which is right for the door gunner
+and wrong under rotated ancestors. Verified by point cloud, 161,553
+points, none moved. `public/aircraft/dji_air_3.glb` is the result,
+numbered so 1 and 4 share a diagonal.
+
+Wiring note for whoever swaps it in: in the `root` node's frame the nose
+is +Y, and `Sketchfab_model` maps that to glTF -Z, so the asset is
+nose-reversed like the Shahed. Expect the extra -90 on heading and
+`pitchSign`/`rollSign` at -1 (section 3). It is 311k triangles against
+the assault drone's 18k; simplify with meshoptimizer as the Shahed was
+if it costs frame time at swarm counts.

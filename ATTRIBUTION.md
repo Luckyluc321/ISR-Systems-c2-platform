@@ -75,6 +75,22 @@ MH-60R Seahawks with Eskadrille 723 at Helicopter Wing Karup.
 - **Modified:** eight propeller blades cut into `Rotor_1`..`Rotor_4` by
   `scripts/split_quad_rotors.py`. Geometry verified unchanged.
 
+### DJI Air 3 — `public/aircraft/dji_air_3.glb`
+
+- **Author:** polyman — https://sketchfab.com/Polyman_3D
+- **Licence:** CC-BY-4.0 — http://creativecommons.org/licenses/by/4.0/
+- **Source:** https://sketchfab.com/3d-models/dji-air-3-3c7c69f9c77741aa9b7bbfcc6be29202
+- **Used for:** consumer-quadcopter threat tracks, replacing the assault
+  drone concept once wired. Not wired into `main.js` yet.
+- **Modified:** the eight blade nodes re-parented under four new nodes
+  `Rotor_1..Rotor_4` at their hubs by `scripts/group_rotor_nodes.py`,
+  so Cesium can spin them. Rotor_1 front-right, Rotor_2 rear-right,
+  Rotor_3 front-left, Rotor_4 rear-left: 1 and 4 on one diagonal, 2 and
+  3 on the other, which is what `_quadRotorTransforms` assumes. Geometry
+  verified unchanged: 161,553 distinct drawn points before and after,
+  none moved. 311k triangles and 14.1 MB, four small textures (0.4 MB
+  in all), so the budget question here is geometry, not textures.
+
 ### F-35A Lightning II — `public/aircraft/f-35a_lightning_ii.glb`
 
 - **Author:** shangus930 — https://sketchfab.com/shangus930
