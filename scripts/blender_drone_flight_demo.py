@@ -680,7 +680,7 @@ def main():
         scene.render.image_settings.file_format = "FFMPEG"
         scene.render.ffmpeg.format = "MPEG4"
         scene.render.ffmpeg.codec = "H264"
-        scene.render.ffmpeg.constant_rate_factor = "MEDIUM"
+        scene.render.ffmpeg.constant_rate_factor = "HIGH"
         scene.render.filepath = os.path.join(args.out, f"{stem}_flight_demo.mp4")
         bpy.ops.render.render(animation=True)
         print(f"wrote {scene.render.filepath}")
