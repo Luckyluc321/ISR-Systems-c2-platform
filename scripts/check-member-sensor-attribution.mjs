@@ -227,38 +227,72 @@ check('each wingman\'s roster confidence is scoped to that wingman',
 
 console.log('\nThe operator can see which sensors hold the focused airframe');
 
-// ONE SENSOR SECTION, AND IT IS THE CASE-LEVEL ONE.
+// ONE SENSOR SECTION, AND IT FOLLOWS THE FOCUSED AIRFRAME.
 //
-// Per-member attribution briefly shipped a SECOND list above the
-// existing "Contributing Sensors". On a lead held by every sensor the
-// two were identical: same rows, same numbers, twice. It was removed on
-// sight and the original section is untouched.
-//
-// Per-member sensor data still exists and is still what member
-// confidence is computed from. It is reachable through
-// __isr_sensorAudit(). It is not a panel section.
+// The first attempt at per-member attribution put a SECOND list above
+// the existing "Contributing Sensors". On a lead held by every sensor
+// the two were identical: same rows, same numbers, twice. It was out
+// the same day. The breakdown now rides the one section the panel has
+// always had, and the roster decides what that section is about.
 check('the panel has exactly one sensor section',
   !/data-live-member-sensors/.test(main)
-  && (main.match(/data-live-case-sensors/g) || []).length >= 1);
+  && (main.match(/data-live-case-sensors/g) || []).length >= 1,
+  'two lists of the same sensors read as a bug, not as per-member truth');
 
-check('the case section is unchanged: case union, original title',
-  /const _enrichedSensors = \(e\.contributingSensors \|\| \[\]\)\.map/.test(main)
-  && /Contributing Sensors · \$\{e\.contributingSensors\.filter/.test(main));
+check('the section source is chosen by scope, in ONE function',
+  /function _panelSensorSource\(event, memberKey\) \{/.test(main)
+  && /const _sensorSource = _panelSensorSource\(e, _scopeCase \? null : _focusMember\.key\);/.test(main)
+  && /const _enrichedSensors = _sensorSource\.map/.test(main),
+  'the full render and the patcher must agree on the row set; they did '
+  + 'not the first time this shipped');
 
-check('the sensor section is live-patched, not only full-rendered',
-  /\[data-live-case-sensors="1"\]/.test(main));
+check('the 250 ms patcher reads the scope off the markup',
+  /_caseSection\.dataset\.sensorScope === 'member'/.test(main)
+  && /const _src = _panelSensorSource\(event, _mk\);/.test(main)
+  && /const _sigNow = `\$\{_src\.filter\(s => !s\.offline\)\.length\}\/\$\{_src\.length\}`/.test(main),
+  'recomputing the scope in the patcher is how it ends up disagreeing '
+  + 'with what is on screen');
 
-check('a change in the case union\'s membership forces a full render',
-  /_caseSection\.dataset\.sensorSig !== _sigNow/.test(main),
-  'the rows carry an id and a value and nothing else, so there is '
-  + 'nothing to patch when the SET changes');
+check('a focused swarm member defaults to its OWN sensors',
+  /const _scopeCase = !_focusMember \|\| _dpSensorScopeCase\.has\(e\.id\);/.test(main),
+  'on a swarm the union is the answer that misleads, so the opt-out is '
+  + 'the button, not the default');
 
-check('each member carries its own sensor count and mass on its stats',
-  /sensorCount: 0, sensorMass: 0,/.test(main)
-  && /sw\.stats\.sensorCount = _own\.filter/.test(main)
-  && /sensorCount: \(\(\) => \{/.test(main),
-  'the roster reads this per row; recomputing it per row per frame '
-  + 'would walk the buckets five times a tick for nothing');
+check('anything that is not a focused swarm member reads the union',
+  /if \(!tpl\?\.swarm \|\| !st\?\.swarmBillboards \|\| slotIdx == null\) return null;/.test(main)
+  && /if \(!memberKey\) return union;/.test(main),
+  'every single-platform event and every historical event must render '
+  + 'exactly the markup it did before this existed');
+
+check('the focused member is resolved off the ROSTER, not the slot index',
+  /function _focusedMemberFor\(event, slotIdx\) \{/.test(main)
+  && (main.match(/_everDetected/g) || []).length >= 4
+  && /const hit = list\[slotIdx\];/.test(main),
+  '_selectedSwarmIndex indexes the roster, which skips undetected '
+  + 'members, so `-m${idx}` is the wrong key for it');
+
+check('offline declarations ride along in both scopes',
+  /const declaredOffline = union\.filter\(s => s\?\.offline\);/.test(main)
+  && /return \[\.\.\.own, \.\.\.declaredOffline\];/.test(main),
+  'offline is a statement about a sensor, not an observation of a '
+  + 'target, so it is just as true of DRONE-3 as of the case');
+
+check('the title keeps the collapse key stable across focus changes',
+  /const _sensorTitle = `Contributing Sensors\$\{_scopeCase \? '' : ` · \$\{_focusMember\.label\}`\}`/.test(main),
+  '_dpSectionKey keys on the text before the first separator, so '
+  + 'leading with the drone id would spring a collapsed section open');
+
+check('an empty member bucket is stated, not hidden',
+  /No sensor is holding this airframe right now/.test(main)
+  && /const _sensorEmptyHtml = \(!_scopeCase && _sensorTotal === 0\)/.test(main)
+  && /\$\{_sensorEmptyHtml\}/.test(main),
+  '"nothing holds this one" is a real answer and hiding it is what made '
+  + 'the union look like per-member truth');
+
+check('the scope button only exists when there is a second scope',
+  /const _sensorScopeHtml = _focusMember \? `/.test(main)
+  && /data-dp-sensor-scope="\$\{e\.id\}"/.test(main)
+  && /_dpSensorScopeCase\.has\(evId\)/.test(main));
 
 // The roster row tooltip carried the per-member count for one commit.
 // It went out in the same change as the duplicate panel section and came
@@ -306,12 +340,14 @@ ${extract('_evidenceQ')}
 ${extract('_evidenceQForMember')}
 ${extract('_updateContributingSensorsForPosition')}
 ${extract('_applyDetectionBatchToEvent')}
+${extract('_panelSensorSource')}
 export const api = {
   bumpTick: () => { _contribTickSeq++; },
   update: _updateContributingSensorsForPosition,
   memberSensorsFor: _memberSensorsFor,
   evidenceQForMember: _evidenceQForMember,
   evidenceQ: _evidenceQ,
+  panelSource: _panelSensorSource,
 };
 `;
 
@@ -435,6 +471,42 @@ check('the member that IS observed reads strongly on the same sensor',
 check('peak confidence is still monotonic per member',
   (api.memberSensorsFor(EV, M0).find(s => s.id === 'N24')?.peakConfidence || 0) >= leadConfBefore,
   'the closed-case summary and the PDF read peak, not current');
+
+// ─── WHAT THE PANEL SECTION ACTUALLY SHOWS, in each scope ──────────
+//
+// The CPH formation is tight enough that all five members cross a ring
+// within the same tick, so "no sensor holds this airframe" does not
+// reproduce by flying the scenario. It is reachable the moment a member
+// is outside every ring while another is inside, which a spread
+// formation or a breakaway produces, so the branch is exercised here
+// rather than left to a screenshot.
+check('member scope shows that member\'s OWN rows, not the union\'s',
+  (() => {
+    const own = api.panelSource(EV, M1).map(s => s.id).sort().join(',');
+    const mine = api.memberSensorsFor(EV, M1).map(s => s.id).sort().join(',');
+    return own === mine && own.length > 0;
+  })());
+
+check('case scope shows the union, byte for byte the same array',
+  api.panelSource(EV, null) === EV.contributingSensors,
+  'anything that is not a focused swarm member must render exactly what '
+  + 'it rendered before this existed');
+
+check('a member nothing holds shows NO rows, so the panel says so',
+  api.panelSource(EV, 'GATE-0001-m9').length === 0
+  && api.panelSource(EV, null).length > 0,
+  'an unheld member inside a held case is the whole point: the union '
+  + 'says yes because another airframe is held');
+
+check('an offline declaration still shows in member scope',
+  (() => {
+    EV.contributingSensors.push({ id: 'N99', confidence: 0, peakConfidence: 0, offline: true });
+    const rows = api.panelSource(EV, 'GATE-0001-m9');
+    EV.contributingSensors.pop();
+    return rows.length === 1 && rows[0].id === 'N99' && rows[0].offline === true;
+  })(),
+  'offline is a statement about a sensor, so it is true of DRONE-3 as '
+  + 'much as of the case');
 
 check('an unattributed batch still reaches the case union',
   (() => {
