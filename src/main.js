@@ -24989,10 +24989,7 @@ async function main() {
   const _dpCollapsed = new Set();
   // Per-event "sensors expanded" state — false = top 5, true = full list.
   const _dpSensorsExpanded = new Set();
-  // Event ids whose sensor section has been switched BACK to the case
-  // union while a swarm member is focused. Empty is the default, so a
-  // focused drone shows its own sensors and the operator opts out.
-  const _dpSensorScopeCase = new Set();
+
   // Per-event "signal evidence expanded" state. The note is the finding;
   // the reasoning behind it is opt-in.
   const _dpEvidenceExpanded = new Set();
@@ -25213,25 +25210,29 @@ async function main() {
     const _siteMeta = SITES[e.siteId];
     const _threatLat = e.lastPosition?.lat;
     const _threatLon = e.lastPosition?.lon;
-    // ONE SECTION, AND IT FOLLOWS THE FOCUSED AIRFRAME.
+    // THE SECTION IS PER DRONE, IN THE SECTION THAT WAS ALREADY THERE.
     //
-    // A union says yes to a sensor that holds ANY member of a formation,
-    // so on a swarm it cannot answer the question the operator is
-    // actually asking, which is what is holding THIS one. The first
-    // attempt put a second list above this one; on a lead held by every
-    // sensor in range the two were identical, same ids and same numbers
-    // twice, and it came out the same day. So this is the one list and
-    // the roster decides what it is about.
+    // A union says yes to a sensor that holds ANY member of a formation
+    // and carries the best confidence any of them earned, so on a swarm
+    // it reports a sensor on DRONE-5 that is actually holding the lead,
+    // at the lead's number. That is not a rounding problem, it is what a
+    // union means.
     //
-    // Default is the focused drone, because on a swarm that is the
-    // honest answer and the union is the one that misleads. The button
-    // switches back to the whole case and _dpSensorScopeCase remembers
-    // it per event.
+    // Two earlier attempts at showing the per-drone answer both added
+    // something to the panel: a second list (f0aa155, out the same day)
+    // and then a title label plus a scope button (42d18a0, out within
+    // the hour). Nothing is added here. The section has the title it has
+    // always had and the rows it has always had, and the roster decides
+    // which airframe they belong to.
     //
     // Nothing changes for anything that is not a focused swarm member:
-    // _focusedMemberFor returns null and the source is the union.
+    // _focusedMemberFor returns null and the source is the union, which
+    // is every single-platform event and every historical event.
     const _focusMember = _focusedMemberFor(e, _selectedSwarmIndex);
-    const _scopeCase = !_focusMember || _dpSensorScopeCase.has(e.id);
+    // A focused swarm member always reads its own bucket. There is no
+    // opt-out, because "which sensors hold THIS airframe" is the only
+    // question the panel is being asked about a formation.
+    const _scopeCase = !_focusMember;
     const _sensorSource = _panelSensorSource(e, _scopeCase ? null : _focusMember.key);
     const _enrichedSensors = _sensorSource.map(s => {
       const meta = _siteMeta?.sensors?.find(x => x.id === s.id);
@@ -25254,24 +25255,19 @@ async function main() {
       <button class="dp-sensor-toggle" data-dp-sensor-toggle="${e.id}">
         ${_sensorsExpanded ? `Show top 5 only` : `See all ${_sensorTotal} sensors`}
       </button>` : '';
-    // The scope button only exists when there is a second scope to go
-    // to, so a single-platform case renders exactly the markup it did
-    // before this was built.
-    const _sensorScopeHtml = _focusMember ? `
-      <button class="dp-sensor-toggle" data-dp-sensor-scope="${e.id}">
-        ${_scopeCase ? `Show ${_focusMember.label} only` : `Show the whole case`}
-      </button>` : '';
-    // THE TITLE KEEPS "Contributing Sensors" IN FRONT.
+    // THE SECTION LOOKS EXACTLY AS IT ALWAYS HAS.
     //
-    // _dpSectionKey keys a section's collapse state on the text before
-    // the first separator. Leading with the drone id would mint a new
-    // key per focused airframe, so a section the operator collapsed on
-    // DRONE-1 would spring back open on DRONE-2.
-    const _sensorTitle = `Contributing Sensors${_scopeCase ? '' : ` · ${_focusMember.label}`}`
-      + (!_scopeCase && _sensorTotal === 0
-        ? ' · not held'
-        : ` · ${_sensorLive} / ${_sensorTotal}`)
+    // No drone name in the title, no scope button, no second list. The
+    // roster row is already highlighted, so the panel says whose list
+    // this is without the section repeating it, and three attempts at
+    // putting that on screen were all wrong. The title string is the
+    // one this section has carried since before any of this existed.
+    const _sensorTitle = `Contributing Sensors · ${_sensorLive} / ${_sensorTotal}`
       + (_sensorTotal > 5 && !_sensorsExpanded ? ' · showing top 5 by proximity' : '');
+    // The one state that would otherwise read as a broken panel: a
+    // focused drone that nothing is holding, inside a case that other
+    // drones are keeping alive. An empty list with no explanation is
+    // what made the union look like per-drone truth in the first place.
     const _sensorEmptyHtml = (!_scopeCase && _sensorTotal === 0) ? `
       <div class="dp-note dp-dim">No sensor is holding this airframe right now. The case may still be held by sensors that have the rest of the formation.</div>` : '';
     // data-sensor-sig IS THE MEMBERSHIP STAMP, not decoration. The rows
@@ -25290,7 +25286,6 @@ async function main() {
           </div>`).join('')}
         ${_sensorEmptyHtml}
         ${_sensorToggleHtml}
-        ${_sensorScopeHtml}
       </div>` : '';
 
     // Contributing Sensors is the CASE: the union across every member,
@@ -25954,16 +25949,6 @@ async function main() {
       });
     });
 
-    // Wire the sensor-section scope toggle: focused drone <-> whole case
-    detailBodyEl.querySelectorAll('[data-dp-sensor-scope]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        btn.blur();
-        const evId = btn.dataset.dpSensorScope;
-        if (_dpSensorScopeCase.has(evId)) _dpSensorScopeCase.delete(evId);
-        else _dpSensorScopeCase.add(evId);
-        renderDetailPanel();
-      });
-    });
 
     // Wire signal-evidence "Show more / Show less" toggle
     detailBodyEl.querySelectorAll('[data-dp-evidence-toggle]').forEach(btn => {

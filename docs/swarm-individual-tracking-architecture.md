@@ -110,7 +110,7 @@ flowchart TD
   answer. An event with no store at all (every single-platform event, every historical
   event) falls back to the case union, so nothing outside swarms changed.
 
-**Operator surface: one section, and it follows the focused airframe.**
+**Operator surface: the section that was already there, per drone.**
 
 ```mermaid
 flowchart LR
@@ -119,48 +119,70 @@ flowchart LR
     F -->|"not a swarm, or<br/>a stale index"| NUL["null"]
     MK --> P["_panelSensorSource(event, memberKey)"]
     NUL --> P
-    B["Show the whole case<br/>_dpSensorScopeCase"] -.->|"forces null"| P
     P -->|"memberKey"| OWN["event.memberSensors[memberKey]<br/>+ offline declarations"]
     P -->|"null"| UNI["event.contributingSensors"]
-    OWN --> SEC["the one Contributing Sensors section"]
+    OWN --> SEC["Contributing Sensors<br/>unchanged title, unchanged rows"]
     UNI --> SEC
     SEC --> PATCH["250 ms patcher reads<br/>data-sensor-scope off the markup"]
 ```
 
-The detail panel has exactly one sensor section. On a swarm it defaults to the focused
-drone's own bucket and the title reads `Contributing Sensors · DRONE-3 · 6 / 14`; a button
-switches it to the whole case and `_dpSensorScopeCase` remembers that per event. On anything
-that is not a focused swarm member, `_focusedMemberFor` returns null, the source is the
-union, and the markup is what it was before any of this existed, scope button included
-(there is none).
+**Nothing is added to the panel.** No second list, no drone name in the title, no scope
+button. `Contributing Sensors` has the title string it carried at `67f29c1`, the same rows and
+the same top-5 toggle; only its SOURCE follows the roster. Click DRONE-5 and the numbers are
+DRONE-5's. On anything that is not a focused swarm member `_focusedMemberFor` returns null and
+the source is the union, which covers every single-platform event and every historical event.
 
-Three traps, each of which the first attempt hit:
+Getting here took three attempts and two of them were on screen:
 
-- **Two sections read as a bug.** The first version put `Sensors Holding DRONE-n` ABOVE
-  `Contributing Sensors`. On a lead held by every sensor in range the two lists were
-  identical, same ids and same numbers twice, and it was reverted the same day (`1fb84fe`).
-  One section, scoped by the roster, is the shape that works.
+| | what it did | why it went |
+|---|---|---|
+| `f0aa155` | added `Sensors Holding DRONE-n` ABOVE the existing section | on a lead held by every sensor the two lists were identical, same ids and same numbers twice |
+| `42d18a0` | one section, but with `· DRONE-5` in the title and a `Show the whole case` button | still a visible change to a panel that was finished; reverted within the hour |
+| current | one section, unchanged markup, source follows the roster | |
+
+The union is still the union: it drives the alert strip, the case file, the report and
+`entry.sensorIds`, and `_recomputeEventContributingSensors` still derives it from the buckets.
+It is simply not what the panel section reads on a swarm, because a union says yes to a sensor
+that holds ANY member and carries the best confidence any of them earned. That is what put S23
+on DRONE-5 at the lead's number.
+
+Two traps, both of which the earlier attempts hit:
+
 - **`_selectedSwarmIndex` indexes the ROSTER, not the formation.** The roster lists only
   members with `_everDetected`, so `${event.id}-m${idx}` is the wrong key for it.
   `_focusedMemberFor` rebuilds the roster's list from the same two sources in the same order
   with the same filter and returns the member the index actually points at.
-- **The title must keep `Contributing Sensors` in front.** `_dpSectionKey` keys a section's
-  collapse state on the text before the first separator, so leading with the drone id would
-  mint a key per airframe and a section collapsed on DRONE-1 would spring open on DRONE-2.
+- **The title must stay `Contributing Sensors`.** `_dpSectionKey` keys a section's collapse
+  state on the text before the first separator, so a drone name in front would mint a key per
+  airframe and a section collapsed on DRONE-1 would spring open on DRONE-2.
 
 `_panelSensorSource(event, memberKey)` is the single source for the row set, because the full
 render and the 250 ms patcher have to agree on it and the first version had them computing it
-separately. The patcher reads the scope off `data-sensor-scope` rather than recomputing it,
-so it cannot disagree with what is on screen. A change in the row set's membership still
-forces one full render: the rows carry an id and a value and nothing else, so there is
-nothing to patch when the SET changes. Live patching matters here because the panel's hover
-gate blocks full renders, and without it a sensor acquiring an airframe would first appear at
-the moment the operator clicked something else.
+separately. The patcher reads the scope off `data-sensor-scope` rather than recomputing it.
+Live patching matters because the panel's hover gate blocks full renders; without it a sensor
+acquiring an airframe would first appear at the moment the operator clicked something else.
 
-An empty member bucket is stated, not hidden: the title reads `· not held` and the section
-carries "No sensor is holding this airframe right now." Hiding it is what made the union look
-like per-member truth. Offline declarations ride along in both scopes, because `offline: true`
-is a statement about a sensor rather than an observation of a target.
+A focused drone that nothing is holding renders the section with no rows and one line saying
+so, inside a case other drones are keeping alive. An empty list with no explanation is what
+made the union look like per-drone truth in the first place. Offline declarations ride along
+in both scopes, because `offline: true` is a statement about a sensor rather than an
+observation of a target.
+
+**Verified in a browser, on `cph_swarm_runway_incursion`,** clicking between roster rows as
+the formation crosses successive rings:
+
+```
+poll 1  DRONE-1 [N24 N23]            DRONE-5 [N24]
+poll 2  DRONE-1 [N24 N23 N05]        DRONE-5 [N24]
+poll 4  DRONE-1 [N24 N23 N05 N06]    DRONE-5 [N24 N23 N05]
+poll 7  DRONE-1 [N24 N23 N05 N06 N20] DRONE-5 [N24 N23 N05 N06]
+
+Contributing Sensors · 2 / 2    Contributing Sensors · 1 / 1
+  N24  0.49                       N24  0.35
+  N23  0.21
+```
+Same title, no buttons, one section, zero page exceptions. A single-platform case reads
+`Contributing Sensors · 2 / 2` with no button, exactly as before.
 
 `__isr_sensorAudit()` prints the same thing for every member at once, which the panel cannot:
 the case union, then one row per member with the sensors holding it, their mass, the

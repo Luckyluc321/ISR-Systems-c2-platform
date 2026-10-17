@@ -253,10 +253,11 @@ check('the 250 ms patcher reads the scope off the markup',
   'recomputing the scope in the patcher is how it ends up disagreeing '
   + 'with what is on screen');
 
-check('a focused swarm member defaults to its OWN sensors',
-  /const _scopeCase = !_focusMember \|\| _dpSensorScopeCase\.has\(e\.id\);/.test(main),
-  'on a swarm the union is the answer that misleads, so the opt-out is '
-  + 'the button, not the default');
+check('a focused swarm member reads its OWN sensors, with no opt-out',
+  /const _scopeCase = !_focusMember;/.test(main)
+  && !/_dpSensorScopeCase/.test(main),
+  '"which sensors hold THIS airframe" is the only question the panel is '
+  + 'being asked about a formation');
 
 check('anything that is not a focused swarm member reads the union',
   /if \(!tpl\?\.swarm \|\| !st\?\.swarmBillboards \|\| slotIdx == null\) return null;/.test(main)
@@ -277,10 +278,21 @@ check('offline declarations ride along in both scopes',
   'offline is a statement about a sensor, not an observation of a '
   + 'target, so it is just as true of DRONE-3 as of the case');
 
-check('the title keeps the collapse key stable across focus changes',
-  /const _sensorTitle = `Contributing Sensors\$\{_scopeCase \? '' : ` · \$\{_focusMember\.label\}`\}`/.test(main),
-  '_dpSectionKey keys on the text before the first separator, so '
-  + 'leading with the drone id would spring a collapsed section open');
+// NOTHING IS ADDED TO THE SECTION. Not a drone name in the title, not a
+// scope button, not a second list. Three attempts at putting the
+// per-drone answer on screen added something to the panel and all three
+// were wrong; the section reads exactly as it did at 67f29c1 and only
+// its SOURCE follows the roster.
+check('the title is the one this section has always carried',
+  /const _sensorTitle = `Contributing Sensors · \$\{_sensorLive\} \/ \$\{_sensorTotal\}`/.test(main)
+  && !/_focusMember\.label/.test(main),
+  'it also keeps the collapse key stable: _dpSectionKey keys on the '
+  + 'text before the first separator, so a drone name in front would '
+  + 'spring a section collapsed on DRONE-1 open on DRONE-2');
+
+check('there is no scope button and no handler for one',
+  !/data-dp-sensor-scope/.test(main)
+  && !/_sensorScopeHtml/.test(main));
 
 check('an empty member bucket is stated, not hidden',
   /No sensor is holding this airframe right now/.test(main)
@@ -288,11 +300,6 @@ check('an empty member bucket is stated, not hidden',
   && /\$\{_sensorEmptyHtml\}/.test(main),
   '"nothing holds this one" is a real answer and hiding it is what made '
   + 'the union look like per-member truth');
-
-check('the scope button only exists when there is a second scope',
-  /const _sensorScopeHtml = _focusMember \? `/.test(main)
-  && /data-dp-sensor-scope="\$\{e\.id\}"/.test(main)
-  && /_dpSensorScopeCase\.has\(evId\)/.test(main));
 
 // The roster row tooltip carried the per-member count for one commit.
 // It went out in the same change as the duplicate panel section and came
