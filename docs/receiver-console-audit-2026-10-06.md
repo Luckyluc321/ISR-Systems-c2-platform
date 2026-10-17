@@ -687,6 +687,8 @@ Claims verified a second time by direct inspection:
 - that all eight archetype badge classes use one colour
 - every count in this document, recomputed from the source files
 
-The file `src/main 2.js` was excluded throughout. It is a 23,519-line
+The file `src/main 2.js` was excluded throughout. It was a 23,519-line
 duplicate of `main.js`, imported by nothing, committed by accident in
-`f1526db`.
+`f1526db`. It was deleted on 2026-10-17 and `src/*\ 2.js` added to
+`.gitignore` so the sync cannot re-commit it; it is still retrievable at
+`git show 'f1526db:src/main 2.js'`.

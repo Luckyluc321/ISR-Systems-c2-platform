@@ -39,3 +39,4 @@ city-creation-framework/mesh-pipeline/work/
 # Python bytecode from the mesh pipeline scripts
 __pycache__/
 *.pyc
+src/*\ 2.js
