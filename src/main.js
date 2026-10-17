@@ -17040,6 +17040,9 @@ async function main() {
     // Same failure the heading already carries a long note about: a
     // per-frame delta of a per-tick value. Here the anchor only moves
     // when the position does, so the elapsed time matches the distance.
+    // Last pitch the aircraft was actually commanded, held across frames
+    // in which it did not move. See the note at the pitch calculation.
+    let _lastPitchTarget = 0;
     let _spdPrevCart = null;
     let _spdPrevTime = performance.now();
     let _yawRateFilt = 0;
@@ -17186,7 +17189,21 @@ async function main() {
       const targetHeading = -stateHolder.headingRad + _iconTrim;
 
       // Pitch — target from vertical-vs-horizontal velocity.
-      let targetPitch = 0;
+      // PITCH IS HELD BETWEEN MOVES, NOT RESET TO LEVEL.
+      //
+      // This read `let targetPitch = 0` and only filled it in on frames
+      // where the aircraft had actually moved. Position advances on a
+      // TICK and this runs every RENDER FRAME, so on most frames the
+      // delta was zero, the guard failed, and the target fell back to
+      // LEVEL. The result is a nose that is commanded level, then to the
+      // real angle, then level again, several times a second. On a 37 m
+      // airframe that reads as the aircraft bucking.
+      //
+      // Same fault the bank had, from the same cause: a per-frame delta
+      // of a per-tick value. An aircraft that has not moved has not
+      // changed attitude either, so the last computed target stands
+      // until there is new evidence.
+      let targetPitch = _lastPitchTarget;
       if (_prevPosCart) {
         const prev = Cesium.Cartographic.fromCartesian(_prevPosCart);
         const curr = Cesium.Cartographic.fromCartesian(cart);
@@ -17200,6 +17217,7 @@ async function main() {
           targetPitch = Math.atan2(dAlt, dHoriz);
           if (targetPitch >  pitchClamp) targetPitch =  pitchClamp;
           if (targetPitch < -pitchClamp) targetPitch = -pitchClamp;
+          _lastPitchTarget = targetPitch;
         }
       }
 
