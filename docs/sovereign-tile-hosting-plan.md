@@ -52,8 +52,9 @@ Close-up fidelity per site comes later from our own capture at onboarding; out o
    Earth-at-Night layer load from ion at boot in every profile. A small guard so the sovereign
    profile skips all ion imagery. This is the single code change in the plan.
 
-Result: customer-facing and simulation use streams only from our bucket. No ion sessions, no Google
-sessions, no quota walls. Opex is storage plus egress, flat, independent of operators and screens.
+Result: imagery and terrain stream only from our bucket; the 3D building layer streams from Google
+on our own key. No ion sessions at all, no quota walls, no lock-outs. Opex is storage plus egress
+plus DKK-level Google 3D sessions, flat in practice and independent of how hard operators use it.
 
 ## What stays as-is
 
