@@ -20923,6 +20923,53 @@ async function main() {
     return rows;
   };
 
+  // FIND THE NOSE IN ONE MINUTE, instead of another round trip.
+  //
+  //   __isr_quadNose(90)    set the offset and relaunch the demo
+  //   __isr_quadNose()      show where it is now
+  //
+  // There are only four answers. The asset's nose is on glTF -Z, which
+  // is measured rather than assumed: its gimbal camera is the lowest
+  // geometry in the file, sits on the centreline, and is at the -Z end.
+  // What is NOT settled is how that maps through Cesium's axis
+  // correction, and 180 and 0 have both been tried and are both wrong,
+  // so it is 90 or 270.
+  //
+  // Whichever value makes the nose point along the direction of travel
+  // is the answer. Tell me the number and it becomes the default.
+  window.__isr_quadNose = (deg) => {
+    const t = window.__isr_quad_tuning = window.__isr_quad_tuning || {};
+    if (deg == null) {
+      console.log('nose offset is', (t.modelOverride || {}).headingOffsetDeg
+        ?? _quadModelSpec().headingOffsetDeg, '· try __isr_quadNose(90) and __isr_quadNose(270)');
+      return;
+    }
+    t.modelOverride = { ...(t.modelOverride || {}), headingOffsetDeg: deg };
+    try { cancelActiveThreats(); } catch (_) { /* nothing running */ }
+    setTimeout(() => {
+      spawnFromTemplate('cph_dji_flight_demo');
+      console.log(`[nose] offset ${deg}. Watch the first forward run: the nose `
+        + 'should point the way it moves. Wrong? __isr_quadNose(' + ((deg + 90) % 360) + ')');
+    }, 400);
+  };
+
+  // IS THE VIBRATION THE HOVER NOISE, OR SOMETHING ELSE?
+  //
+  //   __isr_quadHum(0)    noise off
+  //   __isr_quadHum(1)    back to the Blender amplitude
+  //
+  // The model carries the flight controller's own correction: sub-degree
+  // lean at 0.37, 0.91 and 1.70 Hz, and 0.4 degrees of yaw at 0.23 Hz.
+  // That is deliberate and it is in the Blender file too. If turning it
+  // off stops what you are seeing, it is that and the amplitude is the
+  // dial. If it does not, the oscillation is coming from somewhere else
+  // and I need to look again.
+  window.__isr_quadHum = (gain = 0) => {
+    const t = window.__isr_quad_tuning = window.__isr_quad_tuning || {};
+    t.hoverNoise = gain;
+    console.log(`[hover noise] gain ${gain}. Applies immediately, no relaunch.`);
+  };
+
   window.__isr_propCheck = (seconds = 0) => {
     const camPos = viewer.camera.positionWC;
     const read = () => {

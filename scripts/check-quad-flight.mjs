@@ -171,9 +171,23 @@ check('rotor transforms accept a per-rotor speed',
 
 check('the model key is captured, not read live per frame',
   /const _quadKey = \(window\.__isr_quad_tuning \|\| \{\}\)\.model/.test(main)
-  && !/_quadModelSpec\(\)[^;]*;/.test(main.replace(/\/\/.*$/gm, '')),
+  // Every resolve inside an orientation callback must pass the captured
+  // key. A bare _quadModelSpec() is fine in a diagnostic handle, which
+  // runs when a human types it, and fatal in a per-frame rig, which is
+  // what turned airborne drones sideways.
+  && /const _qM = _quadModelSpec\(_quadKey\);/.test(main)
+  && (main.match(/const _qM = _quadModelSpec\(/g) || []).length
+     === (main.match(/const _qM = _quadModelSpec\(_quadKey\);/g) || []).length,
   'reading the live switch inside a per-frame callback is what turned '
   + 'airborne drones sideways');
+
+check('the hover noise has an off switch',
+  /__isr_quadHum/.test(main) && /hoverNoise/.test(main),
+  'telling a real oscillation from the designed one needs an A/B');
+
+check('the nose offset can be hunted without a rebuild',
+  /__isr_quadNose/.test(main),
+  'there are four possible answers and only a human can see which is right');
 
 if (failures) {
   console.log(`\ncheck:quad-flight FAILED — ${failures} assertion${failures === 1 ? '' : 's'}`);

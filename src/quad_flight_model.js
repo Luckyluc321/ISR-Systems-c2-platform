@@ -115,6 +115,20 @@ export function createQuadFlightModel(opts = {}) {
   const rotors = opts.rotors || [];
   const baseRps = opts.rps ?? 12;
   const seed = opts.seed ?? 0;
+  // Hover noise gain. 1 is the Blender model's own amplitude, sub-degree
+  // at a fraction of a Hertz to a couple of Hertz, which is a real
+  // flight controller correcting a body that drifts in its own
+  // downwash. 0 turns it off, which is the way to tell a genuine
+  // oscillation from the one that is supposed to be there.
+  const noiseGain = () => {
+    // `&&` yields FALSE outside a browser, and false is not null, so a
+    // `?? 1` or `== null` guard against it silently returns 0 and turns
+    // the hover noise off everywhere there is no window. Which is the
+    // gate, where "a hover is not perfectly still" then failed.
+    if (typeof window === 'undefined') return 1;
+    const g = window.__isr_quad_tuning && window.__isr_quad_tuning.hoverNoise;
+    return typeof g === 'number' ? g : 1;
+  };
 
   const maxTilt = MAX_TILT_DEG * DEG;
   const yawMax = YAW_RATE_MAX_DPS * DEG;
@@ -286,9 +300,10 @@ export function createQuadFlightModel(opts = {}) {
       leanE = newLeanE; leanN = newLeanN;
 
       // ── hover noise, decorrelated per airframe ────────────────────
-      const nLeanE = _noise(tSec, leanAmps, NOISE_LEAN_HZ, 0.0 + seed);
-      const nLeanN = _noise(tSec, leanAmps, NOISE_LEAN_HZ, 2.1 + seed);
-      const nYaw = NOISE_YAW_DEG * DEG
+      const ng = noiseGain();
+      const nLeanE = ng * _noise(tSec, leanAmps, NOISE_LEAN_HZ, 0.0 + seed);
+      const nLeanN = ng * _noise(tSec, leanAmps, NOISE_LEAN_HZ, 2.1 + seed);
+      const nYaw = ng * NOISE_YAW_DEG * DEG
         * Math.sin(2 * Math.PI * NOISE_YAW_HZ * tSec + 1.3 + seed);
       const shownE = leanE + nLeanE, shownN = leanN + nLeanN;
       const shownYaw = yaw + nYaw;
