@@ -357,16 +357,28 @@ function _smoothPath(waypoints, dt = 0.25) {
 // Its median is 20 m/s, comfortably inside the envelope, so it needs
 // nothing.
 const _CRUISE_TARGET_MS = {
-  cph_quad_hostile:          26,
-  cph_quad_recon_apron:      26,
-  cph_dji_hobbyist:          14,   // a hobbyist, and it should look like one
-  esbjerg_quad_hostile:      26,
-  esbjerg_usv_hostile:        8,   // a surface vessel. 51 m/s was 100 knots
-  billund_quad_hostile:      26,
-  billund_swarm_recon:       26,
-  billund_commercial_survey: 14,   // a survey flight, not an intercept
-  billund_lego_recon:        26,
-  swarm_recon_cph_amk:       26,
+  // DELIBERATELY EMPTY. Nothing is retimed.
+  //
+  // It was briefly populated, and that was the wrong fix. The paths run
+  // at 46 to 77 m/s, far past the airframe, and the pinning that caused
+  // was real; but the cure is the airframe's drag and its cruise cap,
+  // not the clock. Measured at the ORIGINAL speeds under the current
+  // model:
+  //
+  //     20 m/s -> 15.7 deg    46 m/s -> 20.2 deg
+  //     26 m/s -> 25.3 deg    58 m/s -> 20.2 deg
+  //     33 m/s -> 20.2 deg    77 m/s -> 20.2 deg
+  //
+  // None pinned. A normal forward lean at every speed in every
+  // scenario, with the clocks exactly as they were authored and tuned.
+  //
+  // Retiming doubled or tripled durations and moved choreography that
+  // had been timed by hand. It is kept as a facility because a scenario
+  // may genuinely want slowing one day, and then it is one line here:
+  //
+  //     cph_quad_hostile: 26,
+  //
+  // Positions are never touched, only the clock.
 };
 
 /** Median speed over a path's own waypoints, metres per second. */

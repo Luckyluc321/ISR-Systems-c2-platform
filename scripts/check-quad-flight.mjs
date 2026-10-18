@@ -213,6 +213,23 @@ check('rotor speed rises with thrust demand',
 check('the rotor angle accumulates, so the props actually turn',
   cruise.rotorAngleRad.every(a => Math.abs(a) > 1));
 
+// ─── the scenario clocks are not ours to move ───────────────────────
+console.log('\nScenario timing');
+const drones = readFileSync(new URL('../src/drones.js', import.meta.url), 'utf8');
+
+check('no template is retimed',
+  (() => {
+    const m = /const _CRUISE_TARGET_MS = \{([\s\S]*?)\n\};/.exec(drones);
+    if (!m) return false;
+    // Entries only, comments stripped.
+    const body = m[1].replace(/\/\/.*$/gm, '').trim();
+    return body === '';
+  })(),
+  'These scenarios were timed by hand and signed off. Stretching a clock '
+  + 'to slow a drone moves choreography that was tuned against it. The '
+  + 'pinning is cured by the airframe\'s drag and cruise cap instead, '
+  + 'which leaves every clock alone.');
+
 // ─── the wiring in main.js ──────────────────────────────────────────
 console.log('\nThe wiring');
 const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
