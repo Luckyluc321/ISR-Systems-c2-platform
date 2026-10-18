@@ -1,8 +1,21 @@
 # Sovereign tile hosting — short-term plan
 
 **Status:** Decided 2026-10-18 · **Owner:** Lucas (accounts), Gowri (upload + env), agent (code gate on 1574)
-**Goal:** serve the map from our own cloud so simulations and customer use cost nothing per load,
-with no US-hosted map calls in the customer-facing profile.
+**Goal:** serve imagery and terrain from our own cloud at zero cost per load, kill the ion quota
+dependency, and find the sovereign answer for the 3D building layer without lowering its quality.
+
+**Amended 2026-10-18 (same day):** the operator's working view is the site **plus ~10 km in every
+direction**, and the current Skråfoto meshes fail Lucas's quality bar for that ring in 3D. So the
+customer-facing **3D building layer stays Google Photorealistic tiles short term, via our own
+Google key (direct Map Tiles API, never via ion)** — per-session cost at ops-room usage is DKK-level
+noise and compatible with flat pricing. US hosting for this one layer is a known, time-boxed
+exception. Imagery and terrain go sovereign now (SDFI/DHM are equal or better than Bing/World
+Terrain — no quality loss). Two probes decide the sovereign 3D endgame:
+1. Re-run one Billund tile at full resolution / max ODM quality on Gowri's GPUs — the current
+   tiles were built from 3000 px downscales and heavily decimated, likely a preview-grade run,
+   so the quality ceiling is unknown.
+2. Research licensed EU/Danish commercial photogrammetry mesh (vendors that fly the national
+   programs sell textured mesh with self-hosting licenses) — coverage, terms, per-km² price.
 
 ## The rule this plan exists to enforce
 
@@ -44,9 +57,9 @@ sessions, no quota walls. Opex is storage plus egress, flat, independent of oper
 
 ## What stays as-is
 
-- The photoreal profile (ion + Google) remains in the code for internal side-by-side comparison,
-  behind its existing switch. It is not used for customers while ion is on the free tier, because
-  that tier is non-commercial and quota-capped.
+- The 3D building layer for customers and sims: Google Photorealistic tiles via our own Google
+  key (direct, not ion). The ion-streamed copy of the same layer is retired, which ends the
+  quota-wall and the non-commercial-license problem.
 - No UI, UX or data-flow changes. The map controls, profiles and layers behave exactly as today.
 - `localhost:1573` is off-limits in all steps. All testing happens on 1574 from an isolated copy.
 
