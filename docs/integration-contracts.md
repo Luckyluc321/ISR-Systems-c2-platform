@@ -2038,3 +2038,59 @@ sequenceDiagram
 ---
 
 <!-- End of Integration Contracts book v0.1 · Phases A + B + C · 12 contracts -->
+
+## Site scope: entities are built per account, not hidden
+
+Every site used to be drawn at boot regardless of who was signed in, and a
+visibility sweep then hid the ones the account did not own. Measured on the
+running app, that cost:
+
+```
+639 entities at boot, nothing flying, 258 per-frame callback properties
+a whole drone flight adds 5 entities and 1 callback
+```
+
+Roughly 240 of those belonged to sites an operator cannot see, each sensor
+carrying a dot, a coverage ring and a pulse ring with a per-frame callback.
+Hiding them bought 34 fps to 41 on a single-site account, and 41 fps on a 60 Hz
+screen still judders, because 24 ms sits between one refresh and two. They had
+to stop existing, not stop showing.
+
+```
+                        sites   entities   per-frame callbacks
+admin, sees everything     10        639                   258
+op-cph-airports             1        312                    70
+back to admin              10        639                   258
+```
+
+**The lifecycle.** `ensureSiteRendered(siteId)` builds a site and records the
+exact entity ids it created, taken as the delta across the build rather than
+guessed from id prefixes, so a teardown cannot miss one or take a neighbour's.
+New entity kinds inside `renderSite` are picked up for free. `releaseSite`
+removes exactly those. `syncSitesToRole()` is the single entry point, is
+idempotent, and runs at boot and on every account switch.
+
+**The pulse rings moved, but only in WHEN.** They were built in their own loop
+over every site, after the site render. That loop is now
+`_buildSitePulseRings(siteKey)`, called from `ensureSiteRendered` so the rings
+belong to the site and leave with it. Every property of the ring is byte
+identical and `check:sensor-pulse` still asserts all of them. Nothing about how
+a marker draws has changed.
+
+**`applySiteScopeVisibility` is still needed** and still runs. Entities created
+OUTSIDE `renderSite` also carry a site id: tracks, trails, contributing rings,
+anything that appears long after the site was built. The build owns the site's
+own geometry, the sweep owns everything else stamped with a site.
+
+**What this is NOT yet.** Site definitions are still bundled at build time by
+`import.meta.glob` with `eager: true`, so every site's YAML is in the bundle
+even when it is never built. That is the next layer, and it is what makes this
+scale to thousands of sites:
+
+1. a small manifest of site ids and metadata, enough to decide scope
+2. per-site payloads fetched on demand, which `import.meta.glob` gives for free
+   without `eager`, and which swaps cleanly for an HTTP fetch against Azure
+   later
+3. the entity lifecycle above, which already exists and does not change
+
+`__isr_siteScope()` reports what is built and what it costs.

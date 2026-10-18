@@ -3362,13 +3362,79 @@ async function main() {
     }
   }
 
-  // Render all sites. Every site is drawn once here regardless of who
-  // is signed in, then applySiteScopeVisibility below hides the ones
-  // the active account does not own. Rendering is not repeated on role
-  // switch, so the sweep is what keeps the globe honest.
-  for (const siteKey of Object.keys(SITES)) {
-    renderSite(SITES[siteKey]);
+  // ── SITES ARE BUILT PER ACCOUNT, NOT ALL AT ONCE ────────────────
+  //
+  // Every site used to be drawn at boot regardless of who was signed
+  // in, and applySiteScopeVisibility then HID the ones the account did
+  // not own. Hiding is not free. Measured on the running app:
+  //
+  //     639 entities at boot, nothing flying, 258 per-frame callbacks
+  //     a whole drone flight adds 5 entities and 1 callback
+  //
+  // About 240 of those entities belong to sites an operator cannot see,
+  // each sensor carrying a dot, a coverage ring and a pulse ring. On a
+  // single-site account the hiding bought 34 fps to 41, and 41 fps on a
+  // 60 Hz screen still judders because 24 ms sits between one refresh
+  // and two. The entities had to stop existing, not stop showing.
+  //
+  // It is also simply correct: an operator's browser has no business
+  // holding another tenant's site geometry.
+  //
+  // _renderedSites records the exact entity ids a site created, taken
+  // as the delta across renderSite rather than guessed from id
+  // prefixes, so a teardown cannot miss one and cannot take a
+  // neighbour's. New entity kinds inside renderSite are picked up for
+  // free.
+  const _renderedSites = new Map();   // siteId -> [entity id]
+
+  function ensureSiteRendered(siteId) {
+    if (_renderedSites.has(siteId)) return false;
+    const site = SITES[siteId];
+    if (!site) return false;
+    const before = new Set(viewer.entities.values.map(e => e.id));
+    renderSite(site);
+    _buildSitePulseRings(siteId);
+    const added = viewer.entities.values
+      .map(e => e.id).filter(id => !before.has(id));
+    _renderedSites.set(siteId, added);
+    return true;
   }
+
+  function releaseSite(siteId) {
+    const ids = _renderedSites.get(siteId);
+    if (!ids) return false;
+    for (const id of ids) {
+      const e = viewer.entities.getById(id);
+      if (e) viewer.entities.remove(e);
+    }
+    _renderedSites.delete(siteId);
+    return true;
+  }
+
+  // The one entry point. Idempotent, so it is safe to call on every
+  // role change and at boot.
+  function syncSitesToRole() {
+    let built = 0, freed = 0;
+    for (const siteId of Object.keys(SITES)) {
+      if (_roleCanSeeSite(siteId)) { if (ensureSiteRendered(siteId)) built++; }
+      else if (releaseSite(siteId)) freed++;
+    }
+    if (built || freed) {
+      console.log(`[sites] ${built} built, ${freed} released, `
+        + `${_renderedSites.size} in scope, ${viewer.entities.values.length} entities`);
+    }
+    return { built, freed };
+  }
+
+  window.__isr_siteScope = () => ({
+    inScope: [..._renderedSites.keys()],
+    entitiesPerSite: Object.fromEntries(
+      [..._renderedSites].map(([k, v]) => [k, v.length])),
+    totalEntities: viewer.entities.values.length,
+  });
+  // The first build happens below, once _buildSitePulseRings and the
+  // helpers it closes over are declared. Calling it here would build a
+  // site without its rings and then record that as complete.
 
   // ── THE PULSE RING IS BUILT ONCE, HERE, NOT ON EVERY TICK ──
   //
@@ -3411,7 +3477,12 @@ async function main() {
     return false;
   }
 
-  for (const siteKey of Object.keys(SITES)) {
+  // The pulse rings, per site. Lifted out of a loop over every site so
+  // ensureSiteRendered can build them as part of that site and the
+  // teardown can take them with it. The ring's own properties are
+  // untouched: this moved WHEN they are built, never HOW they draw,
+  // and check:sensor-pulse still asserts every one of them.
+  function _buildSitePulseRings(siteKey) {
     for (const sensor of (SITES[siteKey].sensors || [])) {
       if (sensor.status === 'offline') continue;
       const _ringDegraded = sensor.status === 'degraded';
@@ -3452,6 +3523,10 @@ async function main() {
     }
   }
 
+  // Build every site this account can see. First call, so nothing is
+  // released; the role-change handler calls it again on every switch.
+  syncSitesToRole();
+
   // Load the reconstructed buildings for any site that has them.
   //
   // This was deliberately manual while the mesh still contained ground,
@@ -3472,6 +3547,10 @@ async function main() {
   // no-op here: _roleCanSeeSite returns true for any non-operator role.
   // entity.show = false removes an entity from picking as well as from
   // render, so a hidden sensor also stops being clickable.
+  // Kept, and still needed: entities created OUTSIDE renderSite carry a
+  // siteId too, and a track or a contributing ring can appear long
+  // after the site was built. syncSitesToRole owns the site's own
+  // geometry; this owns everything else that is stamped with a site.
   function applySiteScopeVisibility() {
     for (const e of viewer.entities.values) {
       const sid = e.properties?.siteId?.getValue?.();
@@ -32716,6 +32795,10 @@ async function main() {
     // left every other owner's boundaries, sensors and coverage rings
     // on screen. Both are no-ops for admin and receiver accounts.
     try {
+      // Build what this account can see, release what it cannot, THEN
+      // re-scope everything else. Order matters: the sweep below reads
+      // entities, and a site released above should not be swept.
+      syncSitesToRole();
       applySiteScopeVisibility();
       applyFlyToScope();
     } catch (err) {
