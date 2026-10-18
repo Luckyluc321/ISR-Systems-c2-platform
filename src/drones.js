@@ -367,7 +367,24 @@ function _demoFlightPath(lat0, lon0, alt0, emitDt = 0.25) {
   return out;
 }
 
-const _DEMO_PATH_CPH = _demoFlightPath(55.6205, 12.6480, 90);
+// EMITTED AT FRAME RATE, not at a quarter second.
+//
+// The flight model MEASURES velocity off the path, and interpolate() is
+// linear, so a coarse path hands it a staircase: the velocity holds
+// flat for a waypoint interval and then steps. At 0.25 s that is a 4 Hz
+// square wave straight into the acceleration, and it survived the
+// attitude loop as a one degree per frame ripple on the pitch during a
+// steady forward run. That is what read as humming.
+//
+// This path is GENERATED, so there is no reason to sample it coarsely.
+// The loop already integrates at 1/60; emitting at 1/60 means the
+// velocity the model measures IS the velocity the generator computed,
+// with no sampling in between. 2820 waypoints against 187, which is a
+// few hundred kilobytes of plain objects built once at module load.
+//
+// Hand-authored paths cannot do this, which is why ACC_TAU exists in
+// the model as well.
+const _DEMO_PATH_CPH = _demoFlightPath(55.6205, 12.6480, 90, 1 / 60);
 
 function _smoothPath(waypoints, dt = 0.25) {
   const n = waypoints.length;

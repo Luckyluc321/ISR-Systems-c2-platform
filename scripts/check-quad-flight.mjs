@@ -295,6 +295,61 @@ check('the demo path length matches the render, within a metre',
   + 'too. LENGTH is set by the dynamics and is the sharper test: 390.2 m '
   + 'with the attitude lag, 384.6 without it.');
 
+check('the demo path is EMITTED at frame rate too',
+  /_demoFlightPath\(55\.6205, 12\.6480, 90, 1 \/ 60\)/.test(dronesSrc),
+  'the model measures velocity off the path, and interpolate() is '
+  + 'linear, so a 0.25 s path hands it a 4 Hz staircase. This one is '
+  + 'generated, so there is no reason to sample it coarsely.');
+
+// `main` is read further down this file, so it is in its temporal dead
+// zone here. kAcc lives in the model anyway, not in main.js.
+const modelSrc = readFileSync(new URL('../src/quad_flight_model.js', import.meta.url), 'utf8');
+check('the acceleration is low-passed before it reaches the lean',
+  /const kAcc = 1 - Math\.exp\(-dtSec \/ ACC_TAU\);/.test(modelSrc)
+  && typeof FM.ACC_TAU === 'number' && FM.ACC_TAU > 0 && FM.ACC_TAU < FM.ATT_TAU,
+  'hand-authored paths cannot be re-emitted, so their sampling has to be '
+  + 'removed in the model. ACC_TAU must sit UNDER the attitude time '
+  + 'constant: it should only remove what the airframe could not have '
+  + 'responded to anyway.');
+
+check('steady forward flight does not wobble more than the hover noise',
+  (() => {
+    const w = DRONES.TEMPLATES.cph_dji_flight_demo?.waypoints;
+    if (!w) return false;
+    const fps = 60, dt = 1 / fps;
+    const lerp = (t) => {
+      if (t <= w[0].tSec) return w[0];
+      for (let i = 1; i < w.length; i++) {
+        if (t <= w[i].tSec) {
+          const a = w[i - 1], b = w[i], u = (t - a.tSec) / ((b.tSec - a.tSec) || 1);
+          return { lat: a.lat + (b.lat - a.lat) * u, lon: a.lon + (b.lon - a.lon) * u,
+                   alt: a.alt + (b.alt - a.alt) * u };
+        }
+      }
+      return w[w.length - 1];
+    };
+    const fm = FM.createQuadFlightModel({ rotors, rps: 12 });
+    const p = [];
+    for (let f = 0; f < fps * 9; f++) {
+      const t = f * dt, q = lerp(t);
+      const o = fm.update(q.lat, q.lon, q.alt, dt);
+      if (o && t >= 3 && t <= 8) p.push(o.leanFwdDeg);
+    }
+    // Remove the real ramp with a centred 0.25 s average; the residual is
+    // the wobble a viewer sees as humming.
+    const N = 15, res = [];
+    for (let i = N; i < p.length - N; i++) {
+      let sum = 0;
+      for (let k = -N; k <= N; k++) sum += p[i + k];
+      res.push(p[i] - sum / (2 * N + 1));
+    }
+    const rms = Math.sqrt(res.reduce((a, b) => a + b * b, 0) / res.length);
+    return rms < 0.3;
+  })(),
+  'A one degree per frame ripple at the waypoint rate is what Lucas saw '
+  + 'as the airframe humming. It has to stay under the deliberate hover '
+  + 'noise, which is about 0.5 degrees rms, or it is the thing you notice.');
+
 check('the generator integrates at frame rate, not at the emit rate',
   /const SIM_DT = 1 \/ 60;/.test(dronesSrc)
   && /function _demoFlightPath\(lat0, lon0, alt0, emitDt = 0.25\)/.test(dronesSrc),

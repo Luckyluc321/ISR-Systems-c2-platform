@@ -81,6 +81,10 @@ export const KV = 1.2;                // 1/s, velocity loop gain
 export const ATT_TAU = 0.15;          // s, attitude loop time constant
 export const ATT_RATE_DPS = 120.0;    // deg/s, attitude slew limit
 export const VZ_TAU = 0.6;            // s, vertical speed response
+// Not from the Blender file. There the controller OWNS the velocity, so
+// there is no measured signal to clean; here the velocity is read off a
+// polyline and carries its sampling with it.
+export const ACC_TAU = 0.12;          // s, acceleration low pass
 export const YAW_TAU = 0.3;           // s, yaw rate response
 export const YAW_RATE_MAX_DPS = 100.0;
 
@@ -174,6 +178,7 @@ export function createQuadFlightModel(opts = {}) {
   let vE = 0, vN = 0, vU = 0;
   let yaw = null, yawRate = 0, yawRatePrev = 0;
   let prev = null;          // { e, n, u } metres, relative to the first sample
+  let aE = 0, aN = 0;       // low-passed acceleration, metres per second squared
   let sinceMove = 0;        // seconds since the position last changed
   let vEraw = 0, vNraw = 0, vUraw = 0;   // last measured velocity, held between ticks
   let vMeasured = false;    // did THIS call produce a new velocity?
@@ -310,8 +315,26 @@ export function createQuadFlightModel(opts = {}) {
       // nodding against 5.3. This expression has no such term. It is
       // bounded by the speed change divided by 0.6 s, which is the
       // fastest this airframe can accelerate anyway.
-      const aE = (vEnew - vE) / VZ_TAU;
-      const aN = (vNnew - vN) / VZ_TAU;
+      // AND THEN LOW-PASSED, because the numerator still carries the
+      // path's sampling.
+      //
+      // (v_raw - v_filtered)/VZ_TAU is the filter's exact derivative,
+      // but v_raw is a staircase: a scenario path is a polyline and
+      // interpolate() is linear, so the measured velocity holds flat
+      // for a waypoint interval and then steps. On the demo path,
+      // sampled at 0.25 s, that is a 4 Hz square wave going straight
+      // into the acceleration at full amplitude. The attitude loop's
+      // 0.15 s lag attenuates it about fourfold, which still left a one
+      // degree per frame ripple on the pitch during a steady forward
+      // run, reversing 7.8 times a second. That is the humming.
+      //
+      // ACC_TAU is a touch under the attitude loop's own time constant,
+      // so it removes what the airframe could not have responded to
+      // anyway and leaves everything it could.
+      const kAcc = 1 - Math.exp(-dtSec / ACC_TAU);
+      aE += ((vEnew - vE) / VZ_TAU - aE) * kAcc;
+      aN += ((vNnew - vN) / VZ_TAU - aN) * kAcc;
+      const aEf = aE, aNf = aN;
 
       // ── yaw: follow the direction of travel, rate limited ─────────
       const speed = Math.hypot(vE, vN);
@@ -330,7 +353,7 @@ export function createQuadFlightModel(opts = {}) {
       // ── horizontal: lean demand from the acceleration and the drag ─
       // Identical to the Blender model from here down. There the
       // acceleration came from a velocity loop; here it is measured.
-      const [adE, adN] = _clampLen(aE, aN, A_MAX);
+      const [adE, adN] = _clampLen(aEf, aNf, A_MAX);
       // ── DRAG, CAPPED ABOVE THE AIRFRAME'S TOP SPEED ───────────────
       //
       // DRAG_K is calibrated so that drag balances a ~35 degree lean at
