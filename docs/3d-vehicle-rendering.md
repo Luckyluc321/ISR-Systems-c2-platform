@@ -1027,6 +1027,63 @@ The plan now runs at 25 m/s with a SLOW leg before a 30 deg/s turn at
 end over the apron. The scenario note and duration follow from the
 generator.
 
+### 8k3. The remaining 6 m, and it is the attitude loop
+
+Reply to 1140dbf, from the Blender thread. Your gate passes here. The
+trajectories are not yet the same, and the residual is now a single
+known thing.
+
+Measured on the same plan: Blender flies 390.3 m of ground, the
+generator 384. Not the step size: the Blender loop re-run in plain
+Python gives 390.3 at 1/30, 390.2 at 1/60, 390.1 at 1/240. Then, same
+loop:
+
+```
+full model                      390.2 m   peak 24.71
+without the slew limit          388.4 m
+without lag and slew (instant)  384.6 m   peak 24.70   <- your generator
+```
+
+`_demoFlightPath` computes `tilt = min(MAX_TILT, atan(need / G))` and
+applies it in the same step. The Blender model keeps a lean STATE that
+follows that demand with `ATT_TAU` (0.15 s) and the `ATT_RATE_DPS` slew
+(120 deg/s), so the airframe takes about 0.3 s to reach a 32 degree
+lean, and the acceleration comes from the lean it HAS, not the one it
+wants. The path is shorter without that because every brake also
+starts 0.3 s sooner.
+
+It matters more than 6 m suggests, because `quad_flight_model.js` DOES
+apply the lag, to the attitude it derives from the path. So on the map
+the airframe moves off on an instant-lean path while its body is still
+leaning into it: for a third of a second at every transition it
+accelerates before it has tilted, which is the one thing a quadcopter
+cannot do.
+
+The fix is the three lines the Blender `fly()` has between the demand
+and the acceleration, in your frame:
+
+```js
+// state, outside the loop
+let leanE = 0, leanN = 0;
+const ATT_TAU = 0.15, SLEW = 120 * DEG * dt;
+// per step, after lean_des (= unit(need) * tilt) is known
+let sE = (desE - leanE) * (1 - Math.exp(-dt / ATT_TAU));
+let sN = (desN - leanN) * (1 - Math.exp(-dt / ATT_TAU));
+const sl = Math.hypot(sE, sN);
+if (sl > SLEW) { sE *= SLEW / sl; sN *= SLEW / sl; }
+leanE += sE; leanN += sN;
+const ll = Math.hypot(leanE, leanN);
+const thrust = G * Math.tan(ll);
+aE = (ll > 1e-9 ? leanE / ll * thrust : 0) - dragE;
+aN = (ll > 1e-9 ? leanN / ll * thrust : 0) - dragN;
+```
+
+With that in, the generator should read 390 m and the gate can pin it:
+path length within 1 m of 390.2 is a sharper test than peak speed,
+because the peak is set by the plan and the length by the dynamics.
+Left for you rather than done here: it is your generator and your gate
+expectations.
+
 ## 8l. The manoeuvre sequence is now flyable
 
 `cph_dji_flight_demo`, in the threat picker as "DJI Air 3 flight demo". It flies
