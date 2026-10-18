@@ -40,6 +40,12 @@
 
 const G = 9.81;
 
+// The airframe's own top speed, and the lean a steady cruise is allowed
+// to settle at beyond it. Not from the Blender file: that model is only
+// ever flown inside its envelope, so it never had to answer this.
+export const TOP_SPEED_MS = 21;          // DJI Air 3, level flight
+export const CRUISE_TILT_CAP_DEG = 18;   // a visible lean, not a pinned one
+
 // Airframe and controller. Mirrors blender_drone_flight_demo.py.
 export const MAX_TILT_DEG = 32.0;     // DJI limits sport mode to ~35 deg
 export const A_MAX = 6.5;             // m/s^2, 0 to 21 m/s in about 3.5 s
@@ -143,9 +149,6 @@ export function createQuadFlightModel(opts = {}) {
   let prev = null;          // { e, n, u } metres, relative to the first sample
   let sinceMove = 0;        // seconds since the position last changed
   let vEraw = 0, vNraw = 0, vUraw = 0;   // last measured velocity, held between ticks
-  let vPrevE = 0, vPrevN = 0;            // the velocity before that, for acceleration
-  let aEraw = 0, aNraw = 0;              // last measured acceleration, held too
-  let sinceAccel = 0;       // seconds since the velocity last changed
   let vMeasured = false;    // did THIS call produce a new velocity?
   let originLat = null, originLon = null;
   let tSec = 0;
@@ -250,17 +253,38 @@ export function createQuadFlightModel(opts = {}) {
       // VELOCITY MEASUREMENTS. There is no new velocity between ticks,
       // so there is no new acceleration either; it is held, exactly as
       // the velocity is.
-      if (vMeasured) {
-        const dtv = sinceAccel;
-        if (dtv > 1e-4) {
-          aEraw = (vEraw - vPrevE) / dtv;
-          aNraw = (vNraw - vPrevN) / dtv;
-        }
-        vPrevE = vEraw; vPrevN = vNraw;
-        sinceAccel = 0;
-      }
-      sinceAccel += dtSec;
-      const aE = aEraw, aN = aNraw;
+      // AND IT DIFFERENTIATES THE FILTERED VELOCITY, NOT THE RAW ONE.
+      //
+      // A scenario path is a polyline and interpolate() is linear, so
+      // the RAW velocity is piecewise constant and STEPS at every
+      // waypoint. Differentiating that gives a spike at each one: a
+      // 1.2 m/s step over a 16 ms frame is 75 m/s2, clamped to A_MAX,
+      // which saturates the lean for that frame and releases it the
+      // next. On the demo path, sampled at 0.25 s, that is the airframe
+      // nodding 5 degrees four times a second for the whole flight.
+      // Measured at 5.3 degrees peak to peak before this.
+      //
+      // vE and vN are already low-passed at VZ_TAU, which is the
+      // airframe's own vertical response and therefore the fastest its
+      // speed can genuinely change. Differentiating THAT is continuous,
+      // and it is the real acceleration rather than the path's
+      // sampling artefact.
+      // AND IT IS THE FILTER'S ANALYTIC DERIVATIVE, not a difference
+      // quotient. For a first-order low pass the derivative is exact
+      // and needs no dt at all:
+      //
+      //     dv_filtered/dt = (v_raw - v_filtered) / VZ_TAU
+      //
+      // Any numerator over a 16 ms frame amplifies whatever noise is in
+      // the numerator by 60. Differencing the RAW velocity amplified
+      // the waypoint steps, and differencing the FILTERED velocity
+      // amplified the filter's own per-frame increment, which is why
+      // the second attempt was worse than the first: 8.7 degrees of
+      // nodding against 5.3. This expression has no such term. It is
+      // bounded by the speed change divided by 0.6 s, which is the
+      // fastest this airframe can accelerate anyway.
+      const aE = (vEnew - vE) / VZ_TAU;
+      const aN = (vNnew - vN) / VZ_TAU;
 
       // ── yaw: follow the direction of travel, rate limited ─────────
       const speed = Math.hypot(vE, vN);
@@ -280,7 +304,40 @@ export function createQuadFlightModel(opts = {}) {
       // Identical to the Blender model from here down. There the
       // acceleration came from a velocity loop; here it is measured.
       const [adE, adN] = _clampLen(aE, aN, A_MAX);
-      const dragMag = DRAG_K * speed;
+      // ── DRAG, CAPPED ABOVE THE AIRFRAME'S TOP SPEED ───────────────
+      //
+      // DRAG_K is calibrated so that drag balances a ~35 degree lean at
+      // 21 m/s, which is a DJI Air 3 flat out. The scenario paths were
+      // authored for an ICON, not an airframe, and fly far beyond that:
+      //
+      //    cph_quad_hostile        58 m/s median, 89 peak
+      //    esbjerg_quad_hostile    77 m/s median
+      //    swarm_recon_cph_amk     34 m/s median, 251 peak
+      //
+      // At 58 m/s the drag term alone demands atan(0.0156*58^2/9.81),
+      // which is 79 degrees. Clamped to the 32 degree tilt limit, so
+      // the airframe sits pinned at maximum lean for the whole flight
+      // and jitters around the clamp. That is what reads as lying on
+      // its side.
+      //
+      // Below TOP_SPEED_MS nothing here changes and the model is
+      // Blender's exactly. Above it, where Blender was never run and
+      // has no answer, the steady drag lean is held at
+      // cruiseTiltCapDeg instead of pinning. ACCELERATION is untouched
+      // and still leans the airframe fully, so a hard turn or a brake
+      // still reads as one.
+      //
+      // The real fix is the paths. 58 m/s is 209 km/h, which is a
+      // missile, not a quadcopter. This keeps them watchable until
+      // someone decides to slow them down.
+      const capDeg = (typeof window !== 'undefined'
+        && window.__isr_quad_tuning && typeof window.__isr_quad_tuning.cruiseTiltCapDeg === 'number')
+        ? window.__isr_quad_tuning.cruiseTiltCapDeg : CRUISE_TILT_CAP_DEG;
+      let dragMag = DRAG_K * speed;
+      if (speed > TOP_SPEED_MS) {
+        const maxDragAccel = G * Math.tan(capDeg * DEG);
+        dragMag = Math.min(dragMag, maxDragAccel / Math.max(speed, 1e-6));
+      }
       const needE = adE + vE * dragMag;
       const needN = adN + vN * dragMag;
       const needLen = Math.hypot(needE, needN);

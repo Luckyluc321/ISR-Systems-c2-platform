@@ -132,6 +132,39 @@ check('a hover is nearly level, but not perfectly still',
   `${hover.tiltDeg.toFixed(2)} deg. Zero would mean the hover noise is not running; `
   + 'a real airframe corrects itself in its own downwash.');
 
+// ─── the paths are faster than the airframe ─────────────────────────
+console.log('\nDrag above the airframe top speed');
+
+check('a cruise inside the envelope is untouched',
+  Math.abs(cruise.tiltDeg - dragBalanceDeg) < 2.0,
+  '15 m/s is below the 21 m/s top speed, so the drag term must be exactly '
+  + 'the Blender one');
+
+check('a cruise FAR above it does not pin at the tilt limit',
+  (() => {
+    const fast58 = flyStraight({ speed: 58 });   // cph_quad_hostile's median
+    return fast58.tiltDeg < FM.MAX_TILT_DEG - 2;
+  })(),
+  'at 58 m/s the raw drag term demands 79 degrees of lean. Clamped to the '
+  + '32 degree limit it sits pinned for the whole flight and jitters around '
+  + 'the clamp, which is what read as lying on its side.');
+
+check('the acceleration lean is NOT capped',
+  (() => {
+    // A hard stop from 58 m/s must still lean the airframe hard.
+    const fm = FM.createQuadFlightModel({ rotors, rps: 12 });
+    const frameDt = 1 / 60; let lat = 55.60, lon = 12.65, out = null;
+    for (let f = 0; f < 60 * 6; f++) {
+      const v = f < 60 * 3 ? 58 : 0;
+      lon += (v * frameDt) / M_LON;
+      out = fm.update(lat, lon, 120, frameDt) || out;
+      if (f === 60 * 3 + 20) break;
+    }
+    return out.tiltDeg > 20;
+  })(),
+  'the cap is on the steady drag lean only. A brake or a hard turn must '
+  + 'still read as one.');
+
 // ─── rotor differential ─────────────────────────────────────────────
 console.log('\nThe rotor speed model');
 
