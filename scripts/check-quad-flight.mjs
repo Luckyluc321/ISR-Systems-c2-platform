@@ -42,13 +42,12 @@ const pyTuple = (name) => {
   return m ? m[1].split(',').map(x => Number(x.trim())).filter(x => !Number.isNaN(x)) : null;
 };
 
-// DRAG_K is deliberately NOT in this list. Blender's 0.0156 balances a
-// 35 degree lean at 21 m/s, which is a DJI Air 3 at its limit. These
-// scenarios fly Russian and Chinese reconnaissance multirotors, which
-// are faster, and carrying the DJI's number onto a 30 m/s airframe is
-// self-contradictory: at 26 m/s it demands 47 degrees of lean, past the
-// tilt limit, so the airframe pins and jitters. Drag is derived from the
-// airframe instead, and the relation is asserted below.
+// DRAG_K is checked with a TOLERANCE, a few lines down, and not here.
+// Both sides now describe the same 30 m/s airframe, but one computes
+// g*tan(32)/30^2 as an expression and the other writes the rounded
+// literal 0.0068111, so they differ by about 7e-11. Exact equality
+// would fail the build on a rounding difference that no aircraft can
+// tell apart.
 for (const name of ['MAX_TILT_DEG', 'A_MAX', 'KV', 'ATT_TAU', 'ATT_RATE_DPS',
   'VZ_TAU', 'YAW_TAU', 'YAW_RATE_MAX_DPS', 'TL_DIP', 'TL_SPEED', 'TL_WIDTH',
   'ATT_DIFF', 'ATT_DIFF_REF', 'YAW_DIFF', 'YAW_DIFF_REF', 'YAW_DAMP_DIFF',
@@ -63,6 +62,19 @@ for (const name of ['NOISE_LEAN_DEG', 'NOISE_LEAN_HZ']) {
     py && js && py.length === js.length && py.every((v, i) => v === js[i]),
     `blender says ${py}, the module says ${js}`);
 }
+
+check('DRAG_K agrees with the blender file, to a tolerance',
+  (() => {
+    const py = pyNum('DRAG_K');
+    return py !== null && Math.abs(py - FM.DRAG_K) < 1e-6;
+  })(),
+  `blender ${pyNum('DRAG_K')} against the module ${FM.DRAG_K}. A tolerance `
+  + 'because one side is an expression and the other a rounded literal; '
+  + 'anything larger than 1e-6 is a real disagreement about the airframe.');
+
+check('TOP_SPEED_MS agrees with the blender file',
+  pyNum('TOP_SPEED_MS') === FM.TOP_SPEED_MS,
+  'the two must describe one aircraft');
 
 check('drag is derived from the airframe, not inherited from the DJI',
   Math.abs(FM.DRAG_K - 9.81 * Math.tan(FM.MAX_TILT_DEG * Math.PI / 180) / (FM.TOP_SPEED_MS ** 2)) < 1e-9,
@@ -212,6 +224,64 @@ check('rotor speed rises with thrust demand',
 
 check('the rotor angle accumulates, so the props actually turn',
   cruise.rotorAngleRad.every(a => Math.abs(a) > 1));
+
+// ─── the demo plan and its generator ────────────────────────────────
+//
+// The manoeuvre sequence exists twice: PLAN in the Python, and
+// _DEMO_PLAN in drones.js, which _demoFlightPath integrates into
+// waypoints. Nothing but a person kept them equal, and the generator
+// also carried its OWN copy of the drag constant, which sat at the DJI
+// value and would have capped the map's demo at 19.8 m/s while the
+// render did 25. Both are gated now.
+console.log('\nThe demo manoeuvre plan');
+const dronesSrc = readFileSync(new URL('../src/drones.js', import.meta.url), 'utf8');
+
+const pyPlan = (() => {
+  const m = /^PLAN = \[([\s\S]*?)^\]/m.exec(blender);
+  if (!m) return null;
+  return [...m[1].matchAll(/\(\s*"([^"]+)"\s*,\s*\(([^)]*)\)\s*,\s*([-0-9.]+)\s*,\s*([-0-9.]+)\s*\)/g)]
+    .map(r => [r[1], ...r[2].split(',').map(x => Number(x.trim())), Number(r[3]), Number(r[4])]);
+})();
+const jsPlan = (() => {
+  const m = /const _DEMO_PLAN = \[([\s\S]*?)\n\];/.exec(dronesSrc);
+  if (!m) return null;
+  return [...m[1].matchAll(/\['([^']+)',\s*([^\]]+)\]/g)]
+    .map(r => [r[1], ...r[2].split(',').map(x => Number(x.trim()))]);
+})();
+
+check('the plan table is mirrored exactly',
+  pyPlan && jsPlan && pyPlan.length === jsPlan.length
+  && pyPlan.every((row, i) => row.length === jsPlan[i].length
+    && row.every((v, k) => (typeof v === 'string' ? v === jsPlan[i][k] : Math.abs(v - jsPlan[i][k]) < 1e-9))),
+  `blender has ${pyPlan ? pyPlan.length : '?'} legs, drones.js has `
+  + `${jsPlan ? jsPlan.length : '?'}. The render and the flyable scenario `
+  + 'are the same sequence or they are not.');
+
+check('the generator compensates drag through the lean, as blender does',
+  (() => {
+    const m = /const needE = adE \+ dragE, needN = adN \+ dragN;/.test(dronesSrc)
+      && /thrust - dragE/.test(dronesSrc);
+    return m;
+  })(),
+  'A quadcopter leans far enough to overcome drag AND accelerate, so '
+  + 'inside the tilt limit it reaches the speed it was asked for. '
+  + 'Subtracting drag from the demand instead caps a 25 m/s leg at '
+  + 'KV(v_t-v) = DRAG_K v^2, which is 22.2, against the render\'s 24.7.');
+
+check('the generator integrates at frame rate, not at the emit rate',
+  /const SIM_DT = 1 \/ 60;/.test(dronesSrc)
+  && /function _demoFlightPath\(lat0, lon0, alt0, emitDt = 0.25\)/.test(dronesSrc),
+  'a first-order loop stepped at 0.25 s does not match one stepped at '
+  + "the render's 1/60");
+
+check('the generator uses the airframe drag, not the DJI value',
+  (() => {
+    const m = /const A_MAX = [0-9.]+, DRAG_K = ([0-9.]+)/.exec(dronesSrc);
+    return m && Math.abs(Number(m[1]) - FM.DRAG_K) < 1e-6;
+  })(),
+  '_demoFlightPath carries its own copy. At the DJI 0.0156 it caps the '
+  + "map's demo at 19.8 m/s while the render does 25, and the two stop "
+  + 'being the same flight.');
 
 // ─── the scenario clocks are not ours to move ───────────────────────
 console.log('\nScenario timing');

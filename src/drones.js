@@ -241,12 +241,23 @@ const _DEMO_PLAN = [
   ['HOVER',       0,    0,   0,  0,   2.0],
 ];
 
-function _demoFlightPath(lat0, lon0, alt0, dt = 0.25) {
+// INTEGRATE FINE, EMIT COARSE.
+//
+// The first version integrated at the same 0.25 s it emitted at. A
+// first-order velocity loop stepped at 0.25 s undershoots one stepped
+// at 1/60: the map's path peaked at 22.2 m/s where Blender, running at
+// frame rate, measured 24.7 on the same plan. Same sequence, not quite
+// the same flight.
+//
+// So the loop runs at SIM_DT, which is Blender's own step, and a
+// waypoint is emitted every EMIT_DT. The path is the same length and
+// the same shape; it is simply computed the way the render computes it.
+function _demoFlightPath(lat0, lon0, alt0, emitDt = 0.25) {
   const G = 9.81, DEG = Math.PI / 180;
   // DRAG_K is the airframe's, 9.81 * tan(32 deg) / 30^2, the same literal
   // the Blender file carries; 0.0156 was a DJI Air 3's and capped the
   // sequence at 19.8 m/s.
-  const A_MAX = 6.5, DRAG_K = 0.0068111, KV = 1.2;
+  const A_MAX = 6.5, DRAG_K = 0.0068111, KV = 1.2, MAX_TILT = 32 * DEG;
   const VZ_TAU = 0.6, YAW_TAU = 0.3, YAW_RATE_MAX_DPS = 100;
   const M_LAT = 111320, M_LON = 111320 * Math.cos(lat0 * DEG);
 
@@ -256,9 +267,12 @@ function _demoFlightPath(lat0, lon0, alt0, dt = 0.25) {
   let t = 0;
   const out = [{ lat: lat0, lon: lon0, alt: alt0, heading: 0, tSec: 0 }];
 
+  const SIM_DT = 1 / 60;
+  let sinceEmit = 0;
   for (const [, bodyF, bodyR, bodyU, yawDps, secs] of _DEMO_PLAN) {
-    const steps = Math.round(secs / dt);
+    const steps = Math.round(secs / SIM_DT);
     for (let k = 0; k < steps; k++) {
+      const dt = SIM_DT;
       // yaw: rate command, first-order response, rate limit
       const cmd = Math.max(-YAW_RATE_MAX_DPS, Math.min(YAW_RATE_MAX_DPS, yawDps)) * DEG;
       yawRate += (cmd - yawRate) * (1 - Math.exp(-dt / YAW_TAU));
@@ -267,25 +281,58 @@ function _demoFlightPath(lat0, lon0, alt0, dt = 0.25) {
       // body forward/right into world east/north
       const tgtE = bodyF * sy + bodyR * cy;
       const tgtN = bodyF * cy - bodyR * sy;
-      // horizontal: velocity loop, clamped, against quadratic drag
-      let aE = (tgtE - vx) * KV, aN = (tgtN - vy) * KV;
-      const aLen = Math.hypot(aE, aN);
-      if (aLen > A_MAX) { aE *= A_MAX / aLen; aN *= A_MAX / aLen; }
-      const sp = Math.hypot(vx, vy);
-      aE -= vx * DRAG_K * sp;
-      aN -= vy * DRAG_K * sp;
+      // HORIZONTAL: THE LEAN SUPPLIES THE THRUST, AND DRAG IS PART OF
+      // WHAT IT HAS TO SUPPLY.
+      //
+      // The first version computed the velocity loop's demand and then
+      // SUBTRACTED drag from it. That is not what the Blender model
+      // does and it is wrong: a quadcopter leans far enough to overcome
+      // drag AND accelerate, so inside the tilt limit drag is
+      // compensated and the airframe reaches the speed it was asked
+      // for. Subtracting it instead capped the run at
+      //
+      //     KV(v_t - v) = DRAG_K v^2   ->   22.2 m/s for a 25 m/s leg
+      //
+      // which is exactly the 22.2 the map measured against Blender's
+      // 24.7 on the same plan, and 161 m of ground against about 400.
+      //
+      // Blender's three lines, in order: what the thrust must supply,
+      // the lean that supplies it, and what is left over after drag.
+      // The tilt limit is the only thing that caps speed, and it caps
+      // it at sqrt(g tan(32) / DRAG_K), which is TOP_SPEED by
+      // construction.
+      const spd = Math.hypot(vx, vy);
+      const dragE = vx * DRAG_K * spd, dragN = vy * DRAG_K * spd;
+      let adE = (tgtE - vx) * KV, adN = (tgtN - vy) * KV;
+      const adLen = Math.hypot(adE, adN);
+      if (adLen > A_MAX) { adE *= A_MAX / adLen; adN *= A_MAX / adLen; }
+      const needE = adE + dragE, needN = adN + dragN;
+      const needLen = Math.hypot(needE, needN);
+      let aE = 0, aN = 0;
+      if (needLen > 1e-9) {
+        const tilt = Math.min(MAX_TILT, Math.atan(needLen / G));
+        const thrust = G * Math.tan(tilt);
+        aE = (needE / needLen) * thrust - dragE;
+        aN = (needN / needLen) * thrust - dragN;
+      } else {
+        aE = -dragE; aN = -dragN;
+      }
       vx += aE * dt; vy += aN * dt;
       // vertical: first-order toward the commanded climb rate
       vz += (bodyU - vz) * (1 - Math.exp(-dt / VZ_TAU));
       x += vx * dt; y += vy * dt; z += vz * dt;
       t += dt;
-      out.push({
-        lat: lat0 + y / M_LAT,
-        lon: lon0 + x / M_LON,
-        alt: alt0 + z,
-        heading: 0,
-        tSec: +t.toFixed(2),
-      });
+      sinceEmit += dt;
+      if (sinceEmit >= emitDt - 1e-9) {
+        sinceEmit = 0;
+        out.push({
+          lat: lat0 + y / M_LAT,
+          lon: lon0 + x / M_LON,
+          alt: alt0 + z,
+          heading: 0,
+          tSec: +t.toFixed(2),
+        });
+      }
     }
   }
   return out;
