@@ -259,11 +259,13 @@ function _demoFlightPath(lat0, lon0, alt0, emitDt = 0.25) {
   // sequence at 19.8 m/s.
   const A_MAX = 6.5, DRAG_K = 0.0068111, KV = 1.2, MAX_TILT = 32 * DEG;
   const VZ_TAU = 0.6, YAW_TAU = 0.3, YAW_RATE_MAX_DPS = 100;
+  const ATT_TAU = 0.15, ATT_RATE_DPS = 120;
   const M_LAT = 111320, M_LON = 111320 * Math.cos(lat0 * DEG);
 
   let x = 0, y = 0, z = 0;          // metres east, north, up
   let vx = 0, vy = 0, vz = 0;
   let yaw = 0, yawRate = 0;
+  let leanE = 0, leanN = 0;        // the lean the airframe has ARRIVED at
   let t = 0;
   const out = [{ lat: lat0, lon: lon0, alt: alt0, heading: 0, tSec: 0 }];
 
@@ -308,14 +310,41 @@ function _demoFlightPath(lat0, lon0, alt0, emitDt = 0.25) {
       if (adLen > A_MAX) { adE *= A_MAX / adLen; adN *= A_MAX / adLen; }
       const needE = adE + dragE, needN = adN + dragN;
       const needLen = Math.hypot(needE, needN);
-      let aE = 0, aN = 0;
+      // THE LEAN IS A STATE, NOT A VALUE COMPUTED FRESH EACH STEP.
+      //
+      // This applied the demanded tilt in the same step it computed it,
+      // so the airframe accelerated the instant the command changed. A
+      // quadcopter cannot do that: it has to rotate first, and the
+      // rotation takes ATT_TAU to arrive and is limited to ATT_RATE
+      // degrees a second on the way. About a third of a second at every
+      // transition.
+      //
+      // Found by the Blender thread, by removing the attitude loop from
+      // their own integrator and landing exactly on this generator's
+      // number: 390.2 m of ground with the lag, 384.6 without.
+      //
+      // It matters more than 6 m suggests. The browser flight model
+      // DOES apply the lag, to the attitude it derives from the path.
+      // So an instant-lean path put the airframe in a state no aircraft
+      // reaches: accelerating before it has leaned.
+      let leanDesE = 0, leanDesN = 0;
       if (needLen > 1e-9) {
         const tilt = Math.min(MAX_TILT, Math.atan(needLen / G));
-        const thrust = G * Math.tan(tilt);
-        aE = (needE / needLen) * thrust - dragE;
-        aN = (needN / needLen) * thrust - dragN;
-      } else {
-        aE = -dragE; aN = -dragN;
+        leanDesE = (needE / needLen) * tilt;
+        leanDesN = (needN / needLen) * tilt;
+      }
+      const kAtt = 1 - Math.exp(-dt / ATT_TAU);
+      let stepE = (leanDesE - leanE) * kAtt, stepN = (leanDesN - leanN) * kAtt;
+      const slew = ATT_RATE_DPS * DEG * dt;
+      const stepLen = Math.hypot(stepE, stepN);
+      if (stepLen > slew) { stepE *= slew / stepLen; stepN *= slew / stepLen; }
+      leanE += stepE; leanN += stepN;
+      const leanLen = Math.hypot(leanE, leanN);
+      let aE = -dragE, aN = -dragN;
+      if (leanLen > 1e-9) {
+        const thrust = G * Math.tan(leanLen);
+        aE = (leanE / leanLen) * thrust - dragE;
+        aN = (leanN / leanLen) * thrust - dragN;
       }
       vx += aE * dt; vy += aN * dt;
       // vertical: first-order toward the commanded climb rate

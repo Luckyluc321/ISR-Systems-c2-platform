@@ -19,6 +19,7 @@
 // ═══════════════════════════════════════════════════════════════════
 import { readFileSync } from 'node:fs';
 import * as FM from '../src/quad_flight_model.js';
+import * as DRONES from '../src/drones.js';
 
 let failures = 0;
 const check = (label, ok, why) => {
@@ -267,6 +268,32 @@ check('the generator compensates drag through the lean, as blender does',
   + 'inside the tilt limit it reaches the speed it was asked for. '
   + 'Subtracting drag from the demand instead caps a 25 m/s leg at '
   + 'KV(v_t-v) = DRAG_K v^2, which is 22.2, against the render\'s 24.7.');
+
+check('the generator carries a LEAN STATE, with the lag and the slew',
+  /const kAtt = 1 - Math\.exp\(-dt \/ ATT_TAU\);/.test(dronesSrc)
+  && /const slew = ATT_RATE_DPS \* DEG \* dt;/.test(dronesSrc)
+  && /leanE \+= stepE; leanN \+= stepN;/.test(dronesSrc),
+  'applying the demanded tilt in the step that computes it puts the '
+  + 'airframe in a state no aircraft reaches: accelerating before it has '
+  + 'leaned. The browser flight model DOES apply the lag to the attitude '
+  + 'it derives from the path, so an instant-lean path disagrees with it '
+  + 'for about a third of a second at every transition.');
+
+check('the demo path length matches the render, within a metre',
+  (() => {
+    const w = DRONES.TEMPLATES.cph_dji_flight_demo?.waypoints;
+    if (!w) return false;
+    let len = 0;
+    for (let i = 1; i < w.length; i++) {
+      const dN = (w[i].lat - w[i - 1].lat) * 111320;
+      const dE = (w[i].lon - w[i - 1].lon) * 111320 * Math.cos(w[i].lat * Math.PI / 180);
+      len += Math.hypot(dN, dE);
+    }
+    return Math.abs(len - 390.2) < 1;
+  })(),
+  'Peak speed is set by the plan, so it matches on a wrong integrator '
+  + 'too. LENGTH is set by the dynamics and is the sharper test: 390.2 m '
+  + 'with the attitude lag, 384.6 without it.');
 
 check('the generator integrates at frame rate, not at the emit rate',
   /const SIM_DT = 1 \/ 60;/.test(dronesSrc)
