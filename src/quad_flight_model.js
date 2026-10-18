@@ -129,6 +129,10 @@ export function createQuadFlightModel(opts = {}) {
   let prev = null;          // { e, n, u } metres, relative to the first sample
   let sinceMove = 0;        // seconds since the position last changed
   let vEraw = 0, vNraw = 0, vUraw = 0;   // last measured velocity, held between ticks
+  let vPrevE = 0, vPrevN = 0;            // the velocity before that, for acceleration
+  let aEraw = 0, aNraw = 0;              // last measured acceleration, held too
+  let sinceAccel = 0;       // seconds since the velocity last changed
+  let vMeasured = false;    // did THIS call produce a new velocity?
   let originLat = null, originLon = null;
   let tSec = 0;
   const theta = rotors.map(() => 0);
@@ -186,7 +190,9 @@ export function createQuadFlightModel(opts = {}) {
       // makes the lean smooth rather than stepped.
       sinceMove += dtSec;          // raw, never the clamped dt
       const moved = Math.hypot(e - prev.e, n - prev.n, u - prev.u);
+      vMeasured = false;
       if (moved > 1e-4 && sinceMove > 1e-4) {
+        vMeasured = true;
         vEraw = (e - prev.e) / sinceMove;
         vNraw = (n - prev.n) / sinceMove;
         vUraw = (u - prev.u) / sinceMove;
@@ -209,11 +215,38 @@ export function createQuadFlightModel(opts = {}) {
       // the CLAMPED step on purpose: there, lagging after a stall is
       // the safe behaviour and snapping is not.
       const kv = 1 - Math.exp(-dtSec / VZ_TAU);
-      const aE = (vEnew - vE) / dt, aN = (vNnew - vN) / dt;
       vE += (vEnew - vE) * kv;
       vN += (vNnew - vN) * kv;
       vU += (vUnew - vU) * kv;
       const az = (vUnew - vU) / VZ_TAU;
+
+      // ── ACCELERATION, ACROSS VELOCITY SAMPLES, NOT ACROSS FRAMES ──
+      //
+      // This read (vNew - vFiltered) / frameDt. Between ticks vNew is
+      // held constant while vFiltered is still converging toward it, so
+      // the numerator is the filter's own residual and the denominator
+      // is 16 ms. Half a metre per second of residual over one frame is
+      // 31 m/s^2: past A_MAX, so the lean saturated at the 32 degree
+      // tilt limit and sat there, jittering, every frame of every
+      // flight. That is the "jumping up and down like crazy", and it is
+      // why every airframe read exactly 11.5 degrees of tilt no matter
+      // what it was doing.
+      //
+      // Acceleration is a change in velocity over the time between two
+      // VELOCITY MEASUREMENTS. There is no new velocity between ticks,
+      // so there is no new acceleration either; it is held, exactly as
+      // the velocity is.
+      if (vMeasured) {
+        const dtv = sinceAccel;
+        if (dtv > 1e-4) {
+          aEraw = (vEraw - vPrevE) / dtv;
+          aNraw = (vNraw - vPrevN) / dtv;
+        }
+        vPrevE = vEraw; vPrevN = vNraw;
+        sinceAccel = 0;
+      }
+      sinceAccel += dtSec;
+      const aE = aEraw, aN = aNraw;
 
       // ── yaw: follow the direction of travel, rate limited ─────────
       const speed = Math.hypot(vE, vN);

@@ -6691,7 +6691,24 @@ async function main() {
     dji_air_3: {
       uri: '/aircraft/dji_air_3.glb',
       scale: 0.248,
-      headingOffsetDeg: 180, pitchSign: -1, rollSign: -1, pitchOffsetDeg: 0,
+      // NOSE MEASURED, OFFSET BY ELIMINATION.
+      //
+      // The nose is on -Z: the gimbal camera cluster is the lowest
+      // geometry in the asset, sits on the centreline at X 0.00, and
+      // centres at Z -0.8 to -0.98. A DJI camera hangs below and in
+      // FRONT, so that is the front. Not a guess, measured off the
+      // composed node chain.
+      //
+      // The assault drone's nose is on +X and its offset is 270, so the
+      // two differ by the 90 degrees between their nose axes and the
+      // only candidates here are 180 and 0. 180 was tried live and the
+      // airframe flew sideways, so 0 is what is left.
+      //
+      // If the nose is STILL wrong, it is one line and no rebuild:
+      //   __isr_quad_tuning.modelOverride = { headingOffsetDeg: 90 }
+      // then relaunch. Try 90 and 270. The same four-value hunt the
+      // Shahed and the quad tuning comments have always prescribed.
+      headingOffsetDeg: 0, pitchSign: -1, rollSign: -1, pitchOffsetDeg: 0,
     },
   };
 
@@ -22380,6 +22397,7 @@ async function main() {
       { key: 'cph_geran3_amalienborg', label: 'Geran-3 jet attack, same route at 2x speed', cls: 'critical' },
       { key: 'cph_shahed238_amalienborg', label: 'Shahed-238 jet attack, fastest of the family', cls: 'critical' },
       { key: 'cph_quad_recon_apron', label: 'Quadcopter recon over cargo apron (unknown → yellow)' },
+      { key: 'cph_dji_flight_demo', label: 'DJI Air 3 flight demo (hover, forward, turn, brake, reverse, slide, climb)' },
       { key: 'cph_dji_hobbyist', label: 'Unauthorized DJI hobbyist (unknown → yellow → resolved)' },
     ],
     esbjerg: [
@@ -22684,6 +22702,7 @@ async function main() {
     cph_swarm_runway_incursion:{ threat: '5-drone incursion swarm', pathLabel: 'Øresund → ATC core → 04R threshold' },
     cph_unknown_contact:       { threat: 'Non-identifiable contact', pathLabel: 'N perimeter approach' },
     cph_quad_recon_apron:      { threat: 'Quadcopter recon',       pathLabel: 'Cargo apron loiter' },
+    cph_dji_flight_demo:       { threat: 'DJI Air 3',               pathLabel: 'Airframe demonstration, central apron' },
     cph_dji_hobbyist:          { threat: 'DJI hobbyist',           pathLabel: 'Perimeter stray' },
   };
   if (simSelect) {

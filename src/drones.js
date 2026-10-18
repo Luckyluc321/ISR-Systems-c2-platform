@@ -205,6 +205,88 @@ function _altTangents(waypoints) {
   return m;
 }
 
+// ── THE BLENDER DEMO MANOEUVRE SEQUENCE, AS A FLYABLE PATH ─────────
+//
+// scripts/blender_drone_flight_demo.py has a PLAN: hover, forward,
+// turn, brake, backward, slide right, slide left, descend, climb,
+// hover. In Blender that plan is a VELOCITY command and the controller
+// integrates it into a trajectory.
+//
+// The map cannot take the plan directly, because a track's position
+// comes from its waypoints and the flight model reads the path rather
+// than driving it. So the plan is integrated HERE, with the same
+// velocity loop and the same vertical response the Blender script
+// uses, and the result is emitted as ordinary waypoints. The flight
+// model then measures that path and arrives at the same attitudes,
+// because it is the same aircraft following the same trajectory.
+//
+// Constants mirror blender_drone_flight_demo.py and are gated against
+// it by scripts/check-quad-flight.mjs.
+const _DEMO_PLAN = [
+  ['HOVER',       0,    0,   0,  0,   2.0],
+  ['FORWARD',    10,    0,   0,  0,   3.5],
+  ['TURN',        5,    0,   0, 60,   3.0],
+  ['FORWARD',    10,    0,   0,  0,   2.0],
+  ['BRAKE',       0,    0,   0,  0,   2.5],
+  ['BACKWARD',   -6,    0,   0,  0,   3.0],
+  ['STOP',        0,    0,   0,  0,   2.0],
+  ['SLIDE RIGHT', 0,    6,   0,  0,   2.5],
+  ['SLIDE LEFT',  0,   -6,   0,  0,   3.0],
+  ['STOP',        0,    0,   0,  0,   2.0],
+  ['DESCEND',     0,    0,  -3,  0,   2.5],
+  ['CLIMB',       0,    0,   4,  0,   2.5],
+  ['HOVER',       0,    0,   0,  0,   2.0],
+];
+
+function _demoFlightPath(lat0, lon0, alt0, dt = 0.25) {
+  const G = 9.81, DEG = Math.PI / 180;
+  const A_MAX = 6.5, DRAG_K = 0.0156, KV = 1.2;
+  const VZ_TAU = 0.6, YAW_TAU = 0.3, YAW_RATE_MAX_DPS = 100;
+  const M_LAT = 111320, M_LON = 111320 * Math.cos(lat0 * DEG);
+
+  let x = 0, y = 0, z = 0;          // metres east, north, up
+  let vx = 0, vy = 0, vz = 0;
+  let yaw = 0, yawRate = 0;
+  let t = 0;
+  const out = [{ lat: lat0, lon: lon0, alt: alt0, heading: 0, tSec: 0 }];
+
+  for (const [, bodyF, bodyR, bodyU, yawDps, secs] of _DEMO_PLAN) {
+    const steps = Math.round(secs / dt);
+    for (let k = 0; k < steps; k++) {
+      // yaw: rate command, first-order response, rate limit
+      const cmd = Math.max(-YAW_RATE_MAX_DPS, Math.min(YAW_RATE_MAX_DPS, yawDps)) * DEG;
+      yawRate += (cmd - yawRate) * (1 - Math.exp(-dt / YAW_TAU));
+      yaw += yawRate * dt;
+      const cy = Math.cos(yaw), sy = Math.sin(yaw);
+      // body forward/right into world east/north
+      const tgtE = bodyF * sy + bodyR * cy;
+      const tgtN = bodyF * cy - bodyR * sy;
+      // horizontal: velocity loop, clamped, against quadratic drag
+      let aE = (tgtE - vx) * KV, aN = (tgtN - vy) * KV;
+      const aLen = Math.hypot(aE, aN);
+      if (aLen > A_MAX) { aE *= A_MAX / aLen; aN *= A_MAX / aLen; }
+      const sp = Math.hypot(vx, vy);
+      aE -= vx * DRAG_K * sp;
+      aN -= vy * DRAG_K * sp;
+      vx += aE * dt; vy += aN * dt;
+      // vertical: first-order toward the commanded climb rate
+      vz += (bodyU - vz) * (1 - Math.exp(-dt / VZ_TAU));
+      x += vx * dt; y += vy * dt; z += vz * dt;
+      t += dt;
+      out.push({
+        lat: lat0 + y / M_LAT,
+        lon: lon0 + x / M_LON,
+        alt: alt0 + z,
+        heading: 0,
+        tSec: +t.toFixed(2),
+      });
+    }
+  }
+  return out;
+}
+
+const _DEMO_PATH_CPH = _demoFlightPath(55.6205, 12.6480, 90);
+
 function _smoothPath(waypoints, dt = 0.25) {
   const n = waypoints.length;
   if (n < 3) return waypoints;
@@ -818,6 +900,34 @@ export const TEMPLATES = {
   // See _cphHoldPath above for why the path is generated rather than
   // typed, and what a corner between two waypoints does to an airframe
   // whose bank is derived from its own yaw rate.
+  // THE FLIGHT DEMO, FLYABLE. Hover, forward, a 60 deg/s turn, brake,
+  // backward, slide right, slide left, descend, climb, hover. The same
+  // sequence scripts/blender_drone_flight_demo.py renders, integrated
+  // by _demoFlightPath with the same velocity loop and emitted as
+  // waypoints, so the flight model reproduces the same attitudes.
+  //
+  // 30.5 seconds over the apron at 90 m. It is a demonstration of the
+  // airframe, not a threat: classification unknown, no escalation.
+  cph_dji_flight_demo: {
+    siteId: 'cph',
+    classification: 'unknown',
+    threat: null,
+    platform: 'quadcopter',
+    droneType: 'DJI Air 3',
+    confidence: 0.88,
+    confidenceTrend: 'Held by the central apron sensors throughout',
+    evidence: {
+      rfCarrier: '2.4 GHz',
+      rfBandwidth: '20 MHz OFDM',
+      rfMatch: 'OcuSync 94%',
+      modality: 'RF + acoustic',
+      evidenceSize: '12.1 MB',
+      note: 'Airframe demonstration over the central apron. Flies the full manoeuvre sequence: hover, forward run, a sustained 60 degree per second turn, hard brake, reverse, lateral slide right and left, descent, climb, hover. Every attitude is produced by the flight model from the path rather than scripted, so the lean, the bank and the rotor differential are the airframe responding to what it is asked to do.',
+    },
+    waypoints: _DEMO_PATH_CPH,
+    durationSec: Math.round(_DEMO_PATH_CPH[_DEMO_PATH_CPH.length - 1].tSec),
+  },
+
   cph_jet_hold_atc: {
     droneType: 'Commercial airliner (SAS 743, A320neo)',
     platform: 'jet',

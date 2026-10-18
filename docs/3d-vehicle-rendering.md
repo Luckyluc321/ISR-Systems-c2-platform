@@ -945,3 +945,68 @@ from anyone looking at a render. If it is wrong,
 `__isr_quad_tuning.modelOverride = { headingOffsetDeg: 90 }` and try 0, 90, 180,
 270. And 311k triangles against 24.9k, times five: software rendering says
 nothing useful about frame time.
+
+## 8k. Three failures from the first real test, and what each one was
+
+**1. Sideways.** The nose axis was right, the offset was wrong. Measured rather
+than assumed: the gimbal camera cluster is the lowest geometry in the asset,
+sits on the centreline at X 0.00, and centres at Z -0.8 to -0.98. A DJI camera
+hangs below and in FRONT, so the nose is on -Z, confirming the asset work. The
+assault drone's nose is on +X with an offset of 270, the two differ by 90
+degrees, so the only candidates were 180 and 0. 180 flew sideways, so it is 0.
+If it is still wrong it is one line and no rebuild:
+`__isr_quad_tuning.modelOverride = { headingOffsetDeg: 90 }`.
+
+**2. Jumping.** Acceleration was `(vNew - vFiltered) / frameDt`. Between ticks
+`vNew` is held constant while `vFiltered` is still converging toward it, so the
+numerator was the filter's own residual and the denominator was 16 ms. Half a
+metre per second of residual over one frame is 31 m/s2, past A_MAX, so the lean
+saturated at the 32 degree tilt limit and sat there jittering on every frame of
+every flight. It is why every airframe read exactly 11.5 degrees of tilt no
+matter what it was doing.
+
+Acceleration is now measured across two VELOCITY SAMPLES, over the time between
+them. There is no new velocity between ticks, so there is no new acceleration
+either; it is held, exactly as the velocity is. A steady 15 m/s cruise then
+settles at 19.1 degrees against a drag balance of 19.7, with 1.5 degrees of
+peak-to-peak movement that is the hover noise and nothing else.
+
+That is the THIRD distinct form of the same mistake in this model: a per-tick
+quantity divided by a per-frame interval. The first was the velocity, the second
+the velocity filter's time constant, the third the acceleration.
+
+**3. Lagging.** 311k triangles times five is 1.5M. Cut to 100k with
+`scripts/simplify_dji_air_3.sh`, verified to leave the geometry alone: composed
+extent within 0.5 mm, all four rotor hub positions unmoved to four decimal
+places. The hubs matter because the flight model reads them for the rotor
+differential.
+
+NOT `gltf-transform optimize`. That runs flatten and join, which merge the
+meshes and destroy Rotor_1..4 — checked, it leaves five nodes and no rotors, and
+the propellers stop turning. `weld` then `simplify` keeps the node tree.
+
+## 8l. The manoeuvre sequence is now flyable
+
+`cph_dji_flight_demo`, in the threat picker as "DJI Air 3 flight demo". It flies
+the PLAN from `scripts/blender_drone_flight_demo.py`: hover, forward, a
+sustained 60 deg/s turn, forward, brake, reverse, slide right, slide left,
+descend, climb, hover. 33 seconds over the central apron at 90 m.
+
+The plan is a VELOCITY command, which a track cannot take directly because its
+position comes from waypoints. So `_demoFlightPath` integrates the plan with the
+same velocity loop and vertical response the Blender script uses and emits
+ordinary waypoints; the flight model then measures that path and arrives at the
+same attitudes, because it is the same aircraft following the same trajectory.
+
+Flown live, read off `__isr_quadFlight()`:
+
+```
+ t+3s   speed 7.6   tilt 20.1   pitch  20.1   roll   0.2    rotors 13.1 13.0 13.1 13.0
+ t+12s  speed 0     tilt 20.2   pitch  -8.6   roll -18.3    rotors 15.7 12.6 10.7 12.4
+ t+21s  speed 2.2   tilt 23.4   pitch -16.0   roll  17.1    rotors 10.8 15.6 14.9 10.6
+ t+33s  speed 0     tilt  0.7   pitch  -0.1   roll   0.7    rotors 11.9 11.9 11.9 11.9
+```
+
+Leaning forward on the run, banked 18 degrees through the turn with the rotors
+5 rps apart, nose up 16 degrees on the brake, and settled to under a degree in
+the hover with the four rotors back together. Nothing in that is scripted.
