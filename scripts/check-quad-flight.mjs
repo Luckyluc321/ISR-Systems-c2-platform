@@ -42,7 +42,14 @@ const pyTuple = (name) => {
   return m ? m[1].split(',').map(x => Number(x.trim())).filter(x => !Number.isNaN(x)) : null;
 };
 
-for (const name of ['MAX_TILT_DEG', 'A_MAX', 'DRAG_K', 'KV', 'ATT_TAU', 'ATT_RATE_DPS',
+// DRAG_K is deliberately NOT in this list. Blender's 0.0156 balances a
+// 35 degree lean at 21 m/s, which is a DJI Air 3 at its limit. These
+// scenarios fly Russian and Chinese reconnaissance multirotors, which
+// are faster, and carrying the DJI's number onto a 30 m/s airframe is
+// self-contradictory: at 26 m/s it demands 47 degrees of lean, past the
+// tilt limit, so the airframe pins and jitters. Drag is derived from the
+// airframe instead, and the relation is asserted below.
+for (const name of ['MAX_TILT_DEG', 'A_MAX', 'KV', 'ATT_TAU', 'ATT_RATE_DPS',
   'VZ_TAU', 'YAW_TAU', 'YAW_RATE_MAX_DPS', 'TL_DIP', 'TL_SPEED', 'TL_WIDTH',
   'ATT_DIFF', 'ATT_DIFF_REF', 'YAW_DIFF', 'YAW_DIFF_REF', 'YAW_DAMP_DIFF',
   'NOISE_YAW_DEG', 'NOISE_YAW_HZ']) {
@@ -56,6 +63,29 @@ for (const name of ['NOISE_LEAN_DEG', 'NOISE_LEAN_HZ']) {
     py && js && py.length === js.length && py.every((v, i) => v === js[i]),
     `blender says ${py}, the module says ${js}`);
 }
+
+check('drag is derived from the airframe, not inherited from the DJI',
+  Math.abs(FM.DRAG_K - 9.81 * Math.tan(FM.MAX_TILT_DEG * Math.PI / 180) / (FM.TOP_SPEED_MS ** 2)) < 1e-9,
+  'DRAG_K must satisfy g*tan(MAX_TILT)/TOP_SPEED^2, which is the same '
+  + 'statement Blender\'s constant makes written as a relation. Raising '
+  + 'the top speed without the drag is not a faster aircraft, it is an '
+  + 'impossible one.');
+
+check('at its own top speed the lean IS the tilt limit',
+  Math.abs(Math.atan(FM.DRAG_K * FM.TOP_SPEED_MS ** 2 / 9.81) * 180 / Math.PI
+    - FM.MAX_TILT_DEG) < 0.01);
+
+check('the blender airframe is still what the demo path flies',
+  (() => {
+    const m = /^DRAG_K\s*=\s*([0-9.]+)/m.exec(blender);
+    // The demo cruises at about 3 m/s, where drag is under a degree on
+    // either constant, so the sequence looks the same on both.
+    const v = 3;
+    const a = Math.atan(Number(m[1]) * v * v / 9.81) * 180 / Math.PI;
+    const b = Math.atan(FM.DRAG_K * v * v / 9.81) * 180 / Math.PI;
+    return Math.abs(a - b) < 0.5;
+  })(),
+  'the manoeuvre demo must still match the render');
 
 // ─── the physics, on the real exported model ────────────────────────
 console.log('\nThe physics, flying the exported model');

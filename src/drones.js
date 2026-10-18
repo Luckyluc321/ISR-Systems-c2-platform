@@ -329,6 +329,80 @@ function _smoothPath(waypoints, dt = 0.25) {
 // Each template is a full flight path (list of waypoints). Spawn wraps it into
 // a live track with startTime = now.
 
+// ── CRUISE SPEED, PER TEMPLATE ─────────────────────────────────────
+//
+// These paths were authored for an ICON. Measured over their own
+// waypoints they fly at 46 to 77 m/s, which is 165 to 277 km/h, and the
+// fastest peak is 251 m/s. No multirotor does that. The flight model is
+// calibrated to a real airframe, so it answered the only way it could:
+// it pinned the lean at the 32 degree tilt limit for the whole flight
+// and jittered against the clamp, which is what read as the drone lying
+// on its side and vibrating.
+//
+// THESE ARE NOT HOBBY DRONES. A Russian or Chinese reconnaissance
+// multirotor is a purpose-built airframe and is genuinely faster than a
+// DJI: TOP_SPEED_MS in the flight model is 30 m/s, 108 km/h, against a
+// DJI Air 3's 21. The targets below sit just under that, so the airframe
+// cruises near its limit and still has lean left for a turn.
+//
+// ONLY THE TIMING CHANGES. Every latitude, longitude and altitude is
+// untouched, so the route, the sensor crossings and the geometry are
+// exactly as authored. The flight simply takes as long as it would at a
+// speed the airframe can actually hold.
+//
+// cph_swarm_runway_incursion IS NOT IN THIS TABLE, deliberately. It
+// drives both combined scenarios: the WITHOUT ISR run spawns its
+// aircraft at swarm t=38s, and the WITH ISR hold is timed against it.
+// Retiming it moves the break-off geometry in two signed-off scenarios.
+// Its median is 20 m/s, comfortably inside the envelope, so it needs
+// nothing.
+const _CRUISE_TARGET_MS = {
+  cph_quad_hostile:          26,
+  cph_quad_recon_apron:      26,
+  cph_dji_hobbyist:          14,   // a hobbyist, and it should look like one
+  esbjerg_quad_hostile:      26,
+  esbjerg_usv_hostile:        8,   // a surface vessel. 51 m/s was 100 knots
+  billund_quad_hostile:      26,
+  billund_swarm_recon:       26,
+  billund_commercial_survey: 14,   // a survey flight, not an intercept
+  billund_lego_recon:        26,
+  swarm_recon_cph_amk:       26,
+};
+
+/** Median speed over a path's own waypoints, metres per second. */
+function _medianSpeed(waypoints) {
+  const sp = [];
+  for (let i = 1; i < waypoints.length; i++) {
+    const dt = waypoints[i].tSec - waypoints[i - 1].tSec;
+    if (!(dt > 0)) continue;
+    const dN = (waypoints[i].lat - waypoints[i - 1].lat) * 111320;
+    const dE = (waypoints[i].lon - waypoints[i - 1].lon) * 111320
+      * Math.cos(waypoints[i].lat * Math.PI / 180);
+    sp.push(Math.hypot(dN, dE) / dt);
+  }
+  if (!sp.length) return 0;
+  sp.sort((a, b) => a - b);
+  return sp[Math.floor(sp.length / 2)];
+}
+
+/**
+ * Stretch a path's clock so its median speed becomes `targetMs`.
+ * Positions are not touched. Returns the template unchanged if it has
+ * no target, so nothing is retimed implicitly.
+ */
+function _applyCruiseTargets(templates) {
+  for (const [key, target] of Object.entries(_CRUISE_TARGET_MS)) {
+    const T = templates[key];
+    if (!T?.waypoints?.length) continue;
+    const med = _medianSpeed(T.waypoints);
+    if (!(med > 0) || med <= target) continue;
+    const f = med / target;
+    T.waypoints = T.waypoints.map(w => ({ ...w, tSec: +(w.tSec * f).toFixed(2) }));
+    T.durationSec = Math.round((T.durationSec ?? T.waypoints[T.waypoints.length - 1].tSec) * f);
+  }
+  return templates;
+}
+
 export const TEMPLATES = {
   cph_quad_hostile: {
     siteId: 'cph',
@@ -2569,6 +2643,13 @@ Object.assign(TEMPLATES, {
     durationSec: 140,
   },
 });
+
+// Applied once, after EVERY template is defined. The first version ran
+// straight after the main literal and silently missed swarm_recon_cph_amk
+// and everything else added by a later Object.assign: it stayed at 33 m/s
+// while the others came down. Only the templates named in
+// _CRUISE_TARGET_MS are touched, and only their clock.
+_applyCruiseTargets(TEMPLATES);
 
 // ── Substation threat factory ──
 // Substation sites are small (~300m). Generate 3 threat variants for each

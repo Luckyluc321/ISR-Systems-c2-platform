@@ -43,13 +43,40 @@ const G = 9.81;
 // The airframe's own top speed, and the lean a steady cruise is allowed
 // to settle at beyond it. Not from the Blender file: that model is only
 // ever flown inside its envelope, so it never had to answer this.
-export const TOP_SPEED_MS = 21;          // DJI Air 3, level flight
-export const CRUISE_TILT_CAP_DEG = 18;   // a visible lean, not a pinned one
+// 30 m/s, 108 km/h. NOT a DJI Air 3, which does 21. The airframes in
+// these scenarios are Russian and Chinese reconnaissance multirotors,
+// purpose-built and genuinely faster than anything you can buy in a
+// shop. The paths are retimed to sit just under this, in
+// _CRUISE_TARGET_MS in drones.js, so a drone cruises near its limit and
+// still has lean left for a turn.
+export const TOP_SPEED_MS = 30;
+export const CRUISE_TILT_CAP_DEG = 20;   // a visible lean, not a pinned one
+export const DRAG_K = 9.81 * Math.tan(32.0 * Math.PI / 180) / (30 * 30);
 
 // Airframe and controller. Mirrors blender_drone_flight_demo.py.
 export const MAX_TILT_DEG = 32.0;     // DJI limits sport mode to ~35 deg
 export const A_MAX = 6.5;             // m/s^2, 0 to 21 m/s in about 3.5 s
-export const DRAG_K = 0.0156;         // 1/m, quadratic, the top-speed balance
+// DRAG, DERIVED FROM THE TOP SPEED, NOT COPIED FROM THE DJI.
+//
+// Blender's 0.0156 is the value that balances a 35 degree lean at
+// 21 m/s, which is a DJI Air 3 at its limit. Carry that number onto a
+// 30 m/s airframe and the arithmetic contradicts itself: at 26 m/s it
+// demands atan(0.0156 * 26^2 / 9.81), which is 47 degrees, past the
+// 32 degree tilt limit. The airframe pins and jitters, which is exactly
+// the behaviour this was supposed to fix. Raising the top speed without
+// the drag is not a faster aircraft, it is an impossible one.
+//
+// So drag is derived from the airframe rather than inherited:
+//
+//     DRAG_K = g * tan(MAX_TILT) / TOP_SPEED^2
+//
+// which is the same statement Blender's constant makes, written as a
+// relation instead of a number. At the limit the lean IS the limit, and
+// below it the lean falls away as the square of the speed:
+//
+//     20 m/s -> 15 deg      26 m/s -> 25 deg      30 m/s -> 32 deg
+//
+// Every other constant is Blender's, unchanged and gated against it.
 export const KV = 1.2;                // 1/s, velocity loop gain
 export const ATT_TAU = 0.15;          // s, attitude loop time constant
 export const ATT_RATE_DPS = 120.0;    // deg/s, attitude slew limit
