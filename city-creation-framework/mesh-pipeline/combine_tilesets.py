@@ -66,10 +66,18 @@ def main():
             raise SystemExit(f"No tileset.json under {src}")
         # Symlinked, not copied. These are tens of megabytes each and a
         # copy goes stale the moment either build is re-run.
+        #
+        # RELATIVE, not absolute. The absolute form broke every child at
+        # once when the pipeline directory moved (scripts/mesh-pipeline ->
+        # city-creation-framework/mesh-pipeline): the app then loaded the
+        # root tileset, 404'd all five children, settled at zero tiles,
+        # and the box swap hid 62.5 km2 of OSM boxes with nothing drawn
+        # in their place. A relative link survives a move of the tree and
+        # a copy to another machine.
         link = out / name
         if link.is_symlink() or link.exists():
             link.unlink()
-        os.symlink(src, link)
+        os.symlink(os.path.relpath(src, out), link)
         boxes.append(bbox)
         children.append({
             "boundingVolume": {"region": region(bbox, a.min_height, a.max_height)},

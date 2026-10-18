@@ -111,3 +111,16 @@ Desktop memory raised to ~12 GB, machine plugged in and kept awake.
 
 **What the probe is not:** it does not restore the currently missing Google 3D layer. That outage is
 the ion quota lock-out (heals Nov 1, or permanently via the own-key swap), unrelated to mesh quality.
+
+## Landed 2026-10-18, the flat-Billund regression
+
+Root cause, proven: `combine_tilesets.py` wrote **absolute** symlinks for the combined tileset's five
+children. When the pipeline moved from `scripts/mesh-pipeline/` to `city-creation-framework/mesh-pipeline/`,
+all five links dangled, the app loaded the root tileset, 404'd every child, settled at zero tiles, and the
+coverage swap hid 62.5 km² of OSM boxes with nothing drawn in their place.
+
+Fixed: (1) links repointed relatively on this machine and the combiner now emits relative links;
+(2) `src/main.js` settle-path swap is guarded — boxes are only hidden after at least one tile with real
+content loads (mirrored to isr-c2-billund); (3) dev serving now uses the pipeline's own
+`serve_tiles.py 8778 work/billund-combined`. Still open: bucket hosting (replaces the laptop server),
+height-watch re-export for short buildings (terminal), and the ultra-quality probe.
