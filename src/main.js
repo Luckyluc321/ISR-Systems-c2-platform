@@ -6708,7 +6708,10 @@ async function main() {
       //   __isr_quad_tuning.modelOverride = { headingOffsetDeg: 90 }
       // then relaunch. Try 90 and 270. The same four-value hunt the
       // Shahed and the quad tuning comments have always prescribed.
-      headingOffsetDeg: 0, pitchSign: -1, rollSign: -1, pitchOffsetDeg: 0,
+      // 90, found in the field. 180 and 0 were both tried and both flew
+      // sideways; this is the value that points the nose along the
+      // direction of travel.
+      headingOffsetDeg: 90, pitchSign: -1, rollSign: -1, pitchOffsetDeg: 0,
     },
   };
 
