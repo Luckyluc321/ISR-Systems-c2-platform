@@ -221,17 +221,20 @@ function _altTangents(waypoints) {
 // because it is the same aircraft following the same trajectory.
 //
 // Constants mirror blender_drone_flight_demo.py and are gated against
-// it by scripts/check-quad-flight.mjs.
+// it by scripts/check-quad-flight.mjs. The table is that file's PLAN,
+// row for row: 25 m/s runs for a 30 m/s airframe, a SLOW leg so the
+// turn is entered at 8 m/s where 30 deg/s banks instead of pinning.
 const _DEMO_PLAN = [
   ['HOVER',       0,    0,   0,  0,   2.0],
-  ['FORWARD',    10,    0,   0,  0,   3.5],
-  ['TURN',        5,    0,   0, 60,   3.0],
-  ['FORWARD',    10,    0,   0,  0,   2.0],
-  ['BRAKE',       0,    0,   0,  0,   2.5],
-  ['BACKWARD',   -6,    0,   0,  0,   3.0],
+  ['FORWARD',    25,    0,   0,  0,   6.5],
+  ['SLOW',        8,    0,   0,  0,   3.0],
+  ['TURN',        8,    0,   0, 30,   6.0],
+  ['FORWARD',    25,    0,   0,  0,   5.0],
+  ['BRAKE',       0,    0,   0,  0,   4.5],
+  ['BACKWARD',   -8,    0,   0,  0,   3.0],
   ['STOP',        0,    0,   0,  0,   2.0],
-  ['SLIDE RIGHT', 0,    6,   0,  0,   2.5],
-  ['SLIDE LEFT',  0,   -6,   0,  0,   3.0],
+  ['SLIDE RIGHT', 0,    8,   0,  0,   2.5],
+  ['SLIDE LEFT',  0,   -8,   0,  0,   3.0],
   ['STOP',        0,    0,   0,  0,   2.0],
   ['DESCEND',     0,    0,  -3,  0,   2.5],
   ['CLIMB',       0,    0,   4,  0,   2.5],
@@ -240,7 +243,10 @@ const _DEMO_PLAN = [
 
 function _demoFlightPath(lat0, lon0, alt0, dt = 0.25) {
   const G = 9.81, DEG = Math.PI / 180;
-  const A_MAX = 6.5, DRAG_K = 0.0156, KV = 1.2;
+  // DRAG_K is the airframe's, 9.81 * tan(32 deg) / 30^2, the same literal
+  // the Blender file carries; 0.0156 was a DJI Air 3's and capped the
+  // sequence at 19.8 m/s.
+  const A_MAX = 6.5, DRAG_K = 0.0068111, KV = 1.2;
   const VZ_TAU = 0.6, YAW_TAU = 0.3, YAW_RATE_MAX_DPS = 100;
   const M_LAT = 111320, M_LON = 111320 * Math.cos(lat0 * DEG);
 
@@ -986,14 +992,16 @@ export const TEMPLATES = {
   // See _cphHoldPath above for why the path is generated rather than
   // typed, and what a corner between two waypoints does to an airframe
   // whose bank is derived from its own yaw rate.
-  // THE FLIGHT DEMO, FLYABLE. Hover, forward, a 60 deg/s turn, brake,
-  // backward, slide right, slide left, descend, climb, hover. The same
-  // sequence scripts/blender_drone_flight_demo.py renders, integrated
-  // by _demoFlightPath with the same velocity loop and emitted as
+  // THE FLIGHT DEMO, FLYABLE. Hover, a 25 m/s run, slow, a 30 deg/s
+  // turn at 8 m/s, run, brake, backward, slide right, slide left,
+  // descend, climb, hover. The same sequence
+  // scripts/blender_drone_flight_demo.py renders, integrated by
+  // _demoFlightPath with the same velocity loop and emitted as
   // waypoints, so the flight model reproduces the same attitudes.
   //
-  // 30.5 seconds over the apron at 90 m. It is a demonstration of the
-  // airframe, not a threat: classification unknown, no escalation.
+  // 46.5 seconds over the apron at 90 m, about 400 m end to end. It is
+  // a demonstration of the airframe, not a threat: classification
+  // unknown, no escalation.
   cph_dji_flight_demo: {
     siteId: 'cph',
     classification: 'unknown',
@@ -1008,7 +1016,7 @@ export const TEMPLATES = {
       rfMatch: 'OcuSync 94%',
       modality: 'RF + acoustic',
       evidenceSize: '12.1 MB',
-      note: 'Airframe demonstration over the central apron. Flies the full manoeuvre sequence: hover, forward run, a sustained 60 degree per second turn, hard brake, reverse, lateral slide right and left, descent, climb, hover. Every attitude is produced by the flight model from the path rather than scripted, so the lean, the bank and the rotor differential are the airframe responding to what it is asked to do.',
+      note: 'Airframe demonstration over the central apron. Flies the full manoeuvre sequence: hover, a 25 m/s run, slow, a 30 degree per second turn at 8 m/s, run, hard brake, reverse, lateral slide right and left, descent, climb, hover. Every attitude is produced by the flight model from the path rather than scripted, so the lean, the bank and the rotor differential are the airframe responding to what it is asked to do.',
     },
     waypoints: _DEMO_PATH_CPH,
     durationSec: Math.round(_DEMO_PATH_CPH[_DEMO_PATH_CPH.length - 1].tSec),

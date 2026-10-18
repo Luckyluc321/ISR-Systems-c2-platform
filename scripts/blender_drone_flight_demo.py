@@ -43,6 +43,10 @@ does that the shortcut never did:
   * The body rotates about its centre of mass (rotor centroid in plan,
     body centre in height), not the bounding-box centre.
 
+The airframe envelope is the C2 platform's: TOP_SPEED_MS and DRAG_K are
+the 30 m/s reconnaissance multirotor src/quad_flight_model.js flies, and
+scripts/check-quad-flight.mjs gates the two files against each other.
+
 Propellers spin about their own hubs, diagonal pairs counter-rotating the
 way a DJI airframe does (front-right and rear-left anticlockwise from
 above). The default rate is a readable 18 rps; the physical ~92 rps of an
@@ -90,30 +94,58 @@ PROP_NAME = re.compile(r"(prop|rotor|blade|elic|helic)", re.I)
 
 # The flight plan: (label, body-frame target velocity in m/s, yaw rate in
 # deg/s, seconds). Body frame is (forward, right, up) and turns with the
-# heading. Speeds are a fast-cruise Air 3 rather than its 21 m/s sport
-# maximum, chosen so the lean is clearly visible without pinning the
-# tilt limit the whole time.
+# heading. Speeds are a 30 m/s reconnaissance multirotor, the airframe
+# the C2 platform flies (src/quad_flight_model.js), not a shop-bought
+# DJI. Durations come from the dynamics, not from taste: with the tilt
+# limit at 32 degrees the airframe cannot accelerate harder than
+# g*tan(32) = 6.1 m/s^2 whatever A_MAX says, so 0 to 25 m/s takes about
+# 6 s against quadratic drag, 25 to 0 about 4 s. A turn at 8 m/s and
+# 30 deg/s asks 4.2 m/s^2 of centripetal lean, inside the limit with
+# room for drag, so it banks rather than skids; the SLOW leg before it
+# is there so the turn is not entered at 25 m/s, where the same yaw rate
+# would demand 13 m/s^2 and pin the lean. A pinned lean is the failure
+# that shipped to the map once and read as the airframe lying on its
+# side.
+#
+# src/drones.js mirrors this table as _DEMO_PLAN, so the map's
+# cph_dji_flight_demo flies the same sequence. Change both.
 PLAN = [
     ("HOVER",          (0.0,  0.0,  0.0),   0.0, 2.0),
-    ("FORWARD",        (10.0, 0.0,  0.0),   0.0, 3.5),
-    ("TURN",           (5.0,  0.0,  0.0),  60.0, 3.0),
-    ("FORWARD",        (10.0, 0.0,  0.0),   0.0, 2.0),
-    ("BRAKE",          (0.0,  0.0,  0.0),   0.0, 2.5),
-    ("BACKWARD",       (-6.0, 0.0,  0.0),   0.0, 3.0),
+    ("FORWARD",        (25.0, 0.0,  0.0),   0.0, 6.5),
+    ("SLOW",           (8.0,  0.0,  0.0),   0.0, 3.0),
+    ("TURN",           (8.0,  0.0,  0.0),  30.0, 6.0),
+    ("FORWARD",        (25.0, 0.0,  0.0),   0.0, 5.0),
+    ("BRAKE",          (0.0,  0.0,  0.0),   0.0, 4.5),
+    ("BACKWARD",       (-8.0, 0.0,  0.0),   0.0, 3.0),
     ("STOP",           (0.0,  0.0,  0.0),   0.0, 2.0),
-    ("SLIDE RIGHT",    (0.0,  6.0,  0.0),   0.0, 2.5),
-    ("SLIDE LEFT",     (0.0, -6.0,  0.0),   0.0, 3.0),
+    ("SLIDE RIGHT",    (0.0,  8.0,  0.0),   0.0, 2.5),
+    ("SLIDE LEFT",     (0.0, -8.0,  0.0),   0.0, 3.0),
     ("STOP",           (0.0,  0.0,  0.0),   0.0, 2.0),
     ("DESCEND",        (0.0,  0.0, -3.0),   0.0, 2.5),
     ("CLIMB",          (0.0,  0.0,  4.0),   0.0, 2.5),
     ("HOVER",          (0.0,  0.0,  0.0),   0.0, 2.0),
 ]
 
-# Airframe and controller, calibrated to a DJI Air 3 where a public number
-# exists and stated where it is a judgement.
+# Airframe and controller. Controller numbers are a DJI Air 3's where a
+# public number exists; the airframe envelope is the platform's 30 m/s
+# reconnaissance multirotor, because the C2 map and this render must be
+# the same aircraft (scripts/check-quad-flight.mjs reads these out of
+# this file and fails the build if src/quad_flight_model.js disagrees).
+#
+# Top speed is not a free parameter. It is fixed by the tilt limit and
+# the drag:  v_max = sqrt(g * tan(MAX_TILT) / DRAG_K). So DRAG_K is
+# derived from the airframe, DRAG_K = g * tan(MAX_TILT) / TOP_SPEED^2,
+# and written here as the literal the gate parses:
+#
+#     0.0156     32 deg  ->  19.8 m/s   a DJI Air 3 flat out (the old value)
+#     0.0068111  32 deg  ->  30.0 m/s   the recon airframe
+#
+# Asking the PLAN for more than v_max does nothing but pin the lean.
+TOP_SPEED_MS = 30.0    # m/s, 108 km/h
 MAX_TILT_DEG = 32.0    # DJI limits sport mode to ~35 deg; a little margin
-A_MAX = 6.5            # m/s^2. 0 to 21 m/s in about 3.5 s, as the Air 3 does
-DRAG_K = 0.0156        # 1/m, quadratic: g*tan(35deg) / 21^2, the top-speed balance
+A_MAX = 6.5            # m/s^2 asked of the velocity loop. Moot above g*tan(32) = 6.13:
+                       # the tilt limit, not this, sets how hard it can accelerate
+DRAG_K = 0.0068111     # 1/m, quadratic: 9.81 * tan(32 deg) / 30^2
 KV = 1.2               # 1/s, velocity loop gain: 1 m/s error asks 1.2 m/s^2
 ATT_TAU = 0.15         # s, attitude loop time constant. DJI inner loops are fast
 ATT_RATE_DPS = 120.0   # deg/s, attitude slew limit, the rotors' authority
@@ -488,7 +520,7 @@ def stage(root, size, phase_frames, res):
     coll = scene.collection
 
     floor = root.location.z - max(1.5 * size, 6.0)
-    bpy.ops.mesh.primitive_plane_add(size=max(size * 600, 400.0), location=(0, 0, floor))
+    bpy.ops.mesh.primitive_plane_add(size=max(size * 600, 1200.0), location=(0, 0, floor))
     ground = bpy.context.active_object
     ground.name = "Ground"
     mat = bpy.data.materials.new("GroundChecker")

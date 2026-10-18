@@ -487,11 +487,18 @@ DJI runs:
 
 1. The plan commands a velocity (stick, or waypoint).
 2. A velocity loop asks for an acceleration, capped at `A_MAX`
-   (6.5 m/s^2: 0 to 21 m/s in about 3.5 s, as an Air 3 does).
+   (6.5 m/s^2). The cap never binds: with the tilt limit at 32 degrees
+   the airframe cannot accelerate harder than g tan(32) = 6.13 m/s^2
+   whatever `A_MAX` says, so raising it does nothing.
 3. That plus quadratic drag gives the lean the thrust must have,
    `tan(lean) = |a + k v|v|| / g`, capped at `MAX_TILT` (32 degrees; DJI
-   limits sport mode to about 35). `k` is 0.0156/m from the top-speed
-   balance, 21 m/s at 35 degrees.
+   limits sport mode to about 35). `k` is derived from the airframe,
+   `DRAG_K = g tan(MAX_TILT) / TOP_SPEED^2`, because top speed is not a
+   free parameter: `v_max = sqrt(g tan(MAX_TILT) / DRAG_K)`. Since
+   2026-10-18 the file carries 0.0068111/m, a 30 m/s reconnaissance
+   multirotor, the airframe the map flies. It was 0.0156, a DJI Air 3
+   at 19.8 m/s, and asking the plan for more than that ceiling only
+   pinned the lean.
 4. The attitude follows that demand with a 0.15 s lag and a 120 deg/s
    slew limit, because a body has inertia and rotors finite authority.
    This is what makes a real one tip into a move and roll out of it.
@@ -501,11 +508,18 @@ DJI runs:
 
 So: nose down to go forward, nose UP to brake or fly backward, roll into
 a slide, roll into a turn from the centripetal term, level on vertical
-legs. Measured on the Air 3 at the phase midpoints: 30 degrees nose down
-at peak acceleration, 20 in the accelerating cruise, 6 to 9 at a steady
-10 m/s, 29 nose up braking, 12 nose up at 6 m/s backward, 25 to 29 of
-roll at the start of each slide, under 1 degree on descend and climb.
-Peak slew 123 deg/s including noise.
+legs. The plan is sized from the dynamics: 25 m/s runs (0 to 25 takes
+about 6 s against the drag, 25 to 0 about 4 s), a SLOW leg to 8 m/s
+before a 30 deg/s turn, because the same yaw rate entered at 25 m/s
+would ask 13 m/s^2 of centripetal lean and pin it. Measured on the Air 3
+at the phase midpoints: 32 degrees nose down through the run-up, 25 at
+24.7 m/s still accelerating, 22 of bank through the turn at 7.6 m/s,
+25 nose up braking from 16 m/s, under 1 degree on descend and climb,
+peak slew 123 deg/s including noise, gimbal 0.00 degrees off level.
+
+`src/drones.js` mirrors the table as `_DEMO_PLAN` and the map's
+`cph_dji_flight_demo` flies it; the two are kept in step by hand, so a
+change to one is a change to both. 46.5 s, about 400 m end to end.
 
 On top of that, what a real one does and the old shortcut never did:
 
@@ -984,6 +998,34 @@ differential.
 NOT `gltf-transform optimize`. That runs flatten and join, which merge the
 meshes and destroy Rotor_1..4 — checked, it leaves five nodes and no rotors, and
 the propellers stop turning. `weld` then `simplify` keeps the node tree.
+
+## 8k2. Parity note from the Blender thread, 2026-10-18
+
+Done as asked in the handoff. `DRAG_K` in the Blender file is now the
+literal 0.0068111, which is 9.81 tan(32 deg) / 30^2 to the precision the
+gate's regex reads, and `TOP_SPEED_MS = 30.0` sits beside it so it can be
+gated too. Lock it. Three things to know when you do:
+
+- **The gate compares with `===`.** `FM.DRAG_K` is computed as an
+  expression and the Python literal is rounded, so an exact comparison
+  will fail by 7e-11. Either compare with a tolerance or write the same
+  literal on the JS side.
+- **`_DEMO_PLAN` in `drones.js` is not gated**, and neither is the
+  `DRAG_K` inside `_demoFlightPath`, which was still 0.0156 (the DJI
+  value) and would have capped the demo at 19.8 m/s. Both are updated to
+  match the Blender file in this commit. Worth a check of their own,
+  since "if you change PLAN the scenario changes with it" is only true
+  while someone remembers to copy the table.
+- **`A_MAX` is moot.** g tan(32) is 6.13 m/s^2 and `A_MAX` is 6.5, so
+  the tilt limit sets the acceleration, not the loop cap. 0 to 25 m/s
+  takes about 6 s and that is the airframe, not a sluggish constant;
+  raising `A_MAX` changes nothing. A faster run-up needs a higher tilt
+  limit.
+
+The plan now runs at 25 m/s with a SLOW leg before a 30 deg/s turn at
+8 m/s (see section 9 for why), 46.5 s instead of 33, about 400 m end to
+end over the apron. The scenario note and duration follow from the
+generator.
 
 ## 8l. The manoeuvre sequence is now flyable
 
