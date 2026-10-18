@@ -79,3 +79,35 @@ plus DKK-level Google 3D sessions, flat in practice and independent of how hard 
 - [ ] SDFI token registered and in env — Gowri
 - [ ] Sovereign ion-imagery gate, built and verified on 1574 — agent
 - [ ] Datafordeler FTP order placed (unblocks wide-area city buildings) — Lucas
+
+## Probe 1 — exact recipe (max-quality ODM re-run, Billund terminal block)
+
+**Discovery that motivates it:** the tiles Lucas judged were built at the pipeline's FLOOR, not its
+ceiling: `run_odm.sh` defaults to `--feature-quality medium --pc-quality medium` (its own comment says
+high "was never actually exercised from scratch"), caps the mesh at 300,000 triangles (octree depth 11),
+and `prep_odm.py` downscales every image to 3,000 px. The probe runs the same pipeline at its actual
+maximum to learn the true quality ceiling.
+
+**Where:** Lucas's MacBook (M4, 16 GB, Docker installed) — acceptable at hours-to-overnight — or
+Gowri's RTX box in a fraction of the time. Workdir in a NON-iCloud path (`~/odm-probe`), Docker
+Desktop memory raised to ~12 GB, machine plugged in and kept awake.
+
+**Steps**
+1. Precondition: SDFI token present (repo `.env.local`); if missing, free registration at
+   dataforsyningen.dk. Source obliques are NOT cached in `work/` — the probe re-fetches them.
+2. Scope: `pick_bbox.py --name "Billund Lufthavn"` — terminal block only, keeps 16 GB viable.
+3. `fetch.py` for that bbox: 5 obliques + nadir + published camera poses.
+4. Prep at FULL resolution (bypass the 3,000 px downscale) — change made only in the isolated copy.
+5. ODM: `--feature-quality ultra --pc-quality high` (ultra if RAM allows), `--mesh-size 3000000`,
+   `--mesh-octree-depth 12`, full-res texturing.
+   OOM ladder, in order: pc-quality high→medium-high, image scale 100%→75%, then shrink bbox. Log
+   which rung succeeded — that rung is the production setting.
+6. Clip to footprints and tile as usual → max-quality tileset of the terminal.
+7. Judgment: side-by-side on **1574 only** — floor-quality tile vs max-quality tile vs Google
+   screenshots, at the zoom levels operators actually use. Lucas's eyes are the gate. 1573 untouched.
+8. Decision: PASS → this becomes the production recipe; batch the ring tiles per site on Gowri's GPUs.
+   FAIL → licensed Danish photogrammetry (Probe 2) becomes the sovereign path. Either way Google-via-
+   own-key keeps serving customers until a replacement is proven.
+
+**What the probe is not:** it does not restore the currently missing Google 3D layer. That outage is
+the ion quota lock-out (heals Nov 1, or permanently via the own-key swap), unrelated to mesh quality.
