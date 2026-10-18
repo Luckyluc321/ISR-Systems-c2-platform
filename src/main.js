@@ -1255,7 +1255,21 @@ async function main() {
         // Belt and braces: a tileset that renders nothing at all would
         // otherwise never swap, leaving white boxes forever. allTilesLoaded
         // also fires when the set settles with zero tiles in view.
-        ts.allTilesLoaded.addEventListener(() => swapOnce('tiles settled'));
+        // GUARDED (Oct 2026 flat-Billund regression): allTilesLoaded also
+        // fires when the set settles with ZERO tiles — e.g. every child
+        // tileset 404s because the combined tileset's symlinks broke in a
+        // directory move. Swapping then hides 62.5 km2 of OSM boxes with
+        // nothing drawn in their place. The settle path therefore only
+        // swaps after at least one tile with real content has loaded.
+        let _tilesSeen = 0;
+        ts.tileLoad.addEventListener(() => { _tilesSeen++; });
+        ts.allTilesLoaded.addEventListener(() => {
+          if (_tilesSeen > 0) {
+            swapOnce('tiles settled');
+          } else {
+            console.warn(`[site_mesh] ${siteId} settled with zero tiles — boxes left in place (mesh unreachable?)`);
+          }
+        });
       } else {
         swapOnce('loaded');
       }
