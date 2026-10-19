@@ -17837,10 +17837,13 @@ async function main() {
       }
       if (!_quadLastHpr) return undefined;
 
+      // swapPitchRoll is OFF unless something sets it, so this is the
+      // behaviour that has always shipped. See __isr_quadAxes.
+      const _mp = _quadLastHpr.pitchRad + pitchOffset, _mr = _quadLastHpr.rollRad;
       const hpr = new Cesium.HeadingPitchRoll(
         _quadLastHpr.headingRad + headingOffset,
-        (_quadLastHpr.pitchRad + pitchOffset) * pitchSign,
-        _quadLastHpr.rollRad * rollSign,
+        (_qM.swapPitchRoll ? -_mr : _mp) * pitchSign,
+        (_qM.swapPitchRoll ?  _mp : _mr) * rollSign,
       );
       return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
     };
@@ -18199,10 +18202,12 @@ async function main() {
             _quadFlightDiag.set(`${event.id}-swarm-${i}`, out); }
           if (!_swLastHpr) return undefined;
 
+          // Same optional swap as the lead rig. Off unless set.
+          const _mp = _swLastHpr.pitchRad + pitchOffset, _mr = _swLastHpr.rollRad;
           const hpr = new Cesium.HeadingPitchRoll(
             _swLastHpr.headingRad + headingOffset,
-            (_swLastHpr.pitchRad + pitchOffset) * pitchSign,
-            _swLastHpr.rollRad * rollSign,
+            (_qM.swapPitchRoll ? -_mr : _mp) * pitchSign,
+            (_qM.swapPitchRoll ?  _mp : _mr) * rollSign,
           );
           return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
         };
@@ -21263,6 +21268,62 @@ async function main() {
   // off stops what you are seeing, it is that and the amplitude is the
   // dial. If it does not, the oscillation is coming from somewhere else
   // and I need to look again.
+  // HUNT THE ATTITUDE AXES THE WAY THE NOSE WAS HUNTED.
+  //
+  // The nose offset was found in the field by trying 0, 90, 180, 270,
+  // because the asset's axes did not match what the glTF said. The same
+  // is true one level down: Cesium composes Rz(heading).Ry(pitch).Rx(roll)
+  // and applies them to an asset whose own axes may be rotated, so the
+  // PITCH slot can end up driving roll and the ROLL slot pitch. A sign
+  // flip cannot fix that; only swapping the slots can.
+  //
+  // Deriving which combination is right needs the asset's true axes, and
+  // an attempt to derive them from the glTF Y-up convention was WRONG:
+  // it shipped a swap that flew the airframe permanently sideways. So
+  // this does not guess. It is the same four-value hunt, with the swap
+  // as a fifth dimension, applied live with no relaunch.
+  //
+  //   __isr_quadAxes()      show where it is now
+  //   __isr_quadAxes(3)     try combination 3
+  //   __isr_quadAxes(null)  back to the shipped values
+  //
+  // What to look for, flying a STRAIGHT leg: the nose should be DOWN,
+  // the wings LEVEL, and turning the camera around it must not change
+  // either. What to look for in a TURN: it banks into the turn.
+  const _QUAD_AXIS_COMBOS = [
+    { swapPitchRoll: false, pitchSign: -1, rollSign: -1 },   // 0 = shipped
+    { swapPitchRoll: false, pitchSign: -1, rollSign:  1 },
+    { swapPitchRoll: false, pitchSign:  1, rollSign: -1 },
+    { swapPitchRoll: false, pitchSign:  1, rollSign:  1 },
+    { swapPitchRoll: true,  pitchSign: -1, rollSign: -1 },
+    { swapPitchRoll: true,  pitchSign: -1, rollSign:  1 },
+    { swapPitchRoll: true,  pitchSign:  1, rollSign: -1 },
+    { swapPitchRoll: true,  pitchSign:  1, rollSign:  1 },
+  ];
+  window.__isr_quadAxes = (n) => {
+    const t = window.__isr_quad_tuning = window.__isr_quad_tuning || {};
+    if (n === null) {
+      const o = { ...(t.modelOverride || {}) };
+      delete o.swapPitchRoll; delete o.pitchSign; delete o.rollSign;
+      t.modelOverride = o;
+      console.log('[quad axes] back to the shipped values');
+      return;
+    }
+    if (n === undefined) {
+      const o = t.modelOverride || {};
+      console.table(_QUAD_AXIS_COMBOS.map((c, i) => ({ combo: i, ...c,
+        active: i === 0 ? !('swapPitchRoll' in o) : undefined })));
+      console.log('current override:', JSON.stringify(o));
+      return;
+    }
+    const c = _QUAD_AXIS_COMBOS[n];
+    if (!c) { console.log('combo must be 0..7, or null to reset'); return; }
+    t.modelOverride = { ...(t.modelOverride || {}), ...c };
+    console.log(`[quad axes] combo ${n}:`, JSON.stringify(c),
+      '— applies immediately, no relaunch. Straight leg: nose DOWN, wings LEVEL,'
+      + ' and turning the camera must not change either.');
+  };
+
   window.__isr_quadHum = (gain = 0) => {
     const t = window.__isr_quad_tuning = window.__isr_quad_tuning || {};
     t.hoverNoise = gain;

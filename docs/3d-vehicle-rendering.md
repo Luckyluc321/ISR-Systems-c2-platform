@@ -2098,3 +2098,57 @@ None of it renders anyway, because the model rate-limits yaw to
 that. 3 m/s is where the track bearing starts being the thing on screen.
 `cph_swarm_runway_incursion` reads 1.05 at every floor, because it never
 slows down enough for this to matter.
+
+## 8z. The attitude axes, and why they get hunted rather than derived
+
+Reported on the 3D model, not the icon: "when you look from above it, the
+nose turns relative to your angled pov."
+
+A model's orientation is a world-space quaternion, so a camera cannot
+rotate it. What a camera CAN do is reveal that the airframe is leaning
+about the wrong axis: a drone that is BANKED 23 degrees when it should be
+PITCHED 23 presents a different apparent nose direction from every angle,
+and looks fine only from the one viewpoint it was checked from.
+
+**The mechanism is real.** Cesium composes
+`Rz(heading) . Ry(pitch) . Rx(roll)` and applies it to an asset whose own
+axes may be rotated relative to that frame. Both quad assets need a 90 or
+270 degree heading offset, which is the signature of exactly that. When
+the nose sits on the frame's Y axis, the PITCH slot rotates the airframe
+about its own nose, which is roll, and the ROLL slot pitches it. **A sign
+flip cannot turn pitch into roll.** Only swapping the slots can.
+
+**And deriving which combination is right was already tried, and was
+wrong.** The derivation assumed Cesium's glTF Y-up to Z-up conversion is
+`(x, y, z) -> (x, -z, y)`, solved all 32 combinations against that, and
+shipped the one that scored zero error. It flew the airframe permanently
+sideways and was reverted within the minute. The model of the conversion
+did not match the asset.
+
+So this is not derived any more. `__isr_quadAxes(n)` applies each of the
+eight combinations live, with no relaunch, the same four-value hunt that
+found the nose offset of 90 in the field after 0 and 180 were both tried
+and both flew sideways.
+
+```
+__isr_quadAxes()      show the table and what is active
+__isr_quadAxes(3)     try combination 3
+__isr_quadAxes(null)  back to the shipped values
+```
+
+```
+combo  swapPitchRoll  pitchSign  rollSign
+  0        false         -1         -1      <- shipped
+  1..3     false        the four sign pairs
+  4..7     true         the four sign pairs
+```
+
+**The test is two observations, and the second is the one that matters.**
+On a straight leg the nose must be DOWN and the wings LEVEL — and then
+turning the camera around the airframe must not change either. A wrong
+axis passes the first test from one viewpoint and fails the second from
+every other, which is precisely why it survived this long.
+
+`swapPitchRoll` defaults to absent on both assets, so nothing changes
+until someone sets it. The rigs read `_quadModelSpec` every frame, so the
+override takes effect on the airframe already in the air.
