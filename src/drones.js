@@ -3053,6 +3053,7 @@ function _tickBody(frameTs) {
   // 25 m/s, which is invisible at a kilometre and tens of pixels zoomed
   // in. Published as `frameMs` so main.js can align to the same instant.
   const frameMs = monoAt(frameTs);
+  _lastFrameMs = frameMs;
   for (const [eventId, live] of _liveTracks) {
     if (live.closed) continue;
     const elapsed = (frameMs - live.startTime) / 1000;
@@ -3101,6 +3102,18 @@ function _tickBody(frameTs) {
 //
 // The reschedule is now unconditional on the way out. A bug inside the
 // body is logged once and the simulation keeps running.
+// THE INSTANT THE POSITIONS BELONG TO, readable by anything that has to
+// DIFFERENTIATE them. A speed is dPosition/dt, so the clock that advanced
+// the position has to be the clock that divides it. Attitude rigs in
+// main.js read the wall clock at RENDER time while the position moved on
+// the frame clock, which is two clocks in one quotient. See lastFrameMs()
+// below.
+let _lastFrameMs = 0;
+
+/** The frame-aligned instant the current positions were sampled at.
+ *  0 before the first tick. */
+export function lastFrameMs() { return _lastFrameMs; }
+
 function _tick(frameTs) {
   try {
     _tickBody(frameTs);

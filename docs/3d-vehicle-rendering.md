@@ -1740,3 +1740,105 @@ this short: **when a symptom is camera-dependent, work out the pixel size
 of each candidate at both camera distances before touching anything.** The
 props were always the biggest moving object on screen at zoom and the
 smallest at range, and that alone named them.
+
+## 8v. Two clocks in one quotient, and this one was mine
+
+Reported after five fixes as "still the bugging/humming back and forth",
+with `renderRpsMax = 7` making no visible difference — which was itself
+evidence that 8u was not the live cause.
+
+The in-browser capture settled where to look:
+
+```
+frames 600  dt median 12.5ms  p95 32.5  max 135
+SCREEN px: med 0.083  p95 0.910   WORLD m: med 0.205   CAMERA m: med 0.000
+CAM DIST : median 2185 m          trackedEntity: drone-DET-20261019-9001
+```
+
+Two things fell out of that immediately.
+
+**`WORLD m: med 0.205` is not a position defect.** A second difference
+assumes equal time steps. With constant velocity and unequal ones it is
+exactly `v x (dt2 - dt1)`:
+
+```
+25 m/s x 8 ms = 0.20 m        observed 0.205 m
+```
+
+So the position is a correct function of time and the FRAMES are uneven.
+
+**`trackedEntity` is set**, so the camera is welded to the drone, the
+drone is pinned at screen centre and the whole world moves past it.
+
+That ruled the position out, and the Cesium tracking source ruled the
+camera out: `EntityView.updateTransform` estimates velocity by sampling
+the position property at `time` and `time + 0.001`. A
+`ConstantPositionProperty` returns the same value for both, the VVLH
+branch is skipped, `hasBasis` stays false and it falls back to
+east-north-up. Stable, every frame.
+
+Which left the attitude, and a clock mismatch left behind by 8t.
+
+```js
+const now = performance.now();          // RENDER time
+const dt = (now - _qPrevTime) / 1000;
+```
+
+8t moved the POSITION onto the frame clock. This divides it by a gap
+measured from the wall clock, read partway through a render whose length
+varies. **A speed is dPosition/dt, so the clock that advanced the position
+has to be the clock that divides it.** A dt a few ms off a 12.5 ms frame
+is a speed tens of per cent off, and the lean follows the drag at that
+speed:
+
+```
+25 m/s -> 23.4 deg      32 m/s -> 32 deg (pinned)      17 m/s -> 12 deg
+```
+
+Measured on a dead-straight 25 m/s leg using the real frame timing from
+the capture, where a correct airframe holds one pitch angle:
+
+| dt source | pitch range | swing | rms |
+|---|---|---|---|
+| wall clock, as shipped | −24.9 .. −21.3 | **3.6 deg** | 0.49 |
+| the position's frame clock | −23.5 .. −23.4 | **0.1 deg** | 0.02 |
+
+A continuous 3.6 degree lean oscillation at frame rate. That is the
+"flattening back and forth", and it rode on top of every earlier fix
+because every earlier fix was somewhere else.
+
+`lastFrameMs()` in `drones.js` publishes the instant the positions belong
+to; both rigs, lead and swarm member, now difference that. A dt of zero
+means the callback ran twice inside one frame, so there is no new
+information and the attitude is held rather than integrated against
+nothing.
+
+**The rule, now gated:** anything that differentiates a drone position
+must divide by the clock that advanced it. Three separate bugs have now
+come from mixing a per-tick quantity with a per-frame interval, and this
+is the fourth variation: a per-frame quantity divided by a per-render one.
+
+### What 8u was, in hindsight
+
+The propeller aliasing in 8u is real — 72 deg a frame is a strobe and the
+arithmetic does not change. But `renderRpsMax = 7` producing no visible
+difference says it was not what was being reported by then. It stays in
+because it is correct; it was not the live cause.
+
+### All six
+
+```
+8q  hover noise at cruise      1.9 deg at 1-3 Hz    fast hum, every drone
+8r  untimed transit legs       48 deg swing         a slam at the start
+8s  formation jitter          15.6 deg at 14 s      slow flatten, wingmen
+8t  position sampled at "now"  14 px zoomed in      only visible up close
+8u  propeller aliasing         72 deg/frame         real, not the live cause
+8v  attitude dt on the wall    3.6 deg at frame rate the flattening itself
+```
+
+**What should have been done first.** Instrument the renderer before
+changing the simulation. The capture that found 8v took ten minutes and
+could have been written on day one; instead five rounds were spent picking
+the next suspect from a description. When a symptom survives a fix that
+measurably worked, that is the signal to go and measure the output, not to
+pick the next candidate.

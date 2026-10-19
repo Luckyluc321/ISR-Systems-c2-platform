@@ -120,8 +120,7 @@ EVENTS.forEach(ev => {
 import {
   TEMPLATES, addLiveTrack, markTrackClosed, removeLiveTrack, anyTrackLive,
   isTrackLive,
-  onDroneUpdate, distanceToPerimeter, pointInPolygon, makeSubstationThreats,
-} from './drones.js';
+  onDroneUpdate, distanceToPerimeter, pointInPolygon, makeSubstationThreats, lastFrameMs } from './drones.js';
 // Register substation threat templates for every energy-typed site (module
 // init side effect). Filters SITES by site_type: energy so future Energinet
 // substations added purely via a YAML manifest pick this up automatically.
@@ -17786,7 +17785,25 @@ async function main() {
     // model's node transforms. A quadcopter differentiates its rotors
     // to turn and to yaw; one shared number cannot show that.
     let _quadRotorRps = null;
-    let _qPrevTime = performance.now();
+    // ONE CLOCK, AND IT IS THE POSITION'S. See lastFrameMs in drones.js.
+    //
+    // This was performance.now(), read inside the render. The position it
+    // divides advances on the FRAME clock, and this callback runs partway
+    // through a render whose length varies, so the two gaps differed by
+    // however much the render duration had changed. Speed is dPosition/dt,
+    // so a dt that is a few ms off a 12.5 ms frame is a speed that is tens
+    // of per cent off, and the lean follows the drag at that wrong speed.
+    //
+    // Measured on a straight 25 m/s leg using Lucas's own frame timing
+    // (12.5 ms median, 32.5 p95), where the pitch should not move at all:
+    //
+    //     dt from performance.now()   range -24.9..-21.3, SWING 3.6 deg
+    //     dt from the frame clock     range -23.5..-23.4, SWING 0.1 deg
+    //
+    // 0 means no tick has landed yet, and a dt of zero means this callback
+    // ran twice inside one frame: in both cases there is no new
+    // information, so hold the attitude rather than integrate nothing.
+    let _qPrevTime = 0;
     const _quadOrientation = () => {
       const cart = _billboardRef?.position?.getValue?.(Cesium.JulianDate.now());
       if (!cart) return undefined;
@@ -17796,15 +17813,19 @@ async function main() {
       const pitchSign     = _qM.pitchSign ?? 1;
       const rollSign      = _qM.rollSign  ?? 1;
 
-      const now = performance.now();
-      const dt = (now - _qPrevTime) / 1000;
-      _qPrevTime = now;
-
-      const c = Cesium.Cartographic.fromCartesian(cart);
-      const out = _quadFlight.update(
-        Cesium.Math.toDegrees(c.latitude),
-        Cesium.Math.toDegrees(c.longitude),
-        c.height, dt);
+      const now = lastFrameMs() || performance.now();
+      const dt = _qPrevTime ? (now - _qPrevTime) / 1000 : 0;
+      let out = null;
+      if (dt > 0) {
+        _qPrevTime = now;
+        const c = Cesium.Cartographic.fromCartesian(cart);
+        out = _quadFlight.update(
+          Cesium.Math.toDegrees(c.latitude),
+          Cesium.Math.toDegrees(c.longitude),
+          c.height, dt);
+      } else if (!_qPrevTime) {
+        _qPrevTime = now;
+      }
       // Until there are two samples to differentiate there is no
       // attitude to report, so hold the last one rather than snapping
       // to level for a frame.
@@ -18149,7 +18170,7 @@ async function main() {
         });
         let _swLastHpr = null;
         let _swRotorRps = null;
-        let _swQPrevTime = performance.now();
+        let _swQPrevTime = 0;
         const _swQuadOrientation = () => {
           const cart = _swBbRef?.position?.getValue?.(Cesium.JulianDate.now());
           if (!cart) return undefined;
@@ -18159,15 +18180,20 @@ async function main() {
           const pitchSign     = _qM.pitchSign ?? 1;
           const rollSign      = _qM.rollSign  ?? 1;
 
-          const now = performance.now();
-          const dt = (now - _swQPrevTime) / 1000;
-          _swQPrevTime = now;
-
-          const c = Cesium.Cartographic.fromCartesian(cart);
-          const out = _swFlight.update(
-            Cesium.Math.toDegrees(c.latitude),
-            Cesium.Math.toDegrees(c.longitude),
-            c.height, dt);
+          // One clock, the position's. Same reasoning as the lead rig.
+          const now = lastFrameMs() || performance.now();
+          const dt = _swQPrevTime ? (now - _swQPrevTime) / 1000 : 0;
+          let out = null;
+          if (dt > 0) {
+            _swQPrevTime = now;
+            const c = Cesium.Cartographic.fromCartesian(cart);
+            out = _swFlight.update(
+              Cesium.Math.toDegrees(c.latitude),
+              Cesium.Math.toDegrees(c.longitude),
+              c.height, dt);
+          } else if (!_swQPrevTime) {
+            _swQPrevTime = now;
+          }
           if (out) { _swLastHpr = out; _swRotorRps = out.rotorRps;
             _quadFlightDiag.set(`${event.id}-swarm-${i}`, out); }
           if (!_swLastHpr) return undefined;

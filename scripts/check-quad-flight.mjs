@@ -590,6 +590,22 @@ check('the RENDERED rotor rate is capped below the aliasing limit',
   + 'clamping flattens the four rotors onto one number and throws away the '
   + 'differential that IS the quadcopter turning.');
 
+check('the attitude rigs divide by the SAME clock that moved the position',
+  /export function lastFrameMs\(\) \{ return _lastFrameMs; \}/.test(dronesSrc)
+  && /_lastFrameMs = frameMs;/.test(dronesSrc)
+  && (main.match(/const now = lastFrameMs\(\) \|\| performance\.now\(\);/g) || []).length === 2
+  && (main.match(/let _q?s?w?QPrevTime = 0;|let _qPrevTime = 0;|let _swQPrevTime = 0;/g) || []).length >= 2,
+  'A speed is dPosition/dt, so the clock that ADVANCED the position has to '
+  + 'be the clock that DIVIDES it. The position moves on the frame clock; '
+  + 'these callbacks ran partway through a render whose length varies, so '
+  + 'reading the wall clock here measured a different gap. A dt a few ms '
+  + 'off a 12.5 ms frame is a speed tens of per cent off, and the lean '
+  + 'follows the drag at that wrong speed. Measured on a straight 25 m/s '
+  + 'leg with the real frame timing (12.5 ms median, 32.5 p95), where the '
+  + 'pitch should not move at all: wall clock gave a 3.6 degree swing at '
+  + 'frame rate, the frame clock 0.1. Both rigs must use it, lead and '
+  + 'swarm member, or the lead goes steady and the wingmen do not.');
+
 // ─── no quadcopter path may out-accelerate the airframe ─────────────
 console.log('\nEvery quadcopter path is inside A_MAX');
 
