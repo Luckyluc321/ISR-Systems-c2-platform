@@ -1459,3 +1459,75 @@ call.
 **A new gate covers the class, not the instance:** no quadcopter template
 may demand more than `A_MAX` at any waypoint. Trim the leg, do not bound
 the model.
+
+## 8s. The last of it was the formation jitter, and only the wingmen had it
+
+After the hover-noise fade (8q) and the path trim (8r), the report came back
+as "slightly flattening movement, so the pure forward motion is not
+consistent, but the adjusting is smaller and less frequent than before".
+
+The answer was already in the `__isr_quadFlight()` table from that same run:
+
+```
+airframe          speed m/s   tilt deg   pitch deg
+9001                   25.0       23.4       23.4     <- lead
+9001-swarm-1           27.9       25.5       25.2
+9001-swarm-2           27.5       30.1       29.5
+9001-swarm-3           23.2       20.9       19.4
+9001-swarm-4           27.8       29.4       27.7
+```
+
+The lead reads 23.4 degrees at 25.0 m/s, which is `atan(DRAG_K * 25^2 / g)`
+to the decimal: the exact drag balance. The four wingmen spread over 9
+degrees and their SPEEDS spread over 4.7 m/s, on a path whose legs are a
+constant 25 m/s.
+
+Only members get `_formationJitter`. The lead carries none.
+
+**Why a cosmetic wobble became a 15 degree lean.** Position is an INPUT to
+the flight model; it differentiates it for velocity and the lean follows the
+drag at that velocity. A sinusoidal jitter contributes `amplitude x omega`
+to the measured speed:
+
+```
+8 m x 2*PI/14 = 3.59 m/s   on a 25 m/s cruise = +-14% of airspeed
+```
+
+Fourteen per cent of airspeed, cycling every 14 seconds, and a faithful
+model leans for every bit of it. Measured on a straight 25 m/s leg:
+
+| | pitch swing | peak rate | mean rate |
+|---|---|---|---|
+| lead, no jitter | 0.1 deg | 0.27 deg/s | 0.093 deg/s |
+| member at 14 s | 15.6 deg | 3.48 deg/s | **1.727 deg/s** |
+| member at 60 s | 2.5 deg | 0.37 deg/s | **0.109 deg/s** |
+
+Eighteen times the lead's rate. That is why the lead always looked right.
+
+**The fix changes the period, not the amplitude.** The amplitude is the
+visual that was signed off, so 8 m lateral and 4 m vertical stay exactly as
+they were and the formation, the trails and the recordings are unchanged in
+any still frame. Only the rate drops, to the lead's own.
+
+60 s is also the honest number. 8 m over 14 s is 0.57 m/s of drift, which is
+manoeuvring. Over 60 s it is 0.13 m/s, which is a GPS-held airframe holding
+station.
+
+**The general rule, third time it has bitten.** Anything that writes to a
+drone's POSITION is feeding the flight model an acceleration, whether or not
+it was meant to. The hover noise, the untimed transit legs and the formation
+jitter were all authored for an icon that had no physics behind it. A gate
+now bounds `amplitude x omega` under 1 m/s, and the same question should be
+asked of anything else that nudges a position: what lean does this imply?
+
+### The three causes, and what each one looked like
+
+```
+8q  hover noise at cruise     1.9 deg at 1-3 Hz     a fast hum, everything
+8r  untimed transit legs      48 deg swing          a slam at the start
+8s  formation jitter          15.6 deg at 14 s      slow flatten, wingmen only
+```
+
+All three were the same mistake in different clothing: a cosmetic device
+written before the flight model existed, left in place once the model
+started reading it as physics.

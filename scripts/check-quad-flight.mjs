@@ -525,6 +525,22 @@ check('a steady CRUISE does not hover-twitch',
   + 'it tests cph_dji_flight_demo, whose median is 6.5 m/s, where the fade '
   + 'barely applies.');
 
+check('the formation jitter is slower than the airframe it rides on',
+  (() => {
+    const m = /const _JITTER_M = ([0-9.]+), _JITTER_UP_M = ([0-9.]+), _JITTER_W = 2 \* Math\.PI \/ ([0-9.]+);/.exec(main);
+    if (!m) return false;
+    const amp = Number(m[1]), period = Number(m[3]);
+    return amp * (2 * Math.PI / period) < 1.0;
+  })(),
+  'A jitter contributes amplitude x omega to the speed the flight model '
+  + 'MEASURES, and the lean follows the drag at that speed. 8 m at a 14 s '
+  + 'period was 3.59 m/s on a 25 m/s cruise, plus or minus 14% of airspeed, '
+  + 'and the model faithfully swung the pitch 15.6 deg at 1.73 deg/s mean '
+  + 'against the lead\'s 0.093. That was the last of the drone judder, and '
+  + 'it hit only the wingmen because the lead carries no jitter. Keep the '
+  + 'AMPLITUDE, which is the visual that was signed off, and keep the '
+  + 'PERIOD long enough that amplitude x omega stays under 1 m/s.');
+
 // ─── no quadcopter path may out-accelerate the airframe ─────────────
 console.log('\nEvery quadcopter path is inside A_MAX');
 

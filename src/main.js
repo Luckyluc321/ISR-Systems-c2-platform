@@ -18653,7 +18653,40 @@ async function main() {
   // Small and slow on purpose. 8 m across, 4 m vertically, on a period
   // of roughly fourteen seconds, which is under 4 m/s of speed
   // variation. They stay in formation. They just are not welded to it.
-  const _JITTER_M = 8, _JITTER_UP_M = 4, _JITTER_W = 2 * Math.PI / 14;
+  // FORMATION JITTER: THE AMPLITUDE IS THE VISUAL, THE PERIOD IS THE PHYSICS.
+  //
+  // This breathes a wingman off its exact slot so a formation does not fly
+  // like one welded object. The amplitude is what you SEE and it has not
+  // changed: 8 m lateral, 4 m vertical, so the formation, the trails and
+  // the recordings look exactly as they were signed off.
+  //
+  // The PERIOD was 14 s, and that was the last of the drone judder.
+  //
+  // Position is an input to the flight model: it differentiates it to get
+  // velocity, and the lean follows the drag at that velocity. A jitter
+  // contributes amplitude x omega to the measured speed, so 8 m at 2*PI/14
+  // was 3.59 m/s on a 25 m/s cruise. Plus or minus 14% of airspeed, on a
+  // 14 second cycle, and a faithful model leans for every bit of it.
+  // Measured on a straight 25 m/s leg:
+  //
+  //                            pitch swing   peak rate   mean rate
+  //     lead, no jitter           0.1 deg    0.27 deg/s   0.093 deg/s
+  //     member at 14 s           15.6 deg    3.48 deg/s   1.727 deg/s
+  //     member at 60 s            2.5 deg    0.37 deg/s   0.109 deg/s
+  //
+  // Eighteen times the lead's rate, which is why the LEAD looked right and
+  // the four wingmen did the "slight flattening, forward motion is not
+  // consistent" that outlasted both the hover-noise fade and the path trim.
+  // Lucas's own __isr_quadFlight() read it out: lead 23.4 deg, which is the
+  // exact drag balance at 25 m/s, and members at 20.9, 25.5, 29.4, 30.1.
+  //
+  // 60 s is also the honest number. 8 m over 14 s is 0.57 m/s of drift,
+  // which is manoeuvring; over 60 s it is 0.13 m/s, which is a GPS-held
+  // airframe holding station. The visual is unchanged and the physics stops
+  // being asked to chase a cosmetic.
+  //
+  // scripts/check-quad-flight.mjs gates amplitude x omega under 1 m/s.
+  const _JITTER_M = 8, _JITTER_UP_M = 4, _JITTER_W = 2 * Math.PI / 60;
   function _formationJitter(j, tSec) {
     if (!j) return { dN: 0, dE: 0, dU: 0 };
     return {
