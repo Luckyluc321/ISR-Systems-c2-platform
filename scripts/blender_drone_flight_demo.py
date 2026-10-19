@@ -515,7 +515,7 @@ def fly(root, rotors, gimbal, fwd, right, fps, rps):
 # ----------------------------------------------------------------------------
 # Stage: camera, light, ground, labels
 # ----------------------------------------------------------------------------
-def stage(root, size, phase_frames, res, floor_below=None, cam_offset=(2.6, -3.2, 1.5)):
+def stage(root, size, phase_frames, res, floor_below=None, cam_offset=(2.6, -3.2, 1.5), shutter=0.3):
     """Ground, chase camera, sun, phase labels. floor_below is metres under
     the start height (default: 1.5 airframes, at least 6 m, a quadcopter
     demo); cam_offset is in airframe lengths."""
@@ -600,7 +600,7 @@ def stage(root, size, phase_frames, res, floor_below=None, cam_offset=(2.6, -3.2
     scene.render.resolution_y = h
     scene.render.engine = "BLENDER_EEVEE" if hasattr(bpy.types, "SceneEEVEE") else "BLENDER_EEVEE_NEXT"
     scene.render.use_motion_blur = True
-    scene.render.motion_blur_shutter = 0.3
+    scene.render.motion_blur_shutter = shutter
     try:
         scene.eevee.motion_blur_steps = 8
     except AttributeError:

@@ -207,8 +207,11 @@ def main():
     ap.add_argument("input")
     ap.add_argument("--out", required=True)
     ap.add_argument("--forward", default="-Y")
-    ap.add_argument("--prop-rps", type=float, default=18.0,
-                    help="cruise propeller rate. A Rotax-class pusher turns ~40; 18 reads on camera")
+    ap.add_argument("--prop-rps", type=float, default=9.0,
+                    help="full-throttle propeller rate as DISPLAYED. A Rotax-class pusher turns "
+                         "~40, which renders as a haze. A two-blade prop on 30 fps aliases "
+                         "badly: 18 looked like a slow creep. 9 with a 0.5 shutter gives a "
+                         "160 degree blur arc per frame, the film-camera look of a fast prop.")
     ap.add_argument("--size-m", type=float, default=None, help="real length of the longest extent")
     ap.add_argument("--props", default=PROP_NAME.pattern)
     ap.add_argument("--pivot", default=None, help="x,y,z in file units; default is the wing's centre")
@@ -285,7 +288,7 @@ def main():
     # An aircraft flies high over its ground and is watched from further
     # back than a quadcopter.
     Q.stage(root, size, phase_frames, (w, h), floor_below=max(10.0 * size, 40.0),
-            cam_offset=(2.2, -3.0, 0.9))
+            cam_offset=(2.2, -3.0, 0.9), shutter=0.5)
     for label, f0, f1 in phase_frames:
         print(f"  {label:12} frames {f0:4}-{f1:4}")
 
