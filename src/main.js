@@ -19686,7 +19686,13 @@ async function main() {
         if (!state.recording && _template_for_rec?.swarm) {
           _initRecording(event, state, _template_for_rec);
         }
-        const nowMs = monoNow();
+        // THE FRAME'S TIME, from the tick that woke us. Not monoNow().
+        // This drives every swarm MEMBER's position through
+        // _interpolateWaypoints below, so reading the clock again here
+        // would re-introduce the unevenly-spaced sampling that monoAt
+        // exists to remove, and leave the lead smooth while the four
+        // wingmen juddered. Falls back when a caller is not the tick.
+        const nowMs = p.frameMs ?? monoNow();
         const tSec = (nowMs - (state.spawnMs || nowMs)) / 1000;
         const M_PER_DEG_LAT = 111320;
 

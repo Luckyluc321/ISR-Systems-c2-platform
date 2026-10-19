@@ -541,6 +541,28 @@ check('the formation jitter is slower than the airframe it rides on',
   + 'AMPLITUDE, which is the visual that was signed off, and keep the '
   + 'PERIOD long enough that amplitude x omega stays under 1 m/s.');
 
+check('the position is sampled on the FRAME clock, not on "now"',
+  /function _tickBody\(frameTs\)/.test(dronesSrc)
+  && /const frameMs = monoAt\(frameTs\);/.test(dronesSrc)
+  && /const elapsed = \(frameMs - live\.startTime\) \/ 1000;/.test(dronesSrc)
+  && /function _tick\(frameTs\)/.test(dronesSrc)
+  && /_tickBody\(frameTs\)/.test(dronesSrc)
+  && /const nowMs = p\.frameMs \?\? monoNow\(\);/.test(main),
+  'This tick runs inside a requestAnimationFrame callback, AFTER Cesium\'s '
+  + 'render in the same frame. monoNow() is performance.now(), so it samples '
+  + 'at frameTime + renderDuration, and a render that wanders between 8 and '
+  + '15 ms makes the position samples unevenly spaced even though the frames '
+  + 'are not. Measured at 25 m/s: 0.056 m rms of step variance, 0.205 m '
+  + 'worst spread. That is 0.19 px at a kilometre and 14 px zoomed in to '
+  + 'where the airframe fills the screen, which is exactly the "it still '
+  + 'does it when you zoom in" that outlasted the noise fade, the path trim '
+  + 'and the jitter period. rAF hands every callback the same evenly-spaced '
+  + 'timestamp; monoAt applies the pause offset to it. Every OTHER vehicle '
+  + 'computes its position in a render-time CallbackProperty and is evenly '
+  + 'sampled for free, which is why the drones were the only class that '
+  + 'juddered. main.js must use the published frameMs for the swarm loop too, '
+  + 'or the lead goes smooth and the four wingmen do not.');
+
 // ─── no quadcopter path may out-accelerate the airframe ─────────────
 console.log('\nEvery quadcopter path is inside A_MAX');
 

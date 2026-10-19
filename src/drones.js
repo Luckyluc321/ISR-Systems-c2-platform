@@ -7,7 +7,7 @@
 // position is a pure function of elapsed time, so freezing that clock
 // freezes the track exactly and resuming continues from the same point.
 // See sim_clock.js for why there are two readers.
-import { monoNow } from './sim_clock.js';
+import { monoNow, monoAt } from './sim_clock.js';
 
 // ── A FLOWN CURVE IS COMPUTED, NOT TYPED ──
 //
@@ -3044,11 +3044,18 @@ function speedAt(waypoints, tSec) {
   return Math.round(Math.hypot(dLat, dLon) * 10) / 10;
 }
 
-function _tickBody() {
+function _tickBody(frameTs) {
   const updates = [];
+  // THE FRAME'S OWN TIME, not "now". See monoAt in sim_clock.js: this
+  // tick runs after Cesium's render in the same frame, so `monoNow()`
+  // here samples at frameTime + renderDuration and the position samples
+  // come out unevenly spaced. 6 ms of render variance is 150 mm at
+  // 25 m/s, which is invisible at a kilometre and tens of pixels zoomed
+  // in. Published as `frameMs` so main.js can align to the same instant.
+  const frameMs = monoAt(frameTs);
   for (const [eventId, live] of _liveTracks) {
     if (live.closed) continue;
-    const elapsed = (monoNow() - live.startTime) / 1000;
+    const elapsed = (frameMs - live.startTime) / 1000;
     const p = interpolate(live.template.waypoints, elapsed);
     updates.push({
       eventId,
@@ -3059,6 +3066,7 @@ function _tickBody() {
       speed: speedAt(live.template.waypoints, elapsed),
       visible: p.visible,
       tSec: elapsed,
+      frameMs,
       completed: elapsed >= live.template.durationSec,
     });
   }
@@ -3093,9 +3101,9 @@ function _tickBody() {
 //
 // The reschedule is now unconditional on the way out. A bug inside the
 // body is logged once and the simulation keeps running.
-function _tick() {
+function _tick(frameTs) {
   try {
-    _tickBody();
+    _tickBody(frameTs);
   } finally {
     if (_liveTracks.size > 0) _rafId = requestAnimationFrame(_tick);
     else _rafId = null;

@@ -111,6 +111,38 @@ export function monoNow() {
   return (_paused ? _atMono : performance.now()) - _lostMono;
 }
 
+/** The same clock as `monoNow()`, but read at a time the CALLER supplies
+ *  instead of "right now".
+ *
+ *  WHY THIS EXISTS. `monoNow()` is `performance.now()`, so it answers
+ *  "what time is it at the instant you asked". A simulation tick that
+ *  runs inside a requestAnimationFrame callback asks AFTER whatever else
+ *  ran in that frame, and in this app that is Cesium's whole render. The
+ *  render takes 8 to 15 ms depending on what is on screen, so a position
+ *  sampled with `monoNow()` is sampled at `frameTime + renderDuration`
+ *  and the samples are NOT evenly spaced in time even though the frames
+ *  are.
+ *
+ *  At 25 m/s, 6 ms of that variance is 150 mm of position error. At a
+ *  kilometre's range that is three thousandths of a pixel. Zoomed in to
+ *  where the airframe fills the screen it is tens of pixels, which is
+ *  exactly the "it still does it when you zoom in" that outlasted every
+ *  other fix.
+ *
+ *  requestAnimationFrame hands every callback in a frame the SAME
+ *  timestamp, on this same timebase, and those are evenly spaced. Pass it
+ *  here and the sample times become the frame times.
+ *
+ *  Every other vehicle in the app computes its position inside a
+ *  render-time CallbackProperty, which is evaluated at a fixed point in
+ *  the frame and therefore evenly spaced for free. The drones are the one
+ *  class that writes a position from the tick, which is why they were the
+ *  one class that juddered. */
+export function monoAt(ts) {
+  if (_paused) return _atMono - _lostMono;
+  return (typeof ts === 'number' && ts > 0 ? ts : performance.now()) - _lostMono;
+}
+
 /** Frozen `Date.now()`. Still milliseconds since 1970, shifted back by
  *  however long the simulation has been frozen. Safe to difference
  *  against another `wallNow()` value. NOT a real timestamp: do not

@@ -1531,3 +1531,97 @@ asked of anything else that nudges a position: what lean does this imply?
 All three were the same mistake in different clothing: a cosmetic device
 written before the flight model existed, left in place once the model
 started reading it as physics.
+
+## 8t. Why it was fine at range and not zoomed in: the sample clock
+
+With the attitude finally correct (`__isr_quadFlight()` reading pitch equal
+to tilt on all five airframes, speeds within 1 m/s, rotor spread under
+0.6%), one symptom was left, and it came with its own diagnosis attached:
+**"it still does it when you zoom in"**, and **"it should simply be fully
+smooth as it is with literally all others."**
+
+Both halves of that sentence are the answer.
+
+**Camera-dependent means a sub-pixel error, magnified.** Nothing in the
+attitude chain is camera-dependent. A position error of a few centimetres is
+thousandths of a pixel at a kilometre and tens of pixels when the airframe
+fills the screen.
+
+**"As it is with literally all others" names the mechanism.** Every other
+vehicle in the app computes its position inside a render-time
+`CallbackProperty`:
+
+```js
+position: new Cesium.CallbackProperty(() => Cesium.Cartesian3.fromDegrees(
+  _friendlyMissile.curLon, _friendlyMissile.curLat, ...))
+```
+
+A callback is evaluated at a fixed point inside Cesium's render, so its
+sample times are as evenly spaced as the frames are, for free. The drones
+are the one class that writes a position FROM THE TICK:
+
+```js
+state.billboard.position = state._cartNow;        // the lead
+sw.billboard.position = Cesium.Cartesian3.fromDegrees(...);   // each member
+```
+
+and the tick sampled its time with `monoNow()`, which is
+`performance.now()`, which answers "what time is it at the instant you
+asked".
+
+**The tick asks late, by a varying amount.** `drones.js` drives itself with
+`requestAnimationFrame`, and so does Cesium. Cesium registers first, so
+every frame runs Cesium's entire render and THEN the drone tick. The render
+takes 8 to 15 ms depending on tiles streaming, labels relaying out and five
+models updating. So the position was sampled at `frameTime + renderDuration`
+while the frames themselves are at a clean 16.7 ms.
+
+Measured at 25 m/s over 600 frames with the render duration wandering 8 to
+15 ms:
+
+| | step | spread | rms | zoomed in | at 1 km |
+|---|---|---|---|---|---|
+| sampled at `now` | 0.417 m | 0.205 m | 0.056 m | **3.8 px rms, 14 px worst** | 0.19 px |
+| sampled at the frame | 0.417 m | 0.000 m | 0.000 m | **0 px** | 0 px |
+
+0.19 px at range. 14 px up close. That is the entire symptom, and it is why
+four earlier fixes each helped and none finished the job.
+
+**The fix.** `requestAnimationFrame` hands every callback in a frame the
+same timestamp, on the same timebase as `performance.now()`, and those are
+evenly spaced. `monoAt(ts)` in `sim_clock.js` applies the simulation's pause
+offset to a caller-supplied timestamp instead of reading the clock, and
+`_tickBody(frameTs)` uses it. The frame-aligned instant is published on
+every update as `frameMs`, because `main.js` derives each swarm MEMBER's
+`tSec` separately: reading the clock again there would have left the lead
+smooth and the four wingmen juddering.
+
+```js
+function _tick(frameTs) { _tickBody(frameTs); ... }
+const frameMs = monoAt(frameTs);
+const elapsed = (frameMs - live.startTime) / 1000;
+const nowMs = p.frameMs ?? monoNow();        // main.js, the swarm loop
+```
+
+**The better long-term shape** is to make the drone position a render-time
+`CallbackProperty` like every other vehicle, since `interpolate()` is pure
+and cheap. That was not done here: the position is read by the trails, the
+roster, the recording, per-site markers, detection and the orientation rig,
+and converting it is a blast radius that does not belong in a judder fix.
+`monoAt` buys the same evenly-spaced sampling for three lines.
+
+### All four causes
+
+```
+8q  hover noise at cruise     1.9 deg at 1-3 Hz    a fast hum, every drone
+8r  untimed transit legs      48 deg swing         a slam at the start
+8s  formation jitter          15.6 deg at 14 s     slow flatten, wingmen only
+8t  position sampled at "now" 14 px zoomed in      only visible up close
+```
+
+Four independent causes of one reported symptom, which is why each fix was
+real progress and none of them was the end of it. The first three were
+cosmetic devices written when the drone was an icon with no physics behind
+it. The fourth is the one piece of genuinely shared plumbing, and it only
+ever showed on the drones because they are the only vehicle that writes its
+position from the tick, and the only one anybody zooms in on.
