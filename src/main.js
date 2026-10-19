@@ -1101,7 +1101,40 @@ async function main() {
   }
   if (!_cityTilesUrl || _renderProfile === 'photoreal') {
     try {
-      googlePhotoreal = await Cesium.Cesium3DTileset.fromIonAssetId(2275207);
+      // GOOGLE'S TILES, BOUGHT FROM GOOGLE INSTEAD OF THROUGH ION.
+      //
+      // ion asset 2275207 IS Google Photorealistic 3D Tiles. Streaming
+      // it through ion means ion meters every session, and that meter is
+      // the quota wall. The same tiles are available straight from
+      // Google's Map Tiles API on our own key: identical bytes, identical
+      // resolution, one less party in the path.
+      //
+      // Billing moves with it. Google bills a "root tile request", which
+      // opens a window of up to three hours of tile fetching, at 1,000
+      // free a month and then USD 6.00 per 1,000. A PAGE RELOAD STARTS A
+      // NEW ROOT REQUEST, so development reloading is what spends this,
+      // not operators leaving the map open. At roughly 50 reloads a day
+      // that is the free tier; a heavy month of 3,000 is about 85 kr.
+      // The old USD 200 monthly Maps credit was removed in March 2025 and
+      // does not apply.
+      //
+      // NO KEY, NO CHANGE. Without VITE_GOOGLE_MAP_TILES_KEY this falls
+      // through to the ion path exactly as before, so an environment that
+      // has not been given a key is untouched.
+      //
+      // Note that Cesium OSM Buildings (asset 96188) below is an ion
+      // asset with no Google equivalent and still streams from ion. It is
+      // a far lighter layer, but it means this does not take ion usage to
+      // zero on its own.
+      const _gKey = import.meta.env.VITE_GOOGLE_MAP_TILES_KEY;
+      if (_gKey) {
+        Cesium.GoogleMaps.defaultApiKey = _gKey;
+        googlePhotoreal = await Cesium.createGooglePhotorealistic3DTileset();
+        console.log('[3d_tiles] Google Photorealistic via OUR OWN Google key — no ion session for this layer');
+      } else {
+        googlePhotoreal = await Cesium.Cesium3DTileset.fromIonAssetId(2275207);
+        console.log('[3d_tiles] Google Photorealistic via ion asset 2275207 — set VITE_GOOGLE_MAP_TILES_KEY to go direct and stop burning ion quota');
+      }
       viewer.scene.primitives.add(googlePhotoreal);
       if (_renderProfile === 'sovereign') {
         console.log('[render_profile] sovereign: Google Photoreal 3D Tiles active (interim). Swap to self-hosted DK tiles when VITE_CITY_TILES_URL is set.');

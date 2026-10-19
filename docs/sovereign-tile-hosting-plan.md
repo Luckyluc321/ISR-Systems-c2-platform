@@ -17,6 +17,51 @@ Terrain — no quality loss). Two probes decide the sovereign 3D endgame:
 2. Research licensed EU/Danish commercial photogrammetry mesh (vendors that fly the national
    programs sell textured mesh with self-hosting licenses) — coverage, terms, per-km² price.
 
+## Step 3a landed 2026-10-19 — the 3D layer can go direct, key pending
+
+`src/main.js` now reads `VITE_GOOGLE_MAP_TILES_KEY`. With it set, the 3D
+building layer is created with
+`Cesium.createGooglePhotorealistic3DTileset()` against Google's Map Tiles
+API on our own key. Without it, it falls through to
+`fromIonAssetId(2275207)` exactly as before, so any environment that has
+not been given a key is untouched. Identical tiles either way: ion asset
+2275207 IS Google Photorealistic 3D Tiles.
+
+**Verified pricing, 2026-10-19** (the plan's earlier "DKK-level noise"
+estimate holds, with one correction):
+
+| | |
+|---|---|
+| free allowance | 1,000 root tile requests per month |
+| then | USD 6.00 per 1,000, falling to 5.10 above 100k |
+| a root request | opens a window of up to 3 hours of tile fetching |
+| daily cap | 10,000 root requests per project |
+
+**A page reload starts a NEW root request.** Development reloading is
+what spends this, not operators leaving a map open. Roughly 50 reloads a
+day is the free tier; a heavy month of 3,000 is about 85 kr. An ops room
+with a few operators is comfortably inside the free allowance.
+
+**Correction to this document's assumptions:** the USD 200 monthly Maps
+Platform credit was removed in the March 2025 restructure. Any estimate
+resting on it is void; the 1,000-free allowance above replaced it for
+this SKU.
+
+Sources: Google Maps Platform core services pricing list; Map Tiles API
+usage and billing; the Photorealistic 3D Tiles GA announcement.
+
+**Still outstanding, and it is not code:**
+1. A Google Cloud project OF ITS OWN, so this line is visible separately
+   on the invoice rather than hidden inside existing API spend.
+2. Map Tiles API enabled, key restricted to our origins.
+3. A daily quota cap on the API plus a budget alert. A runaway reload
+   loop is the only way this becomes expensive, and a cap makes that
+   impossible.
+
+**Cesium OSM Buildings (ion asset 96188) still streams from ion** and has
+no Google equivalent. Much lighter, but this change alone does not take
+ion usage to zero.
+
 ## The rule this plan exists to enforce
 
 **We never bulk-download, cache or re-serve Google 3D tiles, Bing imagery, Cesium World Terrain
