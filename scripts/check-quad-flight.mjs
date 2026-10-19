@@ -563,6 +563,33 @@ check('the position is sampled on the FRAME clock, not on "now"',
   + 'juddered. main.js must use the published frameMs for the swarm loop too, '
   + 'or the lead goes smooth and the four wingmen do not.');
 
+check('the RENDERED rotor rate is capped below the aliasing limit',
+  (() => {
+    const m = /const _QUAD_RENDER_RPS_MAX = ([0-9.]+);/.exec(main);
+    if (!m) return false;
+    const cap = Number(m[1]);
+    // a two-blade prop repeats every 180 deg, so the per-frame step has
+    // to stay well inside that or the blade reads as teleporting
+    const degPerFrame = cap * 360 / 60;
+    return degPerFrame > 0 && degPerFrame <= 35
+      && /const k = peak > cap \? cap \/ peak : 1;/.test(main)
+      && /_rotorSpin\(Cesium\.Cartesian3\.UNIT_Z, dir \* rps \* k\)/.test(main);
+  })(),
+  'A frame is a snapshot and a two-blade prop repeats every 180 deg, so '
+  + 'all a viewer sees is where the blade landed this frame against last. '
+  + 'At 12 rps and 60 fps that step is 72 deg and the blade lands at 72, '
+  + '144, 36, 108, 0 and repeats every five frames: a 12 Hz strobe, not a '
+  + 'rotation, with a near-invisible frame whenever it lands edge-on. '
+  + 'Measured over 31 consecutive frames of the 2026-10-19 recording, mean '
+  + 'frame-to-frame change was 0.25 for static water, 2.28 for the '
+  + 'fuselage and 4.61 for the propeller: the body was steady and the '
+  + 'props were doing all of it. The Seahawk has run 4.5 rps through the '
+  + 'same _rotorSpin from the start and has never been reported. No rps is '
+  + 'both fast and smooth without motion blur, which is why the Blender '
+  + 'render looks right and a real-time frame cannot. Scale, never clamp: '
+  + 'clamping flattens the four rotors onto one number and throws away the '
+  + 'differential that IS the quadcopter turning.');
+
 // ─── no quadcopter path may out-accelerate the airframe ─────────────
 console.log('\nEvery quadcopter path is inside A_MAX');
 

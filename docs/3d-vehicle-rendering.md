@@ -1625,3 +1625,118 @@ cosmetic devices written when the drone was an icon with no physics behind
 it. The fourth is the one piece of genuinely shared plumbing, and it only
 ever showed on the drones because they are the only vehicle that writes its
 position from the tick, and the only one anybody zooms in on.
+
+## 8u. The body was never the problem by the end. It was the propellers.
+
+Measured, not guessed, from Lucas's 2026-10-19 screen recording: 609
+frames, every frame's cost readable because the capture ran on a 120 Hz
+clock.
+
+**First, what the recording ruled OUT.** Eight consecutive frames cropped
+tight on the airframe show the fuselage rock steady. Mean frame-to-frame
+change over 31 consecutive frames:
+
+| region | change |
+|---|---|
+| static water (control) | 0.25 |
+| fuselage | 2.28 |
+| **propeller** | **4.61** |
+
+The body was steady. The props were doing all of it.
+
+**The arithmetic.** A frame is a snapshot. A two-blade propeller looks
+identical every 180 degrees, so all a viewer can see is where the blade
+landed this frame against last. At 12 rps and 60 fps:
+
+```
+12 rps x 360 deg / 60 fps = 72 deg per frame
+```
+
+Inside a 180 degree symmetry the blade lands at 72, 144, 36, 108, 0, and
+repeats every five frames. That is not rotation, it is a 12 Hz strobe,
+and whenever the blade lands edge-on it nearly vanishes for that frame.
+Zoomed out the props are a few pixels and none of it shows. Zoomed in
+they are the largest moving thing on screen, which is why this symptom
+was camera-dependent too, and why it survived every fix to the body.
+
+**The app already contained the proof.** The Seahawk's rotor has run at
+4.5 rps through the same `_rotorSpin` since it was built, steps 27 deg a
+frame, and has never once been reported as juddering.
+
+**There is no rps that is both fast and smooth without motion blur.**
+Blender integrates the blade across the shutter and gets a disc, which is
+exactly why the rendered demo looks right and a real-time frame cannot.
+The honest real-time options are a slow blade or a blurred disc. A
+strobing blade is not one of them.
+
+**The fix caps what is RENDERED, not what is modelled.** The flight model
+still reports true per-rotor rps, `__isr_quadFlight()` still reads out the
+real numbers, and the yaw differential still rides on top as a ratio:
+
+```js
+const k = peak > cap ? cap / peak : 1;     // scale, never clamp
+```
+
+Clamping would flatten the four rotors onto one number and throw away the
+differential that IS the quadcopter turning. Scaling keeps every ratio
+between them and only slows the picture.
+
+```
+                    physical      rendered
+60 fps              75 deg/frame  30 deg/frame
+120 fps             38            15
+40 fps             113            45
+Seahawk reference                 27 deg/frame
+```
+
+`_QUAD_RENDER_RPS_MAX = 5`, tunable live with
+`__isr_quad_tuning.renderRpsMax`. Quad-only: this helper is reached by the
+hostile lead, the swarm members and the counter-drone interceptors, while
+the helicopter drives `_rotorSpin` directly and is untouched.
+
+**The proper fix, when it matters more than this does:** a translucent
+blur disc above a speed threshold, which is what every flight sim does and
+what a camera actually records. That is model and material work and it is
+not what a judder fix should drag in.
+
+### What the frame timing said, and what it did not
+
+The same recording showed 77% of frames landing on 2 display refreshes,
+12.3% on 3 and 2.1% on 4 — 8 hitches a second. That looked like the answer
+and was not. A later `__isr_perf()` on a correctly-scoped account read
+**median 9.9 ms, p95 11.7 ms** with 331 entities, which is comfortably
+inside one 16.7 ms slot. The hitches in the recording were the screen
+recorder's own load, plus a session that had every site rendered rather
+than only CPH.
+
+The A/B also closed off every remaining suspect. Against a 9.9 ms baseline:
+
+```
+sensor dots   n=103   saves 1.4 ms
+coverage      n= 34   saves 1.0 ms
+pulse rings   n= 34   saves 0.1 ms
+trails        n=  6   saves -0.3 ms     (noise)
+drones        n= 14   saves -0.2 ms     (noise)
+3D tiles      n=  3   saves 1.6 ms
+```
+
+**The drones and their trails cost nothing measurable.** There was no
+performance problem to fix, which is worth recording because two rounds
+were spent assuming there was.
+
+### All five causes, finally
+
+```
+8q  hover noise at cruise      1.9 deg at 1-3 Hz    fast hum, every drone
+8r  untimed transit legs       48 deg swing         a slam at the start
+8s  formation jitter          15.6 deg at 14 s      slow flatten, wingmen
+8t  position sampled at "now"  14 px zoomed in      only visible up close
+8u  propeller aliasing         72 deg/frame         the last of it, at zoom
+```
+
+Five independent causes of one reported symptom. Four were in the
+simulation and one was never in it at all. The lesson that would have cut
+this short: **when a symptom is camera-dependent, work out the pixel size
+of each candidate at both camera distances before touching anything.** The
+props were always the biggest moving object on screen at zoom and the
+smallest at range, and that alone named them.

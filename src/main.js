@@ -6878,6 +6878,52 @@ async function main() {
   // produces. A quadcopter differentiates its rotors to tilt and to
   // yaw, by about 8% at full attitude acceleration, and that
   // differential is visible on a close pass.
+  // THE PROPELLERS HAVE TO SPIN SLOWER THAN THEY TURN, AND HERE IS WHY.
+  //
+  // A frame is a snapshot. A two-blade propeller looks the same every
+  // 180 degrees, so all a viewer can see is where the blade landed this
+  // frame versus last. At 12 rps and 60 fps that step is
+  //
+  //     12 * 360 / 60 = 72 degrees
+  //
+  // and inside a 180 degree symmetry the blade lands at 72, 144, 36,
+  // 108, 0, 72 ... repeating every five frames. It does not read as
+  // rotation at all. It reads as the blade teleporting, with a 12 Hz
+  // beat, and a blade that happens to land edge-on nearly vanishes for
+  // that frame. Measured on Lucas's 2026-10-19 recording over 31
+  // consecutive frames, mean frame-to-frame change:
+  //
+  //     static water (control)   0.25
+  //     fuselage                 2.28
+  //     PROPELLER                4.61
+  //
+  // The body was steady. The props were doing all of it. That is the
+  // last of the "small jumping / bugging", and it is the one part of it
+  // that was never in the simulation at all.
+  //
+  // THE APP ALREADY CONTAINS THE PROOF. The Seahawk's rotor runs at 4.5
+  // rps through this same `_rotorSpin`, steps 27 degrees a frame, and
+  // has never once been reported as juddering.
+  //
+  // There is no rps that is both fast and smooth without motion blur,
+  // which is why the Blender render looks right and a real-time frame
+  // cannot: Blender integrates the blade across the shutter and gets a
+  // disc. The honest real-time choices are a slow blade or a blurred
+  // disc, and a strobing blade is not one of them.
+  //
+  // So the RENDERED rate is capped while the PHYSICAL one is not. The
+  // flight model still reports true per-rotor rps, the yaw differential
+  // still rides on top of the cap as a ratio, and __isr_quadFlight()
+  // still reads out the real numbers. Only the picture is slowed.
+  //
+  //     __isr_quad_tuning.renderRpsMax = 12   restores the strobe
+  //     __isr_quad_tuning.renderRpsMax = 3    slower still
+  //
+  // Quad-only on purpose: this helper is reached by the hostile lead,
+  // the swarm members and the counter-drone interceptors. The
+  // helicopter drives `_rotorSpin` directly and is not touched.
+  const _QUAD_RENDER_RPS_MAX = 5;      // 30 deg/frame at 60 fps
+
   function _quadRotorTransforms(rpsGetter) {
     const out = {};
     _QUAD_ROTOR_NODES.forEach((name, i) => {
@@ -6888,7 +6934,16 @@ async function main() {
         rotation: new Cesium.CallbackProperty(() => {
           const r = rpsGetter();
           const rps = Array.isArray(r) ? (r[i] ?? r[0] ?? 0) : r;
-          return _rotorSpin(Cesium.Cartesian3.UNIT_Z, dir * rps);
+          // Scale, do not clamp. Clamping would flatten the four rotors
+          // onto one number and throw away the differential that IS the
+          // quadcopter turning; scaling keeps every ratio between them
+          // and only slows the picture.
+          const cap = (window.__isr_quad_tuning || {}).renderRpsMax
+            ?? _QUAD_RENDER_RPS_MAX;
+          const peak = Array.isArray(r)
+            ? r.reduce((a, b) => Math.max(a, Math.abs(b)), 0) : Math.abs(rps);
+          const k = peak > cap ? cap / peak : 1;
+          return _rotorSpin(Cesium.Cartesian3.UNIT_Z, dir * rps * k);
         }, false),
       };
     });
