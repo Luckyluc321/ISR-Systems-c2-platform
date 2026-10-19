@@ -3453,25 +3453,57 @@ async function main() {
   //
   // Offline sensors get no ring: a dead sensor detects nothing and the
   // gap should be visible.
+  // THE LIVE POSITIONS, GATHERED ONCE A FRAME.
+  //
+  // _liveTrackInSensorRange is a per-frame CallbackProperty on EVERY
+  // pulse ring, so it ran once per sensor per frame and each call
+  // walked every live track from scratch. getEvent is EVENTS.find, a
+  // linear scan, so a five-drone swarm on a 34 sensor site did 170
+  // scans of the whole event list every frame before a single haversine
+  // was computed.
+  //
+  // The answer is the same for all 34 rings and changes only when a
+  // track moves. Gathering the positions once per frame and letting the
+  // rings share them removes the repetition without changing a single
+  // thing any ring shows: same predicate, same value, same properties.
+  // Nothing about how a marker draws is touched here.
+  let _ringPosStamp = -1;
+  let _ringPositions = [];
+  function _liveTrackPositions() {
+    const frame = viewer?.scene?.frameState?.frameNumber ?? -1;
+    if (frame === _ringPosStamp) return _ringPositions;
+    _ringPosStamp = frame;
+    const out = [];
+    try {
+      for (const [eid] of droneState) {
+        const evt = getEvent(eid);
+        if (!evt || evt.status !== 'active') continue;
+        if (evt.lastPosition?.lat != null) {
+          out.push(evt.lastPosition.lat, evt.lastPosition.lon);
+        }
+        const st = droneState.get(eid);
+        if (st?.swarmBillboards) {
+          for (const sw of st.swarmBillboards) {
+            if (sw.neutralised || sw.stats?.lat == null) continue;
+            out.push(sw.stats.lat, sw.stats.lon);
+          }
+        }
+      }
+    } catch (_) { /* nothing to show is the safe answer */ }
+    _ringPositions = out;
+    return out;
+  }
+
   function _liveTrackInSensorRange(sensor) {
     // Wrapped because droneState is declared about a thousand lines
     // below this and a temporal-dead-zone read would blank the whole
     // application on boot. That has already happened once today.
     try {
+      const pos = _liveTrackPositions();
+      if (!pos.length) return false;
       const lat = sensor.lat, lon = sensor.lon, r = sensor.coverageRadius;
-      for (const [eid] of droneState) {
-        const evt = getEvent(eid);
-        if (!evt || evt.status !== 'active') continue;
-        if (evt.lastPosition?.lat != null
-            && haversineM(evt.lastPosition.lat, evt.lastPosition.lon, lat, lon) <= r) return true;
-        const st = droneState.get(eid);
-        if (st?.swarmBillboards) {
-          for (const sw of st.swarmBillboards) {
-            if (sw.neutralised) continue;
-            if (sw.stats?.lat != null
-                && haversineM(sw.stats.lat, sw.stats.lon, lat, lon) <= r) return true;
-          }
-        }
+      for (let i = 0; i < pos.length; i += 2) {
+        if (haversineM(pos[i], pos[i + 1], lat, lon) <= r) return true;
       }
     } catch (_) { /* nothing to show is the safe answer */ }
     return false;
