@@ -137,6 +137,42 @@ export const NOISE_LEAN_DEG = [0.45, 0.30, 0.20];
 export const NOISE_LEAN_HZ = [0.37, 0.91, 1.70];
 export const NOISE_YAW_DEG = 0.4;
 export const NOISE_YAW_HZ = 0.23;
+// HOVER NOISE IS HOVER NOISE, AND IT HAS TO FADE WITH AIRSPEED.
+//
+// Not from the Blender file. It has no such term and does not need one:
+// its demo plan is HOVER, SLOW, TURN, BRAKE, STOP, SLIDE, DESCEND,
+// CLIMB, topping out at 25 m/s and sitting near zero for most of its
+// 47 seconds. At those speeds this noise is exactly what its own
+// comment calls it, "hover is not still", and it reads as life.
+//
+// The map is the opposite case. A scenario drone holds a straight leg
+// at 25 to 35 m/s for twenty seconds at a time. The lean is constant
+// there, so NOTHING else on the airframe is moving, and three sines at
+// 0.37, 0.91 and 1.70 Hz summing to 1.9 degrees peak to peak become
+// the only motion on screen. Measured on a dead-straight constant-speed
+// leg: 1.87 degrees peak to peak, 3.0 oscillations per second, and with
+// the noise off the same leg holds its pitch to 0.000 degrees rms. That
+// is the whole of the reported "lags and hums like mini jumping up and
+// down while flying forward". The flight model was never wrong; it was
+// being asked to hover-twitch at 120 km/h.
+//
+// The physics agrees with the name. This noise is the controller
+// fighting its own downwash to hold a station. Once the airframe is in
+// translational flight it has left its downwash behind, the induced
+// flow attaches, and a multirotor is markedly steadier. That transition
+// happens around 5 to 8 m/s, so:
+//
+//     gain *= 1 / (1 + (speed / NOISE_FADE_MS)^2)
+//
+//     hover   1.00      12 m/s  0.20      30 m/s  0.038
+//     6 m/s   0.50      25 m/s  0.055
+//
+// At hover the model is bit-identical to Blender's, which is the case
+// the constants were tuned for and the case the gate asserts. At cruise
+// the 1.9 degrees becomes 0.07, which is below a pixel.
+//
+// Live knob:  __isr_quad_tuning.noiseFadeMs = 1e9   restores full noise
+export const NOISE_FADE_MS = 6.0;
 // NOISE_ALT_M is deliberately NOT ported. In Blender it moves the root
 // object; here the position is the scenario's and a track may not be
 // nudged off its own waypoints, least of all by a few centimetres of
@@ -198,6 +234,17 @@ export function createQuadFlightModel(opts = {}) {
     if (typeof window === 'undefined') return 1;
     const g = window.__isr_quad_tuning && window.__isr_quad_tuning.hoverNoise;
     return typeof g === 'number' ? g : 1;
+  };
+
+  // Airspeed fade on the hover noise. See NOISE_FADE_MS.
+  const noiseFade = (speed) => {
+    const t = (typeof window !== 'undefined'
+      && window.__isr_quad_tuning
+      && typeof window.__isr_quad_tuning.noiseFadeMs === 'number')
+      ? window.__isr_quad_tuning.noiseFadeMs : NOISE_FADE_MS;
+    if (!(t > 0)) return 1;
+    const r = speed / t;
+    return 1 / (1 + r * r);
   };
 
   const maxTilt = MAX_TILT_DEG * DEG;
@@ -446,7 +493,9 @@ export function createQuadFlightModel(opts = {}) {
       leanE = newLeanE; leanN = newLeanN;
 
       // ── hover noise, decorrelated per airframe ────────────────────
-      const ng = noiseGain();
+      // Faded by airspeed: see NOISE_FADE_MS. A station-keeping twitch
+      // belongs to a hover, not to a 120 km/h cruise.
+      const ng = noiseGain() * noiseFade(speed);
       const nLeanE = ng * _noise(tSec, leanAmps, NOISE_LEAN_HZ, 0.0 + seed);
       const nLeanN = ng * _noise(tSec, leanAmps, NOISE_LEAN_HZ, 2.1 + seed);
       const nYaw = ng * NOISE_YAW_DEG * DEG

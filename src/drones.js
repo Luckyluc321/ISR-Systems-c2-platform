@@ -2716,10 +2716,45 @@ Object.assign(TEMPLATES, {
     // climbs and banks NW toward Amager Koblingsstation. Deliberate
     // recon behaviour reads clearly: "sustained inspection of
     // high-value assets" not "casual overflight".
-    // ~5 min total, 25 m/s average, ~7.5 km path.
+    // ~5 min total, ~29 m/s average, 8.6 km path. The header used to
+    // say 7.5 km while the waypoints were 20.4; see the note on the
+    // first waypoint for what the other 12.9 km was.
     waypoints: [
-      { lat: 55.6050, lon: 12.7600, alt: 120, heading: 260, tSec:   0 },  // off-screen ingress, Øresund E — normal cruise
-      { lat: 55.6180, lon: 12.6800, alt: 110, heading: 265, tSec:  25 },  // enter CPH sensors E, begin descent
+      // THE TWO OFF-SCREEN TRANSIT LEGS ARE TRIMMED. WHY.
+      //
+      // This template's own header says "~5 min total, 25 m/s average,
+      // ~7.5 km path". The waypoints had drifted to 20.4 km. The recon
+      // pass itself is right, 5.7 km at 30-33 m/s; the extra 14.4 km is
+      // the ingress and the egress, both labelled off-screen here and
+      // neither ever timed.
+      //
+      // So the ingress flew 5,235 m in 25 s. 209 m/s. CPH coverage
+      // begins 835 m out, which means 21 s of empty map and then a
+      // formation materialising at 209 m/s and braking to 42. The
+      // flight model is faithful and pitched hard nose-up to shed it,
+      // then nose-down again: a 48 degree pitch swing. That is the
+      // reported "forward, jump upwards, forward, jump upwards". The
+      // egress did the same in reverse, 84 to 251 m/s.
+      //
+      // Measured against the airframe's own A_MAX of 6.5 m/s^2, those
+      // two waypoints demanded 9.9 and 8.0. They were the ONLY two
+      // waypoints in any quadcopter template that exceeded it.
+      //
+      // Both legs are trimmed to the distance their own allotted time
+      // affords at the pass's speed. What is deliberately NOT touched:
+      // durationSec, every named apron and pier waypoint and its tSec,
+      // the OVERLAP SLIVER position, and secondEvent.triggerAtSec, which
+      // still sits between wp6 (t=108) and wp7 (t=122), both unchanged.
+      //
+      // Max acceleration demand across the whole path: 9.9 -> 0.66.
+      //
+      // The ingress now starts 177 m INSIDE the ring instead of 4.4 km
+      // outside it, so the formation is on screen from t=0 rather than
+      // fading in at t=21. That is not a loss. The 21 s it replaces
+      // rendered nothing at all, and the 4 s that did render was the
+      // 209 m/s slam.
+      { lat: 55.6164, lon: 12.6899, alt: 120, heading: 260, tSec:   0 },  // ingress, Øresund E — at the CPH ring edge, normal cruise
+      { lat: 55.6180, lon: 12.6800, alt: 110, heading: 265, tSec:  20 },  // enter CPH sensors E, begin descent
 
       // Low-altitude S-shape recon over the EAST cargo apron (DHL / FedEx / WFS on Kystvejen)
       { lat: 55.6210, lon: 12.6700, alt:  70, heading: 275, tSec:  42 },  // descend over east cargo — DHL/FedEx assessment start
@@ -2734,19 +2769,43 @@ Object.assign(TEMPLATES, {
       // Climb and bank NW toward Amager Koblingsstation — begin egress from CPH
       { lat: 55.6295, lon: 12.6280, alt:  85, heading: 305, tSec: 138 },  // climbing, banking NW
       { lat: 55.6320, lon: 12.6220, alt: 100, heading: 320, tSec: 152 },  // approach CPH NW exit
-      { lat: 55.6347, lon: 12.6175, alt: 115, heading: 320, tSec: 160 },  // OVERLAP SLIVER — inside both CPH N22 and AMK-N01 rings, seamless handover
-      { lat: 55.6380, lon: 12.6120, alt: 120, heading: 315, tSec: 168 },  // fully inside AMK coverage
+      // wp10 and wp11 had 8 s slots where their neighbours get 14-22, so
+      // they flew 52 and 63 m/s inside an otherwise 31 m/s pass. Re-timed
+      // by arc length across the t=152..190 window, which makes it
+      // uniform at 34.4 m/s. POSITIONS ARE UNTOUCHED: the overlap sliver
+      // is a geometric claim about two sensor rings, and it still holds.
+      { lat: 55.6347, lon: 12.6175, alt: 115, heading: 320, tSec: 164 },  // OVERLAP SLIVER — inside both CPH N22 and AMK-N01 rings, seamless handover
+      { lat: 55.6380, lon: 12.6120, alt: 120, heading: 315, tSec: 179 },  // fully inside AMK coverage
       { lat: 55.6410, lon: 12.6088, alt: 120, heading: 315, tSec: 190 },  // over AMK substation, peak AMK detection
 
       // Egress from AMK back toward Øresund
       { lat: 55.6440, lon: 12.6140, alt: 120, heading:  40, tSec: 220 },  // exiting AMK sensors NE
-      { lat: 55.6480, lon: 12.6400, alt: 120, heading:  75, tSec: 250 },  // transit over N Amager
-      { lat: 55.6500, lon: 12.6800, alt: 120, heading:  90, tSec: 280 },  // approaching Øresund
-      { lat: 55.6500, lon: 12.7600, alt: 120, heading:  90, tSec: 300 },  // exit off-screen, Øresund E
+      // Egress trimmed 9,240 -> 2,000 m, scaled about wp13 and re-timed by
+      // arc length to a uniform 25 m/s. Every one of these three is
+      // outside every sensor ring (755, 1267, 1797 m), so this leg
+      // renders nothing and only ever existed to take the formation off
+      // screen. It now does that at a speed a multirotor can fly.
+      { lat: 55.6449, lon: 12.6196, alt: 120, heading:  75, tSec: 235 },  // transit over N Amager
+      { lat: 55.6453, lon: 12.6283, alt: 120, heading:  90, tSec: 256 },  // approaching Øresund
+      { lat: 55.6453, lon: 12.6456, alt: 120, heading:  90, tSec: 300 },  // exit off-screen, Øresund E
     ],
     durationSec: 300,
-    // Second event auto-fires when lead crosses AMK sensor coverage (t=115).
+    // Second event auto-fires when lead crosses AMK sensor coverage.
     // Cross-linked back to the primary CPH event via linkedEventId at spawn.
+    //
+    // triggerAtSec DOES NOT MATCH THE GEOMETRY, AND DID NOT BEFORE THE
+    // TRANSIT LEGS WERE TRIMMED EITHER. Measured against the Amager
+    // Koblingsstation ring: the lead is inside it from t=160 to t=245,
+    // and at t=115 it is 2,343 m away from the nearest AMK sensor with
+    // the ring at 1,000 m. On the pre-trim waypoints the window was
+    // t=158 to t=230 and the distance at t=115 was the same 2,343 m, so
+    // this is pre-existing and the trim did not move it.
+    //
+    // Left at 115 deliberately. Moving it to 160 is a one-character
+    // change and makes the Amager event fire when the formation is
+    // actually over Amager, which is what the line above claims, but it
+    // is an EVENT TIMING change rather than a render fix and it is
+    // Lucas's call. Raised, not taken.
     secondEvent: {
       triggerAtSec: 115,
       siteId: 'energinet_amager_koblingsstation',

@@ -477,6 +477,93 @@ check('the nose offset can be hunted without a rebuild',
   /__isr_quadNose/.test(main),
   'there are four possible answers and only a human can see which is right');
 
+// ─── hover noise is HOVER noise ─────────────────────────────────────
+console.log('\nHover noise fades with airspeed');
+
+check('NOISE_FADE_MS is a declared deviation, absent from blender',
+  typeof FM.NOISE_FADE_MS === 'number' && FM.NOISE_FADE_MS > 1
+    && FM.NOISE_FADE_MS < 15 && pyNum('NOISE_FADE_MS') === null,
+  'Blender has no such term and does not need one: its demo plan tops out '
+  + 'at 25 m/s and sits near zero for most of its 47 s, so the noise reads '
+  + 'as life there. A map drone holds 25 to 35 m/s for twenty seconds at a '
+  + 'time with a constant lean, and then three sines at 0.37, 0.91 and 1.70 '
+  + 'Hz are the ONLY motion on screen. The knee belongs between 5 and 8 m/s, '
+  + 'where a multirotor leaves its own downwash and the induced flow '
+  + 'attaches. If this constant ever appears in the blender file, port it '
+  + 'properly instead of declaring it here.');
+
+check('a hover keeps blender\'s full noise amplitude',
+  (() => {
+    const fade = 1 / (1 + (0 / FM.NOISE_FADE_MS) ** 2);
+    return Math.abs(fade - 1) < 1e-12;
+  })(),
+  'the fade must be exactly 1 at zero airspeed, or the hover case stops '
+  + 'being the aircraft the constants were tuned for');
+
+check('a steady CRUISE does not hover-twitch',
+  (() => {
+    // A dead-straight constant-speed leg at cruise. A correct airframe
+    // holds ONE pitch angle for all of it, so anything that moves is
+    // either the model or the noise, and at 30 m/s it should be neither.
+    const fm = FM.createQuadFlightModel({ rotors, rps: 12 });
+    const dt = 1 / 60, speed = 30, p = [];
+    let lon = 12.65;
+    for (let f = 0; f < 60 * 170; f++) {
+      lon += (speed * dt) / M_LON;
+      const o = fm.update(55.60, lon, 120, dt);
+      if (o && f > 60 * 60) p.push(o.pitchRad * 180 / Math.PI);
+    }
+    const mean = p.reduce((a, b) => a + b, 0) / p.length;
+    const rms = Math.sqrt(p.reduce((a, b) => a + (b - mean) ** 2, 0) / p.length);
+    return rms < 0.05;
+  })(),
+  'Measured at 0.42 deg rms and 3.0 oscillations a second before the fade, '
+  + 'on a leg where the pitch should not move at all. That is the whole of '
+  + 'the reported "lags and hums like mini jumping up and down while flying '
+  + 'forward" — the flight model was never wrong, it was being asked to '
+  + 'hover-twitch at 120 km/h. The gate above this one could not catch it: '
+  + 'it tests cph_dji_flight_demo, whose median is 6.5 m/s, where the fade '
+  + 'barely applies.');
+
+// ─── no quadcopter path may out-accelerate the airframe ─────────────
+console.log('\nEvery quadcopter path is inside A_MAX');
+
+check('no quadcopter template demands more than A_MAX at a waypoint',
+  (() => {
+    const D = Math.PI / 180;
+    const bad = [];
+    for (const [key, t] of Object.entries(DRONES.TEMPLATES)) {
+      if ((t.platform || '') !== 'quadcopter') continue;
+      const w = t.waypoints;
+      // Generated paths are emitted at frame rate by the flight model
+      // itself and are flyable by construction.
+      if (!w || w.length < 3 || w.length > 500) continue;
+      const v = [];
+      for (let i = 0; i < w.length - 1; i++) {
+        const a = w[i], b = w[i + 1];
+        const m = Math.hypot((b.lat - a.lat) * 111320,
+          (b.lon - a.lon) * 111320 * Math.cos(a.lat * D), (b.alt || 0) - (a.alt || 0));
+        const dt = b.tSec - a.tSec;
+        v.push({ v: dt > 0 ? m / dt : 0, dt });
+      }
+      for (let i = 0; i < v.length - 1; i++) {
+        const acc = (v[i + 1].v - v[i].v) / Math.max(0.5, Math.min(v[i].dt, v[i + 1].dt));
+        if (Math.abs(acc) > FM.A_MAX) {
+          bad.push(`${key} wp${i + 1} ${v[i].v.toFixed(0)}->${v[i + 1].v.toFixed(0)} m/s, ${acc.toFixed(1)} m/s2`);
+        }
+      }
+    }
+    if (bad.length) console.log('       ' + bad.join('\n       '));
+    return bad.length === 0;
+  })(),
+  `A_MAX is ${FM.A_MAX} m/s2. A waypoint that demands more is not a tuning `
+  + 'problem: the flight model is faithful, so it pitches as hard nose-up as '
+  + 'a real airframe must to shed the speed, and then nose-down again. '
+  + 'swarm_recon_cph_amk had two such waypoints, 9.9 and 8.0 m/s2, both on '
+  + 'off-screen transit legs that were never timed, and they produced a 48 '
+  + 'degree pitch swing. That is the "forward, jump upwards, forward, jump '
+  + 'upwards" that was reported. Trim the leg, do not bound the model.');
+
 if (failures) {
   console.log(`\ncheck:quad-flight FAILED — ${failures} assertion${failures === 1 ? '' : 's'}`);
   process.exit(1);

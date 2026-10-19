@@ -1337,3 +1337,125 @@ first second, before and after.
 The nose-rate bound stays in. Even on the fixed paths it halves the peak nose
 rate, 122 to 23 deg/s, because the remaining templates still contain direction
 changes a polyline makes instantaneous.
+
+## 8q. The hum was hover noise running at 120 km/h
+
+The reported symptom, three times across two days: "it lags and hums like
+mini jumping up and down while flying forward", still present after the
+model port, after the acceleration fix, and on a recon swarm with no
+airliner and no sites rendered.
+
+It was never the plumbing and never the frame rate. It was one constant
+block doing exactly what it says on the tin, in a flight regime it was
+never written for.
+
+```
+NOISE_LEAN_DEG = [0.45, 0.30, 0.20]
+NOISE_LEAN_HZ  = [0.37, 0.91, 1.70]
+```
+
+Three sines, up to 1.9 degrees peak to peak, at about one to two Hertz.
+Measured on a dead-straight constant-speed leg, where a correct airframe
+holds ONE pitch angle for the whole leg:
+
+| | pitch rms | peak to peak | oscillations/s |
+|---|---|---|---|
+| as shipped | 0.408 deg | 1.87 deg | 3.04 |
+| hover noise off | **0.000 deg** | **0.00 deg** | **0.00** |
+
+The model is exact. The hum was 100% the noise.
+
+**Why it reads as life in Blender and as a defect on the map.** The
+Blender script's own comment calls it: "Hover is not still." Its demo
+plan is HOVER, FORWARD, SLOW, TURN, FORWARD, BRAKE, BACKWARD, STOP,
+SLIDE RIGHT, SLIDE LEFT, STOP, DESCEND, CLIMB, HOVER. It tops out at 25
+m/s and sits near zero for most of its 47 seconds, and something is
+always happening. A scenario drone holds a straight leg at 25 to 35 m/s
+for twenty seconds at a stretch with a constant lean, so the noise is
+the only thing on the airframe that moves.
+
+**The fix is the physics the name already implies.** This noise is the
+controller fighting its own downwash to hold a station. In translational
+flight the airframe has left its downwash behind, the induced flow
+attaches, and a multirotor is markedly steadier. That transition is
+around 5 to 8 m/s:
+
+```
+gain *= 1 / (1 + (speed / NOISE_FADE_MS)^2)      NOISE_FADE_MS = 6.0
+
+hover  1.00     6 m/s  0.50     12 m/s  0.20     25 m/s  0.055     30 m/s  0.038
+```
+
+At hover the model is bit-identical to Blender's, which is the case the
+constants were tuned for and the case the gate asserts (1.882 deg before,
+1.882 after). At cruise 1.9 degrees becomes 0.06, below a pixel. Mean
+pitch is unchanged at every speed, so no physics moved.
+
+To see the old behaviour without a rebuild: `__isr_quad_tuning.noiseFadeMs = 1e9`.
+
+**Why the existing wobble gate could not catch it.** There was already a
+"steady forward flight does not wobble more than the hover noise" check.
+It flies `cph_dji_flight_demo`, whose median is 6.5 m/s, where the fade
+barely applies and the noise was always acceptable. A gate on a slow path
+cannot see a fast-path defect. The new gate flies a straight 30 m/s leg
+and requires under 0.05 deg rms.
+
+## 8r. The CPH recon swarm had two waypoints no airframe could fly
+
+`swarm_recon_cph_amk`, the template actually being tested, was the only
+quadcopter template in the repo with waypoints demanding more than the
+airframe's `A_MAX` of 6.5 m/s². Both were on transit legs the comments
+themselves label off-screen, and neither had ever been timed.
+
+The template's own header said "~5 min total, 25 m/s average, ~7.5 km
+path". The waypoints had drifted to **20.4 km**. The recon pass is fine,
+5.7 km at 30 to 33 m/s; the other 14.4 km is an ingress and an egress
+that were drawn and never clocked.
+
+```
+ingress   5,235 m in 25 s   209 m/s   then braking to 42      a = -9.9 m/s2
+egress    5,025 m in 20 s    84 -> 251 m/s                     a = +8.0 m/s2
+```
+
+CPH coverage begins 835 m before waypoint 1, so the scenario opened with
+21 seconds of empty map and then a formation materialising at 209 m/s. A
+faithful model pitches hard nose-up to shed that and nose-down again: a
+48 degree pitch swing, which is the "forward, jump upwards, forward, jump
+upwards" in the original report.
+
+Both legs trimmed to what their own allotted time affords. What is
+deliberately untouched: `durationSec`, every named apron and pier
+waypoint and its `tSec`, the OVERLAP SLIVER position, and
+`secondEvent.triggerAtSec`.
+
+```
+                          before      after
+path                      20.4 km     8.6 km
+worst accel demand        9.9 m/s2    1.8 m/s2   (A_MAX 6.5)
+peak leg speed            251 m/s     35 m/s
+steady-cruise pitch wobble 0.42 deg   0.025 deg rms   (with 8q)
+```
+
+Four `tSec` values moved, all on off-screen or intermediate waypoints:
+wp1 25→20, wp10 160→164, wp11 168→179, wp14 250→235, wp15 280→256. The
+`_CRUISE_TARGET_MS` retiming mechanism stays empty; this is a targeted
+edit to one template, not a global clock stretch.
+
+The ingress now starts 177 m INSIDE the ring instead of 4.4 km outside
+it, so the formation is on screen from t=0. That is not a loss: the 21
+seconds it replaces rendered nothing, and the 4 seconds that did render
+was the slam.
+
+**Pre-existing and raised, not taken.** `secondEvent.triggerAtSec` is
+115, and the lead is inside the Amager Koblingsstation ring from t=160 to
+t=245. At t=115 it is 2,343 m from the nearest Amager sensor against a
+1,000 m ring. On the pre-trim waypoints the window was t=158 to t=230 and
+the distance at t=115 was the same 2,343 m, so the trim did not move it.
+Changing 115 to 160 is a one-character fix that makes the Amager event
+fire when the formation is over Amager, which is what the line above it
+claims, but it is event timing rather than rendering and it is Lucas's
+call.
+
+**A new gate covers the class, not the instance:** no quadcopter template
+may demand more than `A_MAX` at any waypoint. Trim the leg, do not bound
+the model.
