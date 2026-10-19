@@ -615,6 +615,14 @@ check('no quadcopter template demands more than A_MAX at a waypoint',
     const bad = [];
     for (const [key, t] of Object.entries(DRONES.TEMPLATES)) {
       if ((t.platform || '') !== 'quadcopter') continue;
+      // A flyPath template's waypoints are TARGETS, not a path. The
+      // airframe integrates its own way between them, so an authored
+      // step the airframe could not take is not a defect here: it is
+      // the guidance's job to turn it into something flyable, and
+      // check:flight-path asserts that it did. Gating the targets
+      // would forbid writing "hover, then run at 24 m/s", which is
+      // exactly the kind of instruction the generator exists to take.
+      if (t.flyPath) continue;
       const w = t.waypoints;
       // Generated paths are emitted at frame rate by the flight model
       // itself and are flyable by construction.

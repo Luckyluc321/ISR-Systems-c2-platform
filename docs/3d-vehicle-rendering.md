@@ -1979,3 +1979,72 @@ Verified at every frame from the rig's rotation matrix (normalised,
 section 9's lesson), not from stills: bank, pitch, heading rate,
 climb rate, speed and prop rate per phase, and the propeller fixed to
 its hub.
+
+## 8y. The airframe showcase, over open water
+
+A single drone flying the whole envelope in one 4.5 minute pass, so the
+airframe can be judged without paying for photogrammetry over the city.
+In the scenario list as **AIRFRAME · DJI Air 3 flight envelope (over the
+Øresund)**.
+
+**Three constraints shaped the geometry, and they fight each other.**
+
+1. Over water. The shoreline runs near lon 12.6775; the whole sequence
+   stays east of 12.6791.
+2. Inside sensor coverage. A drone renders only within 1 km of a sensor,
+   which is deliberate and not negotiable, so it lives inside the CPH
+   rings. Worst point is 941 m.
+3. Both at once leaves a box of about 1177 x 769 m. The sequence fits in
+   747 x 870.
+
+**The sequence**, every item flyable by construction:
+
+```
+hover · accelerate · 24 m/s cruise · brake to walking pace · hover
+gentle 180 at 100 m radius (16.4 deg of bank)
+hard 150 the other way at 70 m radius (13.8 deg)
+full 360 orbit at 120 m
+climb 70 m · descend 70 m
+figure eight, 95 m loops, one each way
+28 m/s run · brake · hover
+```
+
+```
+147 authored targets -> 5,443 flown points over 272 s
+peak speed  28.7 m/s   (airframe 30)
+peak climb   8.0 m/s   (limit 8)
+miss from the targets: median 0.5 m, worst 17 m
+```
+
+**Two real defects fell out of building it**, which is the point of a
+showcase.
+
+**The vertical demand had no clamp.** Guidance divides by the time
+remaining, and that goes to zero. Horizontal was bounded by the top speed
+the tilt limit enforces anyway; vertical had nothing, so
+`(targetAlt - alt) / timeLeft` spiked, the first-order loop overshot, and
+the next waypoint demanded a correction the other way. Measured before
+the fix: **40 m/s of descent inside a figure eight that is meant to be
+level**, and 51 m/s total on a 30 m/s airframe. `MAX_CLIMB_MS = 8` now
+bounds it, and a gate asserts it. A DJI Air 3 does 10 each way.
+
+**The A_MAX gate was checking the wrong thing for a flown template.** A
+`flyPath` template's waypoints are TARGETS; the airframe integrates its
+own way between them. Gating the targets would forbid writing "hover,
+then run at 24 m/s", which is exactly the instruction the generator
+exists to take. It now skips `flyPath` templates, which
+`check:flight-path` covers properly instead.
+
+**A measurement artefact, worth recording.** The turn-per-step gate read
+180 degrees. Below a walking pace the direction of travel is noise: two
+points a millimetre apart have a meaningless bearing, so a hover reads as
+a flip every step. The flight model already applies that rule before it
+moves the yaw (`speed > 0.5`), and the gate now does too.
+
+**Not in the showcase: true sideways and backwards flight.** A quadcopter
+has no wing, so it can fly with its nose anywhere, and that is most of
+what separates it from a fixed-wing. `flyWaypoints` already accepts
+`holdHeadingDeg` to express it, but the attitude rig in `main.js` derives
+yaw from the direction of travel, so a slide would still render as a
+turn. Wiring a commanded heading through to the rig is a separate change
+and has not been made.

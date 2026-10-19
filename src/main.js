@@ -22738,6 +22738,9 @@ async function main() {
       // below rather than sitting there failing on click.
       { key: '__combo_cph_incursion_noisr', label: 'COMBINED · WITHOUT ISR · swarm on 04R, no sensor grid', cls: 'critical',
         module: '__isr_withoutIsr' },
+      // Airframe check, not a threat scenario. Over the Øresund so the
+      // envelope can be watched without rendering the city.
+      { key: 'cph_quad_showcase', label: 'AIRFRAME · DJI Air 3 flight envelope (over the Øresund)', cls: 'recon' },
       { key: 'cph_unknown_contact', label: 'Non-identifiable contact (N perimeter)', cls: 'recon' },
       { key: 'cph_shahed_amalienborg', label: 'Shahed-136 attack (Øresund → CPH → Amalienborg)', cls: 'critical' },
       { key: 'cph_geran3_amalienborg', label: 'Geran-3 jet attack, same route at 2x speed', cls: 'critical' },
@@ -23046,6 +23049,7 @@ async function main() {
     cph_missile_inbound_sw:    { threat: 'Cruise missile',         pathLabel: 'SW continuation ingress' },
     swarm_recon_cph_amk:       { threat: '5-drone recon swarm',    pathLabel: 'CPH → Amager transit' },
     cph_swarm_runway_incursion:{ threat: '5-drone incursion swarm', pathLabel: 'Øresund → ATC core → 04R threshold' },
+    cph_quad_showcase:         { threat: 'DJI Air 3, airframe check', pathLabel: 'Flight envelope over the Øresund' },
     cph_unknown_contact:       { threat: 'Non-identifiable contact', pathLabel: 'N perimeter approach' },
     cph_quad_recon_apron:      { threat: 'Quadcopter recon',       pathLabel: 'Cargo apron loiter' },
     cph_dji_flight_demo:       { threat: 'DJI Air 3',               pathLabel: 'Airframe demonstration, central apron' },

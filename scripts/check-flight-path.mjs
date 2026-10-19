@@ -56,7 +56,14 @@ for (const [key, t] of Object.entries(D.TEMPLATES)) {
   let maxV = 0, maxTurn = 0, prevB = null;
   for (let i = 1; i < F.length; i++) {
     const dt = F[i].tSec - F[i - 1].tSec;
-    if (dt > 0) maxV = Math.max(maxV, m(F[i - 1], F[i]) / dt);
+    if (!(dt > 0)) continue;
+    const v = m(F[i - 1], F[i]) / dt;
+    maxV = Math.max(maxV, v);
+    // Below a walking pace the direction of travel is noise: two points a
+    // millimetre apart have a meaningless bearing, so a hover reads as a
+    // 180 degree flip every step. The flight model applies the same rule
+    // before it moves the yaw, and so does this.
+    if (v < 1) { prevB = null; continue; }
     const b = brg(F[i - 1], F[i]);
     if (prevB !== null) {
       let d = b - prevB; while (d > 180) d -= 360; while (d < -180) d += 360;
@@ -69,6 +76,18 @@ for (const [key, t] of Object.entries(D.TEMPLATES)) {
     `peak ${maxV.toFixed(1)} m/s against ${TOP.toFixed(1)}. The tilt limit is `
     + 'the only thing that caps speed, so a path above it means the integration '
     + 'is being bypassed.');
+
+  let maxVz = 0;
+  for (let i = 1; i < F.length; i++) {
+    const dt = F[i].tSec - F[i - 1].tSec;
+    if (dt > 0) maxVz = Math.max(maxVz, Math.abs(((F[i].alt || 0) - (F[i - 1].alt || 0)) / dt));
+  }
+  check(`${key}: the climb rate stays inside the airframe`,
+    maxVz <= FP.MAX_CLIMB_MS + 1,
+    `peak ${maxVz.toFixed(1)} m/s vertical against ${FP.MAX_CLIMB_MS}. The guidance `
+    + 'divides by the time remaining, which goes to zero, so the vertical demand '
+    + 'spikes and the first-order loop rings. Measured at 40 m/s of descent inside '
+    + 'a level figure eight before the clamp existed.');
 
   check(`${key}: turns a fraction of a degree per step, not a corner`,
     maxTurn < 5,

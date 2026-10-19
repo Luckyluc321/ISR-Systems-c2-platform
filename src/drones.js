@@ -581,6 +581,91 @@ function _applyCruiseTargets(templates) {
   return templates;
 }
 
+// ── THE FLIGHT ENVELOPE, OVER OPEN WATER ───────────────────────────
+//
+// A single airframe flying every manoeuvre the model can produce, out in
+// the Oresund, so the airframe can be checked in one 4.5 minute pass
+// without paying for photogrammetry over the city.
+//
+// THREE CONSTRAINTS SHAPED THE GEOMETRY, and they fight each other.
+//
+//   1. Over water. The shoreline here runs near lon 12.6775; everything
+//      stays east of 12.6791.
+//   2. Inside sensor coverage. A drone is only rendered within 1 km of a
+//      sensor, which is deliberate and not negotiable, so the whole
+//      sequence lives inside the CPH rings. Worst point is 941 m.
+//   3. Both at once leaves a box of roughly 1177 x 769 m. The sequence
+//      fits in 747 x 870.
+//
+// Every manoeuvre is chosen to be flyable: the tightest turn is 70 m of
+// radius at 13 m/s, which is 13.8 degrees of bank, and the fastest run
+// is 28 m/s against a 30 m/s airframe.
+//
+// flyPath is on, so these are TARGETS. The airframe integrates its way
+// between them and the curve you see is the one it flew.
+//
+// NOT IN HERE: true sideways and backwards flight. A quadcopter can fly
+// with its nose anywhere, but the attitude rig in main.js derives yaw
+// from the direction of travel, so a slide would render as a turn. The
+// generator already accepts holdHeadingDeg for it; wiring that through
+// to the rig is a separate change.
+function _showcaseWaypoints() {
+  const D = Math.PI / 180;
+  const LAT0 = 55.61583, LON0 = 12.6815;
+  const M_LAT = 111320, M_LON = 111320 * Math.cos(LAT0 * D);
+  let e = -150, n = -420, hdg = 0, alt = 120, t = 0;
+  const W = [];
+  const push = () => W.push({
+    lat: +(LAT0 + n / M_LAT).toFixed(6),
+    lon: +(LON0 + e / M_LON).toFixed(6),
+    alt: Math.round(alt),
+    heading: Math.round((hdg % 360 + 360) % 360),
+    tSec: +t.toFixed(1),
+  });
+  push();
+  const hover = (secs) => { t += secs; push(); };
+  const straight = (metres, speed, dAlt = 0) => {
+    const secs = metres / speed, k = Math.max(1, Math.round(secs / 4));
+    for (let i = 0; i < k; i++) {
+      const d = metres / k;
+      e += d * Math.sin(hdg * D); n += d * Math.cos(hdg * D);
+      alt += dAlt / k; t += secs / k; push();
+    }
+  };
+  const turn = (deg, radius, speed, dAlt = 0) => {
+    const secs = Math.abs(deg) * D * radius / speed;
+    const k = Math.max(2, Math.round(Math.abs(deg) / 12));
+    for (let i = 0; i < k; i++) {
+      const dd = deg / k;
+      const cx = e + radius * Math.sin((hdg + Math.sign(deg) * 90) * D);
+      const cy = n + radius * Math.cos((hdg + Math.sign(deg) * 90) * D);
+      const ang = Math.atan2(e - cx, n - cy) + dd * D;
+      e = cx + radius * Math.sin(ang); n = cy + radius * Math.cos(ang);
+      hdg += dd; alt += dAlt / k; t += secs / k; push();
+    }
+  };
+  hover(8);                       // hover, level
+  straight(110, 14);              // accelerate, nose drops
+  straight(240, 24);              // cruise
+  straight(90, 8);                // brake, nose comes up
+  hover(6);                       // hover
+  turn(180, 100, 17);             // gentle 180, 16.4 deg of bank
+  straight(204, 23);              // cruise back
+  turn(-150, 70, 13);             // hard 150 the other way, 13.8 deg
+  straight(110, 15);
+  turn(360, 120, 16);             // a full orbit
+  straight(90, 15);
+  straight(140, 13, 70);          // climb 70 m
+  straight(140, 13, -70);         // descend 70 m
+  turn(360, 95, 15);              // figure eight, first loop
+  turn(-360, 95, 15);             // and back the other way
+  straight(192, 28);              // fast cruise
+  straight(100, 9);               // brake
+  hover(8);                       // hover
+  return W;
+}
+const _SHOWCASE_PATH = _showcaseWaypoints();
+
 export const TEMPLATES = {
   cph_quad_hostile: {
     siteId: 'cph',
@@ -1180,6 +1265,27 @@ export const TEMPLATES = {
     },
     waypoints: _DEMO_PATH_CPH,
     durationSec: Math.round(_DEMO_PATH_CPH[_DEMO_PATH_CPH.length - 1].tSec),
+  },
+
+  cph_quad_showcase: {
+    siteId: 'cph',
+    classification: 'unknown',
+    threat: null,
+    platform: 'quadcopter',
+    droneType: 'DJI Air 3 (flight envelope)',
+    confidence: 0.9,
+    confidenceTrend: 'Held by the east perimeter sensors throughout',
+    evidence: {
+      rfCarrier: '2.4 GHz',
+      rfBandwidth: '20 MHz OFDM',
+      rfMatch: 'OcuSync 95%',
+      modality: 'RF + acoustic',
+      evidenceSize: '9.4 MB',
+      note: 'Airframe check over the Øresund. One drone flying the full envelope: hover, acceleration, 24 m/s cruise, brake, a gentle 180 at 16 degrees of bank, a hard 150 at 14, a full orbit, a 70 m climb and descent, a figure eight and a 28 m/s run. Nothing here is scripted attitude: flyPath makes the waypoints targets and the airframe integrates its way between them, so every lean, bank and rotor differential is the model answering what it was asked to do. Over water on purpose, so the envelope can be checked without rendering the city.',
+    },
+    waypoints: _SHOWCASE_PATH,
+    durationSec: Math.round(_SHOWCASE_PATH[_SHOWCASE_PATH.length - 1].tSec),
+    flyPath: true,
   },
 
   cph_jet_hold_atc: {

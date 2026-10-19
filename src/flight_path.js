@@ -48,6 +48,20 @@ export const YAW_TAU = 0.3;
 export const YAW_RATE_MAX_DPS = 100;
 export const ATT_TAU = 0.15;
 export const ATT_RATE_DPS = 120;
+// A ROOF AND A FLOOR ON THE CLIMB, because the guidance divides by the
+// time remaining and that goes to zero.
+//
+// Horizontal demand is clamped by the top speed, which the tilt limit
+// enforces anyway. Vertical had nothing: `(targetAlt - alt) / timeLeft`
+// with a shrinking denominator spikes, the first-order loop overshoots,
+// and the next waypoint demands a correction the other way. Measured on
+// the showcase before this existed: 40 m/s of descent inside a figure
+// eight that is supposed to be level, and a total speed of 51 m/s on a
+// 30 m/s airframe.
+//
+// 8 m/s each way. A DJI Air 3 does 10 ascending and 10 descending; 8
+// leaves margin and is still far faster than any scenario asks.
+export const MAX_CLIMB_MS = 8;
 
 /**
  * Fly a hand-authored waypoint list and return the path the airframe
@@ -65,7 +79,10 @@ export const ATT_RATE_DPS = 120;
  * airframe swings wide of is made up on the next leg, not by arriving
  * late.
  *
- * @param {Array<{lat,lon,alt,tSec}>} waypoints authored, ascending tSec
+ * @param {Array<{lat,lon,alt,tSec,holdHeadingDeg?}>} waypoints authored, ascending tSec.
+ *   holdHeadingDeg pins the nose for the leg INTO that waypoint, which is
+ *   how a slide or a reverse is expressed; omit it and the nose follows
+ *   the track.
  * @param {{emitDt?:number, maxSpeed?:number}} [opts]
  * @returns {Array<{lat,lon,alt,heading,tSec}>}
  */
@@ -81,7 +98,7 @@ export function flyWaypoints(waypoints, opts = {}) {
     x: (w.lon - lon0) * M_LON, y: (w.lat - lat0) * M_LAT, z: (w.alt ?? 0) - alt0,
     t: w.tSec,
   });
-  const targets = waypoints.map(toLocal);
+  const targets = waypoints.map((w) => ({ ...toLocal(w), hold: w.holdHeadingDeg }));
   const endT = targets[targets.length - 1].t;
 
   let x = 0, y = 0, z = 0, vx = 0, vy = 0, vz = 0;
@@ -101,10 +118,25 @@ export function flyWaypoints(waypoints, opts = {}) {
     let tgtE = (g.x - x) / left, tgtN = (g.y - y) / left;
     const want = Math.hypot(tgtE, tgtN);
     if (want > topSpeed) { tgtE *= topSpeed / want; tgtN *= topSpeed / want; }
-    const bodyU = (g.z - z) / left;
+    const bodyU = Math.max(-MAX_CLIMB_MS, Math.min(MAX_CLIMB_MS, (g.z - z) / left));
 
     // ── yaw: point the nose along the demand, rate limited ───────────
-    if (want > 0.5) {
+    //
+    // Unless the leg HOLDS a heading. A quadcopter has no wing, so it
+    // can fly sideways or backwards with the nose anywhere it likes,
+    // and that is most of what separates it from a fixed-wing. The
+    // guidance cannot know from a waypoint list that a leg is meant to
+    // be a slide rather than a turn, so the author says so. Without it
+    // the nose follows the track, which is right for everything else.
+    const hold = g.hold;
+    if (hold !== null && hold !== undefined) {
+      let e = hold * DEG - yaw;
+      while (e > Math.PI) e -= 2 * Math.PI;
+      while (e < -Math.PI) e += 2 * Math.PI;
+      const max = YAW_RATE_MAX_DPS * DEG;
+      const cmd = Math.max(-max, Math.min(max, e / YAW_TAU));
+      yawRate += (cmd - yawRate) * (1 - Math.exp(-dt / YAW_TAU));
+    } else if (want > 0.5) {
       const cmdYaw = Math.atan2(tgtE, tgtN);
       let e = cmdYaw - yaw;
       while (e > Math.PI) e -= 2 * Math.PI;
