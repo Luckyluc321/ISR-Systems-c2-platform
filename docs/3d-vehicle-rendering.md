@@ -1987,22 +1987,44 @@ airframe can be judged without paying for photogrammetry over the city.
 In the scenario list as **AIRFRAME · DJI Air 3 flight envelope (over the
 Øresund)**.
 
-**Three constraints shaped the geometry, and they fight each other.**
+**The constraint that shaped it, and the two wrong answers before the
+right one.**
 
-1. Over water. The shoreline runs near lon 12.6775.
-2. Inside sensor coverage. A drone renders only within 1 km of a sensor,
-   which is deliberate and not negotiable, so it lives inside the CPH
-   rings.
-3. Both at once leaves a strip only about 780 m wide, and 1.7 km tall.
+A drone renders only within 1 km of a sensor. That rule is deliberate and
+not negotiable, so the first two attempts both tried to fit the sequence
+inside the CPH rings — which means hugging a coastline with the city
+behind it.
 
-**The first attempt got that wrong and was rejected on sight: "Nothing
-happens, as in completely frozen, AND its inland."** Both halves were
-fair.
+*Attempt one* chose a square box inside the covered water. The water
+there is a strip, not a box, so the western edge landed at lon 12.6791,
+about 90 m off the beach and on top of a marina. Rejected: **"Nothing
+happens, as in completely frozen, AND its inland."**
 
-*Inland*: the fit chose a square box, so the western edge sat at lon
-12.6791, about 90 m off the beach, right on top of a marina. A square
-does not fit a strip. The sequence is now narrow and tall, 460 m across
-by 916 long, and its closest approach to the shore is **443 m**.
+*Attempt two* reshaped it narrow and tall and got 443 m offshore. Still
+wrong, and the reason is worth keeping: **"I am saying OUT in the sea,
+not where the land 3d buildings renders."** 443 m is offshore; it is not
+out at sea. The whole point is nothing in frame but the airframe.
+
+*The right answer was to stop fitting the drone around the sensors and
+give it sensors of its own.* `sites/oresund_range.yaml` is a four-node
+range in the middle of the strait. Closest the drone ever gets to
+anything that renders:
+
+```
+Øresund Bridge   3.34 km      Malmö coast    5.7 km
+Peberholm        4.2 km       Amager coast  11.3 km
+Saltholm         5.5 km
+```
+
+It works because `_anySensorSeesPoint` reads **every** site in `SITES`,
+not only the sites the active account renders. So the range makes the
+airspace observable while its own markers stay out of a customer's view,
+and the coverage rule itself is untouched. Its tenant is ISR's own, which
+`check:tenant-stamping` then required an operator for — correctly, since
+a site whose tenant nobody owns would render events nobody can see.
+
+The template keeps `siteId: 'cph'`, so the event still belongs to the
+account watching it.
 
 *Frozen*: it opened with an eight second hover. An airframe correctly
 doing nothing is indistinguishable from a simulation that has not
@@ -2023,7 +2045,7 @@ full orbit at 70 m, then the same the other way: a figure eight
 
 ```
 117 authored targets -> 3,829 flown points over 191 s
-443 m offshore at the closest, 944 m from a sensor at the worst
+3.34 km from the nearest structure, 310 m from a range node at the worst
 460 m across by 916 long
 ```
 

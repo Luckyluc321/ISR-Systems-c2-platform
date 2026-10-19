@@ -611,7 +611,19 @@ function _applyCruiseTargets(templates) {
 // to the rig is a separate change.
 function _showcaseWaypoints() {
   const D = Math.PI / 180;
-  const LAT0 = 55.61583, LON0 = 12.6855;
+  // OUT IN THE STRAIT, not off the beach. The first two attempts put
+  // this inside the CPH rings, which meant hugging a coastline with the
+  // city rendering behind it. The point is to judge an airframe with
+  // nothing else in frame, so it now flies over the Øresund Test Range
+  // (sites/oresund_range.yaml): 3.9 km from the bridge, 5.5 from
+  // Saltholm, 11.3 from Amager.
+  //
+  // The range carries its own sensors because a drone is only drawn
+  // inside sensor coverage, and that rule is not negotiable. Coverage is
+  // evaluated across every site, not only the rendered ones, so the
+  // range makes the airspace observable without putting markers in the
+  // sea view.
+  const LAT0 = 55.60500, LON0 = 12.86000;
   const M_LAT = 111320, M_LON = 111320 * Math.cos(LAT0 * D);
   let e = -60, n = -560, hdg = 0, alt = 120, t = 0;
   const W = [];
@@ -644,11 +656,8 @@ function _showcaseWaypoints() {
       hdg += dd; alt += dAlt / k; t += secs / k; push();
     }
   };
-  // NARROW AND TALL. The water here is only about 780 m wide between the
-  // shoreline and the edge of the sensor rings, while the covered strip
-  // runs roughly 1.7 km north to south. A square sequence does not fit;
-  // this one is 460 m across and 916 long, and its closest approach to
-  // the shore is 443 m.
+  // 460 m across by 916 long, which the range's four nodes cover with
+  // the worst point 310 m from one.
   //
   // IT OPENS ON MOVEMENT. The first version hovered for eight seconds,
   // and an airframe that is correctly doing nothing is indistinguishable
@@ -1290,7 +1299,7 @@ export const TEMPLATES = {
       rfMatch: 'OcuSync 95%',
       modality: 'RF + acoustic',
       evidenceSize: '9.4 MB',
-      note: 'Airframe check over the Øresund. One drone flying the full envelope: hover, acceleration, 24 m/s cruise, brake, a gentle 180 at 16 degrees of bank, a hard 150 at 14, a full orbit, a 70 m climb and descent, a figure eight and a 28 m/s run. Nothing here is scripted attitude: flyPath makes the waypoints targets and the airframe integrates its way between them, so every lean, bank and rotor differential is the model answering what it was asked to do. Over water on purpose, so the envelope can be checked without rendering the city.',
+      note: 'Airframe check over the Øresund Test Range, mid-strait and clear of every coastline. One drone flying the full envelope: hover, acceleration, 24 m/s cruise, brake, a gentle 180 at 16 degrees of bank, a hard 150 at 14, a full orbit, a 70 m climb and descent, a figure eight and a 28 m/s run. Nothing here is scripted attitude: flyPath makes the waypoints targets and the airframe integrates its way between them, so every lean, bank and rotor differential is the model answering what it was asked to do. Out in the strait on purpose: nothing in frame but sea, so the airframe is the only thing to judge and no photogrammetry is rendered.',
     },
     waypoints: _SHOWCASE_PATH,
     durationSec: Math.round(_SHOWCASE_PATH[_SHOWCASE_PATH.length - 1].tSec),

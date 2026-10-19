@@ -27,6 +27,34 @@ export const ADMIN = {
 // Multi-site operators own 2+ site IDs. Single-site operators own 1.
 
 export const OPERATORS = [
+  // ISR's OWN account, for the offshore test range. Not a customer.
+  //
+  // sites/oresund_range.yaml exists so an airframe can be flown over open
+  // water with nothing in frame but sea, and every manifest tenant must
+  // have an operator here or check:tenant-stamping fails — correctly, as
+  // a site whose tenant nobody owns would render events nobody can see.
+  //
+  // It owns only the range. No customer sees a test range in their fleet,
+  // and the range's sensor markers stay out of a customer's view, while
+  // coverage still works everywhere because _anySensorSeesPoint reads
+  // every site rather than only the rendered ones.
+  {
+    id: 'op-isr-internal',
+    kind: 'operator',
+    org: 'ISR Systems',
+    label: 'ISR Systems (internal)',
+    person: 'Test Range',
+    initials: 'IS',
+    logo: '/logos/cph.svg',
+    scope: 'assigned-sites',
+    destinationIds: [],
+    siteIds: ['oresund_range'],
+    sensorCount: 4,
+    isMultiSite: false,
+    sector: 'Test',
+    description: 'Øresund Test Range. Offshore airframe validation, mid-strait.',
+    brandTint: '#8fb6c8',
+  },
   {
     id: 'op-cph-airports',
     kind: 'operator',
