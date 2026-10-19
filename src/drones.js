@@ -8,6 +8,7 @@
 // freezes the track exactly and resuming continues from the same point.
 // See sim_clock.js for why there are two readers.
 import { monoNow, monoAt } from './sim_clock.js';
+import { flyWaypoints } from './flight_path.js';
 
 // ── A FLOWN CURVE IS COMPUTED, NOT TYPED ──
 //
@@ -1297,6 +1298,28 @@ export const TEMPLATES = {
   },
 
   cph_swarm_runway_incursion: {
+    // FLOWN, NOT FOLLOWED. See src/flight_path.js and docs section 8x.
+    //
+    // 44 waypoints over 492 s is one every 11 s, and the direction
+    // changed INSTANTLY at each: 19.8 deg median, 62 worst. Waypoints 6
+    // to 29 are a 181 m loiter orbit sampled at 20 deg a step, so a
+    // circle the airframe can hold at 12.7 deg of bank rendered as a
+    // 24-sided polygon. That is the "Windows 95" pivoting.
+    //
+    // The waypoints below are UNCHANGED. flyPath makes them targets
+    // rather than a rail, and the airframe's own integration draws the
+    // line between them:
+    //
+    //            turn/step median   worst   points
+    //   authored      19.8 deg       62       44
+    //   flown          0.00          1.05   9,841
+    //
+    // Faithful to the authored geometry: the flown path passes 0.0 m
+    // from waypoints 0 to 33, including all three sharp corners, and a
+    // median 0.3 m through the whole orbit. It only drifts where the
+    // template demands more than the airframe has, which is waypoints
+    // 34 to 43 at 34 to 45 m/s against a 30 m/s limit.
+    flyPath: true,
     siteId: 'cph',
     // Spawns over the Oresund, outside every sensor ring, so it is
     // invisible until it crosses in and the detection opens on entry.
@@ -3123,10 +3146,35 @@ function _tick(frameTs) {
   }
 }
 
+// TEMPLATES THAT FLY THEIR PATH INSTEAD OF BEING DRAGGED ALONG IT.
+//
+// See src/flight_path.js. A template with flyPath keeps its waypoints
+// exactly as authored; they stop being a rail and become targets, and
+// the airframe's own integration produces the path it actually flies.
+// Generated once here, not per frame.
+//
+// 20 Hz rather than the demo's 60: the path is already smooth, so the
+// only thing the rate has to beat is the model's ACC_TAU of 0.12 s.
+// Measured on cph_swarm_runway_incursion, worst heading change per
+// emitted step: 0.35 deg at 60 Hz, 1.05 at 20, 5.06 at 4. The authored
+// polyline was 62. 20 Hz is 9,841 points and 1.1 MB against 3.3.
+const _FLY_EMIT_HZ = 20;
+const _flownCache = new Map();
+
+export function flownPath(template) {
+  if (!template?.flyPath || !template.waypoints) return template?.waypoints;
+  const key = template;
+  let p = _flownCache.get(key);
+  if (!p) { p = flyWaypoints(template.waypoints, { emitDt: 1 / _FLY_EMIT_HZ }); _flownCache.set(key, p); }
+  return p;
+}
+
 export function addLiveTrack(eventId, template) {
   // Stamped on the simulation clock, not the browser's, so that
   // `monoNow() - startTime` in _tick stays a frozen-aware elapsed.
-  _liveTracks.set(eventId, { template, startTime: monoNow(), closed: false });
+  const flown = flownPath(template);
+  const t = flown === template.waypoints ? template : { ...template, waypoints: flown };
+  _liveTracks.set(eventId, { template: t, startTime: monoNow(), closed: false });
   if (!_rafId) _rafId = requestAnimationFrame(_tick);
 }
 

@@ -121,6 +121,7 @@ import {
   TEMPLATES, addLiveTrack, markTrackClosed, removeLiveTrack, anyTrackLive,
   isTrackLive,
   onDroneUpdate, distanceToPerimeter, pointInPolygon, makeSubstationThreats, lastFrameMs } from './drones.js';
+import { flyWaypoints } from './flight_path.js';
 // Register substation threat templates for every energy-typed site (module
 // init side effect). Filters SITES by site_type: energy so future Energinet
 // substations added purely via a YAML manifest pick this up automatically.
@@ -18333,9 +18334,17 @@ async function main() {
         // Generate this drone's INDEPENDENT waypoint list. From now on the
         // drone flies its own path — no more deriving from lead position.
         // Recording / replay / exports all read this per-drone trajectory.
-        const droneWaypoints = template?.waypoints
+        // EACH MEMBER FLIES ITS OWN PATH. The offset is applied to the
+        // AUTHORED waypoints first, then that member's own list is
+        // flown, so a wingman is a separate airframe solving the same
+        // route rather than the lead's line shifted sideways. Without
+        // flyPath this is exactly what it was. See src/flight_path.js.
+        const _authoredFor = template?.waypoints
           ? _generatePerDroneWaypoints(template.waypoints, slot)
           : [];
+        const droneWaypoints = (template?.flyPath && _authoredFor.length > 1)
+          ? flyWaypoints(_authoredFor, { emitDt: 1 / 20 })
+          : _authoredFor;
         swarmBillboards.push({
           billboard: swarmBb,
           // Source-of-truth pointer: event.memberTracks entry this

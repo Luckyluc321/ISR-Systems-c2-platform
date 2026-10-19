@@ -1842,3 +1842,90 @@ could have been written on day one; instead five rounds were spent picking
 the next suspect from a description. When a symptom survives a fix that
 measurably worked, that is the signal to go and measure the output, not to
 pick the next candidate.
+
+## 8x. Giving the controller its job back
+
+"WHY cant we completely replicate the designed movements from our OWN
+file?" Because we only ported half of it.
+
+In Blender the controller OWNS the trajectory: a velocity plan goes in
+and it integrates lean, drag and thrust into a position. **The path is
+the output.** Nothing can demand a turn the airframe cannot fly, because
+the airframe is what draws the line. That is the whole reason the render
+looks right.
+
+Scenario tracks never got that. Their paths are hand-authored polylines
+and the position is an INPUT, so the controller is left reporting what
+attitude an impossible movement implies. On the WITH ISR scenario's swarm:
+
+```
+cph_swarm_runway_incursion   44 waypoints over 492 s = one every 11 s
+turn at each waypoint:       median 19.8 deg, worst 62, INSTANT
+```
+
+Two different faults, in one template:
+
+| waypoints | fault |
+|---|---|
+| 6 to 29 | a 181 m loiter orbit sampled at 20 deg a step. The geometry is a circle, flyable at 12.7 deg of bank; it renders as a 24-sided polygon |
+| 3, 5, 31 | genuine corners of −56, −62 and −33 deg with no arc at all |
+
+**Subdividing the polyline fixes neither.** More points on a line with a
+corner is more points sitting on a corner; the turn still happens in one
+step at the vertex. The path has to be FLOWN. Only integration bends.
+
+`src/flight_path.js` does that. The guidance is the simplest thing that
+keeps the schedule:
+
+```
+desired velocity = (target - position) / time remaining to ITS tSec
+```
+
+which decelerates into a waypoint, accelerates out of it and curves
+between them without anyone choosing a radius. The target time is never
+moved, so a corner swung wide is made up on the next leg rather than by
+arriving late.
+
+**Result on the template, with its waypoints completely unchanged:**
+
+| | turn/step median | worst | points | duration |
+|---|---|---|---|---|
+| authored | 19.8 deg | 62 | 44 | 492 s |
+| flown | **0.00** | **1.05** | 9,841 | 492 s |
+
+**And it is still the authored route.** Miss distance from each waypoint:
+
+```
+wp0..wp33   0.0 m        including all three sharp corners
+wp6..wp29   0.3 m median, 0.6 worst, through the whole orbit
+wp34..wp41  2 to 50 m    the template asks 34 m/s
+wp42, wp43  225, 772 m   the template asks 45 m/s
+```
+
+It only drifts where the template demands more than the airframe has, and
+the gate asserts exactly that: any waypoint more than 80 m off must sit on
+a leg that exceeds top speed. Drift without that excuse is a guidance bug.
+
+Sensor coverage entry moves from 8.0 s to 10.0 s, exit from 464 to 476.
+
+**Emit rate.** 20 Hz, not the demo's 60. The path is already smooth, so
+the only thing the rate must beat is the model's `ACC_TAU` of 0.12 s:
+
+```
+60 Hz  29,521 points  3.3 MB  worst 0.35 deg/step
+20 Hz   9,841 points  1.1 MB  worst 1.05
+ 4 Hz   1,969 points  0.2 MB  worst 5.06
+```
+
+**Blast radius is one template.** `flyPath: true` opts a template in;
+everything without it behaves exactly as before. The path is generated
+once at spawn and emitted in the existing waypoint shape, so
+`interpolate`, detection, coverage, markers and recordings all read what
+they always read. Swarm members get the offset applied to the AUTHORED
+waypoints first and then fly their own list, so a wingman is a separate
+airframe solving the same route rather than the lead's line shifted
+sideways.
+
+**Still open:** waypoints 42 and 43 ask 45 m/s of a 30 m/s airframe, so
+the formation ends 772 m short of its off-screen exit. Trimming that leg
+is a template change and has not been made.
