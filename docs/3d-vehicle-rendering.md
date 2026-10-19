@@ -1109,3 +1109,81 @@ Flown live, read off `__isr_quadFlight()`:
 Leaning forward on the run, banked 18 degrees through the turn with the rotors
 5 rps apart, nose up 16 degrees on the brake, and settled to under a degree in
 the hover with the four rotors back together. Nothing in that is scripted.
+
+## 8m. The asset was 702 nodes, and that was the whole performance story
+
+The drone was replaced in the picker and the platform got slower. Four
+rounds of flight-model work followed, all of which fixed real bugs and none
+of which was the cause. The cause was in the file:
+
+```
+                 dji_air_3.glb   assault_drone_concept.glb
+nodes                      702                          10
+meshes                     341                           6
+primitives                 341                           6
+triangles               60,305                      24,896
+```
+
+Triangles were never the problem, which is why cutting 311k to 60k barely
+moved the frame time. **Node count is**, and it is a per-frame CPU cost paid
+whether or not the GPU is busy. `Model.updateSceneGraph` takes the
+`updateModelMatrix` branch unconditionally for any model with a
+`minimumPixelSize`, which every drone here has. That marks the root dirty,
+and `ModelMatrixUpdateStage` recurses the whole subtree, allocating a fresh
+`Matrix4` per node per frame and doing a matrix multiply plus a determinant
+per primitive.
+
+Five drones in a formation, before and after:
+
+```
+          node recursions   Matrix4 allocations   draw commands
+before              3,510                 3,510           1,705
+after                  30                    30              55
+```
+
+`scripts/merge_dji_air_3.mjs` bakes node transforms into vertices and
+concatenates primitives by material. Nothing is simplified, decimated or
+re-textured: same triangles, same materials, same textures, in fewer
+buckets. 702 nodes to 6, 341 primitives to 11, 3.27 MB to 2.10 MB.
+
+**The thing that nearly went wrong, and what now catches it.** The first
+plan said "collapse to 5 nodes": one body and four rotors at the scene
+root. That drops `Sketchfab_model`, whose −90 degree rotation about X is
+the only thing giving each `Rotor_n` its local frame. `main.js` spins the
+rotors about their local Z; under that root, local Z is world up. Without
+it, local Z becomes world Z, which is the nose axis, and the propellers
+would cartwheel edge-over-edge vertically through the airframe.
+
+Every obvious check passes on that broken asset: hub positions unchanged,
+nose axis unchanged, extents unchanged, a still frame correct. It is wrong
+only while spinning. `scripts/check-dji-air-3.mjs` asserts the spin axis in
+world space and sweeps the blades through a full turn checking they stay in
+their own plane, which is the only test that sees it.
+
+**Three more traps the same review found.**
+
+- An extent check would have produced a FALSE failure. The documented
+  4.669 × 1.050 × 4.009 is an eight-corner over-estimate; after baking, the
+  identical script returns the tight 4.215 with not one vertex moved. The
+  gate asserts a point-set identity instead, nearest-neighbour within
+  1e-5 m, which is method-independent. Worst actual movement: 7.8e-8 m,
+  pure float32 rounding.
+- Cesium's bounding sphere transforms only two corners per primitive, so a
+  merge changes it and `minimumPixelSize` changes apparent size with it.
+  Measured 3.0246 to 2.9487, so the drone renders 2.6 percent LARGER. On a
+  14 px floor that is 0.36 of a pixel, so no compensation. The radius is
+  gated so a future change has to be deliberate.
+- `KHR_texture_transform` carries a full-tile UV offset on two materials
+  and is silently dropped on write unless the tool registers it, because an
+  unregistered extension is only a warning. `ALL_EXTENSIONS` is registered
+  and the gate asserts `extensionsUsed` survives.
+
+**Left deliberately alone:** the three `GLASS.001` primitives. Cesium
+depth-sorts translucent commands, and merging them replaces that with fixed
+index order. Two draw calls out of 341 is not worth an irreversible change
+to how the canopy blends.
+
+**Also fixed:** `check-quad-flight.mjs` held the rotor hubs as a literal
+copy and never opened the GLB, so it validated its own data and would have
+passed a broken asset. `check-dji-air-3.mjs` reads the real table out of
+`src/main.js` and compares it to the real file.

@@ -81,14 +81,14 @@ MH-60R Seahawks with Eskadrille 723 at Helicopter Wing Karup.
 - **Licence:** CC-BY-4.0 — http://creativecommons.org/licenses/by/4.0/
 - **Source:** https://sketchfab.com/3d-models/dji-air-3-3c7c69f9c77741aa9b7bbfcc6be29202
 - **Used for:** consumer-quadcopter threat tracks, replacing the assault
-  drone concept once wired. Not wired into `main.js` yet.
+  drone concept once wired. Wired into src/main.js as the default quadcopter airframe.
 - **Modified:** the eight blade nodes re-parented under four new nodes
   `Rotor_1..Rotor_4` at their hubs by `scripts/group_rotor_nodes.py`,
   so Cesium can spin them. Rotor_1 front-right, Rotor_2 rear-right,
   Rotor_3 front-left, Rotor_4 rear-left: 1 and 4 on one diagonal, 2 and
   3 on the other, which is what `_quadRotorTransforms` assumes. Geometry
   verified unchanged: 161,553 distinct drawn points before and after,
-  none moved. 311k triangles and 14.1 MB, four small textures (0.4 MB
+  none moved. 60,305 triangles and 2.1 MB, four small textures (0.4 MB
   in all), so the budget question here is geometry, not textures.
 
 ### F-35A Lightning II — `public/aircraft/f-35a_lightning_ii.glb`

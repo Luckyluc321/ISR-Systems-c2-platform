@@ -103,6 +103,13 @@ check('the blender airframe is still what the demo path flies',
 // ─── the physics, on the real exported model ────────────────────────
 console.log('\nThe physics, flying the exported model');
 
+// THESE USED TO BE A LITERAL COPY, and this gate never opened the GLB.
+// It was in `npm run build` and would have passed a completely broken
+// asset: it validated its own copy of the data. check:dji-air-3 now
+// reads the real hubs out of the file and asserts they match what
+// src/main.js hardcodes, so a broken asset fails the build there.
+// Here they stay literal ON PURPOSE, as the second half of that pair:
+// if someone edits main.js's table, these two gates disagree.
 const AIR3_HUBS = [[1.519, -0.198, -0.813], [1.298, -0.242, 1.437],
                    [-1.519, -0.199, -0.813], [-1.296, -0.258, 1.438]];
 const rotors = FM.rotorsFromHubs(AIR3_HUBS, '-z', '+y', [1, -1, -1, 1]);
