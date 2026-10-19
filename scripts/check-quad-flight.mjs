@@ -49,7 +49,12 @@ const pyTuple = (name) => {
 // literal 0.0068111, so they differ by about 7e-11. Exact equality
 // would fail the build on a rounding difference that no aircraft can
 // tell apart.
-for (const name of ['MAX_TILT_DEG', 'A_MAX', 'KV', 'ATT_TAU', 'ATT_RATE_DPS',
+// ATT_RATE_DPS is a DECLARED deviation, checked below with its reason,
+// for the same class of cause as DRAG_K: Blender flies a plan it
+// generated and therefore never demands more than the airframe can
+// give, while the scenario paths were authored for an icon and five of
+// twelve fly at munition speeds.
+for (const name of ['MAX_TILT_DEG', 'A_MAX', 'KV', 'ATT_TAU',
   'VZ_TAU', 'YAW_TAU', 'YAW_RATE_MAX_DPS', 'TL_DIP', 'TL_SPEED', 'TL_WIDTH',
   'ATT_DIFF', 'ATT_DIFF_REF', 'YAW_DIFF', 'YAW_DIFF_REF', 'YAW_DAMP_DIFF',
   'NOISE_YAW_DEG', 'NOISE_YAW_HZ']) {
@@ -63,6 +68,19 @@ for (const name of ['NOISE_LEAN_DEG', 'NOISE_LEAN_HZ']) {
     py && js && py.length === js.length && py.every((v, i) => v === js[i]),
     `blender says ${py}, the module says ${js}`);
 }
+
+check('the attitude slew is bounded below blender\'s, deliberately',
+  (() => {
+    const py = pyNum('ATT_RATE_DPS');
+    return py === 120 && FM.ATT_RATE_DPS < py && FM.ATT_RATE_DPS >= 10;
+  })(),
+  `blender ${pyNum('ATT_RATE_DPS')} deg/s, the model ${FM.ATT_RATE_DPS}. Blender's `
+  + 'number is the rotors\' real authority and is correct there, because that '
+  + 'model only ever sees demands it can meet. The scenario paths demand losing '
+  + '167 m/s at a waypoint, and a faithful response to that is a 35 degree pitch '
+  + 'swing. Bounding the NOSE RATE leaves speed, route, waypoints, duration and '
+  + 'timing untouched. If this ever equals 120 again, either the paths were fixed '
+  + 'or someone removed the bound without reading why it is here.');
 
 check('DRAG_K agrees with the blender file, to a tolerance',
   (() => {
@@ -149,6 +167,37 @@ check('a steady cruise settles at the drag balance',
   `atan(DRAG_K * 15^2 / g) is ${dragBalanceDeg.toFixed(1)} deg, `
   + `the model holds ${cruise.tiltDeg.toFixed(1)}. That equality is the whole airframe: `
   + 'thrust tilt balancing quadratic drag.');
+
+check('bounding the slew did not flatten the demo',
+  (() => {
+    // The flight demo's path IS flyable, so the bound must barely touch
+    // it: the brake still pitches the nose up past 25 degrees.
+    const w = DRONES.TEMPLATES.cph_dji_flight_demo?.waypoints;
+    if (!w) return false;
+    const fm = FM.createQuadFlightModel({ rotors, rps: 12 });
+    const fps = 60, dt = 1 / fps;
+    const lerp = (t) => {
+      if (t <= w[0].tSec) return w[0];
+      for (let i = 1; i < w.length; i++) {
+        if (t <= w[i].tSec) {
+          const a = w[i - 1], b = w[i], u = (t - a.tSec) / ((b.tSec - a.tSec) || 1);
+          return { lat: a.lat + (b.lat - a.lat) * u, lon: a.lon + (b.lon - a.lon) * u,
+                   alt: a.alt + (b.alt - a.alt) * u };
+        }
+      }
+      return w[w.length - 1];
+    };
+    let lo = 0;
+    for (let f = 0; f < fps * 47; f++) {
+      const t = f * dt, p = lerp(t);
+      const o = fm.update(p.lat, p.lon, p.alt, dt);
+      if (o && t > 3) lo = Math.min(lo, o.leanFwdDeg);
+    }
+    return lo < -25;
+  })(),
+  'the demo brakes from 25 m/s and the nose must still come up past 25 degrees. '
+  + 'If the bound flattens that, it is too low and the showcase stops matching '
+  + 'the render.');
 
 check('a cruise leans forward, not sideways',
   Math.abs(cruise.leanFwdDeg - cruise.tiltDeg) < 1.0 && Math.abs(cruise.leanRgtDeg) < 2.0);

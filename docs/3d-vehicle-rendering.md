@@ -1187,3 +1187,77 @@ to how the canopy blends.
 copy and never opened the GLB, so it validated its own data and would have
 passed a broken asset. `check-dji-air-3.mjs` reads the real table out of
 `src/main.js` and compares it to the real file.
+
+## 8n. The paths are not flyable, and the nose rate is bounded until they are
+
+Reported as the drone going "forward, jump upwards, forward, jump upwards" on a
+recon swarm, on a single-site account, with no airliner in the scene. Traced on
+that exact scenario:
+
+```
+t=23.00   speed 209.4 m/s   pitch +19.9
+t=25.25   speed 152.0       pitch  -7.5
+t=25.50   speed 114.3       pitch -15.5
+t=28.00   speed  43.0       pitch  +3.3
+```
+
+**209 m/s is 754 km/h.** The path demands losing 167 m/s at a waypoint, and the
+model pitches hard nose-up, which is what any aircraft must do to decelerate.
+Then it settles, flies the next leg, and repeats. Five of the twelve quadcopter
+paths do this:
+
+```
+esbjerg_quad_hostile      77 m/s median, 122 peak
+cph_quad_hostile          58 m/s,  89 peak
+billund_quad_hostile      55 m/s,  81 peak
+billund_swarm_recon       46 m/s, 102 peak
+swarm_recon_cph_amk       33 m/s, 209 peak on one 25 s leg
+```
+
+These were authored as waypoint lists for an ICON that slides along a line. The
+old cosmetic rig never showed it because it never asked what the path demanded:
+it leaned a fixed amount by speed and banked on turns, clamped. A faithful model
+cannot do that.
+
+**Why more tilt is not the answer.** A multirotor has no wing, so forward motion
+comes entirely from tilting the airframe. Top speed is where the forward
+component balances drag:
+
+```
+tilt    top speed    thrust to hold altitude
+32 deg     30 m/s          1.18x hover
+45 deg     38 m/s          1.41x
+60 deg     50 m/s          2.00x
+76 deg     77 m/s          4.13x
+```
+
+77 m/s needs 76 degrees of nose-down and four times hover thrust. No multirotor
+has that margin, and it would read as a thrown dart. A fixed-wing or a loitering
+munition flies those speeds near level, because a wing makes the lift.
+
+**What was done, and what it is not.** `ATT_RATE_DPS` is bounded to 20 deg/s
+against Blender's 120. That limits how fast the NOSE can move and nothing else:
+speed, route, waypoints, duration and timing are untouched, which is the point,
+because retiming the paths was tried and correctly rejected for moving signed-off
+choreography.
+
+```
+template                      peak nose rate      pitch range
+                              120 -> 20 deg/s
+swarm_recon_cph_amk             123 -> 24           -16 to 33
+cph_swarm_runway_incursion       97 -> 21             8 to 28
+cph_quad_hostile                122 -> 23           -13 to 31
+cph_dji_flight_demo              70 -> 45           -31 to 32
+```
+
+The runway incursion, which drives both combined scenarios, no longer goes
+nose-up at all. The flight demo barely moves, because its path is flyable and
+never demands more than the airframe can give; the gate asserts its brake still
+pitches past 25 degrees, so the showcase keeps matching the render.
+
+**This is a symptom fix and is gated as one.** `check:quad-flight` asserts the
+deviation from Blender deliberately and explains why, so if it ever reads 120
+again either the paths were fixed or someone removed the bound without reading.
+The real answer is to give those five scenarios an airframe that can fly them.
+Both families are already in the taxonomy with models shipped. That changes
+`platform` and nothing about timing.

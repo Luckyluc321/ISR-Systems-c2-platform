@@ -79,7 +79,40 @@ export const A_MAX = 6.5;             // m/s^2, 0 to 21 m/s in about 3.5 s
 // Every other constant is Blender's, unchanged and gated against it.
 export const KV = 1.2;                // 1/s, velocity loop gain
 export const ATT_TAU = 0.15;          // s, attitude loop time constant
-export const ATT_RATE_DPS = 120.0;    // deg/s, attitude slew limit
+// ATTITUDE SLEW LIMIT, AND WHY IT IS NOT BLENDER'S 120.
+//
+// Blender's model flies a plan it generated itself, so every demand it
+// sees is one the airframe can meet and 120 deg/s is simply the rotors'
+// authority. The scenario paths are different: they were authored as
+// waypoint lists for an ICON, and five of the twelve fly at 46 to 77
+// m/s median with peaks to 209. A quadcopter tops out near 30.
+//
+// The model is faithful, so when a path demands losing 167 m/s at a
+// waypoint it pitches hard nose-up, which is what any aircraft must do
+// to decelerate. Traced on swarm_recon_cph_amk at t=25 s:
+//
+//     209 m/s, pitch +19.9   ->   42 m/s, pitch -15.5
+//
+// a 35 degree swing, repeating at every such waypoint. That is the
+// "forward, jump upwards, forward, jump upwards" that was reported. The
+// old cosmetic rig never did it because it never asked what the path
+// demanded: it leaned a fixed amount by speed and banked on turns.
+//
+// 20 deg/s bounds how fast the NOSE can move and touches nothing else.
+// Speed, route, waypoints, duration and timing are all untouched, which
+// is the entire point: retiming the paths was tried and rejected,
+// correctly, because it moved choreography that was signed off.
+//
+// THIS IS A SYMPTOM FIX AND IT IS LABELLED AS ONE. The real answer is
+// that a 280 km/h contact is a loitering munition or a fixed-wing, not
+// a quadcopter, and both already exist in the taxonomy with models
+// shipped. Changing `platform` on those five templates makes the
+// physics correct rather than bounded, costs nothing in timing, and is
+// a better threat picture besides.
+//
+// To see the unbounded behaviour without a rebuild:
+//   __isr_quad_tuning.attRateDps = 120
+export const ATT_RATE_DPS = 20.0;     // deg/s, attitude slew limit
 export const VZ_TAU = 0.6;            // s, vertical speed response
 // Not from the Blender file. There the controller OWNS the velocity, so
 // there is no measured signal to clean; here the velocity is read off a
@@ -398,8 +431,14 @@ export function createQuadFlightModel(opts = {}) {
         leanDesN = (needN / needLen) * tilt;
       }
       const k = 1 - Math.exp(-dt / ATT_TAU);
+      // Live knob so the unbounded behaviour can be seen without a
+      // rebuild:  __isr_quad_tuning.attRateDps = 120
+      const slewDps = (typeof window !== 'undefined'
+        && window.__isr_quad_tuning
+        && typeof window.__isr_quad_tuning.attRateDps === 'number')
+        ? window.__isr_quad_tuning.attRateDps : ATT_RATE_DPS;
       const [stepE, stepN] = _clampLen(
-        (leanDesE - leanE) * k, (leanDesN - leanN) * k, ATT_RATE_DPS * DEG * dt);
+        (leanDesE - leanE) * k, (leanDesN - leanN) * k, slewDps * DEG * dt);
       const newLeanE = leanE + stepE, newLeanN = leanN + stepN;
       const rateE = stepE / dt, rateN = stepN / dt;
       const leanAccE = (rateE - leanRateE) / dt, leanAccN = (rateN - leanRateN) / dt;
