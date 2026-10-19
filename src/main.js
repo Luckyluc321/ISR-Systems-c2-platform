@@ -6752,7 +6752,13 @@ async function main() {
     assault_drone_concept: {
       hubs: [[-0.729, 0.043, 0.725], [-0.729, 0.043, -0.722],
              [0.729, 0.043, 0.725], [0.729, 0.043, -0.722]],
-      nose: '+x', up: '+y',
+      // +z, not +x. The hubs are a symmetric square so the geometry
+      // alone cannot say which way is forward, and the declared +x
+      // disagrees with the 270 heading offset that was validated on
+      // screen. 270 is only correct for a nose on +z. With +x the
+      // rotor differential was being applied to the wrong pair, so the
+      // airframe spun up its left and right rotors to pitch.
+      nose: '+z', up: '+y',
     },
   };
 
@@ -6810,7 +6816,12 @@ async function main() {
     assault_drone_concept: {
       uri: '/aircraft/assault_drone_concept.glb',
       scale: 0.5,
-      headingOffsetDeg: 270, pitchSign: 1, rollSign: 1, pitchOffsetDeg: 0,
+      // nose on glTF +z, NOT +x. The 270 heading offset only makes the
+      // nose point along the track if the nose is +z, and 270 was
+      // validated on screen, so +z is what the asset is. See the block
+      // on swapPitchRoll below.
+      headingOffsetDeg: 270, swapPitchRoll: true,
+      pitchSign: -1, rollSign: -1, pitchOffsetDeg: 0,
     },
     dji_air_3: {
       uri: '/aircraft/dji_air_3.glb',
@@ -6835,7 +6846,39 @@ async function main() {
       // 90, found in the field. 180 and 0 were both tried and both flew
       // sideways; this is the value that points the nose along the
       // direction of travel.
-      headingOffsetDeg: 90, pitchSign: -1, rollSign: -1, pitchOffsetDeg: 0,
+      // PITCH AND ROLL ARE SWAPPED ON THIS ASSET, AND A SIGN CANNOT FIX IT.
+      //
+      // glTF is Y-up and Cesium converts to its Z-up model frame as
+      // (x, y, z) -> (x, -z, y). This nose is on glTF -z, so after that
+      // conversion it lands on +Y, which in Cesium's HPR frame (+X
+      // forward, +Y left, +Z up) is 90 degrees to port. That is exactly
+      // why headingOffsetDeg had to be 90, and why it was found in the
+      // field rather than derived.
+      //
+      // The consequence was missed. Cesium composes
+      // Rz(heading) . Ry(pitch) . Rx(roll), so pitch turns about the
+      // frame's Y axis and roll about its X. With the nose sitting on
+      // Y, the PITCH slot rotates the airframe about its own nose,
+      // which is roll, and the ROLL slot pitches it. Checked against
+      // the real rotor-hub geometry with Cesium's own maths:
+      //
+      //                        should do              actually did
+      //   accelerate forward   nose down 25     ->    banked LEFT 25
+      //   brake                nose up 25       ->    banked RIGHT 25
+      //   slide right          right wing down  ->    nose DOWN 25
+      //   slide left           left wing down   ->    nose UP 25
+      //
+      // A sign flip cannot turn pitch into roll, which is why
+      // pitchSign -1 and rollSign -1 made a straight cruise look
+      // plausible (a steady 23 degree lean is a steady lean whichever
+      // axis it is about) while every other manoeuvre was wrong.
+      //
+      // swapPitchRoll feeds -roll into the pitch slot and +pitch into
+      // the roll slot. Solved over all 32 combinations of heading
+      // offset, both signs and the swap: with the nose on -z, exactly
+      // one combination scores zero error, and this is it.
+      headingOffsetDeg: 90, swapPitchRoll: true,
+      pitchSign: 1, rollSign: 1, pitchOffsetDeg: 0,
     },
   };
 
@@ -17836,10 +17879,13 @@ async function main() {
       }
       if (!_quadLastHpr) return undefined;
 
+      // See swapPitchRoll in _QUAD_MODELS: on an asset whose nose needs a
+      // 90 degree yaw, Cesium's pitch slot drives roll and vice versa.
+      const _mp = _quadLastHpr.pitchRad + pitchOffset, _mr = _quadLastHpr.rollRad;
       const hpr = new Cesium.HeadingPitchRoll(
         _quadLastHpr.headingRad + headingOffset,
-        (_quadLastHpr.pitchRad + pitchOffset) * pitchSign,
-        _quadLastHpr.rollRad * rollSign,
+        (_qM.swapPitchRoll ? -_mr : _mp) * pitchSign,
+        (_qM.swapPitchRoll ?  _mp : _mr) * rollSign,
       );
       return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
     };
@@ -18198,10 +18244,12 @@ async function main() {
             _quadFlightDiag.set(`${event.id}-swarm-${i}`, out); }
           if (!_swLastHpr) return undefined;
 
+          // Same swap as the lead rig. See swapPitchRoll in _QUAD_MODELS.
+          const _mp = _swLastHpr.pitchRad + pitchOffset, _mr = _swLastHpr.rollRad;
           const hpr = new Cesium.HeadingPitchRoll(
             _swLastHpr.headingRad + headingOffset,
-            (_swLastHpr.pitchRad + pitchOffset) * pitchSign,
-            _swLastHpr.rollRad * rollSign,
+            (_qM.swapPitchRoll ? -_mr : _mp) * pitchSign,
+            (_qM.swapPitchRoll ?  _mp : _mr) * rollSign,
           );
           return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
         };
