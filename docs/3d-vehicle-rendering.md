@@ -1989,31 +1989,42 @@ In the scenario list as **AIRFRAME · DJI Air 3 flight envelope (over the
 
 **Three constraints shaped the geometry, and they fight each other.**
 
-1. Over water. The shoreline runs near lon 12.6775; the whole sequence
-   stays east of 12.6791.
+1. Over water. The shoreline runs near lon 12.6775.
 2. Inside sensor coverage. A drone renders only within 1 km of a sensor,
    which is deliberate and not negotiable, so it lives inside the CPH
-   rings. Worst point is 941 m.
-3. Both at once leaves a box of about 1177 x 769 m. The sequence fits in
-   747 x 870.
+   rings.
+3. Both at once leaves a strip only about 780 m wide, and 1.7 km tall.
+
+**The first attempt got that wrong and was rejected on sight: "Nothing
+happens, as in completely frozen, AND its inland."** Both halves were
+fair.
+
+*Inland*: the fit chose a square box, so the western edge sat at lon
+12.6791, about 90 m off the beach, right on top of a marina. A square
+does not fit a strip. The sequence is now narrow and tall, 460 m across
+by 916 long, and its closest approach to the shore is **443 m**.
+
+*Frozen*: it opened with an eight second hover. An airframe correctly
+doing nothing is indistinguishable from a simulation that has not
+started, and a quadcopter needs about two more seconds to reach 14 m/s
+from rest at `A_MAX`. Ten seconds of an apparently dead screen. It now
+opens on the acceleration; the hover is still in the sequence, after the
+brake, where it reads as a pause rather than a failure.
 
 **The sequence**, every item flyable by construction:
 
 ```
-hover · accelerate · 24 m/s cruise · brake to walking pace · hover
-gentle 180 at 100 m radius (16.4 deg of bank)
-hard 150 the other way at 70 m radius (13.8 deg)
-full 360 orbit at 120 m
+accelerate · 24 m/s cruise · brake to walking pace · hover
+180 at 80 m radius (18.1 deg of bank) · cruise back · 180 the other way
 climb 70 m · descend 70 m
-figure eight, 95 m loops, one each way
+full orbit at 70 m, then the same the other way: a figure eight
 28 m/s run · brake · hover
 ```
 
 ```
-147 authored targets -> 5,443 flown points over 272 s
-peak speed  28.7 m/s   (airframe 30)
-peak climb   8.0 m/s   (limit 8)
-miss from the targets: median 0.5 m, worst 17 m
+117 authored targets -> 3,829 flown points over 191 s
+443 m offshore at the closest, 944 m from a sensor at the worst
+460 m across by 916 long
 ```
 
 **Two real defects fell out of building it**, which is the point of a
@@ -2048,3 +2059,20 @@ what separates it from a fixed-wing. `flyWaypoints` already accepts
 yaw from the direction of travel, so a slide would still render as a
 turn. Wiring a commanded heading through to the rig is a separate change
 and has not been made.
+
+**A third measurement artefact, and the floor that fixed it.** The
+turn-per-step gate first read 180 degrees, from a hover. Excluding
+anything under a walking pace was not enough: an airframe repositioning
+at 1.2 m/s still swings its track bearing 13.9 degrees between samples
+while barely moving. Worst turn per step on the showcase, by floor:
+
+```
+1 m/s  13.85 deg      3 m/s  1.57
+2 m/s   3.67          5 m/s  1.33
+```
+
+None of it renders anyway, because the model rate-limits yaw to
+`YAW_RATE_MAX_DPS` and the nose cannot follow a bearing that spins like
+that. 3 m/s is where the track bearing starts being the thing on screen.
+`cph_swarm_runway_incursion` reads 1.05 at every floor, because it never
+slows down enough for this to matter.

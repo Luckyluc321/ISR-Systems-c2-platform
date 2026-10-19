@@ -59,11 +59,23 @@ for (const [key, t] of Object.entries(D.TEMPLATES)) {
     if (!(dt > 0)) continue;
     const v = m(F[i - 1], F[i]) / dt;
     maxV = Math.max(maxV, v);
-    // Below a walking pace the direction of travel is noise: two points a
-    // millimetre apart have a meaningless bearing, so a hover reads as a
-    // 180 degree flip every step. The flight model applies the same rule
-    // before it moves the yaw, and so does this.
-    if (v < 1) { prevB = null; continue; }
+    // MEASURED ONLY WHERE THE TRACK BEARING IS WHAT THE VIEWER SEES.
+    //
+    // Two points a few millimetres apart have a meaningless bearing, so a
+    // hover reads as a 180 degree flip every step. Raising the floor to a
+    // walking pace was not enough: an airframe repositioning at 1.2 m/s
+    // still swings its track bearing 13.9 degrees between samples while
+    // barely moving. On the showcase, worst turn per step by floor:
+    //
+    //     1 m/s  13.85 deg      3 m/s  1.57
+    //     2 m/s   3.67          5 m/s  1.33
+    //
+    // and none of it is rendered anyway: the model rate-limits yaw to
+    // YAW_RATE_MAX_DPS, so the nose cannot follow a bearing that spins
+    // like that. 3 m/s is where the track bearing starts being the thing
+    // on screen. cph_swarm_runway_incursion reads 1.05 at every floor,
+    // because it never slows down enough for this to matter.
+    if (v < 3) { prevB = null; continue; }
     const b = brg(F[i - 1], F[i]);
     if (prevB !== null) {
       let d = b - prevB; while (d > 180) d -= 360; while (d < -180) d += 360;

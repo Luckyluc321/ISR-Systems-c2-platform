@@ -611,9 +611,9 @@ function _applyCruiseTargets(templates) {
 // to the rig is a separate change.
 function _showcaseWaypoints() {
   const D = Math.PI / 180;
-  const LAT0 = 55.61583, LON0 = 12.6815;
+  const LAT0 = 55.61583, LON0 = 12.6855;
   const M_LAT = 111320, M_LON = 111320 * Math.cos(LAT0 * D);
-  let e = -150, n = -420, hdg = 0, alt = 120, t = 0;
+  let e = -60, n = -560, hdg = 0, alt = 120, t = 0;
   const W = [];
   const push = () => W.push({
     lat: +(LAT0 + n / M_LAT).toFixed(6),
@@ -644,24 +644,33 @@ function _showcaseWaypoints() {
       hdg += dd; alt += dAlt / k; t += secs / k; push();
     }
   };
-  hover(8);                       // hover, level
-  straight(110, 14);              // accelerate, nose drops
-  straight(240, 24);              // cruise
+  // NARROW AND TALL. The water here is only about 780 m wide between the
+  // shoreline and the edge of the sensor rings, while the covered strip
+  // runs roughly 1.7 km north to south. A square sequence does not fit;
+  // this one is 460 m across and 916 long, and its closest approach to
+  // the shore is 443 m.
+  //
+  // IT OPENS ON MOVEMENT. The first version hovered for eight seconds,
+  // and an airframe that is correctly doing nothing is indistinguishable
+  // from a simulation that has not started. A quadcopter also takes about
+  // two seconds to reach 14 m/s from a standstill at A_MAX, so a hover on
+  // top of that is four seconds of an apparently frozen screen. The hover
+  // is still in the sequence, after the brake, where it reads as a pause
+  // rather than a failure.
+  straight(110, 14);              // accelerate from rest, nose drops
+  straight(420, 24);              // cruise north
   straight(90, 8);                // brake, nose comes up
-  hover(6);                       // hover
-  turn(180, 100, 17);             // gentle 180, 16.4 deg of bank
-  straight(204, 23);              // cruise back
-  turn(-150, 70, 13);             // hard 150 the other way, 13.8 deg
-  straight(110, 15);
-  turn(360, 120, 16);             // a full orbit
-  straight(90, 15);
-  straight(140, 13, 70);          // climb 70 m
-  straight(140, 13, -70);         // descend 70 m
-  turn(360, 95, 15);              // figure eight, first loop
-  turn(-360, 95, 15);             // and back the other way
-  straight(192, 28);              // fast cruise
+  hover(4);                       // hover
+  turn(180, 80, 16);              // 180 back the other way, 18.1 deg of bank
+  straight(378, 23);              // cruise south
+  turn(-180, 80, 16);             // 180 the other way, same bank
+  straight(140, 15, 70);          // climb 70 m
+  straight(140, 15, -70);         // descend 70 m
+  turn(360, 70, 15);              // full orbit, 18.1 deg
+  turn(-360, 70, 15);             // and back: a figure eight
+  straight(294, 28);              // fast run
   straight(100, 9);               // brake
-  hover(8);                       // hover
+  hover(4);                       // hover
   return W;
 }
 const _SHOWCASE_PATH = _showcaseWaypoints();
