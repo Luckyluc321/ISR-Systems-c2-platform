@@ -9092,7 +9092,18 @@ async function main() {
   }
 
     if (d.state === 'en_route') {
-      const dtSec = (now - d.lastFrameTs) / 1000;
+      // CLAMPED. The step is speed times elapsed, and elapsed was
+      // bounded below but not above, so a frame hitch, a backgrounded
+      // tab, or a state change that forgot to stamp the clock moved the
+      // unit by whatever that gap implied. lastFrameTs even initialises
+      // to 0, so a unit reaching this before being stamped would step
+      // from the Unix epoch. Reported as the counter-drone team flying
+      // across the map at 500 km/h in patches.
+      //
+      // 0.1 s is six frames at 60 Hz. A longer gap means the tab was
+      // not rendering, and a unit should not teleport to catch up on
+      // time nobody watched.
+      const dtSec = Math.min((now - d.lastFrameTs) / 1000, 0.1);
       d.lastFrameTs = now;
       if (dtSec <= 0) return;
       // Still waiting its turn to pull out of the station.
@@ -9285,7 +9296,16 @@ async function main() {
       }
     } else if (d.state === 'engaging') {
       const engageDur = (now - d.engageStartTs) / 1000;
-      const dtSecEng = Math.max(0.001, (now - (d._engageLastFrameTs || d.engageStartTs)) / 1000);
+      // CLAMPED ABOVE AS WELL AS BELOW.
+      //
+      // This is the chase phase, and it is allowed 1.6x cruise so an
+      // interceptor can close. It was bounded below by Math.max and not
+      // above, and it falls back to engageStartTs on the first engage
+      // frame, so the first step after engagement began could be
+      // seconds long. 1.6 x 120 km/h x several seconds is a unit
+      // crossing the map in one frame, which is what was reported.
+      const dtSecEng = Math.min(
+        Math.max(0.001, (now - (d._engageLastFrameTs || d.engageStartTs)) / 1000), 0.1);
       d._engageLastFrameTs = now;
 
       // Interceptor CHASES the enemy drone smoothly. Every tick we
@@ -9761,7 +9781,18 @@ async function main() {
         return;
       }
       // Fly toward last known target coord
-      const dtSec = (now - d.lastFrameTs) / 1000;
+      // CLAMPED. The step is speed times elapsed, and elapsed was
+      // bounded below but not above, so a frame hitch, a backgrounded
+      // tab, or a state change that forgot to stamp the clock moved the
+      // unit by whatever that gap implied. lastFrameTs even initialises
+      // to 0, so a unit reaching this before being stamped would step
+      // from the Unix epoch. Reported as the counter-drone team flying
+      // across the map at 500 km/h in patches.
+      //
+      // 0.1 s is six frames at 60 Hz. A longer gap means the tab was
+      // not rendering, and a unit should not teleport to catch up on
+      // time nobody watched.
+      const dtSec = Math.min((now - d.lastFrameTs) / 1000, 0.1);
       d.lastFrameTs = now;
       if (dtSec <= 0) return;
       const brng = _bearingRad(d.curLat, d.curLon, d.rtbTargetLat, d.rtbTargetLon);
@@ -9804,7 +9835,18 @@ async function main() {
       }
     } else if (d.state === 'rtb_home') {
       // Fly back to origin base
-      const dtSec = (now - d.lastFrameTs) / 1000;
+      // CLAMPED. The step is speed times elapsed, and elapsed was
+      // bounded below but not above, so a frame hitch, a backgrounded
+      // tab, or a state change that forgot to stamp the clock moved the
+      // unit by whatever that gap implied. lastFrameTs even initialises
+      // to 0, so a unit reaching this before being stamped would step
+      // from the Unix epoch. Reported as the counter-drone team flying
+      // across the map at 500 km/h in patches.
+      //
+      // 0.1 s is six frames at 60 Hz. A longer gap means the tab was
+      // not rendering, and a unit should not teleport to catch up on
+      // time nobody watched.
+      const dtSec = Math.min((now - d.lastFrameTs) / 1000, 0.1);
       d.lastFrameTs = now;
       if (dtSec <= 0) return;
       const brng = _bearingRad(d.curLat, d.curLon, d.originLat, d.originLon);

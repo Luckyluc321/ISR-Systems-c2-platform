@@ -480,6 +480,72 @@ const _CRUISE_TARGET_MS = {
   // Positions are never touched, only the clock.
 };
 
+// ── ROUTE LENGTH, WHERE THE SPEED IS NOT FLYABLE ───────────────────
+//
+// Distance is speed times time. These three paths were authored for an
+// ICON and fly at 55 to 77 m/s, which is 200 to 280 km/h; a multirotor
+// tops out near 30 because it has no wing and gets forward motion only
+// by tilting. Something geometric has to give, and there are three
+// candidates:
+//
+//   slow the clock      duration doubles. Tried, reverted: it moved
+//                       choreography that had been signed off.
+//   change the airframe the scenario stops being a DJI. The Geran
+//                       scenarios already exist separately and fly
+//                       their real speeds, so this would duplicate them
+//                       badly.
+//   shorten the route   duration, timing, name and destination all
+//                       survive. The drone simply starts closer in.
+//
+// The third, scaled about the FINAL waypoint so the target area, the
+// final approach geometry and the altitude profile are untouched and
+// only the run-in shortens.
+//
+// Checked before doing it: all three already START INSIDE sensor
+// coverage, 127 to 669 m from the nearest sensor against a 1000 m
+// radius. So there is no "approaches from outside the grid" beat to
+// lose; they are detected from the first second before and after.
+//
+// Altitudes are NOT scaled. The climb rate against the clock is
+// unchanged, so only the climb ANGLE steepens, which is more
+// drone-like, not less.
+const _ROUTE_TARGET_MS = {
+  cph_quad_hostile:     26,   // 5.6 km -> 2.3 km
+  esbjerg_quad_hostile: 26,   // 6.9 km -> 2.1 km
+  billund_quad_hostile: 26,   // 4.2 km -> 2.1 km
+};
+
+function _pathLengthM(waypoints) {
+  let d = 0;
+  for (let i = 1; i < waypoints.length; i++) {
+    const dN = (waypoints[i].lat - waypoints[i - 1].lat) * 111320;
+    const dE = (waypoints[i].lon - waypoints[i - 1].lon) * 111320
+      * Math.cos(waypoints[i].lat * Math.PI / 180);
+    d += Math.hypot(dN, dE);
+  }
+  return d;
+}
+
+function _applyRouteTargets(templates) {
+  for (const [key, target] of Object.entries(_ROUTE_TARGET_MS)) {
+    const T = templates[key];
+    if (!T?.waypoints?.length) continue;
+    const dur = T.durationSec ?? T.waypoints[T.waypoints.length - 1].tSec;
+    const len = _pathLengthM(T.waypoints);
+    const want = target * dur;
+    if (!(len > want)) continue;
+    const f = want / len;
+    const end = T.waypoints[T.waypoints.length - 1];
+    T.waypoints = T.waypoints.map(w => ({
+      ...w,
+      lat: end.lat + (w.lat - end.lat) * f,
+      lon: end.lon + (w.lon - end.lon) * f,
+    }));
+    // durationSec is NOT touched. That is the whole point.
+  }
+  return templates;
+}
+
 /** Median speed over a path's own waypoints, metres per second. */
 function _medianSpeed(waypoints) {
   const sp = [];
@@ -2762,6 +2828,7 @@ Object.assign(TEMPLATES, {
 // and everything else added by a later Object.assign: it stayed at 33 m/s
 // while the others came down. Only the templates named in
 // _CRUISE_TARGET_MS are touched, and only their clock.
+_applyRouteTargets(TEMPLATES);
 _applyCruiseTargets(TEMPLATES);
 
 // ── Substation threat factory ──

@@ -1261,3 +1261,79 @@ again either the paths were fixed or someone removed the bound without reading.
 The real answer is to give those five scenarios an airframe that can fly them.
 Both families are already in the taxonomy with models shipped. That changes
 `platform` and nothing about timing.
+
+## 8o. The counter-drone team crossing the map, and three unbounded clocks
+
+Reported as the three-drone counter-UAS response flying at 500 km/h or more in
+patches, against a profile that says 120 km/h.
+
+Four places integrated a dispatch unit's position as `speed x elapsed` with
+elapsed bounded BELOW and not above:
+
+```
+en_route    const dtSec = (now - d.lastFrameTs) / 1000;  if (dtSec <= 0) return;
+rtb         same
+return      same
+engage      Math.max(0.001, (now - (d._engageLastFrameTs || d.engageStartTs)) / 1000)
+```
+
+A frame hitch, a backgrounded tab, or a state change that forgot to stamp the
+clock, and one frame moves the unit by whatever that gap implies.
+`lastFrameTs` initialises to `0`, so a unit reaching `en_route` before being
+stamped would step from the Unix epoch.
+
+The engage path is the likely culprit for what was seen: it is the chase phase,
+it is allowed 1.6x cruise so an interceptor can close, and it falls back to
+`engageStartTs` on its first frame. 1.6 x 120 km/h x a few seconds is a unit
+crossing the map between two frames.
+
+All four are clamped to 0.1 s, which is six frames at 60 Hz. A longer gap means
+the tab was not rendering, and a unit should not teleport to catch up on time
+nobody watched.
+
+**This is the same bug shape as three others fixed the same day**: the flight
+model's velocity, its filter time constant, and its acceleration all divided a
+per-tick quantity by a per-frame interval or integrated an unbounded step. The
+rule that keeps falling out: raw elapsed for anything MEASURING the world,
+clamped elapsed for anything INTEGRATING state.
+
+The replay scrubber at `_replayState` is deliberately NOT clamped. It advances a
+playback clock rather than a position, and is bounded by the recording's own
+duration; a long frame there should advance time, or playback drifts behind the
+wall clock.
+
+## 8p. Three hostile routes trimmed instead of slowed
+
+`cph_quad_hostile`, `esbjerg_quad_hostile` and `billund_quad_hostile` flew at 55
+to 77 m/s, which is 200 to 280 km/h, named as DJI Matrice airframes. A
+multirotor tops out near 30 because it has no wing.
+
+Three levers, and only one costs nothing that was signed off:
+
+```
+slow the clock       duration doubles. Tried, reverted, moved choreography.
+change the airframe  stops being a DJI, and the Geran scenarios already exist
+                     separately and fly their real speeds.
+shorten the route    duration, timing, name and destination all survive.
+```
+
+The route is scaled about its FINAL waypoint, so the target area, the final
+approach geometry and the altitude profile are untouched and only the run-in
+shortens. Altitudes are not scaled, so the climb rate against the clock is
+unchanged and only the climb angle steepens.
+
+```
+template                route        median speed    duration
+cph_quad_hostile        5.6 -> 2.3 km   58 -> 24 m/s    90s, unchanged
+esbjerg_quad_hostile    6.9 -> 2.1 km   77 -> 23 m/s    80s, unchanged
+billund_quad_hostile    4.2 -> 2.1 km   55 -> 27 m/s    80s, unchanged
+```
+
+Checked before doing it: all three already START INSIDE sensor coverage, 127 to
+669 m from the nearest sensor against a 1000 m radius, so there is no
+"approaches from outside the grid" beat to lose. They are detected from the
+first second, before and after.
+
+The nose-rate bound stays in. Even on the fixed paths it halves the peak nose
+rate, 122 to 23 deg/s, because the remaining templates still contain direction
+changes a polyline makes instantaneous.
