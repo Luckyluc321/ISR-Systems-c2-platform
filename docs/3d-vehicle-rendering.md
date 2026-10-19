@@ -2152,3 +2152,57 @@ every other, which is precisely why it survived this long.
 `swapPitchRoll` defaults to absent on both assets, so nothing changes
 until someone sets it. The rigs read `_quadModelSpec` every frame, so the
 override takes effect on the airframe already in the air.
+
+### 10a. Porting the fixed-wing model to the map
+
+For whoever wires it, the same way `quad_flight_model.js` was built from
+the quadcopter script. The constants are at the top of
+`scripts/blender_fixedwing_flight_demo.py`, named, and should be gated
+the same way.
+
+**The map inverts the chain, as before.** Blender commands speed, climb
+and turn rate and integrates a path. The map has the path and must
+derive the attitude. The derivation is the same three relations run
+backwards:
+
+- bank from the measured turn rate: `bank = atan(V * w / g)`, then the
+  roll loop (`ROLL_RATE_DPS` slew, `ROLL_TAU` lag) so the wings go over
+  at a finite rate instead of snapping;
+- pitch from the measured flight-path angle: `theta = gamma + alpha`,
+  through the pitch loop (`PITCH_RATE_DPS`, `PITCH_TAU`), with
+  `alpha = ALPHA_CRUISE * (V_CRUISE / V)^2 / cos(bank)` clamped to
+  `ALPHA_MAX`. Measure `gamma` from the path's vertical rate, not from
+  the waypoint altitude difference over one frame (section 1 and the
+  300 m/s lesson apply);
+- propeller rate from inferred throttle, `0.55 * (V/V_CRUISE)^2 +
+  0.25 * dV/A_LONG + 0.6 * sin(gamma) * V / 4 + 0.15`, clamped to
+  `[THR_IDLE, 1]`, then `rps * (0.55 + 0.45 * thr)`.
+
+The existing airliner rig (`_bankedOrientation`) already derives bank
+from yaw rate; this replaces its made-up factor with the physical one
+and adds the two loops. The Shahed is a fixed-wing too and could share
+it.
+
+**What this model deliberately leaves out**, so nobody mistakes an
+omission for a bug: no sideslip or adverse yaw, no wind, no stall (the
+plan never goes below `V_MIN`), and the propeller rate is a fixed-pitch
+model. A governed variable-pitch propeller holds rpm nearly constant in
+flight; if the airframe has one, pin the rate and let only the descent
+and idle move it.
+
+**The asset.** `baykar_bayraktar_sivrisinek_iha_-_tactical_uav.glb`,
+Ozcan Ozaltin, CC-BY-4.0, so it needs an ATTRIBUTION.md entry if it
+enters `public/aircraft/`. Nose on glTF +Z, the convention, so the
+assault drone's 270 heading offset and +1/+1 signs apply, not the
+Air 3's. The propeller is already its own node,
+`SivriSinekIhaV2_Pervane`, at the tail, and spins about its own local
+Y, the fuselage axis, so `_quadRotorTransforms`'s assumption of four
+Z-axis rotors does not fit; it wants one node, one axis, one rate. The
+file carries a 22-frame propeller clip, which Cesium would try to play
+under `runAnimations: true`; leave that false and drive the node. 802k
+triangles: simplify with weld + simplify as the Air 3 was, never
+`gltf-transform optimize`, and verify the propeller node survives.
+
+**Numbers to expect**, from the render, for the gate: 10 deg/s at
+36 m/s gives 32.6 deg of bank; a 4 m/s climb at 36 m/s gives 10.2 deg
+of pitch; 50 m/s level gives 2.1 deg, 28 m/s gives 5.2.
