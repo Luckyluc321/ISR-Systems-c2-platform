@@ -515,11 +515,14 @@ def fly(root, rotors, gimbal, fwd, right, fps, rps):
 # ----------------------------------------------------------------------------
 # Stage: camera, light, ground, labels
 # ----------------------------------------------------------------------------
-def stage(root, size, phase_frames, res):
+def stage(root, size, phase_frames, res, floor_below=None, cam_offset=(2.6, -3.2, 1.5)):
+    """Ground, chase camera, sun, phase labels. floor_below is metres under
+    the start height (default: 1.5 airframes, at least 6 m, a quadcopter
+    demo); cam_offset is in airframe lengths."""
     scene = bpy.context.scene
     coll = scene.collection
 
-    floor = root.location.z - max(1.5 * size, 6.0)
+    floor = root.location.z - (floor_below if floor_below is not None else max(1.5 * size, 6.0))
     bpy.ops.mesh.primitive_plane_add(size=max(size * 600, 1200.0), location=(0, 0, floor))
     ground = bpy.context.active_object
     ground.name = "Ground"
@@ -547,7 +550,7 @@ def stage(root, size, phase_frames, res):
     cam = bpy.data.objects.new("Camera", cam_data)
     coll.objects.link(cam)
     cam.parent = pivot
-    cam.location = Vector((2.6, -3.2, 1.5)) * size
+    cam.location = Vector(cam_offset) * size
     t = cam.constraints.new("TRACK_TO")
     t.target = root
     t.track_axis = "TRACK_NEGATIVE_Z"
@@ -718,4 +721,5 @@ def main():
         print(f"wrote {scene.render.filepath}")
 
 
-main()
+if __name__ == "__main__":
+    main()

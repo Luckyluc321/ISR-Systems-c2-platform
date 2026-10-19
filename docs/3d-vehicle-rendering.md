@@ -1929,3 +1929,53 @@ sideways.
 **Still open:** waypoints 42 and 43 ask 45 m/s of a 30 m/s airframe, so
 the formation ends 772 m short of its off-screen exit. Trimming that leg
 is a template change and has not been made.
+
+## 10. Fixed-wing flight, outside Cesium
+
+`scripts/blender_fixedwing_flight_demo.py` is the fixed-wing sibling of
+the quadcopter demo. It imports that file's loading, propeller
+detection, parenting and staging, and replaces the thrust-lean loop with
+a light-aircraft autopilot. Nothing is keyframed by hand: the plan
+commands speed, climb rate and turn rate, and the attitude is whatever
+produces them.
+
+- **Coordinated turns.** The bank needed for a commanded turn rate is
+  `atan(V w / g)`; the aircraft rolls toward it at 40 deg/s with a
+  0.35 s lag; and the turn rate it gets is `g tan(bank) / V` from the
+  bank it has. Measured: a 10 deg/s command at 36 m/s gives 32.6
+  degrees of bank and exactly 10.0 deg/s once established, 7.2 deg/s a
+  second into the roll.
+- **Pitch leads the flight path.** The nose slews toward flight-path
+  angle plus angle of attack at 6 deg/s; the flight path follows the
+  nose with a 1.2 s lag. A 4 m/s climb reads 10.2 degrees of pitch at
+  3.98 m/s of climb, which is 6.4 of path and 3.8 of angle of attack.
+- **Angle of attack** grows with `(V_cruise / V)^2` and the load factor
+  `1 / cos(bank)`: 3.7 degrees at 36 m/s level, 2.1 at 50, 5.2 at 28.6.
+- **Speed** is capped at 1.2 m/s^2 accelerating and 1.8 decelerating,
+  which is what 100 hp on 600 kg allows, so the fast and slow legs are
+  13 and 14 s long because the physics needs them to be. Throttle is
+  inferred from speed held, acceleration asked and climb, and drives the
+  propeller: 15.6 rps in cruise, 18.0 on the climb and the fast pass,
+  12.7 in the descent, 12.2 on the slow leg.
+- **Turbulence** of a quarter to half a degree at a few tenths of a Hertz.
+
+The airframe numbers are TB2-class and named as assumptions in the
+file. The asset they were flown on is **Baykar's Sivrisinek**, not a
+TB2: its own metadata says so, and Janes and Baykar describe it as a
+catapult-launched loitering munition first shown in April 2026 with no
+published performance. Ozcan Ozaltin, Sketchfab, CC-BY-4.0, 802k
+triangles, nose on glTF +Z (the convention, so `--forward -Y`), a
+single pusher propeller on its own node with a 22-frame spin clip that
+the script discards in favour of its own hub. Pivot at the wing's
+centre. Not in `public/aircraft/`; the renders live in the scratchpad.
+
+```
+/Applications/Blender.app/Contents/MacOS/Blender -b \
+  --python scripts/blender_fixedwing_flight_demo.py -- IN.glb --out OUT_DIR \
+  --render --stills [--forward -Y] [--size-m 4.25] [--prop-rps 18] [--pivot x,y,z]
+```
+
+Verified at every frame from the rig's rotation matrix (normalised,
+section 9's lesson), not from stills: bank, pitch, heading rate,
+climb rate, speed and prop rate per phase, and the propeller fixed to
+its hub.
