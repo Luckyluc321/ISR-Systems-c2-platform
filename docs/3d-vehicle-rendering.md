@@ -2691,3 +2691,94 @@ which is the real Sivrisinek's *maximum* rather than its 102 km/h
 cruise. It is a Blender parity constant checked against
 `blender_fixedwing_flight_demo.py`, so changing it breaks the demo and
 the gate together. Flagged, not changed.
+
+## 8ae. The A320's lurch and its "mach 2" climb were one bug
+
+Lucas: *"when the plane is about to land in the Without ISR ... it like
+jumps up and down for one movement"* and *"when it pivots upwards it
+looks like its flying mach 2 for like 3-5 seconds"*.
+
+Two symptoms, one cause, and it was not in the flight model or the
+renderer. It was in the path.
+
+`_smoothPath()` generated lat and lon with a **Catmull-Rom spline
+parameterised uniformly in the leg**, `u = k / steps`. Such a curve is
+C1 in `u`, but the speed an aircraft actually flies is
+`|dP/du| / span`. The moment two consecutive legs have different spans
+or chord lengths, **speed jumps at the anchor between them** while the
+path through it stays visually smooth.
+
+Measured on `cph_jet_goaround_early`:
+
+```
+t = 378.70   55.7 m/s    decelerating into the flare
+t = 378.96   73.1 m/s    next anchor, +31% in one sample
+```
+
+and climbing out, ground speed ramped 258 → 368 km/h across a leg and
+snapped back to 279 at the next anchor. The first is the lurch before
+the pull-up; the second is the "mach 2" climb. One cause.
+
+The giveaway was in the data: at `t = 418.2` the waypoint reads
+`55.60846, 12.62856, 557` — round numbers among neighbours carrying
+full floating-point precision. Those are the **hand-authored anchors**,
+and the samples between them are generated.
+
+### The fix was already in the same function
+
+The **altitude** channel never had this problem, because it was already
+a cubic Hermite with tangents expressed per second. Lat and lon now use
+the same scheme, with a centred difference in TIME:
+
+```
+m_i = (P_{i+1} − P_{i−1}) / (t_{i+1} − t_{i−1})
+```
+
+That makes `dP/dt` continuous across every anchor, which is what
+"constant speed" means for a path assembled from legs.
+
+| | before | after |
+|---|---|---|
+| worst sample-to-sample speed jump | **57.6 m/s** | **4.1 m/s** |
+| ground speed range | 42.5–116.5 m/s | 62.9–101.2 m/s |
+| lowest altitude | 37.00 m @ t=378.70 | identical |
+
+### What had to be checked before accepting it
+
+Anchors are hit exactly either way, but the curve BETWEEN them moves,
+by up to 375 m far out on the 30 km approach. This clip's entire
+argument is a pair of measured separations, so they were re-measured
+against both templates at the scenario's own 38 s spawn offset rather
+than assumed:
+
+```
+separation at break-off   480 m horizontal,  8 m vertical   — identical
+closest approach          139 m horizontal, 13 m vertical   — identical
+```
+
+Bit-identical before and after, because the critical window moved at
+most 27.7 m and the geometry is dominated by the anchors. Altitude
+deviation is 0.00 m everywhere, since only lat and lon changed.
+
+The re-measurement also caught **stale figures in the template's own
+comment**: it claimed 425 m at break-off and 176 m closest approach,
+where the real numbers are 480 and 139. `scenario_without_isr.js`
+already said 479 m, so that file was right and this one had drifted
+after a path change. Corrected, with the measurement date.
+
+### Blast radius
+
+Two templates use `_smoothPath`. `cph_jet_goaround` is **unchanged** —
+worst jump 2.8 m/s before and after, speed range 70–84 m/s both ways —
+because its anchors are evenly spaced and uniform parameterisation
+happened to be fine there. The fix only moves the path that was broken.
+
+### The lesson
+
+Both symptoms were reported as rendering problems and neither was. The
+flight model, the attitude rig and the frame clock were all innocent;
+the data they were fed had a 31 per cent speed step in it. **When a
+vehicle looks wrong, profile the path it is being given before touching
+anything that draws it** — one pass over the waypoints computing ground
+speed and vertical rate found this in minutes, and the round numbers in
+the waypoint list named the mechanism outright.

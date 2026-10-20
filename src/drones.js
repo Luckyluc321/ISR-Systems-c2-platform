@@ -391,16 +391,48 @@ function _smoothPath(waypoints, dt = 0.25) {
   const n = waypoints.length;
   if (n < 3) return waypoints;
   const at = i => waypoints[Math.max(0, Math.min(n - 1, i))];
-  const cr = (p0, p1, p2, p3, t) => {
-    const t2 = t * t, t3 = t2 * t;
-    return 0.5 * ((2 * p1) + (-p0 + p2) * t
-      + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2
-      + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+  // HERMITE WITH TIME-BASED TANGENTS, NOT UNIFORM CATMULL-ROM.
+  //
+  // This used to run a Catmull-Rom on lat and lon with u = k/steps,
+  // which is uniform in the LEG PARAMETER and not in time. Such a curve
+  // is C1 in u, but the speed an aircraft actually flies is
+  // |dP/du| / span, so the moment two consecutive legs have different
+  // spans or different chord lengths the speed JUMPS at the anchor
+  // between them, even though the path through it is smooth.
+  //
+  // Measured on cph_jet_goaround_early, at the flare:
+  //
+  //     t = 378.70   55.7 m/s     decelerating into the flare
+  //     t = 378.96   73.1 m/s     next anchor, +31% in one sample
+  //
+  // and again climbing out, where ground speed ramped 258 -> 368 km/h
+  // across a leg and then snapped back to 279 at the next anchor. Lucas
+  // saw the first as the aircraft lurching just before it pulled up and
+  // the second as it "flying mach 2 for 3-5 seconds". One cause.
+  //
+  // The altitude channel never had this problem because it was already
+  // a Hermite with tangents expressed per SECOND. Doing the same for
+  // lat and lon makes dP/dt continuous across every anchor, which is
+  // what constant-ish speed means. Anchors are still hit exactly, so
+  // the authored route, the break-off point and the geometry the
+  // comments quote are unchanged.
+  //
+  // Centred difference in TIME, one-sided at the ends.
+  const tanOf = (key) => {
+    const out = new Array(n);
+    for (let i = 0; i < n; i++) {
+      const prev = at(i - 1), next = at(i + 1);
+      const dtSpan = next.tSec - prev.tSec;
+      out[i] = dtSpan > 0 ? (next[key] - prev[key]) / dtSpan : 0;
+    }
+    return out;
   };
+  const mLat = tanOf('lat');
+  const mLon = tanOf('lon');
   const m = _altTangents(waypoints);
   const out = [];
   for (let i = 0; i < n - 1; i++) {
-    const a = at(i), b = at(i + 1), p0 = at(i - 1), p3 = at(i + 2);
+    const a = at(i), b = at(i + 1);
     const span = b.tSec - a.tSec;
     if (span <= 0) continue;
     const steps = Math.max(1, Math.round(span / dt));
@@ -413,8 +445,8 @@ function _smoothPath(waypoints, dt = 0.25) {
       const h01 = -2 * u3 + 3 * u2;
       const h11 = u3 - u2;
       out.push({
-        lat: cr(p0.lat, a.lat, b.lat, p3.lat, u),
-        lon: cr(p0.lon, a.lon, b.lon, p3.lon, u),
+        lat: h00 * a.lat + h10 * span * mLat[i] + h01 * b.lat + h11 * span * mLat[i + 1],
+        lon: h00 * a.lon + h10 * span * mLon[i] + h01 * b.lon + h11 * span * mLon[i + 1],
         alt: h00 * a.alt + h10 * span * m[i] + h01 * b.alt + h11 * span * m[i + 1],
         heading: 0,
         tSec: +(a.tSec + span * u).toFixed(2),
@@ -1502,13 +1534,19 @@ export const TEMPLATES = {
       // 1.2 km the separation to the formation at that moment was 970 m,
       // which is far too far to have seen anything. Holding the
       // glideslope down to 700 m from the threshold, at 37 m, puts the
-      // separation at break-off at 425 m, inside the 300 to 500 m Lucas
-      // asked for.
+      // separation at break-off at 480 m, inside the 300 to 500 m Lucas
+      // asked for. (Re-measured 2026-10-20 against both templates at the
+      // scenario's own 38 s spawn offset: 480 m horizontal and 8 m
+      // vertical at break-off. The 425 m written here before predated a
+      // change to one of the paths; scenario_without_isr.js already said
+      // 479 m, so that file was right and this one had drifted.)
       //
       // THE COST, AND IT IS UNAVOIDABLE. At 425 m, closing at roughly
       // 100 m/s combined, there are about four seconds. An A320 cannot
       // climb clear of a drone at 45 m in four seconds, so the closest
-      // approach becomes 176 m horizontally with 11 m of vertical gap.
+      // approach becomes 139 m horizontally with 13 m of vertical gap,
+      // at jet t = 383.4. (Same re-measurement as above. Unchanged by
+      // the interpolation fix: identical to the metre before and after.)
       // That is not a near miss, it is very nearly a collision.
       //
       // Which is the point of this clip. It is the WITHOUT ISR outcome:
