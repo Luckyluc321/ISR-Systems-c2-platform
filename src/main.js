@@ -23185,7 +23185,31 @@ async function main() {
     if (!el) return;
     let level = 'normal';
     try {
-      const open = (visibleEvents() || []).filter(e => e.status === 'active');
+      // UNDETECTED IS NOT A THREAT LEVEL.
+      //
+      // visibleEvents() applies tenant scope and nothing else.
+      // filteredEvents() in events.js adds `detected !== false`, and its
+      // comment says exactly why: "so the alert strip / receiver inbox
+      // don't fabricate a detection ahead of the sensor grid". This
+      // banner was never given the same filter, so it counted an event
+      // from the moment it SPAWNED rather than from the moment a sensor
+      // saw it.
+      //
+      // A coverage-gated track spawns with detected:false and is flipped
+      // true on first entry into any sensor radius. So today the banner
+      // reads ELEVATED while a hostile is still outside every sensor,
+      // which is a detection the grid has not made.
+      //
+      // The WITHOUT ISR run is the case that makes it obvious: it takes
+      // the site's sensors genuinely offline, nothing ever flips the
+      // flag, and the banner sat on ELEVATED for a track no sensor could
+      // hear. That is the entire premise of the demo, inverted.
+      //
+      // Not a with/without-ISR special case. One filter, matching the
+      // rule the rest of the app already follows, correct everywhere.
+      const open = (visibleEvents() || [])
+        .filter(e => e.status === 'active')
+        .filter(e => e.detected !== false);
       if (open.length) {
         level = open.some(e => e.classification === 'hostile') ? 'elevated' : 'guarded';
       }
