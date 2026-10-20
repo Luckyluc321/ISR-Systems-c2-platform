@@ -91,6 +91,23 @@ MH-60R Seahawks with Eskadrille 723 at Helicopter Wing Karup.
   none moved. 60,305 triangles and 2.1 MB, four small textures (0.4 MB
   in all), so the budget question here is geometry, not textures.
 
+### Baykar Sivrisinek — `public/aircraft/baykar_sivrisinek.glb`
+
+- **Author:** Özcan Özaltın — https://sketchfab.com/ozcan_36
+- **Licence:** CC-BY-4.0 — http://creativecommons.org/licenses/by/4.0/
+- **Source:** https://sketchfab.com/3d-models/baykar-bayraktar-sivrisinek-iha-tactical-uav-189fd9177caa41fc803daca65a10edb6
+- **Used for:** fixed-wing loitering-munition threat tracks. The asset
+  is Baykar's Sivrisinek, a catapult-launched loitering munition first
+  shown in April 2026, not a TB2, whatever its Sketchfab title says.
+- **Modified:** the twelve bolt-row nodes (`CIVATA`) keep their place in
+  the tree but lose their mesh by `scripts/strip_meshes.py`, because a
+  simplifier cannot take a bolt island below a few dozen triangles and
+  they were 680k of the 802k; the rest simplified with meshoptimizer by
+  `scripts/simplify_baykar_sivrisinek.sh`. Node count, animation and
+  extensions verified unchanged and the composed extent unmoved by
+  `scripts/verify_glb_simplify.py`. The propeller is its own node,
+  `SivriSinekIhaV2_Pervane`, spinning about its local Y.
+
 ### F-35A Lightning II — `public/aircraft/f-35a_lightning_ii.glb`
 
 - **Author:** shangus930 — https://sketchfab.com/shangus930

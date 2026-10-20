@@ -2203,6 +2203,20 @@ under `runAnimations: true`; leave that false and drive the node. 802k
 triangles: simplify with weld + simplify as the Air 3 was, never
 `gltf-transform optimize`, and verify the propeller node survives.
 
+**The map copy** is `public/aircraft/baykar_sivrisinek.glb`, 77,780
+triangles and 3.1 MB from 802k and 46.8 MB, made by
+`scripts/simplify_baykar_sivrisinek.sh`. The one thing that recipe does
+that the Air 3's did not: the twelve bolt-row nodes lose their mesh
+(`scripts/strip_meshes.py`), because 650k of the triangles were bolts
+and a simplifier cannot take a bolt island below a few dozen
+triangles; at any error bound the file floored at 220k. The nodes stay,
+so the tree is the same 34 nodes, with the propeller node and its clip
+and all three material extensions intact. The composed extent is 6 mm
+narrower in X, which is the bolt heads that stood proud of the
+wingtips, verified by measuring the bolt-free file before
+simplification. `scripts/verify_glb_simplify.py` checks all of that
+and is told to allow 7 mm for this file only.
+
 **Numbers to expect**, from the render, for the gate: 10 deg/s at
 36 m/s gives 32.6 deg of bank; a 4 m/s climb at 36 m/s gives 10.2 deg
 of pitch; 50 m/s level gives 2.1 deg, 28 m/s gives 5.2.
