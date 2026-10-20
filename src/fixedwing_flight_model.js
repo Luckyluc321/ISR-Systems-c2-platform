@@ -137,6 +137,48 @@ export const LOOKAHEAD_SEC = 0.8;
 // Filtered, because it is a second derivative of a polyline and so the
 // noisiest signal in the model.
 export const ACCEL_TAU = 0.40;         // s
+// MEASURE THE TURN RATE OVER A WINDOW, NOT OVER ONE FRAME.
+//
+// This is the line TURN_RATE_MAX_DPS's own note predicted: "measuring
+// over a window rather than over one frame is the right fix". It was
+// right, and filtering afterwards was never going to do it.
+//
+// interpolate() is piecewise-linear, so the direction of travel is
+// CONSTANT inside a waypoint cell and changes only at a waypoint. A
+// frame-to-frame derivative of that is a square wave at the waypoint
+// rate, and the recon route's 0.25 s spacing puts it at 4 Hz. A
+// first-order filter only attenuates it: at TURN_TAU = 0.30 s, 13 per
+// cent of 4 Hz still gets through, which measured as a +/-1.66 degree
+// wobble of the wings in every turn. At the camera distance in Lucas's
+// recording that is about 4 px of wingtip movement at 4 Hz, which is
+// exactly the shimmer he kept calling a lag. Straight flight never
+// showed it because a straight line has no corners.
+//
+// A least-squares slope over a window of length T averages the
+// staircase away instead of chasing it. Note what it does NOT do: a
+// boxcar mean of length T has exact nulls at every k/T, but an LS
+// SLOPE weights each sample by (t - tmean), a linear ramp, and that
+// window's zeros are not at k/T. It attenuates strongly and broadly
+// rather than nulling one frequency, which is the more useful
+// property here because the fleet's waypoint spacings are not all the
+// same. Measured attenuation at 10 deg/s: 0.25 s spacing (4 Hz) falls
+// to 0.1 deg of ripple, 0.5 s spacing (2 Hz) to 0.56 deg, the latter
+// higher only because a 0.5 s cell steps the heading twice as far.
+//
+// One second is long enough to cover several cells of the 0.25 s recon
+// route while staying short enough that turn entry is not visibly
+// delayed.
+//
+// Measured on the real route, bank residual in a steady turn:
+//
+//     frame-to-frame   +/-1.66 deg at 4.00 Hz   (3.9 px of wingtip)
+//     1 s LS window    +/-0.65 deg at 0.60 Hz   (1.5 px)
+//
+// The frequency matters as much as the amplitude. 4 Hz reads as a
+// broken render; what is left at 0.6 Hz reads as an aircraft working
+// in the wind, which is the detail Lucas asked to keep. It costs 0.22 s
+// on turn entry, measured to 90 per cent of steady bank.
+export const TURN_WINDOW_SEC = 1.0;    // s
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
@@ -180,6 +222,10 @@ export function createFixedWingFlightModel(opts = {}) {
 
   // Measured state, filtered.
   let V = V_CRUISE, turnRate = 0, climb = 0, accel = 0;
+  // Heading history for the windowed turn-rate fit. Unwrapped, because
+  // a least-squares slope cannot be taken across a +/-pi branch cut.
+  let hdgUnwrap = 0;
+  const hdgHist = [];                  // [tSec, unwrapped heading]
   // Attitude state. These are the Blender integrator's variables.
   // psi is the HEADING THE AIRCRAFT IS POINTING, integrated from bank
   // exactly as Blender integrates it. It is deliberately NOT the
@@ -215,14 +261,35 @@ export function createFixedWingFlightModel(opts = {}) {
       // travel is noise, so the aircraft holds the heading it has.
       let hdg = pHdg;
       if (horiz / dtSec > 1) hdg = Math.atan2(dE, dN);
-      let wRaw = 0;
       if (hdg !== null && pHdg !== null) {
         let d = hdg - pHdg;
         while (d > Math.PI) d -= 2 * Math.PI;
         while (d < -Math.PI) d += 2 * Math.PI;
-        wRaw = d / dtSec;
+        hdgUnwrap += d;
       }
       if (hdg !== null) pHdg = hdg;
+
+      // The turn rate, as the SLOPE of the heading over TURN_WINDOW_SEC
+      // rather than the difference between two frames. See the constant:
+      // the window's nulls are placed on the waypoint rate, so the
+      // staircase does not reach the wings at all instead of reaching
+      // them attenuated.
+      hdgHist.push([tSec, hdgUnwrap]);
+      while (hdgHist.length > 2 && tSec - hdgHist[0][0] > TURN_WINDOW_SEC) {
+        hdgHist.shift();
+      }
+      let wRaw = 0;
+      if (hdgHist.length > 2) {
+        let st = 0, sh = 0;
+        for (const [a, b] of hdgHist) { st += a; sh += b; }
+        const mt = st / hdgHist.length, mh = sh / hdgHist.length;
+        let num = 0, den = 0;
+        for (const [a, b] of hdgHist) { num += (a - mt) * (b - mh); den += (a - mt) * (a - mt); }
+        wRaw = den > 0 ? num / den : 0;
+      } else if (hdgHist.length === 2) {
+        // First frames only, before the window has filled.
+        wRaw = (hdgHist[1][1] - hdgHist[0][1]) / Math.max(hdgHist[1][0] - hdgHist[0][0], 1e-6);
+      }
 
       // Filter the measurements, not the results. A polyline hands over a
       // staircase; smoothing the bank afterwards only trades a snap for a

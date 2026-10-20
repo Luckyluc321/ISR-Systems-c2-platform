@@ -323,6 +323,78 @@ check('the propeller reads MEASURED acceleration, not a speed error',
   'dV must come from the measured acceleration of the filtered speed. '
   + '(V_CRUISE - V) * KV is the commanded form and has the wrong sign here.');
 
+// ── the staircase must not reach the wings ────────────────────────
+// The sign and smoothness gates above both passed while the aircraft
+// visibly shimmered in every turn, because they measure the NOSE and
+// this defect is in the WINGS. A frame-to-frame derivative of a
+// piecewise-linear path is a square wave at the waypoint rate; a
+// first-order filter only attenuates it, and 13% of 4 Hz got through
+// as a +/-1.66 degree roll wobble. Straight flight never showed it,
+// which is why it survived three rounds.
+function bankRipple({ turnDps, stepSec, secs = 14, fps = 60 }) {
+  const fm = FM.createFixedWingFlightModel({ rps: 20 });
+  const dt = 1 / fps, speed = FM.V_CRUISE;
+  let lat = 55.6, lon = 12.7, hdg = 0;
+  const mLat = 111320, mLon = 111320 * Math.cos(lat * DEG);
+  const wps = [{ t: 0, lat, lon }];
+  for (let t = stepSec; t <= secs; t += stepSec) {
+    hdg += turnDps * DEG * stepSec;
+    lat += (speed * Math.cos(hdg) * stepSec) / mLat;
+    lon += (speed * Math.sin(hdg) * stepSec) / mLon;
+    wps.push({ t, lat, lon });
+  }
+  const bank = [];
+  for (let i = 0; i * dt <= secs - stepSec; i++) {
+    const t = i * dt;
+    let a = wps[0], b = wps[1];
+    for (let k = 0; k < wps.length - 1; k++) {
+      if (t >= wps[k].t && t <= wps[k + 1].t) { a = wps[k]; b = wps[k + 1]; break; }
+    }
+    const f = (b.t - a.t) === 0 ? 0 : (t - a.t) / (b.t - a.t);
+    const o = fm.update(a.lat + (b.lat - a.lat) * f, a.lon + (b.lon - a.lon) * f, 1000, dt);
+    if (o) bank.push(o.bankDeg);
+  }
+  // Discard the turn entry, then measure the amplitude at exactly the
+  // waypoint frequency by projecting onto one sine and one cosine.
+  const y = bank.slice(Math.round(5 * fps));
+  const n = y.length, f0 = 1 / stepSec;
+  const mean = y.reduce((p, c) => p + c, 0) / n;
+  let re = 0, im = 0;
+  for (let i = 0; i < n; i++) {
+    const a = 2 * Math.PI * f0 * i / fps;
+    re += (y[i] - mean) * Math.cos(a);
+    im += (y[i] - mean) * Math.sin(a);
+  }
+  return 2 * Math.hypot(re, im) / n;      // amplitude in degrees
+}
+
+const rip = bankRipple({ turnDps: 10, stepSec: 0.25 });
+check('the waypoint staircase does not shake the wings',
+  rip < 0.35,
+  `the bank carries ${rip.toFixed(2)} deg of ripple at the 4 Hz waypoint rate. `
+  + 'A polyline differentiated frame-to-frame produces a square wave at that '
+  + 'frequency and TURN_TAU only attenuates it. Measure the turn rate as a '
+  + 'least-squares SLOPE over TURN_WINDOW_SEC instead: a window of length T '
+  + 'has nulls at every k/T, so a 1 s window removes it outright rather than '
+  + 'damping it. This read as the aircraft lagging through every turn.');
+
+check('the turn rate is measured over a window, not between two frames',
+  FM.TURN_WINDOW_SEC >= 4 * 0.25,
+  `TURN_WINDOW_SEC is ${FM.TURN_WINDOW_SEC}. It has to span several waypoint `
+  + 'cells of the route it is flying, or there is nothing to average over. '
+  + "The recon route's cells are 0.25 s.");
+
+// Held to a looser bound than the 0.25 s case ON PURPOSE, and not
+// because the mechanism is weaker. At a fixed turn rate a 0.5 s cell
+// steps the heading twice as far as a 0.25 s cell, so it excites twice
+// as hard. No fixed-wing template in the fleet actually uses 0.5 s
+// today; this is here so one can be added without the shimmer coming
+// back unnoticed.
+const rip2 = bankRipple({ turnDps: 10, stepSec: 0.5 });
+check('a coarser 0.5 s spacing stays controlled too',
+  rip2 < 0.8,
+  `${rip2.toFixed(2)} deg of ripple at 2 Hz, against 0.8 allowed.`);
+
 if (failures) {
   console.log(`\ncheck:fixedwing-flight FAILED — ${failures} assertion${failures === 1 ? '' : 's'}`);
   process.exit(1);

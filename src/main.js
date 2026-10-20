@@ -6943,9 +6943,17 @@ async function main() {
   //   __isr_fixedwing_tuning = { scale: 1.2 }   to try a size live
   const _FIXEDWING_MODEL = {
     uri: '/aircraft/baykar_sivrisinek.glb',
-    // The asset is 4.24 units nose to tail. A Sivrisinek is about 2.4 m
-    // long, so a little under half size renders it life-sized. Map
-    // symbols are drawn larger than life on purpose, as the quad is.
+    // The asset is 4.24 units nose to tail, and 4.24 * 0.9 = 3.82 m.
+    //
+    // That is life-sized, and the number was right for the wrong
+    // reason: the comment here used to say "a Sivrisinek is about 2.4 m
+    // long, so a little under half size", which is neither the real
+    // length nor what 0.9 does. The real aircraft is 3.8 m long with a
+    // 3.2 m span, so its span is SHORTER than its length and 0.9 is
+    // correct. Left at 0.9, with the arithmetic written down.
+    //
+    // Named Mohajer-2 in the scenario, not Sivrisinek. See the template
+    // in drones.js for why.
     scale: 0.9,
     headingOffsetDeg: 270, pitchSign: 1, rollSign: 1, pitchOffsetDeg: 0,
   };
@@ -23258,7 +23266,7 @@ async function main() {
     cph: [
       { key: 'cph_quad_hostile', label: 'Quadcopter, hostile' },
       { key: 'cph_fixedwing_hostile', label: 'Fixed wing, hostile' },
-      { key: 'cph_recon_hostile', label: 'Reconnaissance drone (HALE), hostile', cls: 'recon' },
+      { key: 'cph_recon_hostile', label: 'Mohajer-2 reconnaissance, hostile', cls: 'recon' },
       { key: 'cph_jet_friendly', label: 'Jet (SAS 743), friendly', cls: 'friendly' },
       { key: 'cph_jet_goaround', label: 'Jet (SAS 743), go-around at 185 ft', cls: 'friendly' },
       { key: 'cph_jet_goaround_early', label: 'Jet (SAS 743), crew-spotted go-around at 37 m', cls: 'friendly' },
@@ -23642,7 +23650,7 @@ async function main() {
     cph_shahed238_amalienborg: { threat: 'Shahed-238 (jet)',       pathLabel: 'Øresund → CPH → Amalienborg' },
     cph_quad_hostile:          { threat: 'Quadcopter, hostile',    pathLabel: 'Perimeter ingress' },
     cph_fixedwing_hostile:     { threat: 'Fixed-wing UAS',         pathLabel: 'Recon transit' },
-    cph_recon_hostile:         { threat: 'HALE reconnaissance',    pathLabel: 'High-altitude loiter' },
+    cph_recon_hostile:         { threat: 'Tactical reconnaissance', pathLabel: 'High-altitude loiter' },
     cph_jet_friendly:          { threat: 'Jet (SAS 743), friendly',pathLabel: 'Filed airliner route' },
     cph_jet_goaround:          { threat: 'Jet (SAS 743), friendly',pathLabel: 'Missed approach, 04R' },
     cph_jet_goaround_early:    { threat: 'Jet (SAS 743), friendly',pathLabel: 'Crew-spotted missed approach, 37 m at 700 m' },

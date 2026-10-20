@@ -2554,3 +2554,140 @@ Reading `blender_fixedwing_flight_demo.py` properly, rather than
 consulting the constants I had already lifted out of it, settled the
 causal order, the sign convention, the propeller question and the
 throttle bug in one pass.
+
+## 8ac. The lag was a 4 Hz shimmer in the wings, and only in turns
+
+Lucas, after 8ab: *"it is soooooo close. Still slightly tilting/lagging
+as before. The small minor tilt when it flies straight ahead is a great
+detail, which showcases the wind hitting it. The turning right and left
+lagging (like in the video) is still there though."*
+
+That sentence is the whole diagnosis, and it took three rounds to earn
+it. **Straight flight was fine and turns were not**, which rules out
+every mechanism that does not depend on the heading changing.
+
+### What the recording ruled out
+
+Lucas recorded the event, which made it possible to eliminate things
+instead of guessing:
+
+- **Not the frame rate.** 52 new frames per second, 7 per cent
+  duplicates, worst hold 36 ms over a 6 s window.
+- **Not the camera.** `trackedEntity` builds its frame from
+  `VelocityVectorProperty`, which returns `undefined` for a constant
+  position property, so the view falls through to east-north-up rather
+  than a velocity-aligned frame. `requestRenderMode` is off.
+- **Not readable from the video at all.** Two attempts at tracking the
+  airframe's angle both failed: a binary warm mask correlates −0.87
+  with its own blob size, and intensity weighting correlates −0.93 with
+  total brightness, because the propeller sweeps through the
+  measurement at 19–22 Hz, matching `propRps` of 12–20. Two of three
+  video measurements were measuring the tracker.
+
+### What it was
+
+Detrend the bank through a steady turn and the dominant frequency is
+**4.00 Hz, exactly the waypoint rate**, at ±1.66 degrees.
+
+`interpolate()` is piecewise-linear, so direction of travel is constant
+inside a cell and changes only at a waypoint. A frame-to-frame
+derivative of that is a **square wave at the waypoint rate**, and
+`TURN_TAU = 0.30 s` only attenuates it: at 4 Hz, 13 per cent gets
+through. That reached the wings as a ±1.66 degree roll wobble, about
+4 px of wingtip movement at the recording's camera distance. Straight
+flight never showed it because a straight line has no corners.
+
+8aa fixed the *amplitude* of the bank and 8ab fixed its *sign and
+causality*. Neither touched how the rate was **measured**, which is
+where the defect always was. `TURN_RATE_MAX_DPS`'s own note had said so
+from the beginning: *"measuring over a window rather than over one
+frame is the right fix and it is what TURN_TAU does."* The first half
+of that sentence was right and the second half was wrong.
+
+### The fix, and one piece of theory I got wrong on the way
+
+The turn rate is now the **least-squares slope of the unwrapped heading
+over `TURN_WINDOW_SEC = 1.0 s`**, rather than the difference between
+two frames.
+
+I first justified the window length by claiming its spectral nulls sit
+at every `k/T`, so a 1 s window would null 1, 2, 3 and 4 Hz. **That is
+true of a boxcar mean and false of a least-squares slope**, which
+weights each sample by `(t − t̄)`, a linear ramp, whose zeros are not at
+`k/T`. The gate caught it: a 0.5 s spacing came out at 0.56 degrees
+where a genuine null would have given nearly nothing. The window
+attenuates strongly and broadly rather than nulling one frequency,
+which is the more useful property anyway, since the fleet's waypoint
+spacings are not all the same. The comment and the gate now say that.
+
+Measured on the real route, bank residual in a steady turn:
+
+| | amplitude | dominant |
+|---|---|---|
+| frame-to-frame | ±1.66 deg (3.9 px) | **4.00 Hz** |
+| 1 s LS window | ±0.66 deg (1.5 px) | 0.60 Hz |
+
+**The frequency matters as much as the amplitude.** 4 Hz reads as a
+broken render; 0.6 Hz reads as an aircraft working in the wind, which
+is the detail Lucas explicitly asked to keep. Turn entry is 0.22 s
+later, measured to 90 per cent of steady bank.
+
+It cleaned up straight flight too, ±2.21 down to ±0.85 degrees, and
+that number is worth understanding before anyone "restores" it: the
+turbulence constants are untouched, and ±0.85 is what the two roll
+sines actually sum to. The extra ±1.4 was staircase noise, not wind.
+
+A sweep of the heading-hold gain confirmed `HEADING_HOLD_K = 0.8` should
+stay: dropping it to 0.35 buys ±0.2 degrees of ripple and costs 0.8
+degrees of crab and 0.3 s of turn entry.
+
+### The gate gap this exposed
+
+Every assertion added in 8ab measures the **nose**, and this defect was
+in the **wings**. The sign and smoothness gates both passed while the
+aircraft shimmered through every turn. Now `bankRipple()` flies a
+staircase turn, projects the bank onto the waypoint frequency and fails
+above 0.35 degrees, with a second case at 0.5 s spacing held to 0.8
+because a coarser cell steps the heading twice as far and so excites
+twice as hard. No fixed-wing template uses 0.5 s today; that case is
+there so one can be added without the shimmer returning unnoticed.
+
+Three rounds, three gates, and each time the gate that would have
+caught it was the one nobody thought to write, because each measured
+the quantity the previous fix was about.
+
+## 8ad. The airframe was a Turkish attack munition called a Reaper
+
+Renaming it turned up three errors that had nothing to do with flight.
+
+- **`droneType` was `'HALE reconnaissance (MQ-9 Reaper class)'`.** A
+  Reaper is 11 m long with a 20 m span doing 482 km/h. This airframe is
+  3.8 m doing 130. HALE means high altitude long endurance; this is a
+  small tactical type.
+- **The asset is a Baykar Sivrisinek, which is Turkish**, so a NATO
+  member's aircraft was flying a hostile incursion over Copenhagen.
+- **It is not a reconnaissance aircraft at all.** Janes describes the
+  Sivrisinek as a surface-to-surface one-way attack UAV, that is, a
+  loitering munition. The role label was wrong before the flag was.
+
+Now **Mohajer-2** (Qods Aviation, Iran): confirmed pusher propeller,
+confirmed reconnaissance-only role, confirmed in service, 2.91 m long.
+The mismatch is stated rather than hidden, in the template: the real
+Mohajer-2 is twin-boom with twin rudders, where the asset is a single
+fuselage with a V-tail. The alternatives were CH-91, a better
+configuration match including the inverted-V tail but with weak
+dimensional and in-service data, and Orlan-10, the only one of the three
+with a real NATO airspace record, which has a nose-mounted tractor
+propeller and so cannot reuse this asset.
+
+Also corrected: the scale comment claimed *"a Sivrisinek is about 2.4 m
+long, so a little under half size"*, yet `scale: 0.9` renders 4.24 units
+as 3.82 m, which matches the real aircraft's 3.8 m. **The constant was
+right and its stated reason was wrong**, which is the kind of comment
+that survives until someone trusts it.
+
+One thing deliberately left alone: `V_CRUISE = 36.0` m/s is 130 km/h,
+which is the real Sivrisinek's *maximum* rather than its 102 km/h
+cruise. It is a Blender parity constant checked against
+`blender_fixedwing_flight_demo.py`, so changing it breaks the demo and
+the gate together. Flagged, not changed.

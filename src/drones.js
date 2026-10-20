@@ -1753,7 +1753,7 @@ export const TEMPLATES = {
     durationSec: 492,
   },
 
-  // ── Recon drone, HALE (Reaper/Global-Hawk class), high altitude circular loiter ──
+  // ── Recon drone, small tactical fixed-wing, high altitude circular loiter ──
   // Detected by passive coherent location (PCL): our RF mesh triangulates reflections
   // of civil broadcast signals (DVB-T, FM) bouncing off the target. Backed by
   // SATCOM downlink capture on Ku/Ka band (needs wideband SDR). Lower confidence
@@ -1769,7 +1769,25 @@ export const TEMPLATES = {
     classification: 'hostile',
     threat: 'medium',
     platform: 'fixed-wing',
-    droneType: 'HALE reconnaissance (MQ-9 Reaper class)',
+    // Qods Mohajer-2, Iran. Replaces "HALE reconnaissance (MQ-9 Reaper
+    // class)", which was wrong on every axis: a Reaper is 11 m long
+    // with a 20 m span doing 482 km/h, where this airframe is 3.8 m
+    // doing 130. "HALE" means high altitude long endurance and this is
+    // a small tactical type.
+    //
+    // The asset is a Baykar Sivrisinek, which is Turkish, so a NATO
+    // member's aircraft was flying the hostile incursion. It is also
+    // not a reconnaissance aircraft at all: Janes describes it as a
+    // surface-to-surface one-way attack UAV, that is, a loitering
+    // munition.
+    //
+    // Mohajer-2 is the closest real reconnaissance type we could
+    // source: confirmed pusher propeller, confirmed reconnaissance-only
+    // role, confirmed in service, 2.91 m long against this asset's
+    // 3.8 m. Known mismatch, stated rather than hidden: the real
+    // Mohajer-2 is twin-boom with twin rudders, where the asset is a
+    // single fuselage with a V-tail.
+    droneType: 'Mohajer-2 tactical reconnaissance',
     confidence: 0.62,
     confidenceTrend: 'Detected on ingress at 800 m, climbing beyond passive-sensor ceiling',
     contributingSensors: [
@@ -1784,7 +1802,7 @@ export const TEMPLATES = {
       rfMatch: 'Loiter signature 71%',
       modality: 'RF passive + IR thermal',
       evidenceSize: '84.6 MB',
-      note: 'HALE recon platform. Ingressed at 800 m, initial pass detected clearly by passive fused mesh. Climbed to 3,000 m loiter altitude, exceeding the sensor grid ceiling around 2 km. Track lost as it climbed past the passive-sensor detection envelope. Active radar hardware required for sustained detection above 2 km.',
+      note: 'Tactical recon platform. Ingressed at 800 m, initial pass detected clearly by passive fused mesh. Climbed to 3,000 m loiter altitude, exceeding the sensor grid ceiling around 2 km. Track lost as it climbed past the passive-sensor detection envelope. Active radar hardware required for sustained detection above 2 km.',
     },
     waypoints: _RECON_ROUTE,
     durationSec: Math.round(_RECON_ROUTE[_RECON_ROUTE.length - 1].tSec),
