@@ -21758,7 +21758,7 @@ async function main() {
   // Records the RENDERED orientation every frame for N seconds and
   // reports how it moved. Written because two fixes in a row improved
   // their own numbers while Lucas still saw the aircraft lag, and the
-  // offline model measures clean: 0.12 deg of bank per frame at the
+  // offline model measures clean: 0.04 deg of bank per frame at the
   // median. If the browser disagrees with that, the defect is between
   // the model and the screen, and no further change to the physics can
   // reach it.
@@ -21847,8 +21847,11 @@ async function main() {
       // heading and 6.5 on roll.
       console.log(`  SPREAD  heading p90/p50 ${(pct(dh, 0.9) / Math.max(pct(dh, 0.5), 1e-9)).toFixed(1)}x  `
         + `position p90/p50 ${(pct(ds, 0.9) / Math.max(pct(ds, 0.5), 1e-9)).toFixed(1)}x`);
-      console.log('  offline reference at a constant dt: heading p50 0.0063 max 0.1856, '
-        + 'roll p50 0.1174 max 0.7605, no frozen frames.');
+      console.log('  offline reference at a constant dt, measured on this route '
+        + 'with the 1 s turn-rate window: heading p50 0.0029 p99 0.1899, '
+        + 'roll p50 0.0386 p99 0.6189, pitch p50 0.0062 p99 0.0667, '
+        + 'no frozen frames. Roll p99 is the 40 deg/s roll-rate limit on '
+        + 'turn entry and is meant to be there.');
       window.__isr_fwTraceRows = rows;
     }
     console.log(`[fixedwing trace] recording ${seconds}s...`);
