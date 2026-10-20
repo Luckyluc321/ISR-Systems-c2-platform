@@ -960,12 +960,61 @@ async function main() {
     rotorRps:         12,
   };
 
-  // ── Bing Maps Aerial (asset 2) ──
+  // ── BASE IMAGERY: Google 2D on our own key, Bing from ion as fallback ──
+  //
+  // This layer was the quota wall, not the 3D one. The ion mail that
+  // triggered the move read:
+  //
+  //     Imagery sessions:               1022 of 1000   OVER
+  //     Google Photorealistic 3D Tiles:  953 of 1000
+  //
+  // Bing loads at boot in EVERY profile, so every page load opened an ion
+  // imagery session whether or not anything Danish was drawn on top.
+  //
+  // Google 2D comes from the Map Tiles API on the SAME key as the 3D
+  // tiles, so no new account, project or billing line. It is also billed
+  // far more gently, because 2D is metered per TILE and 3D per session:
+  //
+  //     100,000 tiles free per month, then USD 0.60 per 1,000
+  //
+  // against an ion allowance of 1,000 SESSIONS. Not a limit this app can
+  // reach.
+  //
+  // AND BING IS GOING AWAY REGARDLESS. Microsoft is retiring Bing Maps
+  // and Cesium is migrating off it, so a direct Bing key would only have
+  // to be replaced again.
+  //
+  // THE VARIABLE IS STILL bingLayer ON PURPOSE. Everything below reads it
+  // to set dayAlpha and nightAlpha so the Earth-at-Night city lights bleed
+  // through on the dark side. Only the PROVIDER changes here; the day and
+  // night handling is untouched.
+  //
+  // NO KEY, NO CHANGE: without VITE_GOOGLE_MAP_TILES_KEY this is the ion
+  // Bing path exactly as before, which is what keeps 1573 on its old
+  // behaviour.
+  //
+  // The imagery will not be pixel-identical to Bing. Different captures,
+  // different colour grading. Resolution over Denmark is equal or better.
   let bingLayer = null;
   try {
-    const bing = await Cesium.IonImageryProvider.fromAssetId(2);
-    bingLayer = viewer.imageryLayers.addImageryProvider(bing);
-  } catch (err) { console.error('Bing Aerial failed:', err); }
+    const _gKey2d = import.meta.env.VITE_GOOGLE_MAP_TILES_KEY;
+    if (_gKey2d) {
+      Cesium.GoogleMaps.defaultApiKey = _gKey2d;
+      const g2d = await Cesium.Google2DImageryProvider.fromUrl({ mapType: 'satellite' });
+      bingLayer = viewer.imageryLayers.addImageryProvider(g2d);
+      console.log('[imagery] Google 2D satellite via OUR OWN Google key — no ion imagery session');
+    } else {
+      const bing = await Cesium.IonImageryProvider.fromAssetId(2);
+      bingLayer = viewer.imageryLayers.addImageryProvider(bing);
+      console.log('[imagery] Bing Aerial via ion asset 2 — this is the session the quota counts');
+    }
+  } catch (err) {
+    console.error('Base imagery failed, falling back to ion Bing:', err);
+    try {
+      const bing = await Cesium.IonImageryProvider.fromAssetId(2);
+      bingLayer = viewer.imageryLayers.addImageryProvider(bing);
+    } catch (err2) { console.error('Bing Aerial failed too:', err2); }
+  }
 
   // ── Earth at Night (asset 3812) ──
   let earthAtNightLayer = null;
