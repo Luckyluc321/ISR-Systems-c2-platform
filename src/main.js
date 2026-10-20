@@ -19804,12 +19804,32 @@ async function main() {
         // where EXIT sometimes means "left the site" and sometimes means
         // "we stopped hearing it" cannot be read. Coverage transitions
         // keep their own markers (OUT OF RANGE, REACQUIRED).
-        _updatePerimeterCrossings(event, state, isInside, p);
+        // SAME RULE AS THE MARKERS AND THE BANNER: nothing observed it,
+        // so nothing is recorded. Gating processDroneSiteMarkers covered
+        // the writer whose labels carry a site code; it was not the only
+        // one. This legacy origin-only path writes event.entry and
+        // event.exit on GEOMETRY alone and drops no pin itself, and
+        // _ensureEventMarkersFromData later recreates one from the
+        // field — which is why the surviving label read "ENTRY 09:42:59Z"
+        // with no "· CPH" on it. Three writers, as the note below says,
+        // and gating one left two.
+        //
+        // The WRITE is gated rather than the recreate, because
+        // closeEvent, the cordon dispatch and the post-incident report
+        // all read event.entry and event.exit. An incursion no sensor
+        // detected should not appear in any of them either.
+        //
+        // Coverage reaches about a kilometre past the fenced perimeter,
+        // so a real track is detected long before it crosses one. This
+        // can only fire where that is untrue: a site with its sensors
+        // off.
+        if (event.detected !== false) _updatePerimeterCrossings(event, state, isInside, p);
 
         // ENTRY marker on first inside crossing. Multi-site tracks use
         // processPerSiteMarkers for all sites (including origin) so this
         // legacy origin-only path is skipped for them to avoid duplicates.
-        if (isInside && !state.entryDropped && !event.multiSiteTrack) {
+        if (isInside && !state.entryDropped && !event.multiSiteTrack
+            && event.detected !== false) {
           state.entryDropped = true;
           state.wasInside = true;
           const entryTime = new Date().toISOString().slice(11, 19);
@@ -19847,7 +19867,8 @@ async function main() {
         // Marker drops but track continues playing — we still have a fading signal.
         const perimeterExit = state.wasInside && !isInside;
         const coverageExit  = state.wasInCoverage && cov && !cov.inCoverage;
-        if ((perimeterExit || coverageExit) && !state.exitDropped && !event.multiSiteTrack) {
+        if ((perimeterExit || coverageExit) && !state.exitDropped && !event.multiSiteTrack
+            && event.detected !== false) {
           state.exitDropped = true;
           const exitTime = new Date().toISOString().slice(11, 19);
           const lastSensor = cov?.nearest?.id || (event.contributingSensors[0]?.id) || '';
