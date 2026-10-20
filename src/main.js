@@ -17610,6 +17610,12 @@ async function main() {
         // fly does 20. This is what guarantees it cannot snap however
         // stepped the incoming heading is.
         maxRollRateDegS: 6,
+        // Maximum pitch rate, degrees per second. An A320 rotates at
+        // about 3. The path demands up to 27 at the go-around, which is
+        // a step in its vertical profile rather than a climb the
+        // aircraft is making. See the limiter for why 3 does not make
+        // the emergency climb any shallower.
+        maxPitchRateDegS: 3,
         // BOTH NEGATIVE, and this file already wrote down why. The
         // Shahed's note at the top of this section states the rule: a
         // nose on body -X needs heading +90, and "also reverses Cesium's
@@ -17661,6 +17667,7 @@ async function main() {
       const derotateMs     = T.derotateMs         ?? 3000;
       const yawRateSmooth  = T.yawRateSmoothing   ?? 0;
       const maxRollRate    = ((T.maxRollRateDegS  ?? 0) * Math.PI) / 180;
+      const maxPitchRate   = ((T.maxPitchRateDegS ?? 0) * Math.PI) / 180;
       const wobbleScale    = T.wobbleScale        ?? 0.55;
       const wobbleFromAglM = T.wobbleFromAglM     ?? 300;
       const headingSmooth  = T.headingSmoothing   ?? 0.18;
@@ -17765,7 +17772,39 @@ async function main() {
       }
       _prevHeadingRad = _smoothedHeading;
 
-      _smoothedPitch += (targetPitch - _smoothedPitch) * pitchSmooth;
+      // PITCH RATE LIMIT. The same argument as the roll limit below, on
+      // the axis it was never applied to.
+      //
+      // The position comes from the scenario; the NOSE is derived from
+      // it, by comparing where the aircraft is against where it was. So
+      // a step in the path's vertical profile becomes a step in the
+      // nose angle. Measured on cph_jet_goaround_early, the template the
+      // WITHOUT ISR run flies:
+      //
+      //   heading change per 0.25 s step   max 0.7 deg      fine
+      //   climb angle change per step      max 6.7 deg      27 deg/s
+      //
+      // An A320 rotates at about 3 deg/s. The path was demanding nine
+      // times that, and pitchSmoothing is a lerp: it lags a step but
+      // cannot bound how fast it moves. That is the go-around snapping
+      // instead of rotating, and the smaller repeated steps on short
+      // final are the same thing at 5.6 deg/s.
+      //
+      // THIS DOES NOT FLATTEN THE CLIMB, which was the first question
+      // asked of it. The path takes the climb angle from -2 to +13.6 deg
+      // over THIRTY SECONDS, an average of 0.22 deg/s, so a 3 deg/s
+      // limit leaves the real rotation about fourteen times more headroom
+      // than it uses. It can only clip the spike. Checked at 1, 2, 3, 4,
+      // 6 and 10 deg/s: the lag at the END of the rotation is 0.00 deg at
+      // every one of them. The nose always arrives at the full climb
+      // attitude; it just takes an aircraft's time to get there.
+      let _dPitch = (targetPitch - _smoothedPitch) * pitchSmooth;
+      if (maxPitchRate > 0) {
+        const capP = maxPitchRate * dt;
+        if (_dPitch >  capP) _dPitch =  capP;
+        if (_dPitch < -capP) _dPitch = -capP;
+      }
+      _smoothedPitch += _dPitch;
       // ROLL RATE LIMIT. An airframe cannot change bank instantly, and
       // this is the backstop that makes a visible snap impossible
       // whatever the input does.
