@@ -684,6 +684,127 @@ function _showcaseWaypoints() {
 }
 const _SHOWCASE_PATH = _showcaseWaypoints();
 
+// ── THE FIXED-WING RECON RUN, BUILT FROM KEY POINTS ────────────────
+//
+// The old route was eight waypoints: a corkscrew of four positions
+// repeated twice, directly over the airport, climbing 800 to 3000 m at
+// 20 m/s. That is a 25 degree flight path against a wing's 12 degree
+// limit, with a 90 degree heading change every 15 seconds. No attitude
+// model can make that look like an aeroplane, and the first attempt to
+// fly the Baykar on it looked exactly as bad as the numbers said.
+//
+// This is built the way an approach is flown: key points the aircraft
+// must pass, with proper turns filleted between them at a radius the
+// airframe can hold.
+//
+//   36 m/s, 280 m radius  =  25.3 degrees of bank, 9 deg/s
+//   climb capped at 6.4 m/s, under the model's 7.5 at this speed
+//
+// The shape, east to east:
+//
+//   start 3.2 km east, OUTSIDE the perimeter and outside coverage, so
+//   it appears as it crosses in at t=27
+//   due west to establish the inbound track
+//   SOFT LEFT 43, the track bending south, starting to climb
+//   RIGHT 92, the big visible one, climbing through 900 m
+//   over the EAST HANGARS, which it passes within 50 m of
+//   across the MIDDLE OF THE SITE, within 92 m
+//   coming about to the south, then out east over the Oresund,
+//   descending, leaving coverage at t=177
+//
+// Emitted every 0.25 s. Altitudes are NOT rounded to whole metres: at
+// 36 m/s a step is 9 m of travel and about 1.5 m of climb, so rounding
+// makes each step 1 or 2 m and the measured climb rate reads 4 or 8 m/s
+// instead of 6. The flight model differentiates this path, so a
+// staircase in the altitude becomes a staircase in the pitch.
+function _reconRouteWaypoints() {
+  const D = Math.PI / 180, V = 36, R = 280, EMIT = 0.25;
+  const LAT0 = 55.618, LON0 = 12.656;
+  const M_LAT = 111320, M_LON = 111320 * Math.cos(LAT0 * D);
+  // metres east, north of the airport centre, and the altitude to hold
+  const P = [
+    { e: 3200, n:  150, alt: 600 },   // start, east, outside the perimeter
+    { e: 2300, n:  150, alt: 620 },   // steady west, entering coverage
+    { e: 1600, n: -500, alt: 720 },   // soft LEFT, the track bends south
+    { e:  880, n:  334, alt: 900 },   // RIGHT turn, over the east hangars
+    { e: -150, n:   60, alt: 900 },   // across the middle of the site
+    { e:  700, n: -900, alt: 820 },   // coming about to the south
+    { e: 3000, n: -350, alt: 520 },   // exit east over the Oresund
+  ];
+  const sub = (a, b) => ({ e: a.e - b.e, n: a.n - b.n });
+  const len = (v) => Math.hypot(v.e, v.n);
+  const unit = (v) => { const L = len(v); return { e: v.e / L, n: v.n / L }; };
+
+  const path = [];
+  let cursor = { ...P[0] };
+  for (let i = 0; i < P.length - 1; i++) {
+    const u = unit(sub(P[i + 1], P[i]));
+    let arcIn = 0, arc = null;
+    if (i < P.length - 2) {
+      const u2 = unit(sub(P[i + 2], P[i + 1]));
+      let th = Math.atan2(u2.e, u2.n) - Math.atan2(u.e, u.n);
+      while (th > Math.PI) th -= 2 * Math.PI;
+      while (th < -Math.PI) th += 2 * Math.PI;
+      const d = R * Math.tan(Math.abs(th) / 2);
+      const st = { e: P[i + 1].e - d * u.e, n: P[i + 1].n - d * u.n };
+      const sgn = Math.sign(th);
+      const c = { e: st.e + sgn * R * u.n, n: st.n - sgn * R * u.e };
+      arc = { c, from: Math.atan2(st.e - c.e, st.n - c.n), th, sgn };
+      arcIn = d;
+    }
+    path.push({ kind: 'line', a: { ...cursor },
+      b: { e: P[i + 1].e - arcIn * u.e, n: P[i + 1].n - arcIn * u.n } });
+    if (arc) {
+      path.push({ kind: 'arc', ...arc });
+      const end = arc.from + arc.th;
+      cursor = { e: arc.c.e + R * Math.sin(end), n: arc.c.n + R * Math.cos(end) };
+    }
+  }
+  const segLen = path.map(sg => sg.kind === 'line' ? len(sub(sg.b, sg.a)) : Math.abs(sg.th) * R);
+  const total = segLen.reduce((a, b) => a + b, 0);
+  const at = (s) => {
+    let k = 0;
+    while (k < path.length && s > segLen[k]) { s -= segLen[k]; k++; }
+    const sg = path[Math.min(k, path.length - 1)];
+    if (sg.kind === 'line') { const u = unit(sub(sg.b, sg.a)); return { e: sg.a.e + u.e * s, n: sg.a.n + u.n * s }; }
+    const a = sg.from + sg.sgn * (s / R);
+    return { e: sg.c.e + R * Math.sin(a), n: sg.c.n + R * Math.cos(a) };
+  };
+  // Each key point located by its closest approach on the flown path, so
+  // the climb between two of them is spread over the distance actually
+  // flown rather than the straight line between them.
+  const keyS = P.map((kp) => {
+    let best = Infinity, bs = 0;
+    for (let s = 0; s <= total; s += 5) {
+      const q = at(s); const d = Math.hypot(q.e - kp.e, q.n - kp.n);
+      if (d < best) { best = d; bs = s; }
+    }
+    return bs;
+  });
+  keyS[0] = 0; keyS[keyS.length - 1] = total;
+  const altAt = (s) => {
+    for (let i = 0; i < keyS.length - 1; i++) {
+      if (s >= keyS[i] && s <= keyS[i + 1]) {
+        const a = (s - keyS[i]) / Math.max(1e-6, keyS[i + 1] - keyS[i]);
+        return P[i].alt + (P[i + 1].alt - P[i].alt) * a;
+      }
+    }
+    return P[P.length - 1].alt;
+  };
+  const W = [];
+  for (let s = 0; s <= total; s += V * EMIT) {
+    const q = at(s);
+    W.push({ lat: +(LAT0 + q.n / M_LAT).toFixed(6), lon: +(LON0 + q.e / M_LON).toFixed(6),
+             alt: +altAt(s).toFixed(1), heading: 0, tSec: +(s / V).toFixed(2) });
+  }
+  for (let i = 0; i < W.length; i++) {
+    const a = W[Math.max(0, i - 1)], b = W[Math.min(W.length - 1, i + 1)];
+    W[i].heading = Math.round((Math.atan2((b.lon - a.lon) * M_LON, (b.lat - a.lat) * M_LAT) / D + 360) % 360);
+  }
+  return W;
+}
+const _RECON_ROUTE = _reconRouteWaypoints();
+
 export const TEMPLATES = {
   cph_quad_hostile: {
     siteId: 'cph',
@@ -1659,31 +1780,8 @@ export const TEMPLATES = {
       evidenceSize: '84.6 MB',
       note: 'HALE recon platform. Ingressed at 800 m, initial pass detected clearly by passive fused mesh. Climbed to 3,000 m loiter altitude, exceeding the sensor grid ceiling around 2 km. Track lost as it climbed past the passive-sensor detection envelope. Active radar hardware required for sustained detection above 2 km.',
     },
-    waypoints: [
-      // Spiraling climb over CPH airport centre. Drone stays inside the
-      // horizontal coverage of the sensor spine (N15 / N16 / N17 / N03)
-      // for the whole orbit, so signal is only lost when altitude
-      // exceeds the sensor ceilings, not when it exits horizontal range.
-      //   alt < 1500 m: every CPH sensor sees it (base Radxa 4SE ceiling)
-      //   alt 1500-2000 m: only HackRF-equipped sensors (N03, N15) see it
-      //   alt > 2000 m: no passive sensor sees it, coverage exit fires,
-      //   event auto-closes as fled (fled = out of sensor envelope, in
-      //   this case vertically not horizontally). Real Reaper-class HALE
-      //   operates 6-12 km altitude — this scenario demonstrates the
-      //   capability edge of passive-only gear and why active radar is
-      //   required for sustained high-altitude tracking.
-      // 500 m radius diamond orbit centred at (55.618, 12.650), climbing
-      // 300 m per waypoint. Loses signal around tSec 75 (alt 2300 m).
-      { lat: 55.62250, lon: 12.65000, alt: 800,  heading: 90,  tSec: 0  },   // N point
-      { lat: 55.61800, lon: 12.65800, alt: 1100, heading: 180, tSec: 15 },   // E point
-      { lat: 55.61350, lon: 12.65000, alt: 1400, heading: 270, tSec: 30 },   // S point
-      { lat: 55.61800, lon: 12.64200, alt: 1700, heading: 0,   tSec: 45 },   // W point (last altitude all sensors see)
-      { lat: 55.62250, lon: 12.65000, alt: 2000, heading: 90,  tSec: 60 },   // Only HackRF sensors still see (N03, N15)
-      { lat: 55.61800, lon: 12.65800, alt: 2300, heading: 180, tSec: 75 },   // Above all sensor ceilings, coverage exit fires here
-      { lat: 55.61350, lon: 12.65000, alt: 2600, heading: 270, tSec: 90 },   // Track sustained by scripted trajectory only, no sensor contact
-      { lat: 55.61800, lon: 12.64200, alt: 3000, heading: 0,   tSec: 105 },  // Full loiter altitude — event should have closed by this point
-    ],
-    durationSec: 105,
+    waypoints: _RECON_ROUTE,
+    durationSec: Math.round(_RECON_ROUTE[_RECON_ROUTE.length - 1].tSec),
   },
 
   // ── Shahed-136 / Geran-2 attack profile ──
