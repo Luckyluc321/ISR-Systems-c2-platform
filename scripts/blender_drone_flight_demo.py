@@ -176,20 +176,47 @@ NOISE_YAW_HZ = 0.23
 # ----------------------------------------------------------------------------
 # Loading and geometry
 # ----------------------------------------------------------------------------
-def load(path):
+def load(path, drop=None, pose_frame=None):
+    """Open or import the file. The file's own animation is dropped: a
+    Sketchfab clip (the Inspire 2 carries a 560-frame one across 128
+    channels, the Sivrisinek a propeller spin) would fight the hubs and
+    the rig we drive. `drop` is a regex of mesh names to delete outright,
+    for stage dressing that ships inside the file: the Inspire 2 comes
+    with a 6 x 6 landing pad that would otherwise set the airframe's
+    size."""
     ext = os.path.splitext(path)[1].lower()
     if ext == ".blend":
         bpy.ops.wm.open_mainfile(filepath=path)
-        return
-    bpy.ops.wm.read_factory_settings(use_empty=True)
-    if ext in (".glb", ".gltf"):
-        bpy.ops.import_scene.gltf(filepath=path)
-    elif ext == ".fbx":
-        bpy.ops.import_scene.fbx(filepath=path)
-    elif ext == ".obj":
-        bpy.ops.wm.obj_import(filepath=path)
     else:
-        sys.exit(f"unsupported input: {path}")
+        bpy.ops.wm.read_factory_settings(use_empty=True)
+        if ext in (".glb", ".gltf"):
+            bpy.ops.import_scene.gltf(filepath=path)
+        elif ext == ".fbx":
+            bpy.ops.import_scene.fbx(filepath=path)
+        elif ext == ".obj":
+            bpy.ops.wm.obj_import(filepath=path)
+        else:
+            sys.exit(f"unsupported input: {path}")
+    if pose_frame is not None:
+        bpy.context.scene.frame_set(pose_frame)
+        bpy.context.view_layer.update()
+        # Bake the evaluated pose into the objects before the clip goes.
+        for o in bpy.data.objects:
+            if o.animation_data and o.animation_data.action:
+                o.matrix_basis = o.matrix_basis.copy()
+        print(f"posed at the file's frame {pose_frame}")
+    for o in bpy.data.objects:
+        o.animation_data_clear()
+    for a in list(bpy.data.actions):
+        bpy.data.actions.remove(a)
+    if drop:
+        rx = re.compile(drop, re.I)
+        gone = [o for o in bpy.data.objects if o.type == "MESH" and rx.search(o.name)]
+        for o in gone:
+            bpy.data.objects.remove(o)
+        if gone:
+            print(f"dropped {len(gone)} mesh(es) matching {drop!r}")
+    bpy.context.view_layer.update()
 
 
 def meshes():
@@ -308,12 +335,15 @@ def find_props(centre, airframe_size, name_re):
     return blades
 
 
-def cluster_by_hub(blades):
+def cluster_by_hub(blades, radius=None):
     """Two blades of one rotor sit about one blade-length apart, centre to
     centre; neighbouring rotors more than two. 1.6 blade lengths splits
-    them."""
+    them. Not on an airframe whose props are one mesh each and nearly as
+    long as the motor spacing (the Inspire 2: 1.34 against 1.6), where
+    that rule merges all four; pass `radius` in file units there."""
     Ls = sorted(blade_length(b) for b in blades)
-    radius = 1.6 * Ls[len(Ls) // 2]
+    if radius is None:
+        radius = 1.6 * Ls[len(Ls) // 2]
     groups = []
     for b in blades:
         c = bbox_centre(b)
@@ -368,12 +398,24 @@ def rig_props(groups, root, root_world, cg, fwd, right):
 # ----------------------------------------------------------------------------
 # Gimbal
 # ----------------------------------------------------------------------------
-def rig_gimbal(spec, root, root_world):
-    if not spec:
+def rig_gimbal(spec, root, root_world, names=None):
+    """The camera gimbal, kept level. `spec` is x,y,z,r in file units (a
+    sphere; the Air 3) or `names` a regex of mesh names (the Inspire 2,
+    whose pose is taken from a clip frame, so file coordinates move)."""
+    if names:
+        rx = re.compile(names, re.I)
+        parts = [o for o in meshes() if rx.search(o.name)]
+        if not parts:
+            print("gimbal: no mesh matches, skipping")
+            return None
+        lo, hi = scene_bbox(parts)
+        pivot = (lo + hi) / 2
+    elif spec:
+        x, y, z, r = (float(v) for v in spec.split(","))
+        pivot = Vector((x, y, z))
+        parts = [o for o in meshes() if (bbox_centre(o) - pivot).length <= r]
+    else:
         return None
-    x, y, z, r = (float(v) for v in spec.split(","))
-    pivot = Vector((x, y, z))
-    parts = [o for o in meshes() if (bbox_centre(o) - pivot).length <= r]
     if not parts:
         print("gimbal: nothing inside the sphere, skipping")
         return None
@@ -623,6 +665,20 @@ def main():
                     help="real length of the airframe's longest extent in metres")
     ap.add_argument("--props", default=PROP_NAME.pattern,
                     help="regex for propeller object or parent names, overrides the shape test")
+    ap.add_argument("--rotor-radius", type=float, default=None,
+                    help="file units: blades closer than this share a hub. Default is 1.6 blade "
+                         "lengths, which merges the Inspire 2's four single-mesh props; 0.3 there")
+    ap.add_argument("--pose-frame", type=int, default=None,
+                    help="evaluate the file's own animation at this frame and keep that pose "
+                         "before the clip is discarded: the Inspire 2's clip holds its landing "
+                         "gear retraction")
+    ap.add_argument("--drop", default=None,
+                    help="regex of mesh names to delete before anything else: stage dressing "
+                         "shipped inside the file, such as the Inspire 2's landing pad")
+    ap.add_argument("--gimbal-names", default=None,
+                    help="regex of mesh names that are the camera gimbal; pivot is their "
+                         "joint bounding-box centre. Use instead of --gimbal-near when the "
+                         "pose comes from a clip frame")
     ap.add_argument("--gimbal-near", default=None,
                     help="x,y,z,r in file units: meshes centred inside the sphere are the "
                          "camera gimbal and are kept level about (x,y,z)")
@@ -632,7 +688,7 @@ def main():
     ap.add_argument("--stills", action="store_true", help="render one PNG per phase midpoint")
     args = ap.parse_args(argv)
 
-    load(args.input)
+    load(args.input, drop=args.drop, pose_frame=args.pose_frame)
     os.makedirs(args.out, exist_ok=True)
     stem = os.path.splitext(os.path.basename(args.input))[0]
     scene = bpy.context.scene
@@ -661,7 +717,7 @@ def main():
     blades = find_props(centre, size, re.compile(args.props, re.I))
     if not blades:
         sys.exit("no propellers found: name them, pass --props, or check the shape test")
-    groups = cluster_by_hub(blades)
+    groups = cluster_by_hub(blades, args.rotor_radius)
     hub_xy = sum((g["centre"] for g in groups), Vector()) / len(groups)
     cg = Vector((hub_xy.x, hub_xy.y, centre.z))
     print(f"{len(blades)} blade(s) in {len(groups)} rotor(s); pivot at {tuple(round(v,3) for v in cg)}")
@@ -674,7 +730,7 @@ def main():
     for o in [o for o in bpy.data.objects if o.parent is None and o is not root]:
         reparent(o, root, root_world)
     rotors = rig_props(groups, root, root_world, cg, fwd, right)
-    gimbal = rig_gimbal(args.gimbal_near, root, root_world)
+    gimbal = rig_gimbal(args.gimbal_near, root, root_world, names=args.gimbal_names)
 
     if args.size_m:
         k = args.size_m / size

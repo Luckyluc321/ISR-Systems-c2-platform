@@ -2153,6 +2153,34 @@ every other, which is precisely why it survived this long.
 until someone sets it. The rigs read `_quadModelSpec` every frame, so the
 override takes effect on the airframe already in the air.
 
+### 9b. Three more things the quadcopter demo learned from the Inspire 2
+
+`dji_inspire_2_with_zenmuse_x5s` (geoffreycouppey, Sketchfab) is
+**CC-BY-NC**, so it is a render for the laptop and an internal test,
+never the platform, a prospect demo or a customer sim. It taught the
+script three things anyway, all flags now:
+
+- `--drop REGEX` deletes meshes before anything is measured. The file
+  ships a 6 x 6 unit landing pad (`PISTE`) that would otherwise set the
+  airframe's size and its scale.
+- `--pose-frame N` evaluates the file's own clip at frame N and bakes
+  that pose before the clip is discarded. The Inspire's 560-frame clip
+  is a take-off: the rest pose has the gear down and the arms low, and
+  frame 300 has them raised with the body level, which is how it flies.
+  Found by scrubbing the clip, not by guessing: frames 210 to 280 also
+  have the gear up but the body banked by the animator.
+- `--rotor-radius` in file units, and `--gimbal-names REGEX`. The
+  Inspire's props are one mesh each and 1.34 units long against a 1.6
+  unit motor spacing, so the 1.6-blade-length rule merged all four into
+  one hub; 0.3 separates them. Its gimbal is five named meshes, and a
+  sphere in file units is useless once the pose comes from a clip
+  frame.
+
+`group_rotor_nodes.py` no longer needs a Z-up parent: each hub node is
+oriented so its own local Z is the disc normal (a quarter turn about X
+for an asset authored Y-up all the way down, as this one is), and the
+blades' matrices absorb the inverse. Point cloud verified unchanged.
+
 ### 10a. Porting the fixed-wing model to the map
 
 For whoever wires it, the same way `quad_flight_model.js` was built from

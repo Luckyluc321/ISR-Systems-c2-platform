@@ -156,6 +156,9 @@ def apply(m, p):
             m[2] * x + m[6] * y + m[10] * z + m[14])
 
 
+G_IDENT = identity()
+
+
 def translation(t):
     m = identity()
     m[12], m[13], m[14] = t
@@ -196,8 +199,8 @@ def main():
     ap.add_argument("src")
     ap.add_argument("dst")
     ap.add_argument("--parent", required=True,
-                    help="name of the node to put the Rotor_N nodes under; its frame must have the "
-                         "disc thin in Z (checked)")
+                    help="name of the node to put the Rotor_N nodes under. Any ancestor will "
+                         "do: each hub node is oriented so its own local Z is the disc normal")
     ap.add_argument("--rotor", action="append", required=True,
                     help="comma-separated blade node names for one rotor; repeat per rotor")
     ap.add_argument("--prefix", default="Rotor_")
@@ -239,27 +242,45 @@ def main():
                     hi = [max(a, b) for a, b in zip(hi, q)]
         hub = [(a + b) / 2 for a, b in zip(lo, hi)]
         ext = [b - a for a, b in zip(lo, hi)]
-        thin = "XYZ"[ext.index(min(ext))]
-        if thin != "Z":
-            sys.exit(f"rotor {k}: disc is thin in {thin}, not Z, in {args.parent!r}'s frame "
-                     f"(extents {[round(e, 3) for e in ext]}); pick another --parent")
+        thin = ext.index(min(ext))
+
+        # The hub node's own frame has its Z on the disc normal, whatever
+        # the parent's frame does. main.js spins Rotor_N about LOCAL Z, so
+        # this is what makes the spin an in-plane one. For a Z-up parent
+        # (the Air 3's `root`) that is a pure translation; for an asset
+        # authored Y-up all the way down (the Inspire 2) it is a
+        # translation and a quarter turn about X, and the blades' local
+        # matrices absorb the inverse so nothing moves.
+        if thin == 2:
+            R = G_IDENT
+        elif thin == 1:
+            R = [1, 0, 0, 0,  0, 0, 1, 0,  0, -1, 0, 0,  0, 0, 0, 1]   # local Z -> parent +Y
+        else:
+            R = [0, 0, -1, 0,  0, 1, 0, 0,  1, 0, 0, 0,  0, 0, 0, 1]   # local Z -> parent +X
+        hub_m = mul(translation(hub), R)
 
         # Detach the blades from wherever they were.
         for i in idx:
             old = nodes[parent[i]]
             old["children"] = [c for c in old["children"] if c != i]
 
-        hub_inv = inverse(translation(hub))
+        hub_inv = inverse(hub_m)
         for i in idx:
             nodes[i].pop("translation", None)
             nodes[i].pop("rotation", None)
             nodes[i].pop("scale", None)
             nodes[i]["matrix"] = mul(hub_inv, in_parent_frame(i))
-        nodes.append({"name": f"{args.prefix}{k}", "translation": hub, "children": idx})
+        node = {"name": f"{args.prefix}{k}", "children": idx}
+        if R is G_IDENT:
+            node["translation"] = hub
+        else:
+            node["matrix"] = hub_m
+        nodes.append(node)
         nodes[P].setdefault("children", []).append(len(nodes) - 1)
         print(f"  {args.prefix}{k}: {len(idx)} blade(s) {names} at "
               f"({hub[0]:+.3f}, {hub[1]:+.3f}, {hub[2]:+.3f}) in {args.parent!r}, "
-              f"disc {ext[0]:.2f} x {ext[1]:.2f} x {ext[2]:.2f}")
+              f"disc {ext[0]:.2f} x {ext[1]:.2f} x {ext[2]:.2f}, normal on parent "
+              f"{'XYZ'[thin]}, hub local Z aligned to it")
 
     gl_after, _ = globals_of(gltf)
     after = point_cloud(gltf, binary, gl_after)
