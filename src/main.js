@@ -23653,7 +23653,7 @@ async function main() {
     cph_shahed238_amalienborg: { threat: 'Shahed-238 (jet)',       pathLabel: 'Øresund → CPH → Amalienborg' },
     cph_quad_hostile:          { threat: 'Quadcopter, hostile',    pathLabel: 'Perimeter ingress' },
     cph_fixedwing_hostile:     { threat: 'Fixed-wing UAS',         pathLabel: 'Recon transit' },
-    cph_recon_hostile:         { threat: 'Tactical reconnaissance', pathLabel: 'High-altitude loiter' },
+    cph_recon_hostile:         { threat: 'Mohajer-2 reconnaissance', pathLabel: 'High-altitude loiter' },
     cph_jet_friendly:          { threat: 'Jet (SAS 743), friendly',pathLabel: 'Filed airliner route' },
     cph_jet_goaround:          { threat: 'Jet (SAS 743), friendly',pathLabel: 'Missed approach, 04R' },
     cph_jet_goaround_early:    { threat: 'Jet (SAS 743), friendly',pathLabel: 'Crew-spotted missed approach, 37 m at 700 m' },
