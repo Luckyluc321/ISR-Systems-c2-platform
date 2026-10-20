@@ -12369,6 +12369,25 @@ async function main() {
 
   function processDroneSiteMarkers(event, state, droneKey, curPos, prevPos, droneLabel = null) {
     if (!event || !curPos) return;
+    // NOTHING OBSERVED IT, SO NOTHING IS LOGGED.
+    //
+    // Every marker below is decided by GEOMETRY: did this drone cross
+    // the fenced-yard polygon, did it enter a coverage ring. Geometry is
+    // true whether or not a sensor was working, so an ENTRY pin was
+    // being dropped for a crossing nobody saw.
+    //
+    // The WITHOUT ISR run is the case that exposes it. It takes the
+    // site's 35 sensors genuinely offline, the formation flies the same
+    // route, and the map filled with "ENTRY 09:39:44Z · CPH" labels for
+    // an incursion the grid never detected. That is the one claim the
+    // scenario exists to disprove.
+    //
+    // detected is false from spawn on a coverage-gated template and is
+    // flipped true on first entry into any sensor radius, so this reads
+    // the same fact the alert strip and the threat banner now read. A
+    // track that is genuinely seen is unaffected: by the time it crosses
+    // a perimeter it has long since been detected.
+    if (event.detected === false) return;
     // Lazily initialise tick-loop internal state via mutators. Silent
     // (no listener fire) because these init writes shouldn't provoke
     // a UI render — the tick loop's own render happens at end of tick.
