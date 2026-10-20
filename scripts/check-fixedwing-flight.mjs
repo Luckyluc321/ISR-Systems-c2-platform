@@ -129,6 +129,78 @@ check('a climb puts the nose above the flight path, not on it',
   + `${(climbRun.gammaRad / DEG).toFixed(2)} deg. theta = gamma + alpha is the `
   + 'whole reason this model exists separately from the quad one.');
 
+// ── the staircase ──────────────────────────────────────────────────
+// EVERY TEST ABOVE FLIES A SMOOTH PATH, AND THAT IS WHY THEY ALL PASSED
+// WHILE THE AIRCRAFT FLEW EVERY TURN DEAD LEVEL.
+//
+// fly() advances the heading a little each frame, so the turn rate it
+// hands the model is a clean constant. The map does not do that. There
+// the position comes from interpolate(), which is piecewise-linear
+// between waypoints 0.25 s apart, so the direction of travel is constant
+// inside a cell and changes only AT a waypoint: a staircase, whose
+// derivative is a spike of roughly 180 deg/s one frame in fifteen and
+// zero in between.
+//
+// The shipped line clamped that spike to TURN_RATE_MAX_DPS before
+// filtering it, which threw away the area under it. On the real 792
+// waypoint route the aircraft banked 5.1 deg at peak where it needed
+// 27.3, and 5 deg of bank is invisible at any camera distance. Order
+// matters: filter the measurement, THEN clamp the result.
+//
+// So this flies a staircase on purpose. A smooth-path test cannot see
+// this class of bug at all.
+function flyStaircase({ speed, turnDps, secs = 25, fps = 60, stepSec = 0.25 }) {
+  const fm = FM.createFixedWingFlightModel({ rps: 20 });
+  const dt = 1 / fps;
+  let lat = 55.6, lon = 12.7, hdg = 0, out = null;
+  const mLat = 111320, mLon = 111320 * Math.cos(lat * DEG);
+  // Waypoints every stepSec, then LINEAR interpolation between them,
+  // exactly as drones.js does it.
+  const wps = [{ t: 0, lat, lon }];
+  for (let t = stepSec; t <= secs; t += stepSec) {
+    hdg += turnDps * DEG * stepSec;
+    lat += (speed * Math.cos(hdg) * stepSec) / mLat;
+    lon += (speed * Math.sin(hdg) * stepSec) / mLon;
+    wps.push({ t, lat, lon });
+  }
+  for (let i = 0; i * dt <= secs - stepSec; i++) {
+    const t = i * dt;
+    let a = wps[0], b = wps[1];
+    for (let k = 0; k < wps.length - 1; k++) {
+      if (t >= wps[k].t && t <= wps[k + 1].t) { a = wps[k]; b = wps[k + 1]; break; }
+    }
+    const f = (b.t - a.t) === 0 ? 0 : (t - a.t) / (b.t - a.t);
+    out = fm.update(a.lat + (b.lat - a.lat) * f, a.lon + (b.lon - a.lon) * f, 1000, dt) || out;
+  }
+  return out;
+}
+
+// bank = atan(V * w / g) is the only bank that holds a coordinated turn.
+const _needBank = (v, wDps) => Math.atan((v * wDps * DEG) / 9.81) / DEG;
+
+const stair = flyStaircase({ speed: FM.V_CRUISE, turnDps: 12 });
+const want = _needBank(FM.V_CRUISE, 12);
+check('a turn measured off a POLYLINE still banks the aircraft',
+  Math.abs(stair.bankDeg) > 0.6 * want,
+  `a 12 deg/s turn at ${FM.V_CRUISE} m/s needs ${want.toFixed(1)} deg of bank; `
+  + `flying it as 0.25 s waypoints gives ${stair.bankDeg.toFixed(1)} deg. `
+  + 'If this is near zero the turn rate is being clamped BEFORE it is '
+  + 'filtered, which destroys the staircase spikes the filter needs to '
+  + 'average. Filter the measurement, then clamp the result.');
+
+check('the polyline and the smooth path agree on the bank',
+  Math.abs(Math.abs(stair.bankDeg) - Math.abs(fly({ speed: FM.V_CRUISE, turnDps: 12 }).bankDeg)) < 6.0,
+  `polyline ${stair.bankDeg.toFixed(1)} deg vs smooth `
+  + `${fly({ speed: FM.V_CRUISE, turnDps: 12 }).bankDeg.toFixed(1)} deg. How the path `
+  + 'happens to be SAMPLED must not change how the aircraft flies it.');
+
+check('the turn-rate filter runs before the clamp, not inside it',
+  /turnRate\s*=\s*ease\(\s*turnRate\s*,\s*wRaw\s*,/.test(
+    readFileSync(new URL('../src/fixedwing_flight_model.js', import.meta.url), 'utf8')),
+  'ease() must be handed the RAW measured rate. Wrapping clamp() around '
+  + 'its input is the bug this file now tests for: it cost a factor of 5.4 '
+  + 'in bank angle on the real route.');
+
 if (failures) {
   console.log(`\ncheck:fixedwing-flight FAILED — ${failures} assertion${failures === 1 ? '' : 's'}`);
   process.exit(1);

@@ -2220,3 +2220,144 @@ and is told to allow 7 mm for this file only.
 **Numbers to expect**, from the render, for the gate: 10 deg/s at
 36 m/s gives 32.6 deg of bank; a 4 m/s climb at 36 m/s gives 10.2 deg
 of pitch; 50 m/s level gives 2.1 deg, 28 m/s gives 5.2.
+
+## 8aa. The Baykar flew every turn flat, and the gate could not see it
+
+Lucas, twice: *"its turning motion is horrible, like literally horrible.
+You are changing the nose 10 degrees every 0.5 seconds... Its staying
+flat while your ugly turning motion is mechanically jumping 10 degrees
+to the right."* Then: *"Mate the drone also has to use the ACTUAL
+FILE'S TURNING MOTION"*, and *"Why cant you just use the file?????"*
+
+Two separate faults, and the second one was me about to rebuild
+something the asset already contained.
+
+### The bank: one line, in the wrong order
+
+`fixedwing_flight_model.js` measures turn rate off the flown path and
+banks the aircraft to match, `bank = -atan(V·w/g)`. The shipped line was
+
+```js
+turnRate = ease(turnRate, clamp(wRaw, -wCap, wCap), TURN_TAU, dt);
+```
+
+which clamps the measurement and then filters it. That is backwards, and
+it is backwards for a reason specific to how the path is sampled.
+
+`interpolate()` is piecewise-linear between waypoints 0.25 s apart. The
+direction of travel is therefore **constant inside a cell and changes
+only at a waypoint**: the measured heading is a staircase, and its
+derivative is not a steady 11.8 deg/s but a spike of roughly 180 deg/s
+one frame in fifteen with zero in between. Clamping that spike to 20
+before the filter throws away the area under it, and the average that
+reaches the physics is a tenth of the truth.
+
+The filter's job is to average the staircase back into the real rate,
+which it does correctly **when it is given the spikes**. The clamp is
+only a backstop against a genuinely impossible demand, so it belongs
+after the averaging:
+
+```js
+turnRate = ease(turnRate, wRaw, TURN_TAU, dt);
+turnRate = clamp(turnRate, -wCap, wCap);
+```
+
+Measured by driving the real model along the real 792-waypoint route
+through the real interpolator at 60 fps:
+
+| turn-rate order | peak \|bank\| | mean \|bank\| |
+|---|---|---|
+| clamp then filter | 5.1 deg | 1.5 deg |
+| filter then clamp | **27.3 deg** | **6.9 deg** |
+
+A factor of 5.4. Five degrees of bank is invisible at any camera
+distance, which is exactly what "staying flat" was. With it fixed the
+route reads as a wing: -23.7 deg into the left turn, +22.7 into the
+right, nose 13.3 deg up on the climb and -3.3 on the descent, alpha
+holding 3.5 at cruise.
+
+### Why twenty-four gates passed over it
+
+`check:fixedwing-flight` already asserted *"a turn is flown with the
+bank the turn requires"*, and it passed throughout. Its `fly()` helper
+advances the heading a little every frame, so the turn rate it hands the
+model is a clean constant and the staircase never exists. **The gate was
+flying a path the map never produces.**
+
+Fixed by adding `flyStaircase()`, which lays down waypoints every 0.25 s
+and linearly interpolates between them the way `drones.js` does, plus an
+assertion that the polyline and the smooth path agree on the bank to
+within 6 degrees — *how a path is sampled must not change how the
+aircraft flies it*. Re-introducing the old line fails three assertions;
+restoring it passes. A gate that cannot fail is not a gate.
+
+### The propeller: there was nothing to write
+
+The propeller was not moving and I was most of the way into driving node
+32 by hand through `nodeTransformations` when Lucas stopped me. He was
+right, and the measurement says so:
+
+```
+animations      1  channels 2
+  "SivriSinekIhaV2_Pervane|Pervane_Action" 2 ch, 0.920 s
+    -> node 32 "SivriSinekIhaV2_Pervane" . scale     (skinned-target: false)
+    -> node 32 "SivriSinekIhaV2_Pervane" . rotation  (skinned-target: false)
+skins           0  joints 0
+```
+
+The clip was already there, and Cesium was already adding it:
+`runAnimations` omitted does **not** mean "no animations", because
+ModelVisualizer reads it with `getValueOrDefault(..., time, TRUE)`. This
+is the same default that looped the A320's landing eleven times from a
+property that had been spread away (8m).
+
+So the clip was being added every spawn and then never advancing a
+frame, because **this app pins `viewer.clock.shouldAnimate = false`** to
+hold the sun still, and Cesium drives model clips off that clock. The
+propeller stood still for exactly one reason: no clock.
+
+Note that `loop: REPEAT`, which is unconditional in Cesium and was the
+whole problem for a 28-second landing sequence, is simply correct for a
+propeller.
+
+The clock is borrowed, not taken — and **ref-counted**, because each
+spawn closes over its own saved flag, so a single flag would let the
+first of two fixed-wings to land restore `false` and stop the second
+one's propeller in mid-air. It goes back in `removeDroneEntities` when
+the last one is gone.
+
+Costed before being done, rather than assumed, since a 142-joint skin is
+what made the map crawl once already (8m):
+
+- this clip is 2 channels on 1 **unskinned** node against the A320's 248
+  channels on a 142-joint skin, and the asset has no skins at all
+- **nothing in `src/` uses a `SampledPositionProperty`** — zero matches
+  across all 90 modules, so no vehicle position is clock-driven; every
+  one reads `sim_clock` through a `CallbackProperty`
+- the sun moves 0.25 deg a minute, so 0.8 deg across this 198 s flight
+- the auto imagery branch already runs the clock live, so this is not a
+  new configuration for the scene
+
+### The lesson, which is the one from 8v again
+
+I reached for a reimplementation before measuring whether the asset
+already did the job, and the honest trigger for checking was Lucas
+asking why. Two files up, 8m records the same shape: *"what you do is
+that you use the animation that the builder has enabled."*
+
+And the gate lesson is sharper than the bank fix. Every test in
+`check:fixedwing-flight` was a real assertion about real physics, and
+all of them passed while the aircraft flew visibly wrong, because they
+all fed it a signal shaped differently from the one the map feeds it.
+**Test the model on the data path it actually runs on.** A smooth-path
+test cannot see a sampling bug at all.
+
+Also fixed in the same pass: `MODEL_SWAP_M` for the fixed-wing was
+6000 m, so the GLB swapped to a map symbol three kilometres out and the
+aircraft could only be clicked from far away (*"the drone appearance
+renders WAY too early"*). Now `_fixedWingSpec().swapM ?? 1800`,
+overridable with `window.__isr_fixedwing_tuning = { swapM: 2500 }`.
+And `cph_recon_hostile` gained `coverageGated: true`: it spawns 3.2 km
+east, outside every sensor radius, so DETECTED was firing at t=0 for an
+aircraft nothing could hear. It now flips on first entry into coverage,
+at t=27.

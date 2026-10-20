@@ -1759,6 +1759,12 @@ export const TEMPLATES = {
   // SATCOM downlink capture on Ku/Ka band (needs wideband SDR). Lower confidence
   // than close-range detection because signal is weak and cross-section is small.
   cph_recon_hostile: {
+    // Approaches from 3.2 km east, outside the perimeter AND outside
+    // sensor coverage, so it must not be marked detected at spawn. Same
+    // rule as the swarm: detected flips true on first entry into a
+    // sensor radius, which on this route is t=27. Without this the
+    // DETECTED label fired at t=0 for an aircraft no sensor could hear.
+    coverageGated: true,
     siteId: 'cph',
     classification: 'hostile',
     threat: 'medium',

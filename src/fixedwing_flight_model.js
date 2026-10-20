@@ -174,8 +174,31 @@ export function createFixedWingFlightModel(opts = {}) {
       // lag. See the quad model's ACC_TAU note, which is the same point.
       V = ease(V, Math.max(V_MIN, vRaw), SPEED_TAU, dt);
       climb = ease(climb, climbRaw, CLIMB_TAU, dt);
+      // FILTER FIRST, THEN CLAMP. The order here was the whole bug: the
+      // aircraft flew every turn dead level because this line destroyed
+      // the very signal it was supposed to smooth.
+      //
+      // The route is interpolated LINEARLY between waypoints, so inside
+      // one 0.25 s cell the direction of travel is constant and the
+      // heading only changes AT a waypoint. The raw turn rate is
+      // therefore not a steady 11.8 deg/s: it is a spike of roughly
+      // 180 deg/s for one frame in fifteen, and zero in between.
+      //
+      // Clamping that spike to 20 deg/s BEFORE the filter throws away
+      // the area under it, and what reaches the filter averages out to a
+      // tenth of the truth. Measured on a 36 m/s aircraft in a turn that
+      // genuinely needs 37.1 degrees of bank:
+      //
+      //     clamp then filter    1.33 deg/s  ->   4.9 deg of bank
+      //     filter then clamp   11.79 deg/s  ->  36.3 deg of bank
+      //
+      // The filter's job is to average the staircase back into the real
+      // rate, which it does correctly when it is given the spikes. The
+      // clamp is only a backstop against a genuinely impossible demand,
+      // so it belongs after the averaging, not before it.
       const wCap = TURN_RATE_MAX_DPS * DEG;
-      turnRate = ease(turnRate, clamp(wRaw, -wCap, wCap), TURN_TAU, dt);
+      turnRate = ease(turnRate, wRaw, TURN_TAU, dt);
+      turnRate = clamp(turnRate, -wCap, wCap);
 
       // ── bank: the turn comes FROM the bank ────────────────────────
       // Identical to the Blender line, with a measured turn rate where it
