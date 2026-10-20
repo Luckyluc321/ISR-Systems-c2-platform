@@ -714,7 +714,7 @@ import { initSovereignServices, DK_SERVICES, lookupBBR, reverseGeocodeDAR, findN
 import { initLiveFeeds } from './sovereign_live_feeds.js';
 // First real sensor node. Console entry points + the bridge feed consumer.
 import { createQuadFlightModel, rotorsFromHubs } from './quad_flight_model.js';
-import { createFixedWingFlightModel } from './fixedwing_flight_model.js';
+import { createFixedWingFlightModel, LOOKAHEAD_SEC } from './fixedwing_flight_model.js';
 import { createLiveSensorRuntime } from './live_sensor.js';
 import { activateManhattanDemo, deactivateManhattanDemo, setManhattanChase } from './manhattan_demo.js';
 // Cooperative-traffic adapters self-register on import. Order matters
@@ -18094,6 +18094,37 @@ async function main() {
     const _fwProp = createPropellerDriver(Cesium, viewer, {
       phaseRad: () => _fwLastHpr?.propAngleRad ?? 0,
     });
+    // THE ROUTE'S NEAR FUTURE, for the model. See LOOKAHEAD_SEC in
+    // fixedwing_flight_model.js: measured from where the aircraft has
+    // been, the bank could only start once the track had already bent
+    // and only stop once it had straightened, so the nose trailed the
+    // path by 4.6 deg into every turn and the aircraft rolled 7.6 deg
+    // the wrong way out of it. The waypoints ARE the scenario, so the
+    // route ahead is known: the path's turn rate LOOKAHEAD_SEC from now
+    // becomes the bank demand, and the path's heading now, chord-smoothed
+    // over half a second so the 0.25 s staircase never reaches it,
+    // becomes the nose. Returns undefined off the route's end or before
+    // the first tick, and the model then falls back to measuring.
+    const _fwLookahead = () => {
+      const wps = TEMPLATES[event.templateKey]?.waypoints;
+      const t = droneState.get(event.id)?.routeTSec;
+      if (!wps || wps.length < 2 || !Number.isFinite(t)) return undefined;
+      const H = 0.125;   // half the chord, seconds
+      const headingAt = (tt) => {
+        const a = _interpolateWaypoints(wps, tt - H), b = _interpolateWaypoints(wps, tt + H);
+        if (!a || !b) return null;
+        const dN = (b.lat - a.lat) * 111320;
+        const dE = (b.lon - a.lon) * 111320 * Math.cos(a.lat * Math.PI / 180);
+        return (dN * dN + dE * dE) > 1e-6 ? Math.atan2(dE, dN) : null;
+      };
+      const lead = LOOKAHEAD_SEC;
+      const hNow = headingAt(t), h1 = headingAt(t + lead - 0.25), h2 = headingAt(t + lead + 0.25);
+      if (hNow === null || h1 === null || h2 === null) return undefined;
+      let dh = h2 - h1;
+      while (dh > Math.PI) dh -= 2 * Math.PI;
+      while (dh < -Math.PI) dh += 2 * Math.PI;
+      return { headingRad: hNow, turnRateRad: dh / 0.5, leadSec: lead };
+    };
     const _fixedWingOrientation = () => {
       const cart = _billboardRef?.position?.getValue?.(Cesium.JulianDate.now());
       if (!cart) return undefined;
@@ -18111,7 +18142,7 @@ async function main() {
         const out = _fwFlight.update(
           Cesium.Math.toDegrees(c.latitude),
           Cesium.Math.toDegrees(c.longitude),
-          c.height, dt);
+          c.height, dt, _fwLookahead());
         if (out) { _fwLastHpr = out; _quadFlightDiag.set(`${event.id}`, out); }
       } else if (!_fwPrevTime) {
         _fwPrevTime = now;
@@ -19240,6 +19271,10 @@ async function main() {
     positions.forEach(p => {
       const state = droneState.get(p.eventId);
       if (!state) return;
+      // Where along its route this track is, in route seconds. The
+      // fixed-wing rig reads it to look up the path AHEAD of the
+      // aircraft, so the bank can lead the turn the way a roll-in does.
+      state.routeTSec = p.tSec;
       const event = getEvent(p.eventId);
       if (!event) return;
 

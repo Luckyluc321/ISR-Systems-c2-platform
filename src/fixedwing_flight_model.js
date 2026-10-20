@@ -101,6 +101,27 @@ export const CLIMB_TAU = 0.50;         // s
 // demand and is then smoothed again by ROLL_TAU before it moves
 // anything.
 export const HEADING_HOLD_K = 0.8;     // 1/s
+// THE LOOK-AHEAD, and why the turns lagged without it.
+//
+// Measuring a turn from where the aircraft HAS BEEN means the bank can
+// only start once the path has already begun to turn, and can only
+// stop once it has already straightened. Simulated on a 0.25 s
+// waypoint route at 60 fps, a 10 deg/s turn at 36 m/s: the nose trailed
+// the path by 4.6 deg through the roll-in, and at the end of the turn
+// the aircraft kept turning 4.3 deg past the path, rolled 7.6 deg the
+// OTHER way to catch up, and took four seconds to settle. That
+// counter-bank is what read as lag on screen.
+//
+// A real autopilot flying a known route rolls in BEFORE the turn and
+// out BEFORE the new heading, because it knows the route. The map knows
+// it too: the waypoints are the scenario. So the rig hands the model the
+// path's heading LEAD seconds ahead, and the bank is commanded to bring
+// the nose onto that heading in that time: w_des = (hdg_ahead - psi) /
+// LEAD. LEAD is the roll-in time, a third of a second of ROLL_TAU plus
+// the 33 degrees of bank at 40 deg/s, which is what makes the bank
+// arrive as the turn begins rather than after it. Blender has no need
+// of this: there the autopilot commands the turn and the path follows.
+export const LOOKAHEAD_SEC = 0.8;
 // Blender's dV is the acceleration it is ABOUT TO APPLY: it comes from
 // the plan's commanded speed, (v_t - V) * KV, and the next line
 // integrates it. The propeller then reads it, so the prop rises as the
@@ -170,7 +191,7 @@ export function createFixedWingFlightModel(opts = {}) {
 
   return {
     /** @returns null until there are two samples to differentiate. */
-    update(latDeg, lonDeg, altM, dtSec) {
+    update(latDeg, lonDeg, altM, dtSec, ahead) {
       const dt = Math.min(Math.max(dtSec, 1e-4), 0.1);
       tSec += dt;
 
@@ -279,14 +300,42 @@ export function createFixedWingFlightModel(opts = {}) {
         while (hdgErr > Math.PI) hdgErr -= 2 * Math.PI;
         while (hdgErr < -Math.PI) hdgErr += 2 * Math.PI;
       }
-      const wDes = clamp(turnRate + hdgErr * HEADING_HOLD_K, -wCap, wCap);
+      let wDes;
+      let onRoute = false;
+      if (ahead && Number.isFinite(ahead.turnRateRad) && Number.isFinite(ahead.headingRad)) {
+        // THE ROUTE IS KNOWN, so the bank can lead the turn the way a
+        // real roll-in does, and the nose can sit on the path's tangent
+        // the way a coordinated turn does. Two separate things:
+        //
+        //   bank  <- the turn rate the route will have LEAD seconds from
+        //            now, through the roll loop. It is built by the time
+        //            the track bends, and shed before it straightens.
+        //   nose  <- the route's heading of travel NOW, chord-smoothed by
+        //            the caller over half a second, so it carries no
+        //            staircase and no lag. On a fixed path the nose
+        //            cannot be anywhere else without sideslip.
+        //
+        // Integrating the nose from the bank (the fallback below) is
+        // right when the aircraft owns its path and wrong when the path
+        // is given: an early bank then swings the nose off the track
+        // until the track catches up, and a late one trails it.
+        onRoute = true;
+        wDes = clamp(ahead.turnRateRad, -wCap, wCap);
+      } else {
+        wDes = clamp(turnRate + hdgErr * HEADING_HOLD_K, -wCap, wCap);
+      }
 
       const bankDes = clamp(Math.atan((V * wDes) / G), -maxBank, maxBank);
       bank = ease(bank, bankDes, ROLL_TAU, dt, ROLL_RATE_DPS * DEG * dt);
-      // The turn rate the bank actually produces, and the heading it
-      // therefore sweeps. This is the aircraft flying, not a measurement.
+      // The turn rate the bank actually produces. Off a known route it is
+      // also what sweeps the heading; on one the heading is the route's.
       const wActual = (G * Math.tan(bank)) / V;
-      psi += wActual * dt;
+      if (onRoute) {
+        psi = ahead.headingRad;
+        hdgErr = 0;
+      } else {
+        psi += wActual * dt;
+      }
 
       // ── pitch leads, flight path follows ──────────────────────────
       // The load factor in a bank, and the angle of attack the wing needs
