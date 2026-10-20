@@ -1178,7 +1178,31 @@ async function main() {
       const _gKey = import.meta.env.VITE_GOOGLE_MAP_TILES_KEY;
       if (_gKey) {
         Cesium.GoogleMaps.defaultApiKey = _gKey;
-        googlePhotoreal = await Cesium.createGooglePhotorealistic3DTileset();
+        // THE SECOND ARGUMENT IS NOT OPTIONAL IN PRACTICE.
+        //
+        // createGooglePhotorealistic3DTileset applies three defaults of
+        // its own that Cesium3DTileset.fromIonAssetId never did:
+        //
+        //                             ion path    the factory
+        //   cacheBytes                  512 MB       1536 MB
+        //   maximumCacheOverflowBytes   512 MB       1024 MB
+        //   enableCollision              false        TRUE
+        //
+        // That is up to 2.5 GB of tile cache plus collision meshes built
+        // for photogrammetry. On a laptop it reads as the map freezing
+        // for seconds whenever the camera moves, while the network says
+        // everything is fine: measured 81 requests, all 200, median 13 ms
+        // and a 166 ms worst case. Nothing was slow. The cost was all in
+        // holding and processing what arrived.
+        //
+        // These are Cesium's own defaults, restored explicitly, so the
+        // tileset behaves exactly as it did through ion and only the
+        // billing path differs.
+        googlePhotoreal = await Cesium.createGooglePhotorealistic3DTileset({}, {
+          cacheBytes: 512 * 1024 * 1024,
+          maximumCacheOverflowBytes: 512 * 1024 * 1024,
+          enableCollision: false,
+        });
         console.log('[3d_tiles] Google Photorealistic via OUR OWN Google key — no ion session for this layer');
       } else {
         googlePhotoreal = await Cesium.Cesium3DTileset.fromIonAssetId(2275207);
