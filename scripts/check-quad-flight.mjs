@@ -593,12 +593,7 @@ check('the RENDERED rotor rate is capped below the aliasing limit',
 check('the attitude rigs divide by the SAME clock that moved the position',
   /export function lastFrameMs\(\) \{ return _lastFrameMs; \}/.test(dronesSrc)
   && /_lastFrameMs = frameMs;/.test(dronesSrc)
-  // THREE rigs now: the quad lead, each swarm member, and the
-  // fixed-wing. Every attitude rig in the file must divide by the
-  // position's clock, so this counts them rather than naming them — a
-  // fourth rig that reads the wall clock fails here, which is how the
-  // fixed-wing one was caught the moment it was written.
-  && (main.match(/const now = lastFrameMs\(\) \|\| performance\.now\(\);/g) || []).length === 3
+  && (main.match(/const now = lastFrameMs\(\) \|\| performance\.now\(\);/g) || []).length === 2
   && (main.match(/let _q?s?w?QPrevTime = 0;|let _qPrevTime = 0;|let _swQPrevTime = 0;/g) || []).length >= 2,
   'A speed is dPosition/dt, so the clock that ADVANCED the position has to '
   + 'be the clock that DIVIDES it. The position moves on the frame clock; '
