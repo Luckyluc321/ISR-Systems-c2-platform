@@ -798,6 +798,7 @@ import { createParkedAircraft } from './static_aircraft.js';
 import { A320_POSES } from './a320_poses.js';
 import { createWingVortices } from './airliner_vortices.js';
 import { createGearDriver } from './airliner_surfaces.js';
+import { createPropellerDriver } from './fixedwing_propeller.js';
 import { APPROACH_WOBBLE } from './a320_wobble.js';
 import { createTouchdownSmoke } from './touchdown_smoke.js';
 
@@ -4673,43 +4674,6 @@ async function main() {
   }
 
   // ── Drone entity lifecycle ──
-  // THE CLOCK, BORROWED FOR THE FIXED-WING'S PROPELLER.
-  //
-  // The Baykar's propeller is the asset's OWN animation clip and nothing
-  // drives it in code. Cesium runs model clips off viewer.clock, and this
-  // app pins that clock (shouldAnimate = false) to hold the sun still, so
-  // the clip was being added every spawn and then never advanced a frame.
-  // That is the entire reason the propeller stood still.
-  //
-  // Ref-counted on purpose. Each spawn has its own closure, so a single
-  // saved flag would let the first of two fixed-wings to land restore
-  // shouldAnimate = false and stop the second one's propeller mid-air.
-  // Counting means the clock goes back when the LAST one is gone.
-  //
-  // Costed rather than assumed, because a 142-joint skin is what made the
-  // map crawl once already. This clip is 2 channels on 1 unskinned node
-  // over 0.92 s, against the A320's 248 channels on a 142-joint skin, and
-  // the asset has no skins at all. Nothing in src/ uses a
-  // SampledPositionProperty, so no vehicle position is clock-driven;
-  // every one reads sim_clock through a CallbackProperty. The only other
-  // thing that moves is the sun, at 0.25 deg a minute, so 0.8 deg across
-  // this 198 s flight. The auto imagery branch already runs the clock
-  // live, so this is not a new configuration for the scene.
-  let _propClockBorrows = 0;
-  let _propClockWas = null;
-  function _borrowClockForProp() {
-    if (_propClockBorrows++ === 0) {
-      _propClockWas = viewer.clock.shouldAnimate;
-      viewer.clock.shouldAnimate = true;
-    }
-  }
-  function _returnClockForProp() {
-    if (_propClockBorrows === 0) return;
-    if (--_propClockBorrows === 0 && _propClockWas !== null) {
-      viewer.clock.shouldAnimate = _propClockWas;
-      _propClockWas = null;
-    }
-  }
   const droneState = new Map(); // eventId -> { billboard, trail, shadow, trailPositions, shadowPositions, entryDropped, entryMarker, exitDropped, exitMarker, wasInside, wasInCoverage, closedAt }
   // Which drone within a swarm event is the "primary" for the detail panel.
   // 0 = lead, 1..N-1 = swarm members. Reset to 0 whenever a different event
@@ -18124,6 +18088,12 @@ async function main() {
     });
     let _fwLastHpr = null;
     let _fwPrevTime = 0;
+    // The builder's propeller clip, driven at the flight model's rate.
+    // See fixedwing_propeller.js: this is what replaced borrowing
+    // viewer.clock, so nothing global is touched any more.
+    const _fwProp = createPropellerDriver(Cesium, viewer, {
+      phaseRad: () => _fwLastHpr?.propAngleRad ?? 0,
+    });
     const _fixedWingOrientation = () => {
       const cart = _billboardRef?.position?.getValue?.(Cesium.JulianDate.now());
       if (!cart) return undefined;
@@ -18264,18 +18234,21 @@ async function main() {
         // Quads only: the Shahed has no rotors, the Mi-24 drives its
         // own main and tail rotor a few hundred lines up, and the
         // airliner runs the builder's own animation clip.
-        // THE FIXED-WING USES THE FILE'S OWN PROPELLER, NOT A COPY.
+        // THE FIXED-WING USES THE FILE'S OWN PROPELLER CLIP, BUT NOT
+        // CESIUM'S PLAYBACK OF IT.
         //
-        // Explicit, even though an omitted runAnimations already means
-        // "run them" (ModelVisualizer reads it with getValueOrDefault(...,
-        // TRUE), which is how the A320 looped 11 times from a property
-        // that had been spread away). Relying on that default surprised
-        // this codebase once, so the intent is written down.
+        // FALSE on purpose, and it does not mean "no propeller". It
+        // means ModelVisualizer must keep its hands off the animation
+        // collection, because fixedwing_propeller.js drives the clip
+        // itself to make the blades follow the throttle. The visualizer
+        // offers no rate control at all: it hardcodes
+        // addAll({ loop: REPEAT }).
         //
-        // A flat true is correct HERE and was wrong for the A320: loop
-        // REPEAT is unconditional in Cesium and a propeller is supposed
-        // to loop forever, whereas a 28 s landing sequence is not.
-        ...(isFixedWing ? { runAnimations: true } : {}),
+        // An explicit false makes it call removeAll() once and then
+        // never touch the collection again, since it only acts when the
+        // value CHANGES. Our driver fills it afterwards and re-checks
+        // every frame, so the order of the two does not matter.
+        ...(isFixedWing ? { runAnimations: false } : {}),
         // Quad rotors only. The Baykar has one pusher propeller and no
         // Rotor_1..4 nodes at all, so this was asking Cesium to transform
         // four nodes that do not exist on it.
@@ -18389,10 +18362,6 @@ async function main() {
         viewer.clock.shouldAnimate = true;
       }
     }
-    // The propeller clip needs the clock running to advance at all.
-    // Returned in removeDroneEntities, so it is borrowed for the flight
-    // rather than taken for the session.
-    if (isFixedWing) _borrowClockForProp();
     const billboard = viewer.entities.add(_droneEntitySpec);
     _billboardRef = billboard;
 
@@ -18747,7 +18716,7 @@ async function main() {
       swarmBillboards,   // formation[1..N] only — LEAD is state.leadSwarmMember
       leadSwarmMember,   // formation[0] wrapper, same shape as swarmBillboards entries
       spawnMs: monoNow(),   // shared timing reference for swarm interpolation
-      trailPositions, shadowPositions, _gear, borrowedPropClock: isFixedWing,
+      trailPositions, shadowPositions, _gear, _prop: isFixedWing ? _fwProp : null,
       stateHolder,      // { headingRad } — updated in tick, read by billboard rotation callback
       entryDropped: false, entryMarker: null,
       exitDropped: false, exitMarker: null, wasInCoverage: false,
@@ -19231,10 +19200,6 @@ async function main() {
   function removeDroneEntities(eventId) {
     const state = droneState.get(eventId);
     if (!state) return;
-    // Hand the clock back if this vehicle was holding it for its
-    // propeller. Ref-counted, so it only actually goes back when the
-    // last fixed-wing is gone.
-    if (state.borrowedPropClock) _returnClockForProp();
     viewer.entities.remove(state.billboard);
     viewer.entities.remove(state.trail);
     viewer.entities.remove(state.shadow);
@@ -19759,6 +19724,9 @@ async function main() {
             && ((window.__isr_airliner_tuning || {}).gear ?? true)) {
           state._gear.update(state.billboard, p.alt);
         }
+        // The propeller. Wires itself once the glTF is ready, then costs
+        // one length check a frame.
+        if (state._prop) state._prop.update(state.billboard);
         // TYRE SMOKE at the moment the wheels touch. Fired once, from
         // the aircraft's own position and heading, and then left on the
         // runway: the aircraft rolls away from it, which is what makes
@@ -21714,12 +21682,29 @@ async function main() {
         'path deg': +(o.gammaRad * 180 / Math.PI).toFixed(1),
         'alpha deg': +(o.alphaRad * 180 / Math.PI).toFixed(1),
         'heading deg': +(((o.headingRad * 180 / Math.PI) % 360 + 360) % 360).toFixed(0),
+        'turn deg/s': +(o.turnRateDps ?? 0).toFixed(1),
+        'crab deg': +(o.hdgErrDeg ?? 0).toFixed(1),
+        'accel m/s2': +(o.accelMs2 ?? 0).toFixed(2),
         throttle: +o.throttle.toFixed(2),
         'prop rps': +o.propRps.toFixed(1),
       });
     }
     if (rows.length) console.table(rows);
     else console.log('no fixed-wing is airborne, or the model is not being called');
+    // Whether the builder's clip is actually wired, which is a separate
+    // question from whether the model is computing a rate for it.
+    for (const [eid, st] of droneState) {
+      if (st._prop) console.log(`[propeller] ${eid}`, st._prop.diag());
+    }
+    // bank and turn rate are the same quantity twice: the turn is
+    // computed FROM the bank. Opposite signs mean a sign flip crept
+    // back in, and that renders as banking away from the turn.
+    const wrong = rows.filter(r => Math.abs(r['turn deg/s']) > 2
+      && Math.sign(r['bank deg']) !== Math.sign(r['turn deg/s']));
+    if (wrong.length) {
+      console.warn('[fixedwing] bank and turn rate disagree in sign, so the '
+        + 'aircraft is banking AWAY from its turn:', wrong.map(r => r.airframe));
+    }
     return rows;
   };
 

@@ -85,6 +85,37 @@ export const TURN_RATE_MAX_DPS = 20.0;
 export const SPEED_TAU = 0.35;         // s
 export const TURN_TAU = 0.30;          // s
 export const CLIMB_TAU = 0.50;         // s
+// THE ONE PIECE BLENDER HAS NO NEED OF.
+//
+// There the aircraft IS the path: heading is integrated from bank and
+// nothing else exists to disagree with. Here a route says where the
+// aircraft must be, so the nose it integrates has to be kept honest
+// against the direction it is actually travelling, or the two drift
+// apart and it flies crabbed.
+//
+// This is the gain on that correction, in 1/s. It must stay SMALL. It
+// is the one path by which the polyline's staircase can reach the nose,
+// and the whole point of integrating the heading is that it never does:
+// 0.8 closes a heading error with a 1.25 s time constant, slow enough
+// that a 3 degree waypoint step arrives as 2.4 deg/s of extra turn
+// demand and is then smoothed again by ROLL_TAU before it moves
+// anything.
+export const HEADING_HOLD_K = 0.8;     // 1/s
+// Blender's dV is the acceleration it is ABOUT TO APPLY: it comes from
+// the plan's commanded speed, (v_t - V) * KV, and the next line
+// integrates it. The propeller then reads it, so the prop rises as the
+// aircraft accelerates and falls as it slows.
+//
+// Here the path commands the speed, so there is no v_t to difference
+// against. Writing (V_CRUISE - V) * KV in its place inverted the term:
+// an aircraft genuinely accelerating past cruise produced a NEGATIVE
+// dV and the propeller wound DOWN as it sped up. So the acceleration is
+// measured off the filtered speed instead, which is the same quantity
+// Blender's dV denotes, arrived at the only way a measured path allows.
+//
+// Filtered, because it is a second derivative of a polyline and so the
+// noisiest signal in the model.
+export const ACCEL_TAU = 0.40;         // s
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
@@ -127,9 +158,12 @@ export function createFixedWingFlightModel(opts = {}) {
   const rpsBase = opts.rps ?? 20;
 
   // Measured state, filtered.
-  let V = V_CRUISE, turnRate = 0, climb = 0;
+  let V = V_CRUISE, turnRate = 0, climb = 0, accel = 0;
   // Attitude state. These are the Blender integrator's variables.
-  let bank = 0, theta = ALPHA_CRUISE_DEG * DEG, gamma = 0;
+  // psi is the HEADING THE AIRCRAFT IS POINTING, integrated from bank
+  // exactly as Blender integrates it. It is deliberately NOT the
+  // measured direction of travel: see the chain below.
+  let bank = 0, theta = ALPHA_CRUISE_DEG * DEG, gamma = 0, psi = null;
   let propAngle = 0, tSec = 0;
   // Previous sample, for differentiating the path.
   let pLat = null, pLon = null, pAlt = null, pHdg = null;
@@ -172,7 +206,11 @@ export function createFixedWingFlightModel(opts = {}) {
       // Filter the measurements, not the results. A polyline hands over a
       // staircase; smoothing the bank afterwards only trades a snap for a
       // lag. See the quad model's ACC_TAU note, which is the same point.
+      const vPrev = V;
       V = ease(V, Math.max(V_MIN, vRaw), SPEED_TAU, dt);
+      // The acceleration the aircraft is actually undergoing. See
+      // ACCEL_TAU: this is Blender's dV, measured rather than commanded.
+      accel = ease(accel, (V - vPrev) / dt, ACCEL_TAU, dt);
       climb = ease(climb, climbRaw, CLIMB_TAU, dt);
       // FILTER FIRST, THEN CLAMP. The order here was the whole bug: the
       // aircraft flew every turn dead level because this line destroyed
@@ -200,12 +238,55 @@ export function createFixedWingFlightModel(opts = {}) {
       turnRate = ease(turnRate, wRaw, TURN_TAU, dt);
       turnRate = clamp(turnRate, -wCap, wCap);
 
-      // ── bank: the turn comes FROM the bank ────────────────────────
-      // Identical to the Blender line, with a measured turn rate where it
-      // had a commanded one.
+      // ── bank first, heading SECOND. The file's causal order. ──────
+      //
+      // THIS WAS BACKWARDS, AND IT IS WHY THE AIRCRAFT LOOKED LAGGY AND
+      // BANKED THE WRONG WAY.
+      //
+      // Blender does not measure a heading. It commands a bank, and the
+      // heading is what the bank PRODUCES:
+      //
+      //     bank_des = clamp(-atan(V * w_t / G), ...)
+      //     bank     = ease(bank, bank_des, ROLL_TAU, dt, roll_slew)
+      //     w        = -G * tan(bank) / V      # the turn the bank MAKES
+      //     psi     += w * dt                  # heading INTEGRATES
+      //
+      // The old code ran that backwards: it took the measured heading as
+      // truth and derived a bank from it. Two consequences, both of which
+      // Lucas saw before I did.
+      //
+      // One, the rendered heading WAS the measurement, so it was the
+      // polyline's staircase: the nose snapped about 3 degrees at every
+      // waypoint, fifteen times a second's worth of steps, and no amount
+      // of fixing the bank could smooth it because the nose was not being
+      // filtered at all. Integrating psi from a filtered bank means the
+      // nose can only move as fast as the wings roll.
+      //
+      // Two, THE SIGN. Blender's psi is "+ve left", stated at its own
+      // declaration. Cesium's heading is atan2(dE, dN): clockwise from
+      // north, POSITIVE RIGHT. The minus in bank_des belongs to the
+      // left-positive convention, and carrying it across the flip made a
+      // right turn command left wing down. The aircraft banked AWAY from
+      // every turn. So: no minus here, and no minus on w either.
       const maxBank = MAX_BANK_DEG * DEG;
-      const bankDes = clamp(-Math.atan((V * turnRate) / G), -maxBank, maxBank);
+      if (psi === null) psi = hdg ?? 0;
+
+      // Keep the integrated nose honest against the direction of travel.
+      // Small gain on purpose; HEADING_HOLD_K says why.
+      let hdgErr = 0;
+      if (hdg !== null) {
+        hdgErr = hdg - psi;
+        while (hdgErr > Math.PI) hdgErr -= 2 * Math.PI;
+        while (hdgErr < -Math.PI) hdgErr += 2 * Math.PI;
+      }
+      const wDes = clamp(turnRate + hdgErr * HEADING_HOLD_K, -wCap, wCap);
+
+      const bankDes = clamp(Math.atan((V * wDes) / G), -maxBank, maxBank);
       bank = ease(bank, bankDes, ROLL_TAU, dt, ROLL_RATE_DPS * DEG * dt);
+      // The turn rate the bank actually produces, and the heading it
+      // therefore sweeps. This is the aircraft flying, not a measurement.
+      const wActual = (G * Math.tan(bank)) / V;
+      psi += wActual * dt;
 
       // ── pitch leads, flight path follows ──────────────────────────
       // The load factor in a bank, and the angle of attack the wing needs
@@ -222,7 +303,12 @@ export function createFixedWingFlightModel(opts = {}) {
       gamma = ease(gamma, theta - alpha, GAMMA_TAU, dt);
 
       // ── throttle, inferred, for the propeller ─────────────────────
-      const dV = clamp((V_CRUISE - V) * KV, -A_DECEL, A_LONG);
+      // The Blender expression unchanged, with the measured acceleration
+      // where it had the commanded one. KV is consequently no longer in
+      // this chain: it is the gain on a speed command, and a measured
+      // path issues none. It stays exported because the parity gate
+      // reads it against the Blender file.
+      const dV = clamp(accel, -A_DECEL, A_LONG);
       const thr = clamp(
         0.55 * (V / V_CRUISE) ** 2 + 0.25 * (dV / A_LONG)
         + 0.6 * Math.sin(gamma) * V / 4.0 + 0.15, THR_IDLE, 1.0);
@@ -236,17 +322,23 @@ export function createFixedWingFlightModel(opts = {}) {
       const phShown = bank + tg * noise(tSec, TURB_ROLL_DEG.map(d => d * DEG), TURB_ROLL_HZ, 1.9);
 
       return {
-        headingRad: hdg ?? 0,
+        // The INTEGRATED heading, never the measured one. The measured
+        // one is the polyline's staircase and putting it on screen is
+        // what made the turns judder.
+        headingRad: psi ?? 0,
         pitchRad: thShown,          // nose above the horizon, POSITIVE up
         rollRad: phShown,           // right wing down, POSITIVE
         speedMs: V,
         gammaRad: gamma,            // the flight path, which the nose leads
         alphaRad: alpha,
         bankDeg: bank / DEG,
+        turnRateDps: wActual / DEG,     // what the bank is producing
+        hdgErrDeg: hdgErr / DEG,        // nose vs direction of travel
         pitchDeg: thShown / DEG,
         throttle: thr,
         propRps: wProp,
         propAngleRad: propAngle,
+        accelMs2: accel,
       };
     },
   };

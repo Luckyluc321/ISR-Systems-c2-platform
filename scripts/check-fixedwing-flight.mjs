@@ -201,6 +201,128 @@ check('the turn-rate filter runs before the clamp, not inside it',
   + 'its input is the bug this file now tests for: it cost a factor of 5.4 '
   + 'in bank angle on the real route.');
 
+// ── which WAY it banks, and how smoothly the nose moves ────────────
+// Both of these passed as a matter of luck before, because nothing
+// asserted a DIRECTION or a RATE. The aircraft banked away from every
+// turn and the nose moved in 3 degree steps, and every physics
+// assertion above was satisfied throughout.
+//
+// The sign: Blender's psi is "+ve left" at its own declaration, and
+// Cesium's heading is atan2(dE, dN), clockwise from north, POSITIVE
+// RIGHT. Porting bank_des = -atan(V*w/G) across that flip made a right
+// turn command left wing down.
+const right = flyStaircase({ speed: FM.V_CRUISE, turnDps: 10 });
+const left  = flyStaircase({ speed: FM.V_CRUISE, turnDps: -10 });
+check('a RIGHT turn drops the RIGHT wing',
+  right.bankDeg > 5,
+  `turning right gave ${right.bankDeg.toFixed(1)} deg of roll, and roll is `
+  + 'positive right-wing-down. Negative here means the aircraft is banking '
+  + 'away from its own turn, which is the sign of -atan(V*w/G) carried over '
+  + "from Blender's left-positive heading.");
+check('a LEFT turn drops the LEFT wing',
+  left.bankDeg < -5,
+  `turning left gave ${left.bankDeg.toFixed(1)} deg of roll.`);
+check('bank and turn rate never disagree in sign',
+  Math.sign(right.turnRateDps) === Math.sign(right.bankDeg)
+  && Math.sign(left.turnRateDps) === Math.sign(left.bankDeg),
+  `right: bank ${right.bankDeg.toFixed(1)} vs rate ${right.turnRateDps.toFixed(2)}; `
+  + `left: bank ${left.bankDeg.toFixed(1)} vs rate ${left.turnRateDps.toFixed(2)}. `
+  + 'The turn rate is computed FROM the bank, so these cannot differ unless '
+  + 'a sign was flipped between them.');
+
+// The nose must be an integration, not a copy of the measurement.
+function headingSteps({ turnDps, secs = 20, fps = 60, stepSec = 0.25 }) {
+  const fm = FM.createFixedWingFlightModel({ rps: 20 });
+  const dt = 1 / fps, speed = FM.V_CRUISE;
+  let lat = 55.6, lon = 12.7, hdg = 0;
+  const mLat = 111320, mLon = 111320 * Math.cos(lat * DEG);
+  const wps = [{ t: 0, lat, lon }];
+  for (let t = stepSec; t <= secs; t += stepSec) {
+    hdg += turnDps * DEG * stepSec;
+    lat += (speed * Math.cos(hdg) * stepSec) / mLat;
+    lon += (speed * Math.sin(hdg) * stepSec) / mLon;
+    wps.push({ t, lat, lon });
+  }
+  let prev = null, worst = 0, crab = 0;
+  for (let i = 0; i * dt <= secs - stepSec; i++) {
+    const t = i * dt;
+    let a = wps[0], b = wps[1];
+    for (let k = 0; k < wps.length - 1; k++) {
+      if (t >= wps[k].t && t <= wps[k + 1].t) { a = wps[k]; b = wps[k + 1]; break; }
+    }
+    const f = (b.t - a.t) === 0 ? 0 : (t - a.t) / (b.t - a.t);
+    const o = fm.update(a.lat + (b.lat - a.lat) * f, a.lon + (b.lon - a.lon) * f, 1000, dt);
+    if (!o) continue;
+    const h = (o.headingRad / DEG);
+    if (prev !== null) {
+      let d = h - prev; while (d > 180) d -= 360; while (d < -180) d += 360;
+      if (i > fps) worst = Math.max(worst, Math.abs(d));   // skip the first second's settle
+    }
+    prev = h;
+    if (i > fps) crab = Math.max(crab, Math.abs(o.hdgErrDeg));
+  }
+  return { worst, crab };
+}
+
+const smooth = headingSteps({ turnDps: 12 });
+// A 12 deg/s turn sampled every 0.25 s steps the TRACK by 3 deg at a
+// waypoint. At 60 fps a genuinely integrated nose moves 12/60 = 0.2 deg
+// per frame, so anything approaching 3 means the measurement is being
+// rendered instead of the aircraft.
+check('the nose is integrated, not copied from the polyline',
+  smooth.worst < 0.8,
+  `the worst single-frame heading change is ${smooth.worst.toFixed(2)} deg. A `
+  + '12 deg/s turn at 60 fps should move the nose 0.2 deg a frame; 3 deg means '
+  + 'the rendered heading IS the measured track, which is the staircase, and '
+  + 'that is what reads on screen as the aircraft lagging through its turn.');
+check('the nose still points where the aircraft is going',
+  smooth.crab < 12,
+  `the nose drifted ${smooth.crab.toFixed(1)} deg off the direction of travel. `
+  + 'An integrated heading needs HEADING_HOLD_K to keep it honest, or the '
+  + 'aircraft flies crabbed.');
+
+const src = readFileSync(new URL('../src/fixedwing_flight_model.js', import.meta.url), 'utf8');
+check('the heading is integrated from the bank, as in the Blender file',
+  /psi\s*\+=/.test(src) && /headingRad:\s*psi/.test(src),
+  'Blender commands a bank and lets the heading follow: psi += w * dt. '
+  + 'Returning the MEASURED heading instead renders the path\'s sampling as '
+  + 'aircraft motion.');
+check('no leftover minus on the commanded bank',
+  !/bankDes\s*=\s*clamp\(\s*-\s*Math\.atan/.test(src),
+  "that minus is Blender's, and Blender's heading is positive LEFT.");
+
+// ── the propeller follows the throttle ─────────────────────────────
+// Blender's dV is the acceleration it is about to apply, and the
+// propeller reads it. Porting that as (V_CRUISE - V) * KV inverted it:
+// an aircraft accelerating past cruise produced a negative dV and the
+// blades wound DOWN as it sped up. The acceleration is measured now.
+function flyAccel(from, to, secs = 10) {
+  const fm = FM.createFixedWingFlightModel({ rps: 20 });
+  const fps = 60, dt = 1 / fps;
+  let lat = 55.6; const mLat = 111320;
+  let peak = -Infinity, trough = Infinity;
+  for (let i = 0; i < 8 * fps; i++) { lat += (from * dt) / mLat; fm.update(lat, 12.7, 1000, dt); }
+  for (let i = 0; i < secs * fps; i++) {
+    lat += (to * dt) / mLat;
+    const o = fm.update(lat, 12.7, 1000, dt);
+    if (o) { peak = Math.max(peak, o.propRps); trough = Math.min(trough, o.propRps); }
+  }
+  return { peak, trough };
+}
+const spdUp = flyAccel(36, 52);
+const spdDn = flyAccel(36, 24);
+check('the propeller speeds up when the aircraft does',
+  spdUp.peak > spdDn.trough + 2,
+  `accelerating peaks at ${spdUp.peak.toFixed(1)} rps, decelerating bottoms at `
+  + `${spdDn.trough.toFixed(1)}. If these are equal the throttle is not reading `
+  + 'acceleration at all; if they are REVERSED the commanded-acceleration term '
+  + 'was ported without noticing that the map measures speed rather than '
+  + 'commanding it.');
+check('the propeller reads MEASURED acceleration, not a speed error',
+  /clamp\(accel,/.test(src) && typeof FM.ACCEL_TAU === 'number' && FM.ACCEL_TAU > 0,
+  'dV must come from the measured acceleration of the filtered speed. '
+  + '(V_CRUISE - V) * KV is the commanded form and has the wrong sign here.');
+
 if (failures) {
   console.log(`\ncheck:fixedwing-flight FAILED — ${failures} assertion${failures === 1 ? '' : 's'}`);
   process.exit(1);

@@ -119,7 +119,7 @@ function doorFraction(f) {
  *  is still loading. ModelVisualizer keeps it in _modelHash, keyed by
  *  entity id. Private, so every access is guarded: if the shape of this
  *  ever changes the gear simply stays down rather than throwing. */
-function findModelPrimitive(viewer, entity) {
+export function findModelPrimitive(viewer, entity) {
   try {
     const ds = viewer?.dataSourceDisplay;
     const buckets = [ds?.defaultDataSource, ...(ds?.dataSources?._dataSources || [])];

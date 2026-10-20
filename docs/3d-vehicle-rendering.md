@@ -2361,3 +2361,168 @@ And `cph_recon_hostile` gained `coverageGated: true`: it spawns 3.2 km
 east, outside every sensor radius, so DETECTED was firing at t=0 for an
 aircraft nothing could hear. It now flips on first entry into coverage,
 at t=27.
+
+## 8ab. The turns were backwards in two different ways
+
+Lucas, after 8aa shipped: *"Its still lagging like crazy when it turns...
+The turns of the fixed wing is literally pointing the wings in the
+opposite direction of where its flying at, along with being crazy laggy,
+like turning and lagging during its turn. FIX THIS SHIT BY USING THE
+MOVEMENT PATTERNS/CODE FROM THE FUCKING EXISTING BEAUTIFUL FILE"*
+
+He was right on both counts, and the instruction was the fix. 8aa made
+the bank the right *size* while leaving it the wrong *sign*, and it never
+addressed the nose at all.
+
+### The file commands a bank. I was measuring a heading.
+
+```python
+# blender_fixedwing_flight_demo.py
+w_t       = math.radians(turn_dps)
+bank_des  = clamp(-math.atan(V * w_t / G), -max_bank, max_bank)
+bank      = ease(bank, bank_des, ROLL_TAU, dt, roll_slew)
+w         = -G * math.tan(bank) / V      # the turn the bank MAKES
+psi      += w * dt                       # heading INTEGRATES
+```
+
+Causality runs **bank → heading**. The aircraft rolls, and because it is
+rolled, it turns. My port ran it backwards: it took the measured track
+direction as truth and derived a bank from it, heading → bank.
+
+Two consequences, both of which Lucas saw before I did.
+
+**The nose was the staircase, rendered raw.** The model returned
+`headingRad: hdg`, the measured direction of travel. That direction is
+constant inside a 0.25 s interpolation cell and steps about 3 degrees at
+each waypoint, so the nose snapped in 3 degree increments forever. No
+amount of fixing the bank could smooth it, because the nose was not
+being filtered at all. This is what "crazy laggy, turning and lagging
+during its turn" was, and it is a different defect from 8aa's.
+
+**The sign.** Blender's `psi` is documented *"+ve left"* at its own
+declaration. Cesium's heading is `atan2(dE, dN)`: clockwise from north,
+**positive right**. The minus in `bank_des` belongs to the left-positive
+convention, and I carried it across the flip verbatim, so a right turn
+commanded left wing down. The aircraft banked away from every turn.
+`rollSign` is 1 and nothing downstream compensated.
+
+Measured on the real 792-waypoint route at 60 fps:
+
+| | before | after |
+|---|---|---|
+| peak \|bank\| | 27.3 deg, **wrong way** | 32.2 deg, correct way |
+| worst single-frame heading step | ~3 deg (the staircase) | **0.163 deg** |
+| bank/turn sign disagreement | every turning frame | **0 of 3096** |
+| nose vs direction of travel | 0 by construction | 5.0 deg peak |
+
+The one thing Blender has no need of is a heading hold. There the
+aircraft *is* the path, so nothing can disagree with the integrated
+heading. Here a route says where the aircraft must be, so the integrated
+nose has to be kept honest against the track or it flies crabbed:
+`HEADING_HOLD_K = 0.8`, deliberately small, because it is the only route
+by which the staircase can reach the nose. At 0.8 a 3 degree waypoint
+step arrives as 2.4 deg/s of extra turn demand and is smoothed again by
+`ROLL_TAU` before it moves anything.
+
+### Why every gate passed while it banked the wrong way
+
+Nothing asserted a **direction** or a **rate**. Every physics assertion
+was about magnitude, and the inverted sign satisfies all of them
+perfectly. Added:
+
+- a right turn must drop the right wing, and a left turn the left
+- bank and turn rate may never disagree in sign (they are the same
+  quantity twice, since the turn is computed *from* the bank)
+- the worst single-frame heading change must stay under 0.8 deg, when a
+  12 deg/s turn at 60 fps should move the nose 0.2 deg per frame and the
+  staircase would give 3
+- the nose must stay within 12 deg of the direction of travel
+- source checks: `psi +=` exists, `headingRad: psi` is returned, and
+  there is no leftover minus on `bankDes`
+
+### The propeller, and what "use the file" actually meant
+
+Lucas: *"Make sure the propeller takes acceleration/deceleration into
+account."* Reading the file to answer that turned up two things.
+
+First, **the Blender demo does not use the asset's clip either.** In its
+own words:
+
+```python
+# The file's own animation (this one carries a propeller clip) would
+# fight the hub we drive. Drop it; the propeller is ours now.
+```
+
+It deletes the clip and spins the hub from throttle. So for the
+propeller, "use the file" means *drive it from throttle* — the opposite
+of what I concluded in 8aa, where using the clip was the right answer
+for the blades' geometry and motion.
+
+Both are available at once, because Cesium lets a clip's time be
+**supplied** rather than advanced. `ModelAnimation`'s `animationTime`
+callback returns the normalised position within the clip, and for a
+REPEAT loop Cesium truncates it with `delta - floor(delta)`, so an
+ever-growing phase wraps on its own. The geometry and motion stay the
+builder's; the rate becomes the flight model's.
+
+Second, **my throttle port had the acceleration term inverted.**
+Blender's `dV = clamp((v_t - V) * KV, ...)` is the acceleration it is
+about to apply, from the plan's commanded speed. I wrote
+`(V_CRUISE - V) * KV`, but on the map the path *commands* the speed and
+the model *measures* it, so an aircraft genuinely accelerating past
+cruise produced a negative `dV` and the blades wound **down** as it sped
+up. Now the acceleration is measured off the filtered speed, filtered
+again through `ACCEL_TAU = 0.40` because it is a second derivative of a
+polyline and so the noisiest signal in the model:
+
+```
+phase          speed   accel   thr    prop rps
+cruise          36.0   -0.00   0.70      17.3
+accelerating    52.0            1.00      20.0
+decelerating    28.0            0.48      12.4
+climbing        36.3    0.01    1.00      20.0
+```
+
+### This removed the clock borrow from 8aa
+
+`ModelAnimationCollection.update()` returns early when `frameState.time`
+has not moved — **unless `animateWhilePaused` is set**, which is a
+plain writable field on the collection. With that set and `delta` coming
+from our own callback, the propeller spins with `viewer.clock` frozen.
+
+So the global clock borrow 8aa introduced is gone entirely: no sun
+movement, nothing global touched, and the propeller cannot drift with
+the sim clock. 8aa's reasoning about its cost was sound and its
+measurements were right, but the borrow should never have been needed.
+Costing a constraint is not the same as checking whether it exists —
+which is the fourth note in the 3D-verification memory, and this is the
+second time it has caught me.
+
+It has to be done on the Model primitive, because the entity layer
+cannot express any of it: `ModelVisualizer` hardcodes
+`addAll({ loop: REPEAT })`, and `multiplier` would not have been enough
+anyway since `ModelAnimation` exposes it get-only and caches a duration
+from it on first use. The entity therefore declares
+`runAnimations: false`, which makes the visualizer call `removeAll()`
+once and then leave the collection alone for good, since it only acts
+when the value changes. `fixedwing_propeller.js` fills it afterwards and
+re-checks every frame, so the order of the two passes is not assumed.
+
+`findModelPrimitive` is now exported from `airliner_surfaces.js` rather
+than copied. It walks Cesium privates (`_modelHash`), and two copies of
+that walk would mean a Cesium upgrade breaking both and only one getting
+fixed. Adding the keyword changes no behaviour for the A320.
+
+### The lesson
+
+Both of this session's defects were sign and causality errors in a port,
+sitting under assertions that only ever checked magnitude. **A test that
+measures how much cannot see which way.** The route gate, the staircase
+gate and the sign gate are all the same realisation arriving three
+times: assert the thing you would actually notice on screen.
+
+And twice now the answer has been in the file Lucas kept pointing at.
+Reading `blender_fixedwing_flight_demo.py` properly, rather than
+consulting the constants I had already lifted out of it, settled the
+causal order, the sign convention, the propeller question and the
+throttle bug in one pass.
