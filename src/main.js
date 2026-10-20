@@ -18103,12 +18103,14 @@ async function main() {
       }
       if (!_fwLastHpr) return undefined;
 
-      // Cesium's pitch is nose-DOWN positive; the model reports nose-UP
-      // positive, as an aircraft's attitude is normally written. Hence
-      // the negation, before the asset's own sign convention is applied.
+      // NO NEGATION. Cesium's pitch is nose-UP positive, which is what
+      // the quad model's own note says: "leaning forward is nose DOWN,
+      // so negative in Cesium's convention". The model reports nose-up
+      // positive too, so the two already agree. The negation that was
+      // here rendered every climb as a dive.
       const hpr = new Cesium.HeadingPitchRoll(
         _fwLastHpr.headingRad + headingOffset,
-        (-_fwLastHpr.pitchRad + pitchOffset) * pitchSign,
+        (_fwLastHpr.pitchRad + pitchOffset) * pitchSign,
         _fwLastHpr.rollRad * rollSign,
       );
       return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
@@ -18187,11 +18189,20 @@ async function main() {
         // Quads only. The airliner, the Mi-24 and the Shahed each carry
         // their own sizing a few lines up and none of them was
         // reported; isLoiterMun keeps the 24 it was tuned at.
-        ...(isAirliner || isHostileHeli ? {} : {
+        // A FIXED-WING IS NOT A QUAD AND MUST NOT BORROW ITS SIZING.
+        // This block excluded the airliner and the helicopter and
+        // nothing else, so the Baykar was given the DJI Air 3's
+        // maximumScale (0.248 x exaggeration) and a 14 pixel floor.
+        // A 2.4 m aircraft capped at a 0.26 m drone's scale is why it
+        // lost its symbol far too early and never looked right.
+        ...(isAirliner || isHostileHeli ? {} : (isFixedWing ? {
+          minimumPixelSize: 20,
+          maximumScale: _fixedWingSpec().scale * MODEL_MAX_EXAGGERATION,
+        } : {
           minimumPixelSize: isLoiterMun ? 24 : (_qT.swarmMinimumPixelSize ?? 14),
           maximumScale: (isLoiterMun ? SHAHED_SCALE : _quadModelSpec(_quadKey).scale)
             * (_qT.swarmMaxExaggeration ?? MODEL_MAX_EXAGGERATION),
-        }),
+        })),
         // PROPELLERS, WHICH THIS SPEC HAS NEVER TURNED.
         //
         // nodeTransformations was set in exactly three places: the
@@ -18208,7 +18219,10 @@ async function main() {
         // Quads only: the Shahed has no rotors, the Mi-24 drives its
         // own main and tail rotor a few hundred lines up, and the
         // airliner runs the builder's own animation clip.
-        ...(isAirliner || isHostileHeli || isLoiterMun ? {} : {
+        // Quad rotors only. The Baykar has one pusher propeller and no
+        // Rotor_1..4 nodes at all, so this was asking Cesium to transform
+        // four nodes that do not exist on it.
+        ...(isAirliner || isHostileHeli || isLoiterMun || isFixedWing ? {} : {
           nodeTransformations: _quadRotorTransforms(
             () => _quadRotorRps || ((window.__isr_quad_tuning || {}).rotorRps ?? 12)),
         }),
@@ -21611,6 +21625,37 @@ async function main() {
     console.log(`[quad axes] combo ${n}:`, JSON.stringify(c),
       '— applies immediately, no relaunch. Straight leg: nose DOWN, wings LEVEL,'
       + ' and turning the camera must not change either.');
+  };
+
+  // WHAT THE FIXED-WING MODEL IS ACTUALLY DOING.
+  //
+  //   __isr_fixedwing()
+  //
+  // bank is what the turn requires, atan(V*w/g). pitch is the nose above
+  // the horizon, which on a wing is gamma + alpha: the flight path plus
+  // the angle of attack. alpha grows as the square of how far below
+  // cruise the speed is, and again with the load factor in a bank, so a
+  // slow or banked aircraft rides nose-high. If pitch ever equals gamma
+  // the model is not running and something is drawing the attitude.
+  window.__isr_fixedwing = () => {
+    const rows = [];
+    for (const [key, o] of _quadFlightDiag) {
+      if (!o || o.gammaRad === undefined) continue;     // quads have no gamma
+      rows.push({
+        airframe: key,
+        'speed m/s': +o.speedMs.toFixed(1),
+        'bank deg': +o.bankDeg.toFixed(1),
+        'nose deg': +o.pitchDeg.toFixed(1),
+        'path deg': +(o.gammaRad * 180 / Math.PI).toFixed(1),
+        'alpha deg': +(o.alphaRad * 180 / Math.PI).toFixed(1),
+        'heading deg': +(((o.headingRad * 180 / Math.PI) % 360 + 360) % 360).toFixed(0),
+        throttle: +o.throttle.toFixed(2),
+        'prop rps': +o.propRps.toFixed(1),
+      });
+    }
+    if (rows.length) console.table(rows);
+    else console.log('no fixed-wing is airborne, or the model is not being called');
+    return rows;
   };
 
   window.__isr_quadHum = (gain = 0) => {
