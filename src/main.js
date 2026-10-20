@@ -714,6 +714,7 @@ import { initSovereignServices, DK_SERVICES, lookupBBR, reverseGeocodeDAR, findN
 import { initLiveFeeds } from './sovereign_live_feeds.js';
 // First real sensor node. Console entry points + the bridge feed consumer.
 import { createQuadFlightModel, rotorsFromHubs } from './quad_flight_model.js';
+import { createFixedWingFlightModel } from './fixedwing_flight_model.js';
 import { createLiveSensorRuntime } from './live_sensor.js';
 import { activateManhattanDemo, deactivateManhattanDemo, setManhattanChase } from './manhattan_demo.js';
 // Cooperative-traffic adapters self-register on import. Order matters
@@ -6912,6 +6913,45 @@ async function main() {
   // word away for any scenario that wants it:
   //   __isr_quad_tuning.model = 'assault_drone_concept'
   const _QUAD_MODEL_DEFAULT = 'dji_air_3';
+
+  // ── THE FIXED-WING AIRFRAME ──────────────────────────────────────
+  //
+  // Baykar Sivrisinek, decimated from a Sketchfab source: 802,060
+  // triangles to 77,780, 46.8 MB to 3.1 MB. Of the source triangles
+  // 650k were BOLTS — twelve CIVATA nodes of about 56k each, every bolt
+  // its own closed island, which is why a plain simplify floored at a
+  // quarter of them and the nodes had to lose their meshes instead.
+  //
+  // AXES MEASURED, NOT ASSUMED. Composed extent and the world centroid
+  // of the named parts:
+  //
+  //   span        X 3.810   Y 1.063   Z 4.245
+  //   LENS / CAM  Z = +2.15     the seeker, at the extreme forward point
+  //   MOTOR       Z = -0.81     the pusher motor, behind it
+  //
+  // So the nose is +Z, up is +Y, and the wingspan lies on X. The camera
+  // in the nose and the motor behind it settle which end is which, which
+  // the bounding box alone cannot.
+  //
+  // THE CONVENTION COMES FROM A WORKING ASSET, NOT FROM A THEORY.
+  // assault_drone_concept has the same axes and ships 270 / 1 / 1, and
+  // that is known to look right on screen. Deriving these from the glTF
+  // Y-up convention was tried on the Air 3 and was wrong: it flew the
+  // airframe permanently sideways. Same axes, same numbers.
+  //
+  //   __isr_fixedwing_tuning = { scale: 1.2 }   to try a size live
+  const _FIXEDWING_MODEL = {
+    uri: '/aircraft/baykar_sivrisinek.glb',
+    // The asset is 4.24 units nose to tail. A Sivrisinek is about 2.4 m
+    // long, so a little under half size renders it life-sized. Map
+    // symbols are drawn larger than life on purpose, as the quad is.
+    scale: 0.9,
+    headingOffsetDeg: 270, pitchSign: 1, rollSign: 1, pitchOffsetDeg: 0,
+  };
+  function _fixedWingSpec() {
+    const t = (typeof window !== 'undefined' && window.__isr_fixedwing_tuning) || {};
+    return { ..._FIXEDWING_MODEL, ...t };
+  }
 
   const _QUAD_MODELS = {
     assault_drone_concept: {
@@ -17455,11 +17495,19 @@ async function main() {
     // is the subject of the shot and has to be solid long before a 3 m
     // drone would be worth drawing.
     const isAirliner = platform === 'jet';
+    // Fixed-wing threats. Until now these rendered as a flat icon and
+    // nothing else: there was no 3D aircraft on the map for any of them.
+    const isFixedWing = platform === 'fixed-wing' || platform === 'fixedwing';
     // 12 km covered the entire 10 km approach, so the 3D model was always
     // up and the symbol never appeared at all. That is why it "went
     // missing" when the approach shortened from 18 km. 5 km gives the
     // symbol the outer half of the final and the model the inner half.
-    const MODEL_SWAP_M = isHostileHeli ? 6000 : (isAirliner ? 5000 : 250);
+    // A fixed-wing recon track cruises at 800 m and climbs to 3000. A
+    // 250 m swap would never fire once in the whole scenario, so the
+    // model would exist and never be drawn — the same mistake the
+    // helicopter's 1500 m made before it went to 6000.
+    const MODEL_SWAP_M = isHostileHeli ? 6000
+      : (isAirliner ? 5000 : (isFixedWing ? 6000 : 250));
     const _modelUri = isLoiterMun
       ? '/aircraft/shahed_238_drone.glb'
       : (isQuadcopter ? _quadModelSpec(_quadKey).uri
@@ -17519,9 +17567,10 @@ async function main() {
           // is picked up again, the thing to try is setting the
           // transforms ONCE at a few discrete steps instead of through a
           // CallbackProperty every frame.
-          : (isAirliner ? '/aircraft/a320_noskin.glb' : null)));
+          : (isAirliner ? '/aircraft/a320_noskin.glb'
+            : (isFixedWing ? _fixedWingSpec().uri : null))));
 
-    const _shouldSwapModel = isLoiterMun || isQuadcopter || isHostileHeli || isAirliner;
+    const _shouldSwapModel = isLoiterMun || isQuadcopter || isHostileHeli || isAirliner || isFixedWing;
 
     // Flight rig — closure-captured per entity so each Shahed has
     // independent orientation smoothing. Reads live from
@@ -18011,6 +18060,60 @@ async function main() {
       );
       return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
     };
+    // ── FIXED-WING ATTITUDE, from src/fixedwing_flight_model.js ─────
+    //
+    // Not the quad rig. A wing banks to turn and its nose rides above
+    // its flight path; a quadcopter leans where it is going and points
+    // exactly along it. Driving this airframe with _quadOrientation
+    // would slide it round corners flat, which is a drone with wings
+    // glued on.
+    //
+    // Same clock discipline as the quad rig: lastFrameMs() is the
+    // instant the POSITION belongs to, and a speed is dPosition/dt, so
+    // the clock that advanced the position must be the clock that
+    // divides it. A dt of zero means this ran twice in one frame, so
+    // there is no new information and the attitude is held.
+    const _fwFlight = createFixedWingFlightModel({
+      rps: (typeof window !== 'undefined' && window.__isr_fixedwing_tuning
+        && window.__isr_fixedwing_tuning.propRps) || 20,
+    });
+    let _fwLastHpr = null;
+    let _fwPrevTime = 0;
+    const _fixedWingOrientation = () => {
+      const cart = _billboardRef?.position?.getValue?.(Cesium.JulianDate.now());
+      if (!cart) return undefined;
+      const M = _fixedWingSpec();
+      const headingOffset = ((M.headingOffsetDeg || 0) * Math.PI) / 180;
+      const pitchOffset   = ((M.pitchOffsetDeg   || 0) * Math.PI) / 180;
+      const pitchSign     = M.pitchSign ?? 1;
+      const rollSign      = M.rollSign  ?? 1;
+
+      const now = lastFrameMs() || performance.now();
+      const dt = _fwPrevTime ? (now - _fwPrevTime) / 1000 : 0;
+      if (dt > 0) {
+        _fwPrevTime = now;
+        const c = Cesium.Cartographic.fromCartesian(cart);
+        const out = _fwFlight.update(
+          Cesium.Math.toDegrees(c.latitude),
+          Cesium.Math.toDegrees(c.longitude),
+          c.height, dt);
+        if (out) { _fwLastHpr = out; _quadFlightDiag.set(`${event.id}`, out); }
+      } else if (!_fwPrevTime) {
+        _fwPrevTime = now;
+      }
+      if (!_fwLastHpr) return undefined;
+
+      // Cesium's pitch is nose-DOWN positive; the model reports nose-UP
+      // positive, as an aircraft's attitude is normally written. Hence
+      // the negation, before the asset's own sign convention is applied.
+      const hpr = new Cesium.HeadingPitchRoll(
+        _fwLastHpr.headingRad + headingOffset,
+        (-_fwLastHpr.pitchRad + pitchOffset) * pitchSign,
+        _fwLastHpr.rollRad * rollSign,
+      );
+      return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
+    };
+
     const _droneEntitySpec = {
       id: `drone-${event.id}`,
       position: Cesium.Cartesian3.fromDegrees(...startPos),
@@ -18070,7 +18173,7 @@ async function main() {
         // Floor derived from real metres like everything else.
         scale: isAirliner ? 1
           : (isHostileHeli ? 1.121 : (isLoiterMun ? SHAHED_SCALE
-            : _quadModelSpec(_quadKey).scale)),
+            : (isFixedWing ? _fixedWingSpec().scale : _quadModelSpec(_quadKey).scale))),
         // THE LEAD GETS WHAT ITS OWN WINGMEN GET.
         //
         // This spec has never set either, so a swarm lead drew at true
@@ -18191,7 +18294,8 @@ async function main() {
       // tuning lives on _bankedOrientation and the aircraft never called
       // it. It flew tail-first on the quad rig's conventions.
       _droneEntitySpec.orientation = new Cesium.CallbackProperty(
-        () => ((isLoiterMun || isAirliner) ? _bankedOrientation() : _quadOrientation()),
+        () => (isFixedWing ? _fixedWingOrientation()
+          : ((isLoiterMun || isAirliner) ? _bankedOrientation() : _quadOrientation())),
         false,
       );
     }
