@@ -21708,6 +21708,109 @@ async function main() {
     return rows;
   };
 
+  // WHAT THE SCREEN ACTUALLY GOT, not what the model computed.
+  //
+  //   __isr_fixedwingTrace(6)
+  //
+  // Records the RENDERED orientation every frame for N seconds and
+  // reports how it moved. Written because two fixes in a row improved
+  // their own numbers while Lucas still saw the aircraft lag, and the
+  // offline model measures clean: 0.12 deg of bank per frame at the
+  // median. If the browser disagrees with that, the defect is between
+  // the model and the screen, and no further change to the physics can
+  // reach it.
+  //
+  // Reads the entity's own orientation property, so it sees exactly
+  // what Cesium drew, including any frame the attitude was held on.
+  window.__isr_fixedwingTrace = (seconds = 6) => {
+    const ent = (() => {
+      for (const [eid, st] of droneState) {
+        const o = _quadFlightDiag.get(`${eid}`);
+        if (o && o.gammaRad !== undefined) return st.billboard;
+      }
+      return null;
+    })();
+    if (!ent) { console.log('no fixed-wing airborne'); return; }
+    const rows = [];
+    const t0 = performance.now();
+    const off = viewer.scene.postRender.addEventListener(() => {
+      const q = ent.orientation?.getValue?.(viewer.clock.currentTime);
+      const pos = ent.position?.getValue?.(viewer.clock.currentTime);
+      if (!q || !pos) return;
+      const m = Cesium.Matrix3.fromQuaternion(q, new Cesium.Matrix3());
+      const enu = Cesium.Transforms.eastNorthUpToFixedFrame(pos);
+      const rot = Cesium.Matrix4.getMatrix3(enu, new Cesium.Matrix3());
+      const local = Cesium.Matrix3.multiply(
+        Cesium.Matrix3.transpose(rot, new Cesium.Matrix3()), m, new Cesium.Matrix3());
+      const hpr = Cesium.HeadingPitchRoll.fromQuaternion(
+        Cesium.Quaternion.fromRotationMatrix(local));
+      rows.push([performance.now() - t0,
+        Cesium.Math.toDegrees(hpr.heading),
+        Cesium.Math.toDegrees(hpr.pitch),
+        Cesium.Math.toDegrees(hpr.roll),
+        pos.x, pos.y, pos.z]);
+      if (performance.now() - t0 > seconds * 1000) {
+        off();
+        report();
+      }
+    });
+    function report() {
+      const n = rows.length;
+      const dur = (rows[n - 1][0] - rows[0][0]) / 1000;
+      const pct = (a, q) => a.slice().sort((x, y) => x - y)[Math.floor(a.length * q)];
+      const unwrap = (idx) => {
+        const o = [rows[0][idx]];
+        for (let i = 1; i < n; i++) {
+          let v = rows[i][idx]; const prev = o[i - 1];
+          while (v - prev > 180) v -= 360;
+          while (v - prev < -180) v += 360;
+          o.push(v);
+        }
+        return o;
+      };
+      const stats = (label, arr) => {
+        const d = [];
+        for (let i = 1; i < arr.length; i++) d.push(Math.abs(arr[i] - arr[i - 1]));
+        const held = d.filter(v => v < 1e-6).length;
+        console.log(`  ${label.padEnd(8)} per-frame step  p50 ${pct(d, 0.5).toFixed(4)}  `
+          + `p90 ${pct(d, 0.9).toFixed(4)}  p99 ${pct(d, 0.99).toFixed(4)}  `
+          + `max ${Math.max(...d).toFixed(4)} deg   frozen frames ${held} `
+          + `(${(100 * held / d.length).toFixed(1)}%)`);
+        return d;
+      };
+      const dts = [];
+      for (let i = 1; i < n; i++) dts.push(rows[i][0] - rows[i - 1][0]);
+      console.log(`[fixedwing trace] ${n} frames over ${dur.toFixed(2)} s `
+        + `= ${(n / dur).toFixed(1)} fps`);
+      console.log(`  frame dt  p50 ${pct(dts, 0.5).toFixed(2)}  p90 ${pct(dts, 0.9).toFixed(2)}  `
+        + `max ${Math.max(...dts).toFixed(2)} ms`);
+      const dh = stats('heading', unwrap(1));
+      stats('pitch', unwrap(2));
+      stats('roll', unwrap(3));
+      // Position step, to separate a stuttering POSITION from a
+      // stuttering ATTITUDE. They have different causes and different
+      // fixes, and the screen cannot tell you which it was.
+      const ds = [];
+      for (let i = 1; i < n; i++) {
+        ds.push(Math.hypot(rows[i][4] - rows[i - 1][4], rows[i][5] - rows[i - 1][5],
+          rows[i][6] - rows[i - 1][6]));
+      }
+      const frozen = ds.filter(v => v < 1e-9).length;
+      console.log(`  position per-frame step  p50 ${pct(ds, 0.5).toFixed(3)}  `
+        + `p90 ${pct(ds, 0.9).toFixed(3)}  max ${Math.max(...ds).toFixed(3)} m   `
+        + `frozen frames ${frozen} (${(100 * frozen / ds.length).toFixed(1)}%)`);
+      // The tell: a step distribution with a long tail is a stutter; a
+      // tight one is smooth motion. The offline model gives 1.5 on
+      // heading and 6.5 on roll.
+      console.log(`  SPREAD  heading p90/p50 ${(pct(dh, 0.9) / Math.max(pct(dh, 0.5), 1e-9)).toFixed(1)}x  `
+        + `position p90/p50 ${(pct(ds, 0.9) / Math.max(pct(ds, 0.5), 1e-9)).toFixed(1)}x`);
+      console.log('  offline reference at a constant dt: heading p50 0.0063 max 0.1856, '
+        + 'roll p50 0.1174 max 0.7605, no frozen frames.');
+      window.__isr_fwTraceRows = rows;
+    }
+    console.log(`[fixedwing trace] recording ${seconds}s...`);
+  };
+
   window.__isr_quadHum = (gain = 0) => {
     const t = window.__isr_quad_tuning = window.__isr_quad_tuning || {};
     t.hoverNoise = gain;
