@@ -2103,6 +2103,15 @@ async function main() {
   (function _renderRenderProfileSection() {
     const cpBody = document.getElementById('cp-body');
     if (!cpBody || cpBody.querySelector('#cp-render-profile-section')) return;
+    // ISR-INTERNAL. An operator has no business switching the basemap
+    // between Google photoreal and the Danish sovereign stack: it is
+    // our rendering decision, it reloads the page, and "Sovereign · DK"
+    // is a phrase a customer should never have to interpret.
+    //
+    // BUILT ALWAYS, HIDDEN WHEN NOT ADMIN. This runs once, so returning
+    // early for an operator would mean the section never exists, and
+    // switching back to admin in the same session could not bring it
+    // back. applyFlyToScope owns its visibility from here on.
     const section = document.createElement('div');
     section.className = 'cp-section';
     section.id = 'cp-render-profile-section';
@@ -2120,6 +2129,7 @@ async function main() {
           Switch to ${otherLabel}
         </button>
       </div>`;
+    section.hidden = (getActiveRole()?.kind || 'admin') === 'operator';
     cpBody.appendChild(section);
     const btn = section.querySelector('#cp-rp-switch');
     if (btn) btn.addEventListener('click', () => window.__isr_switchRenderProfile(other));
@@ -23317,6 +23327,25 @@ async function main() {
       const sid = FLY_TARGETS[btn.dataset.fly]?.siteId;
       btn.hidden = !!sid && !_roleCanSeeSite(sid);
     });
+    // OVERVIEW DESTINATIONS ARE ADMIN-ONLY.
+    //
+    // Denmark and Globe carry siteId: null, so the site filter above
+    // leaves them alone. They are not another tenant's data, but they
+    // are not an operator's either: an account that owns one airport
+    // has no use for a button that pulls the camera out to the whole
+    // country, and it quietly says the console is watching more than
+    // their site.
+    const _isAdminLike = (getActiveRole()?.kind || 'admin') !== 'operator';
+    for (const key of ['denmark', 'globe']) {
+      const b = document.querySelector(`#control-panel .cp-btn[data-fly="${key}"]`);
+      if (b) b.hidden = !_isAdminLike;
+    }
+    // The render profile switch is ISR-internal and is built for admin
+    // only, so it has to come and go with the account rather than
+    // surviving from whoever was signed in at boot.
+    const _rp = document.getElementById('cp-render-profile-section');
+    if (_rp) _rp.hidden = !_isAdminLike;
+
     // Hide a multi-site operator's group when the account owns none of
     // its sites. Keyed off the operator, not an id prefix, so it holds
     // for any future multi-site customer.
