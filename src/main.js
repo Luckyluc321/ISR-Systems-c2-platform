@@ -30955,11 +30955,28 @@ async function main() {
     // default errs tight. The floor keeps a 92 m switching station from
     // putting the camera on its roof.
     //   window.__isr_frameTuning = { factor: 1.4, minM: 700 }
+    // A TUNED VALUE BEATS A DERIVED ONE. ALWAYS.
+    //
+    // The first version of this replaced the whole thing with
+    // extent x 1.0, which widened CPH from 2200 m to 4638 m. The camera
+    // centres on the TRACK, not the site, so that doubled how much
+    // ground sits around it: the CPH recon swarm starts 2.7 km out over
+    // Oresund, which at 2200 m read as alone over water and at 4638 m
+    // read as sitting on the airport. Lucas reported it as the swarm
+    // having been moved inside the perimeter. It had not moved at all.
+    //
+    // The bug was never that 2200 was wrong. 2200 and the old 1100 were
+    // two numbers covering ten sites, and the 1100 was wrong for the
+    // substations by a factor of four to twelve. So: keep every value
+    // somebody tuned by eye, derive one only where none exists.
     const _ft = (typeof window !== 'undefined' && window.__isr_frameTuning) || {};
+    const _tuned = { cph: 2200, esbjerg: 2200 };
     const _factor = _ft.factor ?? 1.0;
     const _minM = _ft.minM ?? 600;
     const _maxM = _ft.maxM ?? 12000;
-    const range = _clamp(_siteExtentM(event.siteId) * _factor, _minM, _maxM);
+    const range = _ft.factor === undefined && _tuned[event.siteId] !== undefined
+      ? _tuned[event.siteId]
+      : _clamp(_siteExtentM(event.siteId) * _factor, _minM, _maxM);
     viewer.camera.flyToBoundingSphere(
       new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, 0), 150),
       {
