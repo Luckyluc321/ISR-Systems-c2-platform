@@ -1,3 +1,7 @@
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
 import { defineConfig } from 'vite';
 import cesium from 'vite-plugin-cesium';
 
@@ -53,6 +57,18 @@ export default defineConfig({
         changeOrigin: true,
         secure: true,
         rewrite: (p) => p.replace(/^\/osky/, '/api'),
+      },
+    },
+  },
+  // MULTI-PAGE. The dev server serves any .html in the root already, so
+  // /login.html works under `npm run dev` without this. A BUILD does
+  // not: Rollup only follows index.html, and login.html would be
+  // silently dropped from dist/. Named here so the two behave the same.
+  build: {
+    rollupOptions: {
+      input: {
+        index: resolve(__dirname, 'index.html'),
+        login: resolve(__dirname, 'login.html'),
       },
     },
   },
