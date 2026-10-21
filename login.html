@@ -6,230 +6,236 @@
 <title>ISR Systems · Sign in</title>
 <link rel="icon" href="/isr-logo.png" />
 <style>
-  /* Tokens lifted from src/style.css so this page cannot drift from the
-     platform it signs you into. Same ground, same hairlines, same cyan. */
-  :root {
-    --bg:          #06080b;
-    --panel:       #0a0d10;
-    --elevated:    #0e131a;
-    --text:        #e6ecf0;
-    --text-dim:    #86909e;
-    --text-mute:   #5a6371;
-    --border:      rgba(180, 200, 220, 0.10);
-    --border-strong: rgba(180, 200, 220, 0.18);
-    --accent:      #4dd2ff;
-    --on-accent:   #06080b;
-    --danger:      #ff5a5a;
-    --font-body:   -apple-system, "SF Pro Display", "Segoe UI", "IBM Plex Sans", Roboto, system-ui, sans-serif;
-    --font-mono:   ui-monospace, "SF Mono", "IBM Plex Mono", "Cascadia Mono", Menlo, Consolas, monospace;
-  }
-  * { box-sizing: border-box; }
-  html, body { height: 100%; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--font-body);
+  /* ═══════════════════════════════════════════════════════════════
+     THE BRAND IS isr-systems.com, NOT AN INVENTION.
+     ───────────────────────────────────────────────────────────────
+     Every value below is lifted from the live site: pure black, white
+     at 0.45/0.5 for secondary text, the two font stacks, 0.28em on the
+     tagline, 0.14em on the corner labels, the 1px x 12px rules beside
+     them, and the staggered rise/fade.
+
+     What the site does NOT have, and so neither does this: a card, a
+     border box, a panel, a background animation, an accent colour.
+     The first version of this page had a bordered card and a radar
+     sweep, which is why it read as generic. The brand is severe and
+     empty on purpose.
+     ═══════════════════════════════════════════════════════════════ */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%; width: 100%;
+    background: #000;
+    color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Helvetica Neue", "Inter", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
     overflow: hidden;
   }
 
-  /* The background sweep. Deliberately dim and slow: it reads as
-     equipment running, not as decoration. No glow, no gradient fills,
-     no colour beyond the one cyan the platform already uses. */
-  #bg { position: fixed; inset: 0; display: block; z-index: 0; }
-  #vignette {
-    position: fixed; inset: 0; z-index: 1; pointer-events: none;
-    background: radial-gradient(ellipse at center, rgba(6,8,11,0) 35%, rgba(6,8,11,0.82) 100%);
+  .container {
+    min-height: 100vh;
+    display: flex; flex-direction: column;
+    justify-content: center; align-items: center;
+    padding: 2rem;
+    position: relative;
   }
 
-  main {
-    position: relative; z-index: 2;
-    height: 100%;
-    display: grid;
-    place-items: center;
-    padding: 24px;
+  /* ── Corner labels, verbatim from the site ───────────────────── */
+  .location, .corner-right {
+    position: fixed; top: 1.75rem;
+    display: inline-flex; align-items: center; gap: 0.85rem;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 0.68rem; font-weight: 400;
+    color: rgba(255, 255, 255, 0.45);
+    letter-spacing: 0.14em; text-transform: uppercase;
+    text-decoration: none;
+    opacity: 0; animation: fade 1.2s ease forwards 1s;
+  }
+  .location { left: 2rem; }
+  .corner-right { right: 2rem; }
+  .location::before, .corner-right::after {
+    content: ''; display: inline-block;
+    width: 1px; height: 12px;
+    background: rgba(255, 255, 255, 0.35);
+    transition: background 0.3s ease;
+  }
+  .corner-right:hover, .corner-right:focus-visible {
+    color: rgba(255, 255, 255, 0.95); outline: none;
+  }
+  .corner-right:hover::after, .corner-right:focus-visible::after {
+    background: rgba(255, 255, 255, 0.95);
   }
 
-  .card {
-    width: 100%;
-    max-width: 384px;
-    background: rgba(10, 13, 16, 0.92);
-    border: 1px solid var(--border-strong);
-    border-radius: 3px;
-    padding: 36px 32px 28px;
-    backdrop-filter: blur(2px);
+  /* ── Lockup ──────────────────────────────────────────────────── */
+  .logo {
+    max-width: min(44vw, 360px); width: 100%; height: auto;
+    opacity: 0; transform: translateY(8px);
+    animation: rise 1.2s ease forwards 0.2s;
+  }
+  .tagline {
+    margin-top: 2rem;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: clamp(0.7rem, 0.95vw, 0.85rem);
+    letter-spacing: 0.28em; text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.5);
+    text-align: center;
+    opacity: 0; transform: translateY(8px);
+    animation: rise 1.2s ease forwards 0.6s;
   }
 
-  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 30px; }
-  .brand img { height: 30px; width: auto; display: block; }
-  .brand-txt { display: flex; flex-direction: column; gap: 3px; }
-  .brand-name {
-    font-family: var(--font-mono);
-    font-size: 13px; letter-spacing: 0.16em; text-transform: uppercase;
-    color: var(--text);
+  /* ── Form. No box. Rules only, the same hairline the brand uses. */
+  form {
+    width: 100%; max-width: 332px;
+    margin-top: 4.5rem;
+    opacity: 0; transform: translateY(8px);
+    animation: rise 1.2s ease forwards 0.9s;
   }
-  .brand-sub {
-    font-family: var(--font-mono);
-    font-size: 9.5px; letter-spacing: 0.13em; text-transform: uppercase;
-    color: var(--text-mute);
-  }
-
+  .field { margin-bottom: 1.9rem; }
   label {
     display: block;
-    font-family: var(--font-mono);
-    font-size: 9.5px; letter-spacing: 0.13em; text-transform: uppercase;
-    color: var(--text-dim);
-    margin: 0 0 7px;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.45);
+    margin-bottom: 0.7rem;
   }
-  input[type="email"], input[type="password"] {
+  input {
     width: 100%;
-    padding: 10px 12px;
-    margin-bottom: 18px;
-    background: rgba(0, 0, 0, 0.35);
-    border: 1px solid var(--border);
-    border-radius: 2px;
-    color: var(--text);
-    font-family: var(--font-mono);
-    font-size: 13px;
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 0;
+    padding: 0 0 0.6rem;
+    color: #fff;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 0.86rem; letter-spacing: 0.04em;
     outline: none;
-    transition: border-color 0.12s ease;
+    transition: border-color 0.3s ease;
   }
-  input:focus { border-color: rgba(77, 210, 255, 0.5); }
-  input::placeholder { color: var(--text-mute); }
+  input::placeholder { color: rgba(255, 255, 255, 0.22); letter-spacing: 0.04em; }
+  input:focus { border-bottom-color: rgba(255, 255, 255, 0.95); }
+  input:-webkit-autofill {
+    -webkit-text-fill-color: #fff;
+    transition: background-color 9999s ease-out;
+  }
 
   button[type="submit"] {
     width: 100%;
-    padding: 11px 12px;
-    background: var(--accent);
-    color: var(--on-accent);
-    border: none;
-    border-radius: 2px;
-    font-family: var(--font-mono);
-    font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
-    font-weight: 600;
+    margin-top: 2.6rem;
+    padding: 0.95rem 1rem;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 0;
     cursor: pointer;
-    transition: filter 0.12s ease;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 0.68rem; letter-spacing: 0.14em; text-transform: uppercase;
+    transition: background 0.3s ease, color 0.3s ease, border-color 0.3s ease;
   }
-  button[type="submit"]:hover { filter: brightness(1.12); }
-  button[type="submit"]:disabled { opacity: 0.45; cursor: default; filter: none; }
+  button[type="submit"]:hover,
+  button[type="submit"]:focus-visible {
+    background: rgba(255, 255, 255, 0.95);
+    border-color: rgba(255, 255, 255, 0.95);
+    color: #000;
+    outline: none;
+  }
+  button[type="submit"]:disabled {
+    opacity: 0.35; cursor: default;
+    background: transparent; color: rgba(255, 255, 255, 0.95);
+    border-color: rgba(255, 255, 255, 0.35);
+  }
 
   .err {
-    min-height: 15px;
-    margin: 11px 0 0;
-    font-family: var(--font-mono);
-    font-size: 10.5px;
-    color: var(--danger);
-    letter-spacing: 0.02em;
+    min-height: 1rem;
+    margin-top: 1.1rem;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 0.62rem; letter-spacing: 0.1em; text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.95);
+    text-align: center;
   }
 
   .foot {
-    margin-top: 26px;
-    padding-top: 15px;
-    border-top: 1px solid var(--border);
-    display: flex; justify-content: space-between; align-items: center;
-    font-family: var(--font-mono);
-    font-size: 9px; letter-spacing: 0.1em; text-transform: uppercase;
-    color: var(--text-mute);
+    position: fixed; bottom: 1.75rem; left: 0; right: 0;
+    text-align: center;
+    font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    font-size: 0.6rem; letter-spacing: 0.14em; text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.28);
+    opacity: 0; animation: fade 1.2s ease forwards 1.3s;
   }
-  .foot a { color: var(--text-mute); text-decoration: none; }
-  .foot a:hover { color: var(--text-dim); }
 
-  /* The one honest label on the page: authentication is not wired yet. */
-  .stub {
-    margin-top: 16px;
-    padding: 9px 11px;
-    border: 1px dashed rgba(180, 200, 220, 0.16);
-    border-radius: 2px;
-    font-family: var(--font-mono);
-    font-size: 9.5px; line-height: 1.5;
-    color: var(--text-mute);
+  @keyframes rise { to { opacity: 1; transform: translateY(0); } }
+  @keyframes fade { to { opacity: 1; } }
+
+  @media (max-width: 600px) {
+    .logo { max-width: 68vw; }
+    .location { top: 1.25rem; left: 1.25rem; font-size: 0.7rem; }
+    .corner-right { top: 1.25rem; right: 1.25rem; font-size: 0.7rem; }
+    form { margin-top: 3rem; }
   }
-  .stub b { color: var(--text-dim); font-weight: 600; }
-
-  @media (prefers-reduced-motion: reduce) { #bg { display: none; } }
+  @media (prefers-reduced-motion: reduce) {
+    .logo, .tagline, form, .location, .corner-right, .foot {
+      animation: none; opacity: 1; transform: none;
+    }
+  }
 </style>
 </head>
 <body>
-<canvas id="bg"></canvas>
-<div id="vignette"></div>
 
-<main>
-  <form class="card" id="form" autocomplete="on">
-    <div class="brand">
-      <img src="/isr-logo.png" alt="" />
-      <span class="brand-txt">
-        <span class="brand-name">ISR Systems</span>
-        <span class="brand-sub">Site Intelligence Platform</span>
-      </span>
+<span class="location">Copenhagen, Denmark</span>
+<a class="corner-right" href="mailto:contact@isr-systems.com">Contact</a>
+
+<div class="container">
+  <img src="/isr-logo.png" alt="ISR Systems" class="logo" />
+  <p class="tagline">Deeptech. Intelligence.</p>
+
+  <form id="form" autocomplete="on">
+    <div class="field">
+      <label for="email">Operator ID</label>
+      <input id="email" name="email" type="email" placeholder="name@organisation.dk"
+             autocomplete="username" required />
     </div>
-
-    <label for="email">Operator ID</label>
-    <input id="email" name="email" type="email" placeholder="name@organisation.dk"
-           autocomplete="username" required />
-
-    <label for="password">Passphrase</label>
-    <input id="password" name="password" type="password" placeholder="••••••••••••"
-           autocomplete="current-password" required />
-
+    <div class="field">
+      <label for="password">Passphrase</label>
+      <input id="password" name="password" type="password" placeholder="••••••••••••"
+             autocomplete="current-password" required />
+    </div>
     <button type="submit" id="submit">Sign in</button>
     <p class="err" id="err" role="alert"></p>
-
-    <div class="stub">
-      <b>Authentication is not connected.</b> This form resolves to a local
-      account so the flow can be walked end to end. Identity moves to the
-      Azure tenant once its location is fixed.
-    </div>
-
-    <div class="foot">
-      <span>Authorised use only</span>
-      <a href="https://isr-systems.com/" target="_blank" rel="noopener">isr-systems.com</a>
-    </div>
   </form>
-</main>
+</div>
+
+<p class="foot">Authorised access only</p>
 
 <script type="module">
 // ═══════════════════════════════════════════════════════════════════
 // THE AUTH SEAM. One function, deliberately.
 // ───────────────────────────────────────────────────────────────────
-// Nothing here verifies anything, and it must not pretend to. The
-// platform's whole identity surface is already a single point:
-// roles.js keeps _activeId private and setActiveRole() is the only
-// thing that writes it. So a real provider replaces the body of
-// authenticate() and nothing else in the app moves.
+// Nothing here verifies anything. The platform's identity surface is
+// already a single point: roles.js keeps _activeId private and
+// setActiveRole() is the only thing that writes it. So a real provider
+// replaces the body of authenticate() and nothing else in the app
+// moves.
 //
 // When the Azure tenant is fixed, authenticate() becomes a token
-// exchange: the provider returns claims, those claims map to an
-// account id, and the id is handed on exactly as it is below. The
-// mapping from claim to account is the only new logic, and it belongs
+// exchange: the provider returns claims, the claims map to an account
+// id, and the id is handed on exactly as below. That mapping belongs
 // server side.
-//
-// UNTIL THEN THIS IS A DOOR WITH NO LOCK, and the page says so in
-// writing rather than implying a security property it does not have.
 // ═══════════════════════════════════════════════════════════════════
 
 const ACCOUNT_KEY = 'isr.auth.accountId';
 
-/**
- * @returns {Promise<{ok: true, accountId: string} | {ok: false, reason: string}>}
- */
 async function authenticate(email, _passphrase) {
   const id = String(email || '').trim().toLowerCase();
   if (!id) return { ok: false, reason: 'Operator ID required' };
 
-  // Local resolution only. The domain picks the account so the flow can
-  // be walked as a real operator rather than as admin, which is the
-  // whole point of having this page before auth exists.
+  // Local resolution only, so the operator flow can be walked as a real
+  // operator rather than as admin. Replaced wholesale by the provider.
   const byDomain = [
-    [/@cph|københavn|kastrup/, 'op-cph-airports'],
-    [/@bll|billund/,           'op-billund-airport'],
-    [/@ode|odense/,            'op-odense-airport'],
-    [/@esb|esbjerg/,           'op-esbjerg-port'],
-    [/@energinet/,             'op-energinet'],
+    [/@cph|kobenhavn|københavn|kastrup/, 'op-cph-airports'],
+    [/@bll|billund/,                     'op-billund-airport'],
+    [/@ode|odense/,                      'op-odense-airport'],
+    [/@esb|esbjerg/,                     'op-esbjerg-port'],
+    [/@energinet/,                       'op-energinet'],
   ];
   for (const [re, accountId] of byDomain) if (re.test(id)) return { ok: true, accountId };
-
-  // Anything else lands on the ISR admin account, which is what every
-  // developer and demo session wants.
   return { ok: true, accountId: 'admin-isr' };
 }
 
@@ -241,115 +247,26 @@ form.addEventListener('submit', async (e) => {
   e.preventDefault();
   errEl.textContent = '';
   submit.disabled = true;
-  submit.textContent = 'Signing in';
+  submit.textContent = 'Authenticating';
   try {
     const res = await authenticate(
       document.getElementById('email').value,
       document.getElementById('password').value,
     );
-    if (!res.ok) {
-      errEl.textContent = res.reason;
-      return;
-    }
-    // Handed to the app, which reads it once at boot and calls
-    // setActiveRole. Session storage, not local: closing the tab ends
-    // the session, which is the correct default for an operations
-    // console even before it is enforced.
+    if (!res.ok) { errEl.textContent = res.reason; return; }
+    // Session storage, not local: closing the tab ends the session,
+    // which is the right default for an operations console even before
+    // it is enforced.
     try { sessionStorage.setItem(ACCOUNT_KEY, res.accountId); } catch (_) { /* private mode */ }
     window.location.href = '/';
   } catch (err) {
-    errEl.textContent = 'Sign-in failed. Check the console.';
+    errEl.textContent = 'Sign-in failed';
     console.error('[login]', err);
   } finally {
     submit.disabled = false;
     submit.textContent = 'Sign in';
   }
 });
-
-// ── Background ────────────────────────────────────────────────────
-// A slow sensor sweep over a sparse grid. Restraint is the brief: one
-// colour, thin strokes, nothing that pulses or blooms. It should read
-// like equipment left running in a dark room.
-const cv = document.getElementById('bg');
-const ctx = cv.getContext('2d');
-let w = 0, h = 0, cx = 0, cy = 0, dpr = 1;
-const NODES = [];
-
-function resize() {
-  dpr = Math.min(window.devicePixelRatio || 1, 2);
-  w = window.innerWidth; h = window.innerHeight;
-  cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
-  cv.style.width = w + 'px'; cv.style.height = h + 'px';
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  cx = w / 2; cy = h / 2;
-  NODES.length = 0;
-  // Deterministic placement. No Math.random: the page should look the
-  // same every time it is opened, like a fixed installation.
-  const count = Math.max(14, Math.min(34, Math.round((w * h) / 46000)));
-  for (let i = 0; i < count; i++) {
-    const a = (i * 2.399963229728653);        // golden angle
-    const r = Math.sqrt((i + 0.5) / count) * Math.max(w, h) * 0.52;
-    NODES.push({ x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r * 0.62, a });
-  }
-}
-
-const SWEEP_PERIOD_MS = 11000;                // one revolution
-const RING_M = [0.16, 0.30, 0.44, 0.58];
-
-function frame(t) {
-  ctx.clearRect(0, 0, w, h);
-  const maxR = Math.max(w, h) * 0.62;
-  const sweep = ((t % SWEEP_PERIOD_MS) / SWEEP_PERIOD_MS) * Math.PI * 2;
-
-  // Rings
-  ctx.lineWidth = 1;
-  for (const m of RING_M) {
-    ctx.beginPath();
-    ctx.ellipse(cx, cy, maxR * m, maxR * m * 0.62, 0, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(180, 200, 220, 0.045)';
-    ctx.stroke();
-  }
-
-  // Sweep arm, a thin line with a short trailing wedge
-  const TRAIL = 0.42;
-  const g = ctx.createLinearGradient(
-    cx, cy, cx + Math.cos(sweep) * maxR, cy + Math.sin(sweep) * maxR * 0.62);
-  g.addColorStop(0, 'rgba(77, 210, 255, 0.00)');
-  g.addColorStop(1, 'rgba(77, 210, 255, 0.16)');
-  ctx.beginPath();
-  ctx.moveTo(cx, cy);
-  ctx.ellipse(cx, cy, maxR, maxR * 0.62, 0, sweep - TRAIL, sweep);
-  ctx.closePath();
-  ctx.fillStyle = 'rgba(77, 210, 255, 0.022)';
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(cx, cy);
-  ctx.lineTo(cx + Math.cos(sweep) * maxR, cy + Math.sin(sweep) * maxR * 0.62);
-  ctx.strokeStyle = g;
-  ctx.lineWidth = 1;
-  ctx.stroke();
-
-  // Nodes. A node brightens as the arm passes it and fades after, which
-  // is the only motion on the page besides the arm itself.
-  for (const n of NODES) {
-    let d = sweep - ((n.a % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-    d = ((d % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
-    const lit = d < TRAIL ? (1 - d / TRAIL) : 0;
-    const base = 0.05;
-    ctx.beginPath();
-    ctx.arc(n.x, n.y, 1.25, 0, Math.PI * 2);
-    ctx.fillStyle = `rgba(77, 210, 255, ${(base + lit * 0.5).toFixed(3)})`;
-    ctx.fill();
-  }
-
-  requestAnimationFrame(frame);
-}
-
-if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-  window.addEventListener('resize', resize);
-  resize();
-  requestAnimationFrame(frame);
-}
 </script>
 </body>
 </html>
