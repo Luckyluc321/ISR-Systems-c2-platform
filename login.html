@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>ISR Systems · Sign in</title>
+<title>TIGER · ISR Systems</title>
 <link rel="icon" href="/isr-logo.png" />
 <style>
   /* ═══════════════════════════════════════════════════════════════
@@ -71,21 +71,37 @@
     opacity: 0; transform: translateY(8px);
     animation: rise 1.2s ease forwards 0.2s;
   }
-  .tagline {
-    margin-top: 2rem;
+  /* THE PRODUCT NAME AS A DESIGNATION, NOT A SECOND WORDMARK.
+     The logo already contains "ISR SYSTEMS" set in wide-tracked caps.
+     Setting TIGER the same way below it produced two wordmarks in the
+     same treatment, competing, with the lower one reading as a mistake.
+     Scale alone would not have separated them.
+     So it borrows the one motif the brand already owns: the 1px x 12px
+     rule that flanks the corner labels. Small, flanked, dim. That reads
+     as a designation stamped under a mark, which is what it is. The
+     "Site Intelligence Platform" line went entirely: the company site
+     carries one line of copy, and this page does not need two. */
+  .product {
+    margin-top: 2.1rem;
+    display: inline-flex; align-items: center; gap: 0.85rem;
     font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-    font-size: clamp(0.7rem, 0.95vw, 0.85rem);
-    letter-spacing: 0.28em; text-transform: uppercase;
+    font-size: 0.68rem; font-weight: 400;
+    letter-spacing: 0.34em; text-indent: 0.34em;
+    text-transform: uppercase;
     color: rgba(255, 255, 255, 0.5);
-    text-align: center;
     opacity: 0; transform: translateY(8px);
     animation: rise 1.2s ease forwards 0.6s;
   }
+  .product::before, .product::after {
+    content: ''; display: inline-block;
+    width: 1px; height: 12px;
+    background: rgba(255, 255, 255, 0.35);
+  }
+  .product::after { margin-left: -0.34em; }
 
-  /* ── Form. No box. Rules only, the same hairline the brand uses. */
   form {
     width: 100%; max-width: 332px;
-    margin-top: 4.5rem;
+    margin-top: 4.2rem;
     opacity: 0; transform: translateY(8px);
     animation: rise 1.2s ease forwards 0.9s;
   }
@@ -101,7 +117,7 @@
     width: 100%;
     background: transparent;
     border: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.26);
     border-radius: 0;
     padding: 0 0 0.6rem;
     color: #fff;
@@ -110,7 +126,10 @@
     outline: none;
     transition: border-color 0.3s ease;
   }
-  input::placeholder { color: rgba(255, 255, 255, 0.22); letter-spacing: 0.04em; }
+  /* NO PLACEHOLDERS. A greyed "name@organisation.dk" and a row of bullet
+     glyphs are the two details that make a sign-in read as a template.
+     The labels already say what each field is, and an empty field looks
+     deliberate where a faint example looks unfinished. */
   input:focus { border-bottom-color: rgba(255, 255, 255, 0.95); }
   input:-webkit-autofill {
     -webkit-text-fill-color: #fff;
@@ -171,7 +190,7 @@
     form { margin-top: 3rem; }
   }
   @media (prefers-reduced-motion: reduce) {
-    .logo, .tagline, form, .location, .corner-right, .foot {
+    .logo, .product, form, .location, .corner-right, .foot {
       animation: none; opacity: 1; transform: none;
     }
   }
@@ -184,17 +203,17 @@
 
 <div class="container">
   <img src="/isr-logo.png" alt="ISR Systems" class="logo" />
-  <p class="tagline">Deeptech. Intelligence.</p>
+  <p class="product">Tiger</p>
 
   <form id="form" autocomplete="on">
     <div class="field">
       <label for="email">Operator ID</label>
-      <input id="email" name="email" type="email" placeholder="name@organisation.dk"
+      <input id="email" name="email" type="email"
              autocomplete="username" required />
     </div>
     <div class="field">
       <label for="password">Passphrase</label>
-      <input id="password" name="password" type="password" placeholder="••••••••••••"
+      <input id="password" name="password" type="password"
              autocomplete="current-password" required />
     </div>
     <button type="submit" id="submit">Sign in</button>
