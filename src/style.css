@@ -9444,17 +9444,6 @@ body.workspace-map-active #receiver-view {
      shape. The downed badge moved into it too, which also aligns the
      two status badges with each other. */
   grid-template-columns: 48px 155px 90px 84px 1fr 68px 52px 68px 76px 46px;
-}
-/* ONE AIRCRAFT HAS NOTHING TO ALIGN AGAINST.
-   Column 4 is the permanent status slot, 84px held open so a swarm's
-   rows line up whether or not a given drone has a badge to show. With a
-   single platform there is never a badge and never a sibling row, so
-   that 84px is a hole between the role and the coordinates and nothing
-   else. Collapsed to zero here; the span stays, so all ten children
-   still map to all ten columns and the 1fr coordinates column simply
-   gains the width. */
-.dp-swarm-row.is-solo {
-  grid-template-columns: 48px 155px 90px 0 1fr 68px 52px 68px 76px 46px;
   gap: 6px;
   align-items: center;
   padding: 6px 8px;

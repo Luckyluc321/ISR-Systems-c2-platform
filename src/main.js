@@ -26926,7 +26926,7 @@ async function main() {
       const _rfRaw = e.evidence?.rfCarrier || '';
       const _rfLabel = _tierSummary(e.evidence, _rfRaw);
       const soloRow = `
-        <div class="dp-swarm-row is-focused is-solo" data-swarm-idx="0" title="${_platformId} (${_platformModel})">
+        <div class="dp-swarm-row is-focused" data-swarm-idx="0" title="${_platformId} (${_platformModel})">
           <span class="dp-swarm-id">${_platformId}</span>
           <span class="dp-swarm-model">${_platformModel}</span>
           <span class="dp-swarm-role">lead</span>
