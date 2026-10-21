@@ -41,19 +41,22 @@ unreachable from the UI. The simulate-threat site dropdown lists 3.
 
 **Fix:** generate from `SITES`.
 
-### 1.3 A site can be rejected silently
+### 1.3 A rejected site only announces itself in the console
 
-`sites_registry.js` exports `SITE_LOAD_ERRORS`. **Nothing reads it.** A
-rejected site looks exactly like a rendering bug: the site is absent,
-every sensor is absent, and no message appears anywhere.
+**CORRECTED 2026-10-21.** The original text here said `SITE_LOAD_ERRORS`
+is read by nothing. That was wrong: `main.js:28` logs a `console.warn`
+per rejected file. The real gap is narrower, and still real: the warning
+reaches the console and nothing else, so a rejected site is
+indistinguishable from a rendering bug to anyone looking at the map. The
+site is absent, every sensor is absent, and the screen says nothing.
 
 Købmagergade was rejected for `site_type: office` against the enum
 `[airport, port, energy, government, data, gov-facility, other]`. It
 cost an hour, and the symptom was "the sensor doesn't show".
 
-**Fix:** surface at startup — console error at minimum, ideally a
-visible banner. This is the cheapest item here and prevents a whole
-class of lost afternoon.
+**Fix:** make it visible in the UI rather than console-only. Cheapest
+item here, and it prevents a whole class of lost afternoon: Købmagergade
+cost one, and the warning was sitting in the console the entire time.
 
 ### 1.4 Camera framing keyed on site identity
 
@@ -70,6 +73,22 @@ gets 1100 m.
 **Fix:** derive from site extent or `siteType`.
 
 ---
+
+## Corrected: per-account scoping was never missing
+
+**ADDED 2026-10-21.** An earlier draft of this document implied the UI
+did not scope itself to the signed-in account. It did, and does:
+`applyFlyToScope()` hides fly-to buttons and simulate-threat options for
+sites the account does not own, re-running on every account switch, and
+it reads `_visibleSiteIds()`, which derives from `SITES`.
+
+What was actually wrong was narrower: the lists were hand-written markup,
+so a site with no button had nothing to hide. `odense` was configured,
+loading, and unreachable. Generating the lists from the registry fixed
+it in 79fee8f; the scoping itself was not touched and did not need to be.
+
+Recorded because the wrong version of this would send the next reader
+rebuilding something that already works.
 
 ## P2 — blocks onboarding a new site without a developer
 

@@ -264,5 +264,28 @@ check('the runtime folds batches through the real apply',
   /applyDetectionBatch: _applyDetectionBatchToEvent,/.test(main));
 check('the ring hold is the sweeper\'s grace, one number', /ringHoldMs: _SWEEP_GRACE_MS,/.test(main));
 
+// ── auto-registration: a node announcing itself ────────────────────
+// Until sensor_online existed, a live node had to be placed by hand
+// before its detections meant anything. The hazard in automating it is
+// that nearestSiteId has no maximum distance: correct for the console
+// path, where a human typed the coordinates, and dangerous for hardware,
+// where a bad GPS fix would attach a sensor to whichever customer site
+// is nearest and start feeding their event stream.
+const ls = readFileSync(new URL('../src/live_sensor.js', import.meta.url), 'utf8');
+const branch = ls.slice(ls.indexOf("case 'sensor_online'"), ls.indexOf("case 'bridge-closed'"));
+
+check('a node can announce itself', branch.length > 0 && /placeSensor\(/.test(branch));
+check('announcing is idempotent, so a reboot does not place a second dot',
+  /registry\.get\(|registry\.values\(\)/.test(branch) && /setNodeStatus\(/.test(branch));
+check('an announce without usable coordinates is refused',
+  /Number\.isFinite\(lat\)/.test(branch));
+check('an announce too far from any site is refused',
+  /nearestSiteId\(/.test(branch) && /limit/.test(branch) && /break;/.test(branch),
+  'hardware announcing itself needs a distance bound that the manual path does not');
+check('the bound is NOT imposed on the shared helpers',
+  !/maxDistance|MAX_SITE_DIST/.test(ls.slice(ls.indexOf('export function nearestSiteId'),
+    ls.indexOf('export function liveSensorRejectionReason'))),
+  'nearestSiteId is shared with the console path, where unbounded is correct');
+
 console.log(failures ? `\n✗ ${failures} live-sensor check(s) failed` : '\n✓ live sensor gate green');
 process.exit(failures ? 1 : 0);

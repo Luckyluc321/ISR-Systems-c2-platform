@@ -45,6 +45,16 @@
 //   __isr_liveSensor(lat, lon, { siteId?, id?, nodeId?, label? })
 //   __isr_liveDetect({ confidence | probability, label?, nodeId?, sensorId? })
 //   __isr_liveSensors.startFeed('ws://<laptop>:8000/ws/detections')
+//
+// Feed messages handled, by `type`:
+//   detection     a classifier result for a node
+//   sensor_online a node announcing itself: places it automatically from
+//                 its own lat/lon, so powering a sensor on is the whole
+//                 procedure. Idempotent; a reboot updates status rather
+//                 than placing a second dot. Aliases: sensor-online, hello
+//   heartbeat     per-node status
+//   status        bulk per-node status
+//   bridge-closed marks every placed node degraded
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { wallNow } from './sim_clock.js';
@@ -528,6 +538,77 @@ export function createLiveSensorRuntime(deps) {
       case 'status':
         for (const [nodeId, node] of Object.entries(msg.nodes || {})) setNodeStatus(nodeId, node?.status);
         break;
+      // A NODE ANNOUNCING ITSELF. The whole auto-registration path.
+      //
+      // Until this existed, a live node had to be placed by hand before
+      // its detections meant anything: startFeed() says so out loud,
+      // "no live sensor placed yet. Detections will be dropped until
+      // __isr_liveSensor(lat, lon) is called." For a customer, powering
+      // on a sensor has to be the entire procedure.
+      //
+      // Everything it needs was already here. registerLiveSensor
+      // validates, buildLiveSensorRecord shapes, nearestSiteId resolves
+      // the site FROM THE COORDINATES ALONE, and liveSensorEntitySpec
+      // draws the green dot and its ring. This is one branch wiring a
+      // message to a function that already existed.
+      //
+      // IDEMPOTENT on purpose. A node that reboots, or a bridge that
+      // replays its hello, must not place a second dot on top of the
+      // first. An id already in the registry is treated as a status
+      // update, which is also what makes this safe to send on a timer.
+      case 'sensor_online':
+      case 'sensor-online':
+      case 'hello': {
+        const nodeId = msg.node_id ?? msg.nodeId;
+        const lat = Number(msg.lat), lon = Number(msg.lon);
+        const id = msg.sensor_id ?? msg.id ?? null;
+        const known = id ? registry.get(id)
+          : [...registry.values()].find(r => r.sensor.nodeId && r.sensor.nodeId === nodeId);
+        if (known) { setNodeStatus(nodeId, msg.status || 'online'); break; }
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+          log.warn(`[live_sensor] ${nodeId || 'node'} announced itself without usable `
+            + `coordinates (lat=${msg.lat}, lon=${msg.lon}); not placed.`);
+          break;
+        }
+        // A SANITY BOUND, AND ONLY ON THIS PATH.
+        //
+        // nearestSiteId has no maximum distance, which is correct for
+        // the console entry point: a human typed those coordinates and
+        // knows what they meant. Hardware announcing itself does not
+        // have that property. A node with a bad first GPS fix, one
+        // powered on at the office, or a typo in the bridge config
+        // would otherwise attach silently to whichever customer site
+        // happens to be nearest and start feeding their event stream.
+        //
+        // The bound is the site's own extent plus 3 km, floored at 2 km,
+        // because a sensor belongs to its site: legitimately out on a
+        // perimeter, never in the next town. For CPH that is about
+        // 7.6 km, for a 92 m substation about 3 km.
+        //
+        // Deliberately NOT applied to nearestSiteId or
+        // liveSensorRejectionReason, which the manual path shares.
+        const near = nearestSiteId(sites, lat, lon);
+        const site = near && sites[near.siteId];
+        let extent = 0;
+        for (const [blon, blat] of (site?.siteBoundary || [])) {
+          extent = Math.max(extent, _haversineM(
+            site.coordinates.lat, site.coordinates.lon, blat, blon));
+        }
+        const limit = Math.max(2000, extent + 3000);
+        if (!near || near.distanceM > limit) {
+          log.warn(`[live_sensor] ${nodeId || 'node'} announced at ${lat}, ${lon}, which is `
+            + `${near ? near.distanceM : '?'} m from the nearest site `
+            + `(${near ? near.siteId : 'none'}), beyond the ${Math.round(limit)} m limit. `
+            + 'Not placed. Check the node\'s GPS fix or its configured position.');
+          break;
+        }
+        placeSensor(lat, lon, {
+          id, nodeId,
+          label: msg.label ?? undefined,
+          hardware: msg.hardware ?? undefined,
+        });
+        break;
+      }
       case 'bridge-closed':
         for (const rec of registry.values()) {
           setNodeStatus(rec.sensor.nodeId, 'degraded', 'Link to the inference bridge lost');
