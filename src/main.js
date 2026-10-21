@@ -23138,6 +23138,30 @@ async function main() {
     energinet_amager_koblingsstation: { type: 'site', siteId: 'energinet_amager_koblingsstation', centerLon: 12.6088, centerLat: 55.6410, range: 1500, heading: 0, pitch: -55, duration: 2.5 },
   };
 
+  // EVERY SITE GETS A DESTINATION, WHETHER OR NOT ANYONE WROTE ONE.
+  //
+  // The entries above are hand-tuned and stay authoritative: CPH wants a
+  // 7.5 km pull-back and a substation wants 1.4 km, and no formula knows
+  // that. But a site with no entry used to have no fly-to at all, which
+  // is how odense ended up configured, loading, and unreachable from the
+  // UI. A new customer's site landed in exactly the same hole.
+  //
+  // So anything in SITES without a preset gets one derived from its own
+  // coordinates. The defaults are the substation framing, because a site
+  // nobody has tuned is more likely small than an international airport,
+  // and because being slightly too close is recoverable where having no
+  // button at all is not. Override by adding a literal above.
+  for (const sid of Object.keys(SITES)) {
+    if (FLY_TARGETS[sid]) continue;
+    const c = SITES[sid].coordinates;
+    if (!c || typeof c.lat !== 'number' || typeof c.lon !== 'number') continue;
+    FLY_TARGETS[sid] = {
+      type: 'site', siteId: sid,
+      centerLon: c.lon, centerLat: c.lat,
+      range: 2000, heading: 0, pitch: -55, duration: 2.5,
+    };
+  }
+
   function flyTo(key) {
     const t = FLY_TARGETS[key];
     if (!t) return;
@@ -23231,8 +23255,15 @@ async function main() {
       const sid = FLY_TARGETS[btn.dataset.fly]?.siteId;
       btn.hidden = !!sid && !_roleCanSeeSite(sid);
     });
-    const grp = document.getElementById('fly-group-energinet');
-    if (grp) grp.hidden = !_visibleSiteIds().some(sid => sid.startsWith('energinet_'));
+    // Hide a multi-site operator's group when the account owns none of
+    // its sites. Keyed off the operator, not an id prefix, so it holds
+    // for any future multi-site customer.
+    for (const op of OPERATORS) {
+      const owned = (op.siteIds || []);
+      if (owned.length < 2) continue;
+      const grp = document.getElementById(`fly-group-${op.id.replace(/[^a-z0-9]+/gi, '-')}`);
+      if (grp) grp.hidden = !owned.some(sid => _roleCanSeeSite(sid));
+    }
     const sel = document.getElementById('sim-site-select');
     if (sel) {
       let firstVisible = null;
@@ -23245,6 +23276,57 @@ async function main() {
       if (sel.selectedOptions[0]?.hidden && firstVisible) sel.value = firstVisible;
     }
   }
+  // THE LISTS COME FROM SITES, NOT FROM THE MARKUP.
+  //
+  // These were hand-written <button> and <option> elements, which meant
+  // the UI and the site registry drifted apart silently: odense was
+  // configured and had no button, and every new customer site would
+  // have needed an index.html edit to be reachable at all.
+  //
+  // Scoping is NOT done here. applyFlyToScope() below already hides
+  // what the signed-in account does not own, and it reads
+  // _visibleSiteIds(), which is derived from SITES. Generating the full
+  // set and letting that hide it keeps one rule in one place: admin
+  // sees every site, an operator sees only the sites its own account
+  // lists, and a receiver is unchanged because receivers carry no site
+  // scope at all.
+  //
+  // Multi-site operators keep the collapsible group the six Energinet
+  // substations had, now derived from the operator rather than from the
+  // site id prefix.
+  function renderSiteLists() {
+    const host = document.getElementById('fly-sites');
+    const label = sid => SITES[sid]?.name || sid;
+    const allSites = Object.keys(SITES).filter(sid => FLY_TARGETS[sid]);
+    const grouped = new Set();
+    let html = '';
+    for (const op of OPERATORS) {
+      const owned = (op.siteIds || []).filter(sid => allSites.includes(sid));
+      if (owned.length < 2) continue;
+      owned.forEach(sid => grouped.add(sid));
+      const key = op.id.replace(/[^a-z0-9]+/gi, '-');
+      html += `<div class="fly-group" id="fly-group-${key}">
+          <button class="cp-btn wide fly-group-hdr" data-fly-expand="${key}">
+            <span>${op.org || op.label || op.id}</span><span class="fly-caret">▸</span>
+          </button>
+          <div class="fly-group-body" id="fly-group-${key}-body" style="display:none;">
+            ${owned.map(sid => `<button class="cp-btn wide fly-sub" data-fly="${sid}">${label(sid)}</button>`).join('')}
+          </div>
+        </div>`;
+    }
+    const flat = allSites.filter(sid => !grouped.has(sid));
+    html = flat.map(sid => `<button class="cp-btn wide" data-fly="${sid}">${label(sid)}</button>`).join('') + html;
+    if (host) host.innerHTML = html;
+
+    const sel = document.getElementById('sim-site-select');
+    if (sel) {
+      const keep = sel.value;
+      sel.innerHTML = allSites.map(sid => `<option value="${sid}">${label(sid)}</option>`).join('');
+      if (allSites.includes(keep)) sel.value = keep;
+    }
+  }
+  renderSiteLists();
+
   document.querySelectorAll('#control-panel .cp-btn[data-fly]').forEach((btn) => {
     btn.addEventListener('click', () => flyTo(btn.dataset.fly));
   });
@@ -25201,8 +25283,8 @@ async function main() {
               <label class="cfg-label">Site scope</label>
               <select class="cfg-input" id="rule-site">
                 <option value="all" ${r.siteId==='all'?'selected':''}>All sites</option>
-                <option value="cph" ${r.siteId==='cph'?'selected':''}>CPH Airport only</option>
-                <option value="esbjerg" ${r.siteId==='esbjerg'?'selected':''}>Esbjerg Harbour only</option>
+                ${_visibleSiteIds().map(sid =>
+                  `<option value="${sid}" ${r.siteId===sid?'selected':''}>${SITES[sid]?.name || sid} only</option>`).join('')}
               </select>
             </div>
             <div>
