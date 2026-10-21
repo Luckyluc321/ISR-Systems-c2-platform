@@ -86,6 +86,22 @@ export function concurrentEvents(event, events, opts = {}) {
     // the threat banner follow: if no sensor has heard it, the platform
     // does not get to mention it.
     .filter(e => e.detected !== false)
+    // A FILED AIRLINER IS NOT CONCURRENT ACTIVITY, IT IS TUESDAY.
+    //
+    // CPH handles on the order of a thousand movements a day. A
+    // friendly, flight-plan-matched, transponder-tracked aircraft
+    // sharing a site with a drone is the normal state of an airport,
+    // not a coincidence worth reporting, and listing it invites exactly
+    // the failure this module is written to avoid: a model asked what
+    // two concurrent tracks might mean will find a meaning. "A
+    // commercial airliner is concurrent with the swarm" is one bad
+    // inference from a coordination claim that would be nonsense.
+    //
+    // Same rule the threat banner reached earlier: friendly means
+    // non-threat, and the rest of the app already says so in those
+    // words. 'unknown' is NOT excluded; an unidentified track at the
+    // other end of the site is precisely what an operator needs told.
+    .filter(e => e.classification !== 'friendly')
     .map(e => ({
       id: e.id,
       droneType: e.droneType || e.platform || 'unidentified',

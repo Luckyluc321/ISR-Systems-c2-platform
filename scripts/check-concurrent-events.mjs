@@ -50,6 +50,18 @@ check('an undetected track is not an event here either', !ids.includes('DET-4'),
   + 'the platform does not get to mention it');
 check('a closed event is precedent, not concurrency', !ids.includes('DET-5'),
   'precedent_retrieval.js already owns closed events');
+check('a FRIENDLY aircraft is not concurrent activity',
+  !concurrentEvents(swarm, [swarm, mk('DET-6', 'cph', 55.62, 12.66, { cls: 'friendly' })])
+    .some(c => c.id === 'DET-6'),
+  'CPH handles about a thousand movements a day. A filed, transponder-tracked '
+  + 'airliner sharing a site with a drone is the normal state of an airport. '
+  + 'Listing it invites the exact failure this module avoids: asked what two '
+  + 'concurrent tracks might mean, a model will find a meaning.');
+check('an UNKNOWN track is still listed',
+  concurrentEvents(swarm, [swarm, mk('DET-7', 'cph', 55.62, 12.66, { cls: 'unknown' })])
+    .some(c => c.id === 'DET-7'),
+  'an unidentified track at the other end of the site is precisely what an '
+  + 'operator needs told; only friendly is excluded');
 
 console.log('\nIt stays inside its remit');
 const src = readFileSync(new URL('../src/concurrent_events.js', import.meta.url), 'utf8');
