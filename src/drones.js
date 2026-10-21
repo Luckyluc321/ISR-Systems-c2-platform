@@ -646,9 +646,17 @@ function _showcaseWaypoints() {
   // OUT IN THE STRAIT, not off the beach. The first two attempts put
   // this inside the CPH rings, which meant hugging a coastline with the
   // city rendering behind it. The point is to judge an airframe with
-  // nothing else in frame, so it now flies over the Øresund Test Range
-  // (sites/oresund_range.yaml): 3.9 km from the bridge, 5.5 from
-  // Saltholm, 11.3 from Amager.
+  // nothing else in frame, so it flew over the Øresund Test Range.
+  //
+  // THAT RANGE AND ITS SHOWCASE SCENARIO WERE DELETED 2026-10-21, on the
+  // way to a customer-ready platform: a test range is not something a
+  // customer should find in their fleet. The helper below is left in
+  // place because it is harmless and self-contained, but nothing calls
+  // it. Restoring the showcase means restoring sites/oresund_range.yaml
+  // and the op-isr-internal operator with it, because a drone is only
+  // drawn inside sensor coverage and the range carried the only sensors
+  // out there. Measured at deletion: 0 of 116 waypoints had coverage
+  // from any remaining site.
   //
   // The range carries its own sensors because a drone is only drawn
   // inside sensor coverage, and that rule is not negotiable. Coverage is
@@ -1438,26 +1446,6 @@ export const TEMPLATES = {
     durationSec: Math.round(_DEMO_PATH_CPH[_DEMO_PATH_CPH.length - 1].tSec),
   },
 
-  cph_quad_showcase: {
-    siteId: 'cph',
-    classification: 'unknown',
-    threat: null,
-    platform: 'quadcopter',
-    droneType: 'DJI Air 3 (flight envelope)',
-    confidence: 0.9,
-    confidenceTrend: 'Held by the east perimeter sensors throughout',
-    evidence: {
-      rfCarrier: '2.4 GHz',
-      rfBandwidth: '20 MHz OFDM',
-      rfMatch: 'OcuSync 95%',
-      modality: 'RF + acoustic',
-      evidenceSize: '9.4 MB',
-      note: 'Airframe check over the Øresund Test Range, mid-strait and clear of every coastline. One drone flying the full envelope: hover, acceleration, 24 m/s cruise, brake, a gentle 180 at 16 degrees of bank, a hard 150 at 14, a full orbit, a 70 m climb and descent, a figure eight and a 28 m/s run. Nothing here is scripted attitude: flyPath makes the waypoints targets and the airframe integrates its way between them, so every lean, bank and rotor differential is the model answering what it was asked to do. Out in the strait on purpose: nothing in frame but sea, so the airframe is the only thing to judge and no photogrammetry is rendered.',
-    },
-    waypoints: _SHOWCASE_PATH,
-    durationSec: Math.round(_SHOWCASE_PATH[_SHOWCASE_PATH.length - 1].tSec),
-    flyPath: true,
-  },
 
   cph_jet_hold_atc: {
     droneType: 'Commercial airliner (SAS 743, A320neo)',
