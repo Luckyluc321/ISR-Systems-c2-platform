@@ -1285,6 +1285,13 @@ body.details-collapsed #control-panel {
 }
 .cp-group { display: flex; gap: 5px; }
 .cp-group-vert { flex-direction: column; }
+/* The fly-to site buttons are generated into this container rather than
+   written into index.html, so they are one level deeper than they used
+   to be. The buttons are <button>, inline-block by default, and were
+   previously direct flex children of .cp-group-vert. Inside a plain
+   div they flowed inline and wrapped two to a row, overflowing the
+   panel. This restores the column they were always in. */
+#fly-sites { display: flex; flex-direction: column; gap: 5px; }
 .cp-btn {
   flex: 1; padding: 6px 10px;
   position: relative;
