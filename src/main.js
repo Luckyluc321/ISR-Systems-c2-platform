@@ -26930,6 +26930,18 @@ async function main() {
           <span class="dp-swarm-id">${_platformId}</span>
           <span class="dp-swarm-model">${_platformModel}</span>
           <span class="dp-swarm-role">lead</span>
+          <!-- THE PERMANENT STATUS SLOT, COLUMN 4.
+               The grid is ten columns and .dp-swarm-row's own comment says
+               this one "is now always present and simply empty for a drone
+               with nothing to report, so every row has the same shape".
+               The swarm row includes it; this single-platform row did not,
+               so every field after the role landed one column to the left.
+               The coordinates ended up in the 84px status slot and clipped,
+               while the flexible 1fr column went to the altitude, which needs none
+               of it. That is the clipped coordinate with a wide gap beside
+               it, and no amount of widening the pillar could fix it because
+               the columns were simply mismatched. -->
+          <span class="dp-swarm-status"></span>
           <span class="dp-swarm-pos mono">${e.lastPosition.lat.toFixed(4)}°N ${e.lastPosition.lon.toFixed(4)}°E</span>
           <span class="dp-swarm-alt mono">${e.lastPosition.alt} m</span>
           <span class="dp-swarm-hdg mono">${e.lastPosition.heading}°</span>
