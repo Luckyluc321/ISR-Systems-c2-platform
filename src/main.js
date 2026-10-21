@@ -21889,6 +21889,55 @@ async function main() {
     console.log(`[fixedwing trace] recording ${seconds}s...`);
   };
 
+  // WHERE IS IT, ACTUALLY.
+  //
+  //   __isr_whereIsIt()
+  //
+  // Prints every live drone's rendered position, its distance from its
+  // site centre, and whether it is inside that site's perimeter polygon.
+  // Added because "it spawns inside the perimeter" was answered twice
+  // from the template geometry, which says the first waypoint is 2703 m
+  // out and outside the polygon, and twice that answer was wrong about
+  // what is on screen. The template is not the screen.
+  window.__isr_whereIsIt = () => {
+    const R = 111320;
+    const inside = (lat, lon, poly) => {
+      if (!Array.isArray(poly) || !poly.length) return null;
+      let c = false;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const [xi, yi] = poly[i], [xj, yj] = poly[j];
+        if (((yi > lat) !== (yj > lat)) && (lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi)) c = !c;
+      }
+      return c;
+    };
+    const rows = [];
+    const add = (who, eid, ent) => {
+      const cart = ent?.position?.getValue?.(viewer.clock.currentTime);
+      if (!cart) return;
+      const c = Cesium.Cartographic.fromCartesian(cart);
+      const lat = Cesium.Math.toDegrees(c.latitude), lon = Cesium.Math.toDegrees(c.longitude);
+      const ev = EVENTS.find(e => e.id === eid);
+      const site = SITES[ev?.siteId];
+      const ctr = site?.coordinates;
+      rows.push({
+        who, event: eid, site: ev?.siteId,
+        lat: +lat.toFixed(5), lon: +lon.toFixed(5), altM: Math.round(c.height),
+        mFromCentre: ctr ? Math.round(Math.hypot((lat - ctr.lat) * R,
+          (lon - ctr.lon) * R * Math.cos(lat * Math.PI / 180))) : null,
+        insidePerimeter: inside(lat, lon, site?.perimeter || site?.siteBoundary),
+        elapsedSec: ev?.startedAt ? Math.round((Date.now() - new Date(ev.startedAt)) / 1000) : null,
+      });
+    };
+    for (const [eid, st] of droneState) {
+      add('LEAD', eid, st.billboard);
+      (st.swarmBillboards || []).forEach((sw, i) => add(`member ${i + 1}`, eid, sw.billboard));
+    }
+    if (!rows.length) { console.log('no drone is airborne'); return []; }
+    console.table(rows);
+    console.log('insidePerimeter true means the dot is within the drawn site polygon.');
+    return rows;
+  };
+
   window.__isr_quadHum = (gain = 0) => {
     const t = window.__isr_quad_tuning = window.__isr_quad_tuning || {};
     t.hoverNoise = gain;
