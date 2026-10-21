@@ -3048,43 +3048,68 @@ Object.assign(TEMPLATES, {
       // fading in at t=21. That is not a loss. The 21 s it replaces
       // rendered nothing at all, and the 4 s that did render was the
       // 209 m/s slam.
-      { lat: 55.6164, lon: 12.6899, alt: 120, heading: 260, tSec:   0 },  // ingress, Øresund E — at the CPH ring edge, normal cruise
-      { lat: 55.6180, lon: 12.6800, alt: 110, heading: 265, tSec:  20 },  // enter CPH sensors E, begin descent
+      // OFF-SCREEN INGRESS, RESTORED 2026-10-21.
+      //
+      // The note above is what I wrote on 2026-10-19 when I trimmed this
+      // leg, and it was wrong about the cost. Trimming was the right cure
+      // for the 209 m/s slam, but it moved the start from 4.4 km outside
+      // the nearest sensor ring to 177 m INSIDE it, so the formation went
+      // from fading in at t=21 to drawing five stacked icons on frame one,
+      // 640 m from the boundary. At the launch camera that gap is about
+      // 140 px and the icon cluster about 200 px wide, so the blob's inner
+      // edge sits ON the line. Lucas reported the swarm as spawning inside
+      // the perimeter. He was describing exactly this, and I spent three
+      // rounds proving the COORDINATES were outside, which was true and
+      // entirely beside the point.
+      //
+      // Moved back 900 m along the ingress bearing: the SHORTEST distance
+      // that restores the old BEHAVIOUR rather than the old waypoint. From
+      // here the nearest sensor is 1721 m, so the formation is outside every
+      // ring at spawn, invisible for ~22 s, and fades in ~800 m from the
+      // boundary, which is what it did before the trim to within metres.
+      //
+      // Not the full 5.1 km original: that costs 142 s of empty approach at
+      // today's honest 103 km/h, and only ever fitted inside 300 s because
+      // the formation was doing 120. Speed is unchanged. Everything after
+      // this shifts +28 s and durationSec goes 300 -> 328.
+      { lat: 55.6178, lon: 12.7040, alt: 120, heading: 260, tSec:   0 },  // off-screen ingress, Øresund E — outside every sensor ring
+      { lat: 55.6164, lon: 12.6899, alt: 120, heading: 260, tSec:  28 },  // CPH ring edge, normal cruise
+      { lat: 55.6180, lon: 12.6800, alt: 110, heading: 265, tSec:  48 },  // enter CPH sensors E, begin descent
 
       // Low-altitude S-shape recon over the EAST cargo apron (DHL / FedEx / WFS on Kystvejen)
-      { lat: 55.6210, lon: 12.6700, alt:  70, heading: 275, tSec:  42 },  // descend over east cargo — DHL/FedEx assessment start
-      { lat: 55.6215, lon: 12.6620, alt:  55, heading: 255, tSec:  58 },  // LOW pass over Apron East (cargo aircraft detail)
+      { lat: 55.6210, lon: 12.6700, alt:  70, heading: 275, tSec:  70 },  // descend over east cargo — DHL/FedEx assessment start
+      { lat: 55.6215, lon: 12.6620, alt:  55, heading: 255, tSec:  86 },  // LOW pass over Apron East (cargo aircraft detail)
 
       // Curve NW-then-W into the passenger pier belt at very low altitude
-      { lat: 55.6260, lon: 12.6580, alt:  50, heading: 250, tSec:  75 },  // LOW over Pier E (SAS long-haul widebody stands E1-E7)
-      { lat: 55.6272, lon: 12.6500, alt:  50, heading: 260, tSec:  92 },  // LOW over Piers C/D (mixed non-Schengen)
-      { lat: 55.6275, lon: 12.6420, alt:  55, heading: 265, tSec: 108 },  // LOW over Pier B (Schengen)
-      { lat: 55.6278, lon: 12.6350, alt:  65, heading: 275, tSec: 122 },  // starting to climb toward Pier A / Terminal 2
+      { lat: 55.6260, lon: 12.6580, alt:  50, heading: 250, tSec: 103 },  // LOW over Pier E (SAS long-haul widebody stands E1-E7)
+      { lat: 55.6272, lon: 12.6500, alt:  50, heading: 260, tSec: 120 },  // LOW over Piers C/D (mixed non-Schengen)
+      { lat: 55.6275, lon: 12.6420, alt:  55, heading: 265, tSec: 136 },  // LOW over Pier B (Schengen)
+      { lat: 55.6278, lon: 12.6350, alt:  65, heading: 275, tSec: 150 },  // starting to climb toward Pier A / Terminal 2
 
       // Climb and bank NW toward Amager Koblingsstation — begin egress from CPH
-      { lat: 55.6295, lon: 12.6280, alt:  85, heading: 305, tSec: 138 },  // climbing, banking NW
-      { lat: 55.6320, lon: 12.6220, alt: 100, heading: 320, tSec: 152 },  // approach CPH NW exit
+      { lat: 55.6295, lon: 12.6280, alt:  85, heading: 305, tSec: 166 },  // climbing, banking NW
+      { lat: 55.6320, lon: 12.6220, alt: 100, heading: 320, tSec: 180 },  // approach CPH NW exit
       // wp10 and wp11 had 8 s slots where their neighbours get 14-22, so
       // they flew 52 and 63 m/s inside an otherwise 31 m/s pass. Re-timed
       // by arc length across the t=152..190 window, which makes it
       // uniform at 34.4 m/s. POSITIONS ARE UNTOUCHED: the overlap sliver
       // is a geometric claim about two sensor rings, and it still holds.
-      { lat: 55.6347, lon: 12.6175, alt: 115, heading: 320, tSec: 164 },  // OVERLAP SLIVER — inside both CPH N22 and AMK-N01 rings, seamless handover
-      { lat: 55.6380, lon: 12.6120, alt: 120, heading: 315, tSec: 179 },  // fully inside AMK coverage
-      { lat: 55.6410, lon: 12.6088, alt: 120, heading: 315, tSec: 190 },  // over AMK substation, peak AMK detection
+      { lat: 55.6347, lon: 12.6175, alt: 115, heading: 320, tSec: 192 },  // OVERLAP SLIVER — inside both CPH N22 and AMK-N01 rings, seamless handover
+      { lat: 55.6380, lon: 12.6120, alt: 120, heading: 315, tSec: 207 },  // fully inside AMK coverage
+      { lat: 55.6410, lon: 12.6088, alt: 120, heading: 315, tSec: 218 },  // over AMK substation, peak AMK detection
 
       // Egress from AMK back toward Øresund
-      { lat: 55.6440, lon: 12.6140, alt: 120, heading:  40, tSec: 220 },  // exiting AMK sensors NE
+      { lat: 55.6440, lon: 12.6140, alt: 120, heading:  40, tSec: 248 },  // exiting AMK sensors NE
       // Egress trimmed 9,240 -> 2,000 m, scaled about wp13 and re-timed by
       // arc length to a uniform 25 m/s. Every one of these three is
       // outside every sensor ring (755, 1267, 1797 m), so this leg
       // renders nothing and only ever existed to take the formation off
       // screen. It now does that at a speed a multirotor can fly.
-      { lat: 55.6449, lon: 12.6196, alt: 120, heading:  75, tSec: 235 },  // transit over N Amager
-      { lat: 55.6453, lon: 12.6283, alt: 120, heading:  90, tSec: 256 },  // approaching Øresund
-      { lat: 55.6453, lon: 12.6456, alt: 120, heading:  90, tSec: 300 },  // exit off-screen, Øresund E
+      { lat: 55.6449, lon: 12.6196, alt: 120, heading:  75, tSec: 263 },  // transit over N Amager
+      { lat: 55.6453, lon: 12.6283, alt: 120, heading:  90, tSec: 284 },  // approaching Øresund
+      { lat: 55.6453, lon: 12.6456, alt: 120, heading:  90, tSec: 328 },  // exit off-screen, Øresund E
     ],
-    durationSec: 300,
+    durationSec: 328,
     // Second event auto-fires when lead crosses AMK sensor coverage.
     // Cross-linked back to the primary CPH event via linkedEventId at spawn.
     //
