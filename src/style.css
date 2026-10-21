@@ -4554,9 +4554,21 @@ body.view-config #cesiumContainer { opacity: 0.15; pointer-events: none; }
 
 /* ─────────── FLY-TO EXPANDABLE GROUP ─────────── */
 .fly-group { display: flex; flex-direction: column; }
+/* [hidden] IS NOT ENOUGH ON ITS OWN HERE.
+   The browser hides [hidden] with a UA rule of the lowest priority, so
+   any author `display` beats it. .fly-group sets display: flex and
+   .fly-group-hdr sets it !important, which meant applyFlyToScope's
+   `grp.hidden = true` did nothing at all: a CPH operator was shown the
+   ENERGINET group, another tenant's sites, one click from opening.
+   It never surfaced before because admin is the default account and
+   admin hides nothing. The single site buttons were always fine, since
+   .cp-btn sets no display of its own. */
+.fly-group[hidden] { display: none; }
 .fly-group-hdr {
   display: flex !important; align-items: center; justify-content: space-between;
 }
+.fly-group-hdr[hidden] { display: none !important; }
+.cp-btn[hidden] { display: none; }
 .fly-caret {
   color: var(--text-dim);
   font-family: var(--font-mono);
