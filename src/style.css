@@ -9948,3 +9948,24 @@ body.workspace-map-active #receiver-view {
    read rather than scanned. */
 .dp-note-detail p { margin: 0 0 0.6em; }
 .dp-note-detail p:last-child { margin-bottom: 0; }
+
+/* ── Single-platform row: close the empty status gap ───────────────
+   APPENDED AT THE END ON PURPOSE. An earlier attempt inserted this
+   beside .dp-swarm-row and put the closing brace in the wrong place,
+   which severed that rule's gap, padding, background, border,
+   font-size and colour and stripped every swarm roster row. Broken CSS
+   is still valid CSS, so the build passed and nothing caught it before
+   the screen did.
+
+   Column 4 is the permanent status slot, 84px held open so a swarm's
+   rows align whether or not a given drone carries a badge. With ONE
+   platform there is never a badge and never a sibling row, so the width
+   is a hole between the role and the coordinates.
+
+   Scoped to .is-solo, which only the single-platform row carries. The
+   span stays, so all ten children still map to all ten columns and the
+   1fr coordinates column absorbs the freed width. Multi-entry roster
+   rows never match this selector and are not affected. */
+.dp-swarm-row.is-solo {
+  grid-template-columns: 48px 155px 90px 0 1fr 68px 52px 68px 76px 46px;
+}
