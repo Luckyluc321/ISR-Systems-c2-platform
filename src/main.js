@@ -576,6 +576,27 @@ function _roleCanSeeSite(siteId, role = getActiveRole()) {
   if (!role || role.kind !== 'operator') return true;
   return Array.isArray(role.siteIds) && role.siteIds.includes(siteId);
 }
+// How big a site actually is: the furthest boundary vertex from its own
+// centre, in metres. Cached, because a boundary never changes at
+// runtime and CPH's has 162 points.
+const _siteExtentCache = new Map();
+function _siteExtentM(siteId) {
+  if (_siteExtentCache.has(siteId)) return _siteExtentCache.get(siteId);
+  const site = SITES[siteId];
+  const c = site?.coordinates;
+  let ext = 0;
+  if (c && Array.isArray(site.siteBoundary) && site.siteBoundary.length) {
+    const mLat = 111320;
+    const mLon = 111320 * Math.cos((c.lat * Math.PI) / 180);
+    for (const [lon, lat] of site.siteBoundary) {
+      ext = Math.max(ext, Math.hypot((lat - c.lat) * mLat, (lon - c.lon) * mLon));
+    }
+  }
+  _siteExtentCache.set(siteId, ext);
+  return ext;
+}
+function _clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
 function _visibleSiteIds(role = getActiveRole()) {
   return Object.keys(SITES).filter(sid => _roleCanSeeSite(sid, role));
 }
@@ -26400,7 +26421,23 @@ async function main() {
     // Event selected takes priority, clear any lingering target
     _selectedTargetId = null;
     const e = getEvent(id);
-    if (!e) {
+    // AN UNDETECTED TRACK IS NOT AN EVENT.
+    //
+    // detected === false means no sensor has ever heard it. The ledger
+    // already honours that, because filteredEvents() filters on it. The
+    // MAP did not: clicking the drone's own model selected it, and the
+    // panel then rendered a PRE-INGRESS card reading "track inferred
+    // from cross-cue but not yet inside sensor coverage".
+    //
+    // In the WITHOUT ISR run there is no cross-cue. Every sensor at the
+    // site is off, which is the entire premise, so the card asserted an
+    // inference nothing could have made and the operator was shown a
+    // detection conjured out of nothing.
+    //
+    // The vehicle still flies and is still drawn. That is the argument
+    // of the clip: you can see it, the system cannot. What is withheld
+    // is the claim to have detected it.
+    if (!e || e.detected === false) {
       _lastClosedPanelSig = null;
       detailEmptyEl.style.display = 'flex';
       detailBodyEl.style.display = 'none';
@@ -26487,14 +26524,22 @@ async function main() {
         || e.temporaryLoss.classification === 'fled');
     let telemetry = '';
     if (preIngress) {
-      telemetry = `
-        <div class="dp-section dp-pre-ingress">
-          <div class="dp-pre-hdr">
-            <span class="dp-pre-pulse"></span>
-            <span class="dp-pre-title">PRE-INGRESS · AWAITING SENSOR CONTACT</span>
-          </div>
-          <div class="dp-pre-sub">Track inferred from cross-cue but not yet inside sensor coverage. Live telemetry populates once the first sensor confirms detection.</div>
-        </div>`;
+      // THE PRE-INGRESS CARD IS GONE, AND THE BRANCH STAYS EMPTY.
+      //
+      // It read "Track inferred from cross-cue but not yet inside
+      // sensor coverage". That is a defensible claim when the grid is
+      // live and something else cued the track. It is not a claim the
+      // system can make in the WITHOUT ISR run, where every sensor at
+      // the site is off: nothing cued anything, so the card invented
+      // the inference it reported.
+      //
+      // renderDetailPanel now returns the empty state for any event
+      // with detected === false, so this branch is already unreachable
+      // for the case that produced the card. It is kept, empty, as the
+      // backstop: if a coverage-gated track ever reaches here with its
+      // detection state merely unknown rather than false, the panel
+      // shows no telemetry instead of a fabricated one.
+      telemetry = '';
     } else if (temporaryLoss) {
       const tl = e.temporaryLoss;
       const lk = e.lastKnownPosition || e.lastPosition;
@@ -30831,8 +30876,36 @@ async function main() {
     // destination point off-center (target visible in front-of-camera
     // rather than centered). Bounding sphere pins the target under the
     // camera reticle regardless of pitch.
-    const bigSite = event.siteId === 'cph' || event.siteId === 'esbjerg';
-    const range = bigSite ? 2200 : 1100;   // metres pulled back
+    // FRAME THE SITE, DO NOT CLASSIFY IT.
+    //
+    // This was `siteId === 'cph' || siteId === 'esbjerg' ? 2200 : 1100`,
+    // and those two numbers matched no site in the fleet. Measured
+    // against each site's own boundary, the split was wrong in both
+    // directions for all ten:
+    //
+    //   CPH          4638 m across, framed at 2200  camera inside it
+    //   Esbjerg      3677 m         framed at 2200  inside
+    //   Billund      2142 m         framed at 1100  inside
+    //   Odense       1371 m         framed at 1100  inside
+    //   Amager          92 m        framed at 1100  12x too far out
+    //   Ferslev        165 m        framed at 1100  7x too far
+    //
+    // Billund is an international airport and got substation framing
+    // because it was not in a two-item list. Every new customer got the
+    // same. A classifier was never the right shape for the question:
+    // "how far back" has a measured answer, and every site already
+    // carries the boundary polygon that answers it.
+    //
+    // FACTOR 1.0 means you see roughly the whole site. The complaint
+    // across the fleet is "too far out", never "too close", so the
+    // default errs tight. The floor keeps a 92 m switching station from
+    // putting the camera on its roof.
+    //   window.__isr_frameTuning = { factor: 1.4, minM: 700 }
+    const _ft = (typeof window !== 'undefined' && window.__isr_frameTuning) || {};
+    const _factor = _ft.factor ?? 1.0;
+    const _minM = _ft.minM ?? 600;
+    const _maxM = _ft.maxM ?? 12000;
+    const range = _clamp(_siteExtentM(event.siteId) * _factor, _minM, _maxM);
     viewer.camera.flyToBoundingSphere(
       new Cesium.BoundingSphere(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, 0), 150),
       {
