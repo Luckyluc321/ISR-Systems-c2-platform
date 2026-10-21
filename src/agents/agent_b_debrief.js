@@ -200,6 +200,7 @@ function buildDebriefMessages(event, samples, analysis, opts = {}) {
   // similarity + tier + recency thresholds. See
   // docs/agentic-precedent-retrieval-architecture.md.
   const precedentBlock = opts.precedentBlock;
+  const concurrentBlock = opts.concurrentBlock;
   const dur = samples.length ? Math.round(samples[samples.length - 1].t_sec_from_event - samples[0].t_sec_from_event) : 0;
   // Defensive on every analysis section. A narrative generator must not
   // crash because one optional section is absent: an event with no
@@ -315,6 +316,26 @@ function buildDebriefMessages(event, samples, analysis, opts = {}) {
     precedentBlock,
   ].join('\n') : '';
 
+  // Concurrent activity — plain-text section, formatted deterministically
+  // by concurrent_events.js. Same user-prompt placement and the same
+  // rationale: per-event context, not persistent doctrine.
+  //
+  // It answers a question the deterministic correlator cannot. That one
+  // scores continuity, "is this the same object later", and its
+  // kinematic gate correctly refuses to link a recon track at one end of
+  // an airport to a swarm at the other. Whether those two are acting
+  // TOGETHER is a judgement, and judgement is this agent's job.
+  //
+  // The block states no link has been established, forbids recommending
+  // an action, and explicitly invites the answer "this is coincidence".
+  // That last part is not politeness: a model asked only to find
+  // patterns will find them, and a false coordinated-attack claim in
+  // front of an operator is worse than silence.
+  const concurrentSection = concurrentBlock ? [
+    '',
+    concurrentBlock,
+  ].join('\n') : '';
+
   const userPrompt = [
     `Event ID: ${event.id}`,
     `Site: ${siteName}`,
@@ -329,6 +350,7 @@ function buildDebriefMessages(event, samples, analysis, opts = {}) {
     signalsSection,
     cooperativeSection,
     precedentSection,
+    concurrentSection,
     '',
     'TRAJECTORY ANALYSIS',
     '─────────────────',

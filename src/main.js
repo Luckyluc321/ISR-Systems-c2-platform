@@ -16751,6 +16751,16 @@ async function main() {
       registerPrecedent(event);
     } catch (err) { console.warn('[precedent_index] register failed:', err.message); }
 
+    // What else is live at this site right now. Deterministic, no HTTP,
+    // no LLM, and empty when the site is quiet so it costs nothing.
+    // visibleEvents() is the TENANT-SCOPED list: a tenant must never
+    // learn that another tenant's site is busy, and this must not be
+    // the place that leaks it.
+    let concurrentBlock = null;
+    try {
+      concurrentBlock = _buildConcurrentBlock(event, visibleEvents() || []) || null;
+    } catch (err) { console.warn('[concurrent_events] build failed:', err.message); }
+
     streamDebriefNarrative(event, samples, analysis, {
       onBodyDelta: (text) => {
         if (gen !== _mistralDebriefGen) return;
@@ -16804,6 +16814,7 @@ async function main() {
       signalsProseBlock: promptBlock.proseBlock,
       cooperativeCheckBlock,
       precedentBlock,
+      concurrentBlock,
       // Tier constrains how deep Agent B is allowed to go. transit
       // gets a single short paragraph, marginal 1-2, notable full.
       notabilityTier: ranked?.notability?.tier || 'marginal',

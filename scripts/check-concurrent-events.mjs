@@ -73,6 +73,34 @@ check('it invites the agent to say "no"', /often coincidence/.test(block),
 check('it is empty when nothing is concurrent', buildConcurrentBlock(swarm, [swarm]) === '',
   'a quiet site must cost no tokens');
 
+// ── step 2: the agent is told, and only when there is something ────
+// The property that matters is that a quiet site produces a prompt
+// BYTE-IDENTICAL to today's. The chain: buildConcurrentBlock returns ''
+// -> main.js stores null -> concurrentSection is '' -> .filter(Boolean)
+// drops it from the prompt array entirely.
+const agent = readFileSync(new URL('../src/agents/agent_b_debrief.js', import.meta.url), 'utf8');
+const mainJs = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+
+console.log('\nThe agent receives it');
+check('the debrief builder accepts a concurrentBlock',
+  /const concurrentBlock = opts\.concurrentBlock;/.test(agent));
+check('it becomes a section only when present',
+  /const concurrentSection = concurrentBlock \? \[/.test(agent),
+  'a falsy block must yield an empty string, not the word undefined');
+check('the section is placed in the user prompt',
+  /concurrentSection,/.test(agent.slice(agent.indexOf('const userPrompt'))));
+check('an empty section is dropped from the prompt entirely',
+  /\]\.filter\(Boolean\)\.join/.test(agent),
+  'without filter(Boolean) a quiet site would add a blank line to every '
+  + 'prompt, which is a change to a working path for no reason');
+check('main.js builds it from the TENANT-SCOPED list',
+  /_buildConcurrentBlock\(event, visibleEvents\(\)/.test(mainJs),
+  'visibleEvents() is actor-filtered. Passing the raw EVENTS array here would '
+  + 'tell one tenant that another tenant\'s site is busy, in a prompt.');
+check('a build failure cannot break the debrief',
+  /\[concurrent_events\] build failed/.test(mainJs),
+  'wrapped in try/catch like the precedent block beside it');
+
 if (failures) {
   console.log(`\ncheck:concurrent-events FAILED — ${failures} assertion${failures === 1 ? '' : 's'}`);
   process.exit(1);
