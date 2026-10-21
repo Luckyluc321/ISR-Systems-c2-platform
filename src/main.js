@@ -23055,7 +23055,8 @@ async function main() {
     } else {
       // "All sites" means all sites THIS account owns. An operator's
       // status bar must not total another owner's hardware.
-      _visibleSiteIds().forEach(sid => {
+      const _ids = _visibleSiteIds();
+      _ids.forEach(sid => {
         const site = SITES[sid];
         site.sensors.forEach(s => {
           total++;
@@ -23064,6 +23065,18 @@ async function main() {
           else if (s.status === 'offline') offline++;
         });
       });
+      // "ALL SITES" IS A CLAIM, AND FOR AN OPERATOR IT IS FALSE.
+      //
+      // The totals above were already scoped. The LABEL was not, so a
+      // CPH operator read "Scope All sites" beside a number that was
+      // correctly 35. Said to an account that owns one site of ten,
+      // "all sites" says the fleet is theirs.
+      const _r = getActiveRole();
+      if (_r && _r.kind === 'operator') {
+        scopeLabel = _ids.length === 1
+          ? (SITES[_ids[0]]?.name || _ids[0])
+          : `${_ids.length} sites`;
+      }
     }
     const dotClass = offline > 0 ? 'err' : degraded > 0 ? 'warn' : 'ok';
     const parts = [`${online}/${total} online`];
@@ -33757,6 +33770,12 @@ async function main() {
       syncSitesToRole();
       applySiteScopeVisibility();
       applyFlyToScope();
+      // The sensor and scope cells are derived from the account too,
+      // and were the one surface this handler never refreshed. A CPH
+      // operator was reading 126/130 online, which is every tenant's
+      // hardware totalled together, because the cells still held the
+      // values computed at boot as admin.
+      updateStatusBar(_currentSiteScope);
     } catch (err) {
       console.error('[roleChange] site scope re-apply failed:', err);
     }

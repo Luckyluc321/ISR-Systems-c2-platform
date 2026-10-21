@@ -74,6 +74,30 @@ check('uptime counts from zero',
   formatUptime(0) === '0:00:00' && formatUptime(3 * 3600000 + 4 * 60000 + 11000) === '3:04:11',
   formatUptime(0));
 
+// ── tenant isolation ───────────────────────────────────────────────
+// A CPH operator read "Sensors 126/130 online · Scope All sites". The
+// totals are every tenant's hardware added together, and "all sites"
+// told an account that owns one site of ten that the fleet was theirs.
+//
+// The counting was already scoped. Two things were not: the LABEL, and
+// the fact that nothing recomputed either on an account switch, so the
+// cells kept the values derived at boot as admin.
+const mainJs = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+
+const roleChange = mainJs.slice(mainJs.lastIndexOf('onRoleChange(() => {'));
+check('the status bar is recomputed when the account changes',
+  /updateStatusBar\(/.test(roleChange.slice(0, 4000)),
+  'onRoleChange re-scopes the globe, the fly-to list and the ledger but not '
+  + 'the status bar, so its cells keep whatever account was active at boot. '
+  + 'That is how an operator came to read another tenant\'s sensor total.');
+
+const usb = mainJs.slice(mainJs.indexOf('function updateStatusBar('));
+check('the scope label is scoped too, not just the totals',
+  /kind === 'operator'/.test(usb.slice(0, 2600)),
+  '"All sites" is a claim. It is true for admin and false for an operator, '
+  + 'and it sat next to a correctly scoped number, which makes the number '
+  + 'look like the fleet total rather than their own.');
+
 if (failures) {
   console.log(`\ncheck:status-bar FAILED — ${failures} assertion${failures === 1 ? '' : 's'}`);
   process.exit(1);
