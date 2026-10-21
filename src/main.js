@@ -23595,9 +23595,32 @@ async function main() {
       //
       // Not a with/without-ISR special case. One filter, matching the
       // rule the rest of the app already follows, correct everywhere.
+      //
+      // AND A FRIENDLY TRACK IS NOT A THREAT OF ANY LEVEL.
+      //
+      // The same WITHOUT ISR run exposed the other half of this. The
+      // swarm is correctly excluded above, because it is coverage-gated
+      // and no sensor ever hears it. But the SAS A320 is
+      // classification: 'friendly' and cooperative: true, so it is
+      // never undetected: it is tracked by transponder, which is the
+      // whole point of the cooperative flag. It therefore survived the
+      // filter, failed the hostile test, and dropped straight through
+      // to 'guarded'.
+      //
+      // So a filed, ADS-B correlated airliner flying a published
+      // approach turned the site banner orange. Not only in the demo:
+      // six templates are friendly, and every one of them did this.
+      //
+      // Everywhere else in the app already says friendly means
+      // non-threat, in those words: "Friendly ID", "FRIENDLY",
+      // "Non-threat confirmed and logged." This computation was the
+      // only place that disagreed. GUARDED is for something real and
+      // unexplained, which is what 'unknown' is for, and that still
+      // raises it.
       const open = (visibleEvents() || [])
         .filter(e => e.status === 'active')
-        .filter(e => e.detected !== false);
+        .filter(e => e.detected !== false)
+        .filter(e => e.classification !== 'friendly');
       if (open.length) {
         level = open.some(e => e.classification === 'hostile') ? 'elevated' : 'guarded';
       }
