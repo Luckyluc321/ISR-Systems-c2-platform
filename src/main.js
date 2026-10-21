@@ -716,6 +716,7 @@ import { initLiveFeeds } from './sovereign_live_feeds.js';
 import { createQuadFlightModel, rotorsFromHubs } from './quad_flight_model.js';
 import { createFixedWingFlightModel, LOOKAHEAD_SEC } from './fixedwing_flight_model.js';
 import { createLiveSensorRuntime } from './live_sensor.js';
+import { createStatusBar } from './status_bar.js';
 import { activateManhattanDemo, deactivateManhattanDemo, setManhattanChase } from './manhattan_demo.js';
 // Cooperative-traffic adapters self-register on import. Order matters
 // only in that mock must be available for eval + sim scenarios;
@@ -23071,6 +23072,33 @@ async function main() {
     sbSensors.innerHTML = `<span class="sb-dot ${dotClass}"></span>Sensors <b>${parts.join(' · ')}</b>`;
     sbScope.innerHTML = `Scope <b>${scopeLabel}</b>`;
   }
+
+  // THE OTHER FIVE CELLS. See status_bar.js.
+  //
+  // They were literal text in index.html that nothing referenced:
+  // a frozen uptime, an invented 112 ms, a made-up model version, a
+  // hardcoded "nominal", and a personal username on screen for every
+  // customer. Each now reports what is true, and reports absence as an
+  // em dash rather than as a plausible number.
+  //
+  // One 1 s interval, no network, no polling. Every cell caches its
+  // last string and only writes to the DOM on a change, so a quiet
+  // console writes nothing after the first pass.
+  const _statusBar = createStatusBar({
+    doc: document,
+    getRole: () => getActiveRole(),
+    getVisibleSiteIds: () => _visibleSiteIds(),
+    getSiteSources: () => SITE_SOURCE_CONFIG,
+    // Reads the feed registry that already exists. Deliberately does
+    // NOT ping anything: a status bar must not generate traffic to
+    // describe itself.
+    getFeeds: () => { try { return _liveFeedsMgr ? _liveFeedsMgr.list() : null; } catch (_) { return null; } },
+    isForcedMock: () => { try { return !!window.__ISR_FORCE_ALL_MOCK; } catch (_) { return false; } },
+  }).start();
+  window.__isr_statusBar = _statusBar;
+  // Account switches change the session, the model scope and the site
+  // scope at once, so repaint immediately rather than waiting a second.
+  try { onRoleChange(() => _statusBar.update()); } catch (_) { /* non-fatal */ }
 
   overviewToggle.addEventListener('click', () => {
     overviewExpanded = !overviewExpanded;
