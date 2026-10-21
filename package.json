@@ -33,7 +33,8 @@
     "check:dji-air-3": "node scripts/check-dji-air-3.mjs",
     "check:flight-path": "node scripts/check-flight-path.mjs",
     "check:fixedwing-flight": "node scripts/check-fixedwing-flight.mjs",
-    "check:status-bar": "node scripts/check-status-bar.mjs"
+    "check:status-bar": "node scripts/check-status-bar.mjs",
+    "check:hidden-guards": "node scripts/check-hidden-guards.mjs"
   },
   "devDependencies": {
     "vite": "^8.1.1"

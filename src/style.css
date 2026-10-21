@@ -9,6 +9,22 @@
    semantic colour for state only, monospace for data, sans for body,
    sharp corners, hairline borders, no gradients unless functional.
    ═════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════
+   [hidden] MUST ACTUALLY HIDE.
+   ───────────────────────────────────────────────────────────────
+   The browser hides [hidden] with a UA rule, the lowest priority
+   there is, so ANY author `display` silently beats it. Three
+   elements were found this way in one afternoon, all of them
+   tenant scoping: .fly-group and .fly-group-hdr kept the ENERGINET
+   group on a CPH operator's panel, one click from six sites of
+   another tenant, and .cp-section kept an ISR-internal render
+   switch in a customer's console. In each case the code read as
+   though the element was gone and it was on screen.
+   Per-element guards fixed those three. This fixes the class, for
+   every element, including ones nobody has written yet.
+   ═══════════════════════════════════════════════════════════════ */
+[hidden] { display: none !important; }
+
 :root {
   /* ── Surfaces ─────────────────────────────────────────────────
      Layered dark ground. Higher = closer to the user (elevated).
@@ -4563,15 +4579,11 @@ body.view-config #cesiumContainer { opacity: 0.15; pointer-events: none; }
    It never surfaced before because admin is the default account and
    admin hides nothing. The single site buttons were always fine, since
    .cp-btn sets no display of its own. */
-.fly-group[hidden] { display: none; }
 .fly-group-hdr {
   display: flex !important; align-items: center; justify-content: space-between;
 }
-.fly-group-hdr[hidden] { display: none !important; }
-.cp-btn[hidden] { display: none; }
 /* Same trap as .fly-group: .cp-section carries its own display, so
    .hidden on the render-profile section would not have taken. */
-.cp-section[hidden] { display: none; }
 .fly-caret {
   color: var(--text-dim);
   font-family: var(--font-mono);

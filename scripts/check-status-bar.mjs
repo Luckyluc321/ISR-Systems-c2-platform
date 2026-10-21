@@ -98,20 +98,6 @@ check('the scope label is scoped too, not just the totals',
   + 'and it sat next to a correctly scoped number, which makes the number '
   + 'look like the fleet total rather than their own.');
 
-// ── hiding has to actually hide ────────────────────────────────────
-// applyFlyToScope hides a multi-site operator's group with
-// `grp.hidden = true`. The browser's [hidden] rule is the weakest there
-// is, so any author `display` wins. .fly-group sets display: flex and
-// its header sets it !important, so a CPH operator was shown the
-// ENERGINET group one click from another tenant's sites.
-const css = readFileSync(new URL('../src/style.css', import.meta.url), 'utf8');
-for (const sel of ['.fly-group[hidden]', '.fly-group-hdr[hidden]', '.cp-btn[hidden]']) {
-  check(`${sel} is defined`, css.includes(sel),
-    `${sel} has an author display rule, so setting .hidden on it does nothing. `
-    + 'Anything hidden by script needs a matching [hidden] rule at the same '
-    + 'specificity or the element stays on screen.');
-}
-
 if (failures) {
   console.log(`\ncheck:status-bar FAILED — ${failures} assertion${failures === 1 ? '' : 's'}`);
   process.exit(1);
