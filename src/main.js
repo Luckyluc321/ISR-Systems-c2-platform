@@ -23364,7 +23364,21 @@ async function main() {
       }
       // If the current selection just became invisible, move it to the
       // first site this account can actually simulate against.
-      if (sel.selectedOptions[0]?.hidden && firstVisible) sel.value = firstVisible;
+      //
+      // AND TELL THE PANEL. Assigning sel.value fires no change event,
+      // so the THREAT list below kept whatever site it was last built
+      // for: the selector read "Copenhagen Airport" while the list under
+      // it was Billund's, BLL and LEGO HQ and the Gerans. Nothing was
+      // lost, the two were simply out of step.
+      //
+      // It survived until now because the options were hand-written with
+      // cph first, so the default selection was already right and this
+      // line almost never ran. Generating them from the registry put
+      // billund first alphabetically, which made it run every time.
+      if (sel.selectedOptions[0]?.hidden && firstVisible && sel.value !== firstVisible) {
+        sel.value = firstVisible;
+        sel.dispatchEvent(new Event('change'));
+      }
     }
   }
   // THE LISTS COME FROM SITES, NOT FROM THE MARKUP.
@@ -23388,7 +23402,18 @@ async function main() {
   function renderSiteLists() {
     const host = document.getElementById('fly-sites');
     const label = sid => SITES[sid]?.name || sid;
-    const allSites = Object.keys(SITES).filter(sid => FLY_TARGETS[sid]);
+    // ORDER IS NOT ALPHABETICAL. The hand-written list had cph first
+    // because it is the site most work happens at, and sorting the
+    // generated list by id silently demoted it to third. A fly-to list
+    // is a work surface, not an index.
+    const _siteOrder = (a, b) => {
+      const pri = sid => (_roleCanSeeSite(sid) ? 0 : 1);
+      if (pri(a) !== pri(b)) return pri(a) - pri(b);
+      if (a === 'cph') return -1;
+      if (b === 'cph') return 1;
+      return (SITES[a]?.name || a).localeCompare(SITES[b]?.name || b, 'da');
+    };
+    const allSites = Object.keys(SITES).filter(sid => FLY_TARGETS[sid]).sort(_siteOrder);
     const grouped = new Set();
     let html = '';
     for (const op of OPERATORS) {
