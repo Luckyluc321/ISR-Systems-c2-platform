@@ -212,7 +212,7 @@
              autocomplete="username" required />
     </div>
     <div class="field">
-      <label for="password">Passphrase</label>
+      <label for="password">Password</label>
       <input id="password" name="password" type="password"
              autocomplete="current-password" required />
     </div>
@@ -241,7 +241,7 @@
 
 const ACCOUNT_KEY = 'isr.auth.accountId';
 
-async function authenticate(email, _passphrase) {
+async function authenticate(email, _password) {
   const id = String(email || '').trim().toLowerCase();
   if (!id) return { ok: false, reason: 'Operator ID required' };
 
