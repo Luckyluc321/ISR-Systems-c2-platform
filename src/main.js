@@ -738,6 +738,7 @@ import { createQuadFlightModel, rotorsFromHubs } from './quad_flight_model.js';
 import { createFixedWingFlightModel, LOOKAHEAD_SEC } from './fixedwing_flight_model.js';
 import { createLiveSensorRuntime } from './live_sensor.js';
 import { createStatusBar } from './status_bar.js';
+import { concurrentEvents as _concurrentEvents, buildConcurrentBlock as _buildConcurrentBlock } from './concurrent_events.js';
 import { activateManhattanDemo, deactivateManhattanDemo, setManhattanChase } from './manhattan_demo.js';
 // Cooperative-traffic adapters self-register on import. Order matters
 // only in that mock must be available for eval + sim scenarios;
@@ -21899,6 +21900,28 @@ async function main() {
   // from the template geometry, which says the first waypoint is 2703 m
   // out and outside the polygon, and twice that answer was wrong about
   // what is on screen. The template is not the screen.
+  // WHAT ELSE IS LIVE AT THIS SITE RIGHT NOW.
+  //
+  //   __isr_concurrent()            for the selected event
+  //   __isr_concurrent(eventId)     for a specific one
+  //   __isr_concurrent(id, true)    print the block the agent would read
+  //
+  // Selection only. It writes nothing, links nothing, and renders
+  // nothing. See concurrent_events.js for why this is not a correlator.
+  window.__isr_concurrent = (eventId, showBlock = false) => {
+    const id = eventId || getSelectedEventId();
+    const ev = id ? getEvent(id) : null;
+    if (!ev) { console.log('no event selected. Pass an id, or click one.'); return []; }
+    // The TENANT-SCOPED list, never the raw EVENTS array: an operator
+    // must not learn that another tenant's site is busy.
+    const scoped = visibleEvents() || [];
+    const list = _concurrentEvents(ev, scoped);
+    console.log(`[concurrent] ${ev.id} at ${ev.siteId}: ${list.length} other live track(s)`);
+    if (list.length) console.table(list); else console.log('  nothing else is live at this site.');
+    if (showBlock) console.log('\n' + (_buildConcurrentBlock(ev, scoped) || '(no block — nothing concurrent)'));
+    return list;
+  };
+
   window.__isr_whereIsIt = () => {
     const R = 111320;
     const inside = (lat, lon, poly) => {
