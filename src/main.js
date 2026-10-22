@@ -23603,6 +23603,31 @@ async function main() {
           { key: 'cph_swarm_runway_incursion' },
           { key: 'cph_jet_hold_atc', atTSec: 0 },
         ] },
+      // TWO HOSTILE TRACKS, OPPOSITE ENDS, AT THE SAME TIME.
+      //
+      // Every combo above pairs the swarm with an AIRLINER, and an
+      // airliner is normal traffic: a thousand movements a day at CPH,
+      // filed, transponder-tracked, and correctly excluded from
+      // concurrency reasoning. None of them produce the situation an
+      // operator actually has to think hardest about, which is two
+      // unexplained tracks at once with no established link between
+      // them. The recon draws the response, the swarm does the work.
+      //
+      // 240 s, measured rather than chosen. The recon's own detection
+      // flips at its t = 27, so the pair is live and detected together
+      // for 171 s, never closer than 2709 m, mean separation 3955 m.
+      // At the midpoint the swarm bears 225 degrees from the site
+      // centre and the recon 114, which is the opposite-ends geometry
+      // Lucas asked for rather than two tracks on the same side.
+      //
+      // Offsets of 120 and 160 were measured too: both bring them
+      // within 625 m and 1220 m respectively, which reads as one
+      // formation rather than two separate problems.
+      { key: '__combo_cph_two_hostiles', label: 'COMBINED · swarm on 04R + fixed-wing recon from the east', cls: 'critical',
+        combo: [
+          { key: 'cph_swarm_runway_incursion' },
+          { key: 'cph_recon_hostile', atTSec: 240 },
+        ] },
       // WITHOUT ISR. Neither a template nor a combo, because the run has
       // to take this site's sensor grid offline for its duration as well
       // as spawn the two tracks, and that is scenario behaviour which
@@ -23966,6 +23991,7 @@ async function main() {
     __combo_cph_incursion_isr: { threat: '5-drone swarm + SAS 743', pathLabel: 'WITH ISR, tower warns at 7.6 km' },
     __combo_cph_incursion_noisr: { threat: '5-drone swarm + SAS 743', pathLabel: 'WITHOUT ISR, no sensor grid, crew spots them at 480 m' },
     __combo_cph_incursion_isr_hold: { threat: '5-drone swarm + SAS 743', pathLabel: 'WITH ISR, arrival held over the water, no approach flown' },
+    __combo_cph_two_hostiles:  { threat: '5-drone swarm + fixed-wing recon', pathLabel: 'Two hostiles, opposite ends, 171 s concurrent' },
     cph_missile_hostile:       { threat: 'Cruise missile',         pathLabel: 'Baltic sea ingress' },
     cph_missile_inbound_sw:    { threat: 'Cruise missile',         pathLabel: 'SW continuation ingress' },
     swarm_recon_cph_amk:       { threat: '5-drone recon swarm',    pathLabel: 'CPH → Amager transit' },
