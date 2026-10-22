@@ -16758,7 +16758,8 @@ async function main() {
     // the place that leaks it.
     let concurrentBlock = null;
     try {
-      concurrentBlock = _buildConcurrentBlock(event, visibleEvents() || []) || null;
+      concurrentBlock = _buildConcurrentBlock(event, visibleEvents() || [],
+        { siteCentre: SITES[event.siteId]?.coordinates || null }) || null;
     } catch (err) { console.warn('[concurrent_events] build failed:', err.message); }
 
     streamDebriefNarrative(event, samples, analysis, {
@@ -21256,6 +21257,26 @@ async function main() {
     const event = {
       id: eventId,
       siteId: template.siteId,
+      // PROVENANCE, THE SAME WORD THE DETECTION LAYER ALREADY USES.
+      //
+      // nn_source.js tags every detection 'sim' or 'live' and its header
+      // says why: "A site can be mixed, with real sensors watching real
+      // airspace while a training scenario runs alongside, and once
+      // those two streams touch there is no way to tell them apart
+      // after the fact. Tagging is cheap now and impossible to retrofit
+      // later."
+      //
+      // Events dropped it. A live-sensor event already carries
+      // source: 'live' (live_sensor.js buildLiveEvent), but a
+      // template-spawned one carried nothing, so a scenario-authored
+      // "Shahed-136" and a real classifier's "Shahed-136" were
+      // indistinguishable one layer downstream.
+      //
+      // That matters most at the bridge this is being built for. When
+      // the neural net starts supplying identity, the same fields fill
+      // with the same shape, and the only thing separating an asserted
+      // identity from a detected one is this word.
+      source: 'sim',
       classification: template.classification,
       threat: template.threat,
       droneType: template.droneType,
@@ -21926,10 +21947,10 @@ async function main() {
     // The TENANT-SCOPED list, never the raw EVENTS array: an operator
     // must not learn that another tenant's site is busy.
     const scoped = visibleEvents() || [];
-    const list = _concurrentEvents(ev, scoped);
+    const list = _concurrentEvents(ev, scoped, { siteCentre: SITES[ev.siteId]?.coordinates || null });
     console.log(`[concurrent] ${ev.id} at ${ev.siteId}: ${list.length} other live track(s)`);
     if (list.length) console.table(list); else console.log('  nothing else is live at this site.');
-    if (showBlock) console.log('\n' + (_buildConcurrentBlock(ev, scoped) || '(no block — nothing concurrent)'));
+    if (showBlock) console.log('\n' + (_buildConcurrentBlock(ev, scoped, { siteCentre: SITES[ev.siteId]?.coordinates || null }) || '(no block — nothing concurrent)'));
     return list;
   };
 

@@ -50,6 +50,26 @@ const CFG = {
 
 const R = 111320;
 
+/** Compass bearing of a point from the site centre, 0-360, or null.
+ *  The cheapest fact that answers "opposite ends or same side", which
+ *  is the question an operator actually asks first. */
+export function bearingFromCentre(pos, centre) {
+  if (!pos || !centre) return null;
+  if (typeof pos.lat !== 'number' || typeof centre.lat !== 'number') return null;
+  const dN = (pos.lat - centre.lat) * R;
+  const dE = (pos.lon - centre.lon) * R * Math.cos((centre.lat * Math.PI) / 180);
+  let b = (Math.atan2(dE, dN) * 180) / Math.PI;
+  if (b < 0) b += 360;
+  return Math.round(b);
+}
+
+/** Smallest angle between two bearings, 0-180. */
+export function bearingSeparation(a, b) {
+  if (a == null || b == null) return null;
+  const d = Math.abs(a - b) % 360;
+  return Math.round(d > 180 ? 360 - d : d);
+}
+
 /** Metres between two events' last known positions, or null. */
 export function separationM(a, b) {
   const pa = a?.lastPosition, pb = b?.lastPosition;
@@ -73,6 +93,10 @@ export function separationM(a, b) {
  */
 export function concurrentEvents(event, events, opts = {}) {
   const max = opts.maxEvents ?? CFG.MAX_EVENTS;
+  // Passed in, not imported: this module stays pure and never reaches
+  // for the site registry itself. Without it the bearing fields are
+  // null and everything else still works.
+  const centre = opts.siteCentre || null;
   if (!event || !event.siteId || !Array.isArray(events)) return [];
   const isLive = e => e.status === 'active';
   if (CFG.REQUIRE_BOTH_ACTIVE && !isLive(event)) return [];
@@ -102,15 +126,45 @@ export function concurrentEvents(event, events, opts = {}) {
     // words. 'unknown' is NOT excluded; an unidentified track at the
     // other end of the site is precisely what an operator needs told.
     .filter(e => e.classification !== 'friendly')
-    .map(e => ({
-      id: e.id,
-      droneType: e.droneType || e.platform || 'unidentified',
-      platform: e.platform || null,
-      classification: e.classification || 'unknown',
-      threat: e.threat || null,
-      separationM: separationM(event, e),
-      ageSec: e.startTime ? Math.round((now - new Date(e.startTime).getTime()) / 1000) : null,
-    }))
+    .map(e => {
+      // EVERY FIELD HERE IS ARITHMETIC. No model, no threshold on
+      // meaning, nothing that needs inference to be reachable. The more
+      // the checklist carries, the less rides on the agent: with the
+      // model down an operator still gets two hostile tracks, how far
+      // apart, which bearings, and which arrived first, which is most
+      // of what a decision needs.
+      const bEvent = bearingFromCentre(event.lastPosition, centre);
+      const bOther = bearingFromCentre(e.lastPosition, centre);
+      const angle = bearingSeparation(bEvent, bOther);
+      const tA = event.startTime ? new Date(event.startTime).getTime() : null;
+      const tB = e.startTime ? new Date(e.startTime).getTime() : null;
+      return {
+        id: e.id,
+        droneType: e.droneType || e.platform || 'unidentified',
+        platform: e.platform || null,
+        classification: e.classification || 'unknown',
+        threat: e.threat || null,
+        // Where this identity came from. 'live' means a detector said
+        // so; 'sim' means a scenario file did. An operator reading
+        // "Shahed-136 on the other side" needs to know which, and so
+        // does the agent, which is why it travels into the block below.
+        identitySource: e.source || 'sim',
+        separationM: separationM(event, e),
+        ageSec: tB == null ? null : Math.round((now - tB) / 1000),
+        bearingDeg: bOther,
+        // Positive: this track appeared AFTER the one in focus.
+        appearedAfterSec: (tA == null || tB == null) ? null : Math.round((tB - tA) / 1000),
+        // 90 degrees is the honest cut. Below it the two are broadly on
+        // the same side of the site; above it an operator looking at one
+        // has the other behind them. Named rather than left as a number
+        // because "opposite ends" is the phrase people actually use.
+        approach: angle == null ? null
+          : angle >= 90 ? 'opposite ends'
+            : angle >= 45 ? 'different sides'
+              : 'same side',
+        bearingSeparationDeg: angle,
+      };
+    })
     .sort((a, b) => {
       if (a.separationM == null) return 1;
       if (b.separationM == null) return -1;
@@ -124,30 +178,50 @@ export function concurrentEvents(event, events, opts = {}) {
  * nothing concurrent, so the caller can concatenate unconditionally and
  * a quiet site costs no tokens.
  */
-export function formatConcurrentBlock(list, event) {
+export function formatConcurrentBlock(list, event, opts = {}) {
   if (!Array.isArray(list) || !list.length) return '';
+  // Every line here is MEASURED: arithmetic over the event record, true
+  // whether or not the model is reachable. The agent is asked for one
+  // thing only, at the end, and it is the one thing arithmetic cannot
+  // answer.
   const lines = list.map(c => {
-    const sep = c.separationM == null ? 'separation unknown' : `${c.separationM} m away`;
-    const age = c.ageSec == null ? '' : `, active ${c.ageSec}s`;
-    const thr = c.threat ? `, threat ${c.threat}` : '';
-    return `- ${c.id}: ${c.droneType}, ${c.classification}${thr}, ${sep}${age}`;
+    const bits = [`${c.droneType}`, c.classification];
+    if (c.threat) bits.push(`threat ${c.threat}`);
+    if (c.separationM != null) bits.push(`${c.separationM} m away`);
+    if (c.bearingDeg != null) bits.push(`bearing ${c.bearingDeg} deg from site centre`);
+    if (c.approach) bits.push(`${c.approach} (${c.bearingSeparationDeg} deg apart)`);
+    if (c.appearedAfterSec != null) {
+      bits.push(c.appearedAfterSec >= 0
+        ? `appeared ${c.appearedAfterSec}s AFTER this track`
+        : `appeared ${Math.abs(c.appearedAfterSec)}s BEFORE this track`);
+    }
+    if (c.ageSec != null) bits.push(`active ${c.ageSec}s`);
+    bits.push(c.identitySource === 'live'
+      ? 'identity from a live detector'
+      : 'identity from a simulation, not a detector');
+    return `- ${c.id}: ${bits.join(', ')}`;
   });
+  const focal = event.lastPosition && opts.siteCentre
+    ? bearingFromCentre(event.lastPosition, opts.siteCentre) : null;
   return [
     'CONCURRENT ACTIVITY AT THIS SITE',
-    `The following tracks are live at the same site as ${event.id} at this moment.`,
+    `The following tracks are live at the same site as ${event.id} at this moment.`
+      + (focal == null ? '' : ` ${event.id} bears ${focal} deg from the site centre.`),
+    'Commercial and other friendly traffic is excluded: a filed airliner sharing an',
+    'airport with a drone is the normal state of an airport, not a coincidence.',
     'They are listed because they are concurrent, NOT because any link has been',
     'established. The deterministic correlator has not connected them.',
     '',
     ...lines,
     '',
-    'Say whether their timing and placement suggest coordinated activity, and say',
-    'plainly if it does not. Concurrency at a busy site is often coincidence.',
-    'Do NOT recommend an action and do NOT assert a link as fact: this is context',
-    'for the operator to judge.',
+    'Every figure above is measured. Say whether their timing and placement suggest',
+    'coordinated activity, and say plainly if it does not. Concurrency at a busy site',
+    'is often coincidence. Do NOT restate the figures back: the operator can already',
+    'see them. Do NOT recommend an action and do NOT assert a link as fact.',
   ].join('\n');
 }
 
 /** Convenience: select and format in one call. */
 export function buildConcurrentBlock(event, events, opts = {}) {
-  return formatConcurrentBlock(concurrentEvents(event, events, opts), event);
+  return formatConcurrentBlock(concurrentEvents(event, events, opts), event, opts);
 }

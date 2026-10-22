@@ -113,6 +113,43 @@ check('a build failure cannot break the debrief',
   /\[concurrent_events\] build failed/.test(mainJs),
   'wrapped in try/catch like the precedent block beside it');
 
+// ── the measured checklist, and where identity came from ───────────
+// Every field here is arithmetic over the event record. The point is
+// that it stays true with the model unreachable: the net eventually
+// supplies WHAT a thing is, the checklist supplies where and when, and
+// the agent is asked only the question neither can answer.
+const centre = { lat: 55.6085, lon: 12.6350 };
+const A = mk('A', 'cph', 55.5900, 12.6100);
+const B = mk('B', 'cph', 55.6200, 12.6900);
+A.startTime = new Date(Date.now() - 520000).toISOString();
+B.startTime = new Date(Date.now() - 280000).toISOString();
+const [row] = concurrentEvents(A, [A, B], { siteCentre: centre });
+
+console.log('\nThe checklist is arithmetic, not inference');
+check('bearing from the site centre is reported', row.bearingDeg != null);
+check('opposite ends is detected', row.approach === 'opposite ends',
+  `got ${row.approach} at ${row.bearingSeparationDeg} deg apart`);
+check('which track appeared first is reported', row.appearedAfterSec === 240,
+  `got ${row.appearedAfterSec}`);
+check('with no site centre it degrades instead of throwing',
+  concurrentEvents(A, [A, B])[0].bearingDeg === null,
+  'the module takes the centre as an argument and never reaches for the '
+  + 'site registry itself');
+
+console.log('\nIdentity provenance survives into the agent prompt');
+check('a template event declares source sim',
+  /source: 'sim',/.test(readFileSync(new URL('../src/main.js', import.meta.url), 'utf8')),
+  'nn_source.js tags every detection sim or live and says tagging is cheap now '
+  + 'and impossible to retrofit. Events dropped it, so a scenario-authored '
+  + 'identity and a detected one were indistinguishable downstream.');
+check('the checklist carries identitySource', row.identitySource != null);
+const liveB = { ...B, source: 'live' };
+check('a live identity is named as such in the block',
+  /identity from a live detector/.test(buildConcurrentBlock(A, [A, liveB], { siteCentre: centre })));
+check('a simulated identity is named as such too',
+  /identity from a simulation, not a detector/.test(buildConcurrentBlock(A, [A, B], { siteCentre: centre })),
+  'the agent must not read an authored identity as a detected one');
+
 if (failures) {
   console.log(`\ncheck:concurrent-events FAILED — ${failures} assertion${failures === 1 ? '' : 's'}`);
   process.exit(1);
