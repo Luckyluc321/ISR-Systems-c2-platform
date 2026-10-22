@@ -37,7 +37,8 @@
     "check:hidden-guards": "node scripts/check-hidden-guards.mjs",
     "check:concurrent-events": "node scripts/check-concurrent-events.mjs",
     "check:nn-integration-index": "node scripts/check-nn-integration-index.mjs",
-    "check:photoreal-coverage": "node scripts/check-photoreal-coverage.mjs"
+    "check:photoreal-coverage": "node scripts/check-photoreal-coverage.mjs",
+    "check:scenario-menu": "node scripts/check-scenario-menu.mjs"
   },
   "devDependencies": {
     "vite": "^8.1.1"

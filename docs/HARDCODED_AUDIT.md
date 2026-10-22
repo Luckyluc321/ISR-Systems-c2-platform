@@ -43,6 +43,12 @@ unreachable from the UI. The simulate-threat site dropdown lists 3.
 
 ### 1.3 A rejected site only announces itself in the console
 
+**FIXED 2026-10-22.** The Scope cell of the status bar now reads
+"· 1 site file rejected" for admin, with every file and reason in its
+tooltip. Admin only: a file name and validation message describe other
+tenants' configuration. Gated by `check:status-bar`.
+
+
 **CORRECTED 2026-10-21.** The original text here said `SITE_LOAD_ERRORS`
 is read by nothing. That was wrong: `main.js:28` logs a `console.warn`
 per rejected file. The real gap is narrower, and still real: the warning
@@ -103,6 +109,13 @@ zoom, small footprint.
 
 ### 2.2 Default site is a literal
 
+**FIXED 2026-10-22.** `_configSiteId` has no literal. The Config page
+resolves its site on every render against the active account's visible
+sites, using the same order as the fly-to list (`_siteWorkOrder`). It
+was also a tenant leak: any operator opened Config on CPH's destinations.
+Gated by `check:scenario-menu` [defaults].
+
+
 `main.js` ~23689, `let _configSiteId = 'cph'`. An instance without CPH
 starts pointed at a site it does not have.
 
@@ -117,6 +130,13 @@ starts pointed at a site it does not have.
 cover the operator binding so the code reads the manifest.
 
 ### 2.4 Two parallel scenario lists
+
+**FIXED 2026-10-22.** One list. `_SIM_COMPOSER_META` is gone; each
+`THREAT_MENU` entry carries the `threat` and `pathLabel` the picker
+shows. All 55 picker entries were snapshotted before and after and are
+identical. Gated by `check:scenario-menu` [menu], which also asserts
+every (threat, path) pair is unique per site and every key resolves.
+
 
 `THREAT_MENU` (`main.js` ~23268) and `_SIM_COMPOSER_META` (~23650) both
 name scenarios and must be kept in sync by hand. Renaming the Mohajer-2

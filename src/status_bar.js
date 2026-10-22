@@ -68,6 +68,36 @@ export function backendLabel(feeds) {
   return `${live.length} live`;
 }
 
+/**
+ * A site manifest the loader rejected, as the status bar says it.
+ *
+ * A rejected site is absent from the map along with every sensor it
+ * owns, and the only trace was a console warning. Købmagergade 57 was
+ * rejected for one enum value and cost an hour, because the symptom
+ * was "the sensor doesn't show", not "the site file is invalid".
+ *
+ * ADMIN ONLY. A file name and a validation message describe the
+ * platform's configuration, including other tenants' sites, and an
+ * operator's view must not learn that another tenant's site exists.
+ *
+ * @returns null, or { text, title } where title lists every rejection
+ */
+export function siteLoadErrorsLabel(errors, role) {
+  if (!role || role.kind !== 'admin') return null;
+  if (!Array.isArray(errors) || !errors.length) return null;
+  const n = errors.length;
+  return {
+    text: `${n} site file${n === 1 ? '' : 's'} rejected`,
+    title: errors.map(e => `${e?.file || '?'}: ${e?.error || 'rejected'}`).join('\n'),
+  };
+}
+
+/** Escape for an HTML attribute or text node. */
+export function escapeHtml(v) {
+  return String(v).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
 /** Latency is only real when something measured it. */
 export function latencyLabel(ms) {
   if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return '—';

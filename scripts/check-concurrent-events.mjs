@@ -11,7 +11,7 @@
 // So the assertions are about restraint: what it must never do.
 // ═══════════════════════════════════════════════════════════════════
 import { readFileSync } from 'node:fs';
-import { concurrentEvents, buildConcurrentBlock, separationM } from '../src/concurrent_events.js';
+import { concurrentEvents, buildConcurrentBlock, separationM, concurrentPanelLines, coordinationReadingFor } from '../src/concurrent_events.js';
 
 let failures = 0;
 const check = (label, ok, why) => {
@@ -149,6 +149,42 @@ check('a live identity is named as such in the block',
 check('a simulated identity is named as such too',
   /identity from a simulation, not a detector/.test(buildConcurrentBlock(A, [A, B], { siteCentre: centre })),
   'the agent must not read an authored identity as a detected one');
+
+
+// ── The panel: measured lines, and a coordination line every time ──
+console.log('\n[panel]');
+const _panelList = concurrentEvents(A, [A, B], { siteCentre: centre });
+const _lines = concurrentPanelLines(_panelList);
+check('one panel line per concurrent track', _lines.length === _panelList.length && _lines.length > 0);
+check('a panel line carries distance and approach, no confidence',
+  /km away|m away/.test(_lines[0]) && !/confidence/i.test(_lines[0]));
+const _none = coordinationReadingFor({ id: 'X' });
+check('no model reading: says "not assessed", never silent',
+  _none.assessed === false && /Not assessed\. Inference not connected\./.test(_none.text));
+const _bad = coordinationReadingFor({ coordinationReading: { text: 'Coordinated', confidence: 'certain' } });
+check('a reading without a valid confidence is not shown as assessed', _bad.assessed === false);
+const _ok = coordinationReadingFor({ coordinationReading: { text: ' No coordination indicated. ', confidence: 'low', modelVersion: 'mistral-large-2' } });
+check('a structured reading renders with confidence and model version',
+  _ok.assessed && _ok.text === 'No coordination indicated.' && _ok.confidence === 'low' && _ok.modelVersion === 'mistral-large-2');
+const _main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+check('the panel row reads the tenant-scoped list',
+  /_concurrentEvents\(e, visibleEvents\(\) \|\| \[\]/.test(_main));
+check('the coordination line renders whenever the concurrent row does',
+  /const _coord = _conc\.length \? _coordinationReadingFor\(e\) : null;/.test(_main)
+  && /\$\{concurrentRow\}/.test(_main) && /\$\{coordinationLines\}/.test(_main));
+check('panel text is escaped (identity will come from the net)',
+  /escapeHtml\(l\)/.test(_main) && /escapeHtml\(_coord\.text\)/.test(_main));
+check('a panel line says where the identity came from',
+  /· simulated$/.test(concurrentPanelLines(concurrentEvents(A, [A, B], { siteCentre: centre }))[0])
+  && /· live detection$/.test(concurrentPanelLines(concurrentEvents(A, [A, { ...B, source: 'live' }], { siteCentre: centre }))[0]));
+check('a track that appeared in the same second reads as the same time',
+  /appeared at the same time/.test(concurrentPanelLines([{ droneType: 'X', classification: 'hostile', appearedAfterSec: 0 }])[0]));
+check('the panel counts what it is not showing',
+  /maxEvents: Infinity/.test(_main) && /\+ \$\{_concMore\} more at this site/.test(_main));
+check('a coordination confidence never borrows the hostile verdict colour',
+  /mc-conf mc-conf-neutral">Confidence · \$\{_coord\.confidence/.test(_main) && !/mc-conf-\$\{_coord\.confidence\}/.test(_main));
+check('nothing in the panel path writes linkedEventIds',
+  !/_concurrentEvents\([\s\S]{0,600}linkedEventIds\s*=/.test(_main));
 
 if (failures) {
   console.log(`\ncheck:concurrent-events FAILED — ${failures} assertion${failures === 1 ? '' : 's'}`);

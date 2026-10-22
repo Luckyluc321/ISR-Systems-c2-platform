@@ -1,6 +1,6 @@
 # The agent panel: provenance before content
 
-Design note, 2026-10-22. Proposal, not yet built.
+Design note, 2026-10-22. The concurrency rows are built (see "Built" at the end); the visual tier markers are still a proposal.
 
 ## The problem
 
@@ -102,15 +102,31 @@ and keeps facts, which is the right way round.
   marker does not replace it: "this is a model reading" and "this model
   is not currently connected" are different statements.
 
-## Open question for Lucas
+## Answered: every time
 
-Should an ASSESSED row appear **every time** the agent is given
-concurrent tracks, or **only when the agent judges it meaningful**?
+Lucas, 2026-10-22: the ASSESSED coordination line renders **every time**
+the Mission Console shows concurrent tracks. With no model reading it
+says so ("Not assessed. Inference not connected.") instead of going
+quiet, so an operator can tell "checked, nothing" from "never looked".
 
-Always-render means an operator can tell "the system checked and found
-nothing in it" from "the system did not look". Only-when-meaningful is
-quieter but makes silence ambiguous, and at a busy site ambiguous
-silence is the worse failure.
+## Built, 2026-10-22
 
-Recommendation: always render, with the null result stated plainly
-("concurrent activity present, no coordination indicated").
+In the existing Mission Console section, no new section:
+
+- **Concurrent activity** row, MEASURED. One line per other live,
+  detected, non-friendly track at the site, from the same tenant-scoped
+  list the agent receives: type, classification, distance, which side
+  of the site, and how long before or after this track it appeared.
+  No confidence, because these are measurements.
+- **Coordination** line inside the Assessed pattern row, ASSESSED,
+  rendered whenever the row above is. Reads `event.coordinationReading`,
+  written only through `events.js::setCoordinationReading(id,
+  { text, confidence, modelVersion })` and validated on read by
+  `concurrent_events.js::coordinationReadingFor`. Nothing calls it yet: the analysis debrief gives the model the concurrent block
+  and asks the question, but answers in free narrative. When a
+  structured answer exists, that one call is the whole integration.
+- Nothing is written to `linkedEventIds`. Gated by
+  `check:concurrent-events` [panel].
+
+Still a proposal: the visual MEASURED / ESTABLISHED / ASSESSED markers
+on every row. The rows above use the panel's existing styles.

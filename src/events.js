@@ -1690,6 +1690,21 @@ export function setNarrativeCache(id, cache) {
   _notify(id);
   return e;
 }
+// The model's reading of whether concurrent tracks at this event's site
+// look coordinated: { text, confidence: 'low'|'medium'|'high',
+// modelVersion }. ASSESSED tier, so it is stored beside the event and
+// never folded into linkedEventIds, which records only what the
+// deterministic correlator established. Nothing calls this yet; it is
+// the seam a structured inference answer lands through. The panel
+// validates the shape on read (coordinationReadingFor), so a malformed
+// reading renders as "not assessed" rather than as a verdict.
+export function setCoordinationReading(id, reading) {
+  const e = EVENTS.find(x => x.id === id);
+  if (!e) return null;
+  e.coordinationReading = reading || null;
+  _notify(id);
+  return e;
+}
 export function clearPreprocessedCache(id) {
   const e = EVENTS.find(x => x.id === id);
   if (!e) return null;

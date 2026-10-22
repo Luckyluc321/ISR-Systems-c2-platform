@@ -13,6 +13,7 @@
 import { readFileSync } from 'node:fs';
 import {
   formatUptime, sessionLabel, modelLabel, backendLabel, latencyLabel,
+  siteLoadErrorsLabel, escapeHtml,
 } from '../src/status_bar.js';
 
 let failures = 0;
@@ -97,6 +98,29 @@ check('the scope label is scoped too, not just the totals',
   '"All sites" is a claim. It is true for admin and false for an operator, '
   + 'and it sat next to a correctly scoped number, which makes the number '
   + 'look like the fleet total rather than their own.');
+
+// ── A rejected site manifest is visible, to admin only ─────────────
+console.log('\n[rejected site files]');
+const _errs = [{ file: '/sites/kobmagergade57.yaml', error: 'site_type "office" not in enum' }];
+const _admin = { kind: 'admin' };
+const _op = { kind: 'operator', siteIds: ['cph'] };
+const _rcv = { kind: 'receiver' };
+const _lab = siteLoadErrorsLabel(_errs, _admin);
+check('admin sees a rejected site file', _lab && _lab.text === '1 site file rejected');
+check('the tooltip names the file and the reason', _lab && /kobmagergade57\.yaml: site_type "office"/.test(_lab.title));
+check('plural reads as plural', siteLoadErrorsLabel([..._errs, ..._errs], _admin)?.text === '2 site files rejected');
+check('an operator never sees it', siteLoadErrorsLabel(_errs, _op) === null,
+  'a file name and validation message describe other tenants\' configuration');
+check('a receiver never sees it', siteLoadErrorsLabel(_errs, _rcv) === null);
+check('nothing rejected, nothing shown', siteLoadErrorsLabel([], _admin) === null);
+check('no role, nothing shown', siteLoadErrorsLabel(_errs, null) === null);
+check('escapeHtml neutralises markup and quotes',
+  escapeHtml('<b x="1">\'&') === '&lt;b x=&quot;1&quot;&gt;&#39;&amp;');
+const _main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
+check('updateStatusBar renders it in the Scope cell, escaped',
+  /siteLoadErrorsLabel\(_siteLoaderErrors, getActiveRole\(\)\)/.test(_main)
+  && /title="\$\{escapeHtml\(_rej\.title\)\}"/.test(_main)
+  && /\$\{escapeHtml\(_rej\.text\)\}/.test(_main));
 
 if (failures) {
   console.log(`\ncheck:status-bar FAILED — ${failures} assertion${failures === 1 ? '' : 's'}`);

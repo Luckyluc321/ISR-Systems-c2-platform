@@ -191,9 +191,10 @@ export function formatConcurrentBlock(list, event, opts = {}) {
     if (c.bearingDeg != null) bits.push(`bearing ${c.bearingDeg} deg from site centre`);
     if (c.approach) bits.push(`${c.approach} (${c.bearingSeparationDeg} deg apart)`);
     if (c.appearedAfterSec != null) {
-      bits.push(c.appearedAfterSec >= 0
-        ? `appeared ${c.appearedAfterSec}s AFTER this track`
-        : `appeared ${Math.abs(c.appearedAfterSec)}s BEFORE this track`);
+      bits.push(c.appearedAfterSec === 0 ? 'appeared at the same time as this track'
+        : c.appearedAfterSec > 0
+          ? `appeared ${c.appearedAfterSec}s AFTER this track`
+          : `appeared ${Math.abs(c.appearedAfterSec)}s BEFORE this track`);
     }
     if (c.ageSec != null) bits.push(`active ${c.ageSec}s`);
     bits.push(c.identitySource === 'live'
@@ -219,6 +220,65 @@ export function formatConcurrentBlock(list, event, opts = {}) {
     'is often coincidence. Do NOT restate the figures back: the operator can already',
     'see them. Do NOT recommend an action and do NOT assert a link as fact.',
   ].join('\n');
+}
+
+/**
+ * One line per concurrent track for the detail panel's Mission Console.
+ * Plain text: the caller escapes it. Every figure is MEASURED, so the
+ * lines carry no confidence; a distance is or is not 2.7 km.
+ */
+export function concurrentPanelLines(list) {
+  if (!Array.isArray(list)) return [];
+  return list.map(c => {
+    const bits = [c.droneType, c.classification];
+    if (c.separationM != null) {
+      bits.push(c.separationM >= 1000 ? `${(c.separationM / 1000).toFixed(1)} km away` : `${c.separationM} m away`);
+    }
+    if (c.approach) bits.push(c.approach);
+    if (c.appearedAfterSec != null) {
+      const s = Math.abs(c.appearedAfterSec);
+      bits.push(s === 0 ? 'appeared at the same time'
+        : c.appearedAfterSec > 0 ? `appeared ${s} s after this track` : `appeared ${s} s before this track`);
+    }
+    // Where the identity came from, said on the line itself. The agent
+    // block already carries it; an operator reading "Shahed-136" needs
+    // to know whether a detector or a scenario file said so.
+    bits.push(c.identitySource === 'live' ? 'live detection' : 'simulated');
+    return bits.join(' · ');
+  });
+}
+
+/**
+ * The coordination reading, as the panel shows it. ASSESSED tier.
+ *
+ * THE SEAM. A live inference path calls events.js
+ *     setCoordinationReading(eventId, { text, confidence, modelVersion })
+ * with confidence one of 'low' | 'medium' | 'high'. Nothing calls it
+ * today: the analysis debrief already hands the model the concurrent
+ * block and asks this question, but its answer is free narrative, not a
+ * field. Until a structured answer exists the panel says so, every
+ * time concurrent tracks exist, rather than going quiet. Lucas,
+ * 2026-10-22: every time. A silent row cannot be told apart from a
+ * system that never looked.
+ *
+ * Never derived here. A rule that turned bearings and timings into a
+ * coordination verdict would be a classifier, and C2 does not classify.
+ *
+ * @returns { assessed: boolean, text, confidence?, modelVersion? }
+ */
+export function coordinationReadingFor(event) {
+  const r = event && event.coordinationReading;
+  const ok = r && typeof r.text === 'string' && r.text.trim()
+    && ['low', 'medium', 'high'].includes(r.confidence);
+  if (!ok) {
+    return { assessed: false, text: 'Not assessed. Inference not connected.' };
+  }
+  return {
+    assessed: true,
+    text: r.text.trim(),
+    confidence: r.confidence,
+    modelVersion: typeof r.modelVersion === 'string' && r.modelVersion ? r.modelVersion : 'unknown model',
+  };
 }
 
 /** Convenience: select and format in one call. */

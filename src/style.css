@@ -9969,3 +9969,15 @@ body.workspace-map-active #receiver-view {
 .dp-swarm-row.is-solo {
   grid-template-columns: 48px 155px 90px 0 1fr 68px 52px 68px 76px 46px;
 }
+
+/* A rejected site manifest, appended to the Scope cell for admin only.
+   Uses the same token as a degraded sensor dot so it reads as "needs
+   attention" in the bar's own vocabulary. Help cursor because the full
+   list of rejections is in the title tooltip. Selector is new; no
+   existing rule is changed. */
+.sb-cell b.sb-alert { color: var(--degraded); cursor: help; }
+
+/* The model's confidence in its own coordination reading. Neutral at
+   every level: a confident "no coordination" must not borrow the
+   pattern verdict's hostile red. Same geometry as .mc-conf-low. */
+.mc-conf-neutral { background: rgba(150, 160, 170, 0.10); color: var(--text); border: 1px solid rgba(150, 160, 170, 0.30); }

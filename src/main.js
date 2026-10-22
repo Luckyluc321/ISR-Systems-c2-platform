@@ -600,6 +600,20 @@ function _clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
 function _visibleSiteIds(role = getActiveRole()) {
   return Object.keys(SITES).filter(sid => _roleCanSeeSite(sid, role));
 }
+// ORDER IS NOT ALPHABETICAL. The hand-written fly-to list had cph first
+// because it is the site most work happens at, and sorting the
+// generated list by id silently demoted it to third. A site list is a
+// work surface, not an index. Shared by the fly-to list and the Config
+// page's default tab, so both rank sites the same way. Fly-to still
+// filters to sites with a camera preset and groups multi-site
+// operators, so its first button is not always Config's first tab.
+function _siteWorkOrder(a, b) {
+  const pri = sid => (_roleCanSeeSite(sid) ? 0 : 1);
+  if (pri(a) !== pri(b)) return pri(a) - pri(b);
+  if (a === 'cph') return -1;
+  if (b === 'cph') return 1;
+  return (SITES[a]?.name || a).localeCompare(SITES[b]?.name || b, 'da');
+}
 // Filter a linked-event ID list by tenant scope for the active role.
 // Operators: only see links within their own tenant (same operator's
 // siteIds). Receivers + Admin: see everything (no filter — receivers
@@ -737,8 +751,8 @@ import { initLiveFeeds } from './sovereign_live_feeds.js';
 import { createQuadFlightModel, rotorsFromHubs } from './quad_flight_model.js';
 import { createFixedWingFlightModel, LOOKAHEAD_SEC } from './fixedwing_flight_model.js';
 import { createLiveSensorRuntime } from './live_sensor.js';
-import { createStatusBar } from './status_bar.js';
-import { concurrentEvents as _concurrentEvents, buildConcurrentBlock as _buildConcurrentBlock } from './concurrent_events.js';
+import { createStatusBar, siteLoadErrorsLabel, escapeHtml } from './status_bar.js';
+import { concurrentEvents as _concurrentEvents, buildConcurrentBlock as _buildConcurrentBlock, concurrentPanelLines as _concurrentPanelLines, coordinationReadingFor as _coordinationReadingFor } from './concurrent_events.js';
 import { activateManhattanDemo, deactivateManhattanDemo, setManhattanChase } from './manhattan_demo.js';
 // Cooperative-traffic adapters self-register on import. Order matters
 // only in that mock must be available for eval + sim scenarios;
@@ -800,6 +814,7 @@ import {
 } from './sovereign_geodanmark_features.js';
 import { applyBuildingSwap, clearBuildingSwap, footprintsFor, coverageFor, sitesWithFootprints } from './building_footprints.js';
 import { createCoverageTracer, createBoxClipOwner, coverageClipPolygons, coverageRings } from './photoreal_coverage.js';
+import { createAltAudit } from './alt_audit.js';
 // Danish imagery over ground where we built the buildings, and nowhere
 // else. Default stays Bing + Google photoreal. See basemap_meshed_sites.js.
 import { createMeshedSiteBasemap } from './basemap_meshed_sites.js';
@@ -21510,6 +21525,9 @@ async function main() {
   onDroneUpdate(onDroneTick);
   // Expose spawn function to the sim button (wired below in control panel section)
   window.__spawnDrone = spawnFromTemplate;
+  // Read-only. Samples the map's own terrain under every template and
+  // prints how high each really flies above the ground. See alt_audit.js.
+  window.__isr_altAudit = createAltAudit({ Cesium, viewer, templates: TEMPLATES });
   // Read-only handle on the scene. Nothing in here reads it back and no
   // behaviour depends on it; it exists so a self-contained scenario
   // module can hide entities without this file knowing it exists.
@@ -23255,7 +23273,12 @@ async function main() {
     if (degraded) parts.push(`${degraded} degraded`);
     if (offline) parts.push(`${offline} offline`);
     sbSensors.innerHTML = `<span class="sb-dot ${dotClass}"></span>Sensors <b>${parts.join(' · ')}</b>`;
-    sbScope.innerHTML = `Scope <b>${scopeLabel}</b>`;
+    // A rejected site file, said where an admin looks at scope. Without
+    // this the only trace is a console warning and the symptom is a
+    // site that silently is not there. See siteLoadErrorsLabel.
+    const _rej = siteLoadErrorsLabel(_siteLoaderErrors, getActiveRole());
+    sbScope.innerHTML = `Scope <b>${scopeLabel}</b>`
+      + (_rej ? ` <b class="sb-alert" title="${escapeHtml(_rej.title)}">· ${escapeHtml(_rej.text)}</b>` : '');
   }
 
   // THE OTHER FIVE CELLS. See status_bar.js.
@@ -23543,18 +23566,7 @@ async function main() {
   function renderSiteLists() {
     const host = document.getElementById('fly-sites');
     const label = sid => SITES[sid]?.name || sid;
-    // ORDER IS NOT ALPHABETICAL. The hand-written list had cph first
-    // because it is the site most work happens at, and sorting the
-    // generated list by id silently demoted it to third. A fly-to list
-    // is a work surface, not an index.
-    const _siteOrder = (a, b) => {
-      const pri = sid => (_roleCanSeeSite(sid) ? 0 : 1);
-      if (pri(a) !== pri(b)) return pri(a) - pri(b);
-      if (a === 'cph') return -1;
-      if (b === 'cph') return 1;
-      return (SITES[a]?.name || a).localeCompare(SITES[b]?.name || b, 'da');
-    };
-    const allSites = Object.keys(SITES).filter(sid => FLY_TARGETS[sid]).sort(_siteOrder);
+    const allSites = Object.keys(SITES).filter(sid => FLY_TARGETS[sid]).sort(_siteWorkOrder);
     const grouped = new Set();
     let html = '';
     for (const op of OPERATORS) {
@@ -23604,25 +23616,35 @@ async function main() {
   // Threat simulator: site dropdown drives which threat set is available
   const simSelect = document.getElementById('sim-site-select');
   const simPanel = document.getElementById('sim-panel-active');
+  // ONE LIST. Each entry carries the two strings the picker shows:
+  // `threat` (first dropdown) and `pathLabel` (second dropdown, default
+  // 'Authored route'). There used to be a second list holding threat
+  // and path for 27 keys, and this one held a `label` that the picker
+  // ignored wherever the other list had an entry. So a rename here
+  // changed nothing on screen, which is how the Mohajer-2 scenario
+  // became unfindable by its new name. check:scenario-menu asserts
+  // there is one list and that no two entries at a site share a threat
+  // and path, because that pair is how an entry is found and a
+  // duplicate would make one unreachable.
   const THREAT_MENU = {
     cph: [
-      { key: 'cph_quad_hostile', label: 'Quadcopter, hostile' },
-      { key: 'cph_fixedwing_hostile', label: 'Fixed wing, hostile' },
-      { key: 'cph_recon_hostile', label: 'Mohajer-2 reconnaissance, hostile', cls: 'recon' },
-      { key: 'cph_jet_friendly', label: 'Jet (SAS 743), friendly', cls: 'friendly' },
-      { key: 'cph_jet_goaround', label: 'Jet (SAS 743), go-around at 185 ft', cls: 'friendly' },
-      { key: 'cph_jet_goaround_early', label: 'Jet (SAS 743), crew-spotted go-around at 37 m', cls: 'friendly' },
-      { key: 'cph_jet_goaround_atc', label: 'Jet (SAS 743), ATC-warned go-around at 398 m', cls: 'friendly' },
-      { key: 'cph_missile_hostile', label: 'Cruise missile, critical', cls: 'critical' },
-      { key: 'cph_missile_inbound_sw', label: 'Cruise missile inbound from SW (continuation)', cls: 'critical' },
-      { key: 'swarm_recon_cph_amk', label: 'SWARM · 5-drone recon (CPH → Amager)', cls: 'critical' },
-      { key: 'cph_swarm_runway_incursion', label: 'SWARM · 5-drone runway incursion (04R)', cls: 'critical' },
+      { key: 'cph_quad_hostile', threat: 'Quadcopter, hostile', pathLabel: 'Perimeter ingress' },
+      { key: 'cph_fixedwing_hostile', threat: 'Fixed-wing UAS', pathLabel: 'Recon transit' },
+      { key: 'cph_recon_hostile', threat: 'Mohajer-2 reconnaissance', pathLabel: 'High-altitude loiter', cls: 'recon' },
+      { key: 'cph_jet_friendly', threat: 'Jet (SAS 743), friendly', pathLabel: 'Filed airliner route', cls: 'friendly' },
+      { key: 'cph_jet_goaround', threat: 'Jet (SAS 743), friendly', pathLabel: 'Missed approach, 04R', cls: 'friendly' },
+      { key: 'cph_jet_goaround_early', threat: 'Jet (SAS 743), friendly', pathLabel: 'Crew-spotted missed approach, 37 m at 700 m', cls: 'friendly' },
+      { key: 'cph_jet_goaround_atc', threat: 'Jet (SAS 743), friendly', pathLabel: 'ATC-warned missed approach, 398 m at 7.6 km', cls: 'friendly' },
+      { key: 'cph_missile_hostile', threat: 'Cruise missile', pathLabel: 'Baltic sea ingress', cls: 'critical' },
+      { key: 'cph_missile_inbound_sw', threat: 'Cruise missile', pathLabel: 'SW continuation ingress', cls: 'critical' },
+      { key: 'swarm_recon_cph_amk', threat: '5-drone recon swarm', pathLabel: 'CPH → Amager transit', cls: 'critical' },
+      { key: 'cph_swarm_runway_incursion', threat: '5-drone incursion swarm', pathLabel: 'Øresund → ATC core → 04R threshold', cls: 'critical' },
       // COMBINED. Not a template, a pair with an offset. The swarm reaches
       // the 04R threshold at its own t = 480.6 s and the airliner's
       // decision point is its own t = 285.4 s, so the aircraft spawns 210 s
       // in and breaks off at about t = 495 on the swarm's clock, moments
       // after the formation arrives over the runway.
-      { key: '__combo_cph_incursion', label: 'COMBINED · swarm on 04R + crew-spotted go-around (sensors live)', cls: 'critical',
+      { key: '__combo_cph_incursion', threat: '5-drone swarm + SAS 743', pathLabel: 'Sensors live, crew spots them at 480 m', cls: 'critical',
         combo: [
           { key: 'cph_swarm_runway_incursion' },
           // Spawned when the swarm's OWN clock reads 216 s, so the two
@@ -23643,7 +23665,7 @@ async function main() {
       // the formation still over the field, so the runway is clear long
       // before they reach it. Trigger 71 = the swarm at t = 300 minus the
       // aircraft's own 229.1 s to its decision point.
-      { key: '__combo_cph_incursion_isr', label: 'COMBINED · WITH ISR · swarm on 04R + tower-warned go-around', cls: 'critical',
+      { key: '__combo_cph_incursion_isr', threat: '5-drone swarm + SAS 743', pathLabel: 'WITH ISR, tower warns at 7.6 km', cls: 'critical',
         combo: [
           { key: 'cph_swarm_runway_incursion' },
           { key: 'cph_jet_goaround_atc', atTSec: 71 },
@@ -23656,7 +23678,7 @@ async function main() {
       // variant above so the two are compared on equal terms, and the
       // aircraft is still in the hold when the formation reaches the
       // runway, which is the point.
-      { key: '__combo_cph_incursion_isr_hold', label: 'COMBINED · WITH ISR · swarm on 04R + arrival held over the water', cls: 'critical',
+      { key: '__combo_cph_incursion_isr_hold', threat: '5-drone swarm + SAS 743', pathLabel: 'WITH ISR, arrival held over the water, no approach flown', cls: 'critical',
         combo: [
           { key: 'cph_swarm_runway_incursion' },
           { key: 'cph_jet_hold_atc', atTSec: 0 },
@@ -23681,7 +23703,7 @@ async function main() {
       // Offsets of 120 and 160 were measured too: both bring them
       // within 625 m and 1220 m respectively, which reads as one
       // formation rather than two separate problems.
-      { key: '__combo_cph_two_hostiles', label: 'COMBINED · swarm on 04R + fixed-wing recon from the east', cls: 'critical',
+      { key: '__combo_cph_two_hostiles', threat: '5-drone swarm + fixed-wing recon', pathLabel: 'Two hostiles, opposite ends, 171 s concurrent', cls: 'critical',
         combo: [
           { key: 'cph_swarm_runway_incursion' },
           { key: 'cph_recon_hostile', atTSec: 240 },
@@ -23694,37 +23716,37 @@ async function main() {
       //
       // Delete that one file and the entry disappears from the list
       // below rather than sitting there failing on click.
-      { key: '__combo_cph_incursion_noisr', label: 'COMBINED · WITHOUT ISR · swarm on 04R, no sensor grid', cls: 'critical',
+      { key: '__combo_cph_incursion_noisr', threat: '5-drone swarm + SAS 743', pathLabel: 'WITHOUT ISR, no sensor grid, crew spots them at 480 m', cls: 'critical',
         module: '__isr_withoutIsr' },
       // Airframe check, not a threat scenario. Over the Øresund so the
       // envelope can be watched without rendering the city.
-      { key: 'cph_unknown_contact', label: 'Non-identifiable contact (N perimeter)', cls: 'recon' },
-      { key: 'cph_shahed_amalienborg', label: 'Shahed-136 attack (Øresund → CPH → Amalienborg)', cls: 'critical' },
-      { key: 'cph_geran3_amalienborg', label: 'Geran-3 jet attack, same route at 2x speed', cls: 'critical' },
-      { key: 'cph_shahed238_amalienborg', label: 'Shahed-238 jet attack, fastest of the family', cls: 'critical' },
-      { key: 'cph_quad_recon_apron', label: 'Quadcopter recon over cargo apron (unknown → yellow)' },
-      { key: 'cph_dji_flight_demo', label: 'DJI Air 3 flight demo (hover, forward, turn, brake, reverse, slide, climb)' },
-      { key: 'cph_dji_hobbyist', label: 'Unauthorized DJI hobbyist (unknown → yellow → resolved)' },
+      { key: 'cph_unknown_contact', threat: 'Non-identifiable contact', pathLabel: 'N perimeter approach', cls: 'recon' },
+      { key: 'cph_shahed_amalienborg', threat: 'Shahed-136 / Geran-2', pathLabel: 'Øresund → CPH → Amalienborg', cls: 'critical' },
+      { key: 'cph_geran3_amalienborg', threat: 'Geran-3 (jet)', pathLabel: 'Øresund → CPH → Amalienborg', cls: 'critical' },
+      { key: 'cph_shahed238_amalienborg', threat: 'Shahed-238 (jet)', pathLabel: 'Øresund → CPH → Amalienborg', cls: 'critical' },
+      { key: 'cph_quad_recon_apron', threat: 'Quadcopter recon', pathLabel: 'Cargo apron loiter' },
+      { key: 'cph_dji_flight_demo', threat: 'DJI Air 3', pathLabel: 'Airframe demonstration, central apron' },
+      { key: 'cph_dji_hobbyist', threat: 'DJI hobbyist', pathLabel: 'Perimeter stray' },
     ],
     esbjerg: [
-      { key: 'esbjerg_quad_hostile', label: 'Quadcopter, hostile' },
-      { key: 'esbjerg_usv_hostile', label: 'USV (surface drone), hostile' },
-      { key: 'esbjerg_fixedwing_hostile', label: 'Fixed wing reconnaissance, hostile' },
-      { key: 'esbjerg_missile_hostile', label: 'Cruise missile from sea, critical', cls: 'critical' },
+      { key: 'esbjerg_quad_hostile', threat: 'Quadcopter, hostile' },
+      { key: 'esbjerg_usv_hostile', threat: 'USV (surface drone), hostile' },
+      { key: 'esbjerg_fixedwing_hostile', threat: 'Fixed wing reconnaissance, hostile' },
+      { key: 'esbjerg_missile_hostile', threat: 'Cruise missile from sea, critical', cls: 'critical' },
     ],
     billund: [
-      { key: 'billund_quad_hostile', label: 'Quadcopter, hostile (low pass over terminal + cargo)' },
-      { key: 'billund_fixedwing_hostile', label: 'Fixed wing recon (E-W runway axis)' },
-      { key: 'billund_swarm_recon', label: 'SWARM · 4-drone recon over CHBA cargo apron', cls: 'critical' },
+      { key: 'billund_quad_hostile', threat: 'Quadcopter, hostile (low pass over terminal + cargo)' },
+      { key: 'billund_fixedwing_hostile', threat: 'Fixed wing recon (E-W runway axis)' },
+      { key: 'billund_swarm_recon', threat: 'SWARM · 4-drone recon over CHBA cargo apron', cls: 'critical' },
       // The benign counterpart to the line above, over the same ground.
       // Shown next to it on purpose: the pair is what demonstrates the
       // platform tells them apart, and either alone demonstrates nothing.
-      { key: 'billund_commercial_survey', label: 'SWARM · 3-drone pavement survey, authorised', cls: 'friendly' },
-      { key: 'billund_missile_hostile', label: 'Cruise missile from S, critical', cls: 'critical' },
-      { key: 'billund_lego_recon', label: 'LEGO adjacency recon (transits BLL → LEGO HQ)', cls: 'recon' },
-      { key: 'billund_geran2_north', label: 'Geran-2 transit N (BLL → past Karup → Skagen)', cls: 'critical' },
-      { key: 'billund_geran4_north', label: 'Geran-4 jet, same route at 320 km/h', cls: 'critical' },
-      { key: 'billund_geran5_north', label: 'Geran-5 jet, same route at 525 km/h (fastest)', cls: 'critical' },
+      { key: 'billund_commercial_survey', threat: 'SWARM · 3-drone pavement survey, authorised', cls: 'friendly' },
+      { key: 'billund_missile_hostile', threat: 'Cruise missile from S, critical', cls: 'critical' },
+      { key: 'billund_lego_recon', threat: 'LEGO adjacency recon (transits BLL → LEGO HQ)', cls: 'recon' },
+      { key: 'billund_geran2_north', threat: 'Geran-2 (piston, 185 km/h)', pathLabel: 'N transit, BLL → Karup → Skagen', cls: 'critical' },
+      { key: 'billund_geran4_north', threat: 'Geran-4 (jet, 320 km/h)', pathLabel: 'N transit, BLL → Karup → Skagen', cls: 'critical' },
+      { key: 'billund_geran5_north', threat: 'Geran-5 (jet, 525 km/h)', pathLabel: 'N transit, BLL → Karup → Skagen', cls: 'critical' },
     ],
   };
   // Auto-generate for every energy-typed site (3 threats each). Filters
@@ -23732,9 +23754,9 @@ async function main() {
   // pick this up automatically.
   Object.keys(SITES).filter(sid => SITES[sid].siteType === 'energy').forEach(sid => {
     THREAT_MENU[sid] = [
-      { key: `${sid}_quad_hostile`, label: 'Quadcopter, hostile' },
-      { key: `${sid}_fixedwing_hostile`, label: 'Fixed wing reconnaissance, hostile' },
-      { key: `${sid}_missile_hostile`, label: 'Cruise missile, critical', cls: 'critical' },
+      { key: `${sid}_quad_hostile`, threat: 'Quadcopter, hostile' },
+      { key: `${sid}_fixedwing_hostile`, threat: 'Fixed wing reconnaissance, hostile' },
+      { key: `${sid}_missile_hostile`, threat: 'Cruise missile, critical', cls: 'critical' },
     ];
   });
   // Two-tier scenario option — appears on Kassø as the origin site.
@@ -23744,7 +23766,7 @@ async function main() {
   if (Array.isArray(THREAT_MENU['energinet_kassoe'])) {
     THREAT_MENU['energinet_kassoe'].push({
       key: 'cruise_missile_to_amalienborg',
-      label: 'TWO-TIER · Cruise missile → Amalienborg',
+      threat: 'TWO-TIER · Cruise missile → Amalienborg',
       cls: 'critical',
     });
   }
@@ -23765,7 +23787,6 @@ async function main() {
     // enables after a threat is chosen (auto-selected when the
     // threat has exactly one route). Launch resolves the authored
     // template for the chosen pair.
-    const meta = k => _SIM_COMPOSER_META[k] || null;
     const entries = menu
       // An entry backed by a module is only offered while that module is
       // loaded. Deleting the file removes the option instead of leaving
@@ -23782,8 +23803,8 @@ async function main() {
       // Same trap, same fix. A module entry that lost this field here
       // would fall through to the template branch and do nothing.
       module: t.module || null,
-      threat: meta(t.key)?.threat || t.label,
-      pathLabel: meta(t.key)?.pathLabel || 'Authored route',
+      threat: t.threat,
+      pathLabel: t.pathLabel || 'Authored route',
     }));
     const threats = [...new Set(entries.map(e => e.threat))];
     if (!threats.includes(_simSelThreat)) { _simSelThreat = null; _simSelPath = null; }
@@ -24028,37 +24049,7 @@ async function main() {
 
   let _simSelThreat = null;
   let _simSelPath = null;
-  // Threat/path annotation for the composer. Keys not listed fall
-  // back automatically. pathLabel doubles as the path identity.
-  const _SIM_COMPOSER_META = {
-    billund_geran2_north:      { threat: 'Geran-2 (piston, 185 km/h)', pathLabel: 'N transit, BLL → Karup → Skagen' },
-    billund_geran4_north:      { threat: 'Geran-4 (jet, 320 km/h)',    pathLabel: 'N transit, BLL → Karup → Skagen' },
-    billund_geran5_north:      { threat: 'Geran-5 (jet, 525 km/h)',    pathLabel: 'N transit, BLL → Karup → Skagen' },
-    cph_shahed_amalienborg:    { threat: 'Shahed-136 / Geran-2',   pathLabel: 'Øresund → CPH → Amalienborg' },
-    cph_geran3_amalienborg:    { threat: 'Geran-3 (jet)',          pathLabel: 'Øresund → CPH → Amalienborg' },
-    cph_shahed238_amalienborg: { threat: 'Shahed-238 (jet)',       pathLabel: 'Øresund → CPH → Amalienborg' },
-    cph_quad_hostile:          { threat: 'Quadcopter, hostile',    pathLabel: 'Perimeter ingress' },
-    cph_fixedwing_hostile:     { threat: 'Fixed-wing UAS',         pathLabel: 'Recon transit' },
-    cph_recon_hostile:         { threat: 'Mohajer-2 reconnaissance', pathLabel: 'High-altitude loiter' },
-    cph_jet_friendly:          { threat: 'Jet (SAS 743), friendly',pathLabel: 'Filed airliner route' },
-    cph_jet_goaround:          { threat: 'Jet (SAS 743), friendly',pathLabel: 'Missed approach, 04R' },
-    cph_jet_goaround_early:    { threat: 'Jet (SAS 743), friendly',pathLabel: 'Crew-spotted missed approach, 37 m at 700 m' },
-    cph_jet_goaround_atc:      { threat: 'Jet (SAS 743), friendly',pathLabel: 'ATC-warned missed approach, 398 m at 7.6 km' },
-    cph_jet_hold_atc:          { threat: 'Jet (SAS 743), friendly',pathLabel: 'Holding over Koge Bugt, approach never commenced' },
-    __combo_cph_incursion:     { threat: '5-drone swarm + SAS 743', pathLabel: 'Sensors live, crew spots them at 480 m' },
-    __combo_cph_incursion_isr: { threat: '5-drone swarm + SAS 743', pathLabel: 'WITH ISR, tower warns at 7.6 km' },
-    __combo_cph_incursion_noisr: { threat: '5-drone swarm + SAS 743', pathLabel: 'WITHOUT ISR, no sensor grid, crew spots them at 480 m' },
-    __combo_cph_incursion_isr_hold: { threat: '5-drone swarm + SAS 743', pathLabel: 'WITH ISR, arrival held over the water, no approach flown' },
-    __combo_cph_two_hostiles:  { threat: '5-drone swarm + fixed-wing recon', pathLabel: 'Two hostiles, opposite ends, 171 s concurrent' },
-    cph_missile_hostile:       { threat: 'Cruise missile',         pathLabel: 'Baltic sea ingress' },
-    cph_missile_inbound_sw:    { threat: 'Cruise missile',         pathLabel: 'SW continuation ingress' },
-    swarm_recon_cph_amk:       { threat: '5-drone recon swarm',    pathLabel: 'CPH → Amager transit' },
-    cph_swarm_runway_incursion:{ threat: '5-drone incursion swarm', pathLabel: 'Øresund → ATC core → 04R threshold' },
-    cph_unknown_contact:       { threat: 'Non-identifiable contact', pathLabel: 'N perimeter approach' },
-    cph_quad_recon_apron:      { threat: 'Quadcopter recon',       pathLabel: 'Cargo apron loiter' },
-    cph_dji_flight_demo:       { threat: 'DJI Air 3',               pathLabel: 'Airframe demonstration, central apron' },
-    cph_dji_hobbyist:          { threat: 'DJI hobbyist',           pathLabel: 'Perimeter stray' },
-  };
+
   if (simSelect) {
     simSelect.addEventListener('change', renderSimPanel);
     renderSimPanel();
@@ -24072,7 +24063,12 @@ async function main() {
   // ══════════════════════════════════════════
   const configBackdrop = document.getElementById('config-modal');
   const configCard = document.getElementById('config-modal-card');
-  let _configSiteId = 'cph';
+  // NO LITERAL DEFAULT. This was 'cph', so an instance without CPH
+  // opened Config on a site it does not have, and an operator for any
+  // other site opened it on CPH's destination list: another tenant's
+  // agencies and contacts. Resolved on every render instead, against
+  // the sites the active account can see. See _configSiteFor().
+  let _configSiteId = null;
   let _editingId = null; // null = list view, 'new' = add form, '<id>' = edit form
 
   function closeConfig() { configBackdrop.style.display = 'none'; _editingId = null; }
@@ -25395,9 +25391,19 @@ async function main() {
     setTimeout(() => searchEl.focus(), 20);
   }
 
+  // The site the Config page shows: the one chosen, if the active
+  // account may see it, otherwise the account's first visible site.
+  // Re-checked on every render because the account can change while
+  // the modal is closed and _configSiteId would otherwise survive it.
+  function _configSiteFor(current, visible) {
+    if (current && visible.includes(current)) return current;
+    return [...visible].sort(_siteWorkOrder)[0] || null;
+  }
+
   function renderConfig() {
     if (configBackdrop.style.display === 'none') return;
-    const dests = destinationsForSite(_configSiteId);
+    _configSiteId = _configSiteFor(_configSiteId, _visibleSiteIds());
+    const dests = _configSiteId ? destinationsForSite(_configSiteId) : [];
     const byTier = dests.reduce((acc, d) => { (acc[d.tier] = acc[d.tier] || []).push(d); return acc; }, {});
 
     const editingDest = _editingId && _editingId !== 'new' ? getDestination(_editingId) : null;
@@ -25476,7 +25482,7 @@ async function main() {
       <div class="cfg-tabs">${tabHtml}</div>
       <div class="cfg-body">
         <div class="cfg-list-hdr">
-          <span>${dests.length} destinations for ${siteName(_configSiteId)}</span>
+          <span>${_configSiteId ? `${dests.length} destinations for ${siteName(_configSiteId)}` : 'No site in scope for this account'}</span>
           <button class="btn primary" data-cfg="add">+ Add destination</button>
         </div>
         ${listHtml}
@@ -25522,6 +25528,9 @@ async function main() {
       const availabilityStatus = document.getElementById('cfg-avail').value;
       const methods = [...configCard.querySelectorAll('input[name="cfg-method"]:checked')].map(i => i.value);
       if (!methods.length) { toast('At least one contact method required', 'err'); return; }
+      // An account with no site in scope has nowhere to attach this, and
+      // a destination with siteId null would route for no one.
+      if (!_configSiteId) { toast('No site in scope for this account', 'err'); return; }
       const payload = { name, tier, type, contactMethods: methods, availabilityStatus, siteId: _configSiteId };
       if (_editingId === 'new') {
         addDestination(payload);
@@ -27126,6 +27135,35 @@ async function main() {
           <div class="mc-k">Pattern flags</div>
           <div class="mc-v">${flags.map(f => `<div class="mc-flag">${f}</div>`).join('')}</div>
         </div>` : '';
+      // CONCURRENT ACTIVITY. Other live, detected, non-friendly tracks at
+      // this site, from the same tenant-scoped list the agent is given.
+      // MEASURED: arithmetic over the event records, true whether or not
+      // inference is reachable. Its ASSESSED counterpart, whether they
+      // look coordinated, sits in the verdict below and renders every
+      // time this row does. Not Linked events: nothing has established
+      // a link, and that section means something has.
+      // Selected without the agent's cap so the row can say how many it
+      // is not showing. A fifth track silently cut off is the failure an
+      // operator would never know to look for.
+      const _MC_CONC_SHOWN = 4;
+      const _concAll = _concurrentEvents(e, visibleEvents() || [],
+        { siteCentre: SITES[e.siteId]?.coordinates || null, maxEvents: Infinity });
+      const _conc = _concAll.slice(0, _MC_CONC_SHOWN);
+      const _concMore = _concAll.length - _conc.length;
+      const _coord = _conc.length ? _coordinationReadingFor(e) : null;
+      const concurrentRow = _conc.length ? `
+        <div class="mc-row">
+          <div class="mc-k">Concurrent activity</div>
+          <div class="mc-v">${_concurrentPanelLines(_conc).map(l => `<div>${escapeHtml(l)}</div>`).join('')}${_concMore > 0 ? `<div class="mc-dim">+ ${_concMore} more at this site</div>` : ''}</div>
+        </div>` : '';
+      // Confidence here is the model's confidence in its OWN reading, and
+      // a confident "no coordination" must not render in hostile red. So
+      // the badge is neutral at every level; mc-conf-high is the pattern
+      // verdict's threat colour and means something else.
+      const coordinationLines = _coord ? (_coord.assessed
+        ? `<div class="mc-pattern">Coordination · ${escapeHtml(_coord.text)}</div>
+              <div class="mc-conf mc-conf-neutral">Confidence · ${_coord.confidence.toUpperCase()} · ${escapeHtml(_coord.modelVersion)}</div>`
+        : `<div class="mc-dim">Coordination · ${escapeHtml(_coord.text)}</div>`) : '';
       return `
         <div class="dp-section dp-mission-console">
           <div class="dp-section-title mc-title">
@@ -27135,11 +27173,13 @@ async function main() {
           ${nearestBlock}
           ${dwellBlock}
           ${flagsBlock}
+          ${concurrentRow}
           <div class="mc-row mc-verdict">
             <div class="mc-k">Assessed pattern</div>
             <div class="mc-v">
               <div class="mc-pattern">${pattern}</div>
               <div class="mc-conf mc-conf-${confCls}">Confidence · ${confidence}</div>
+              ${coordinationLines}
             </div>
           </div>
           <div class="mc-footer">Agent B mock output. Live Mistral inference in production via Azure sovereign proxy (Scaleway primary, Foundry failover).</div>
