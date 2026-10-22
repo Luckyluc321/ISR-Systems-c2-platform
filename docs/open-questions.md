@@ -57,6 +57,26 @@ ground directly beneath. In Denmark the first two differ by roughly
 37 m, so a track at 40 m renders at 77 m if the reference is assumed
 rather than stated. The two seams that refuse an altitude today are
 refusing it correctly and stay as they are until this field exists.
+
+**Refined, same conversation.** Lucas: site context is onboarded before
+any launch and updated by the customer on an ongoing basis, so the
+platform already knows the ground precisely.
+
+That settles the CONVERSION and not the AMBIGUITY, and the distinction
+is the whole of this question. With the site's ground at 5 m MSL and a
+tracker reporting 100:
+
+    if the reference is MSL  -> 95 m above the ground
+    if the reference is AGL  -> 105 m above sea level
+
+Both are plausible readings of the same number, and no amount of ground
+truth separates them. The declaration has to come from the side that
+produced the figure.
+
+Once it does, site context carries everything else: the platform holds
+the terrain and can convert to whatever it renders in, per site, without
+asking anyone. So this stays a one-field ask rather than a modelling
+problem, which is the cheapest shape it could have.
 **Owner:** whoever wires the first real feed · **Trigger:** a named tracker's specification exists
 
 Two seams accept an altitude and deliberately refuse to apply it:
