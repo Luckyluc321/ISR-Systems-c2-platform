@@ -12,6 +12,16 @@ This exists so a decision made in one working session is not lost when the sessi
 
 ### Q1 · Edge team: emit a stable object id per track
 
+
+**ANSWERED 2026-10-22 (Lucas).** The id must be a plain random
+identifier with no relationship to the neural net, the detection that
+created it, or anything derivable. The edge mints one per track and
+keeps it for the life of that track. Nothing downstream may parse
+meaning out of it.
+
+That is simpler than this question originally assumed, and it is the
+right constraint: an id that encodes anything becomes a second,
+undocumented data channel the moment someone reads it.
 **Owner:** Esteban and Gowri · **Raised:** 2026-09-26 · **Status:** drafted, not sent
 
 The ask, in full:
@@ -34,6 +44,19 @@ Context if it is queried:
 
 ### Q2 · Altitude datum conversion
 
+
+**ANSWERED 2026-10-22 (Lucas).** Not something the platform computes,
+and not something the net computes either. The tracker already holds the
+number; it has to declare which reference it used. One field on the
+payload:
+
+    alt_ref: "msl" | "ellipsoid" | "agl"
+
+Above mean sea level, above the GPS ellipsoid (raw GNSS), or above the
+ground directly beneath. In Denmark the first two differ by roughly
+37 m, so a track at 40 m renders at 77 m if the reference is assumed
+rather than stated. The two seams that refuse an altitude today are
+refusing it correctly and stay as they are until this field exists.
 **Owner:** whoever wires the first real feed · **Trigger:** a named tracker's specification exists
 
 Two seams accept an altitude and deliberately refuse to apply it:
@@ -86,6 +109,16 @@ A track feed that reorders, adds or drops array entries between ticks reproduces
 
 ### Q5 · Position ingest from tracks
 
+
+**ANSWERED 2026-10-22 (Lucas).** Localisation is centralised in the
+sensor network, not in C2. Three or more sensors produce a fix at the
+network's own sampling rate, and the platform receives a position. C2
+does not multilaterate, does not fuse, and does not correct.
+
+This closes the open half of the question. What remains is mechanical:
+the tick loop currently supplies movement from the simulation, and the
+seam exists so the edge can take over identity before it takes over
+position. Nothing here needs designing, only wiring when a feed exists.
 **Owner:** unassigned · **Trigger:** Q1 answered and an edge feed exists
 
 `src/track_source.js` attaches identity today. Movement still comes from the simulation tick. The separation is deliberate, so the edge can take over identity before it takes over position. `syncMemberTrack()` in events.js already accepts kinematics and is the landing point.
