@@ -2782,3 +2782,24 @@ vehicle looks wrong, profile the path it is being given before touching
 anything that draws it** — one pass over the waypoints computing ground
 speed and vertical rate found this in minutes, and the round numbers in
 the waypoint list named the mechanism outright.
+
+## Altitude datum: `alt` is above the ellipsoid, not above ground
+
+Recorded 2026-10-22 after the recon swarm flew through Terminal 3.
+
+- A template's `alt` goes straight into `Cesium.Cartesian3.fromDegrees(lon, lat, alt)`
+  for every drone, swarm member and replay frame. That is height above the WGS84
+  ellipsoid.
+- Danish ground sits about 37 m above the ellipsoid (geoid separation,
+  `DK_GEOID_SEPARATION_M`), CPH's apron about 42 m. So `alt: 50` renders roughly
+  8 m over the apron. The evidence text can say "120 m AGL" and the track is not.
+- Dispatch aircraft are the exception: `_airborneAbsAlt()` adds the terrain height
+  under them, so an interceptor at "60 m AGL" really is.
+- The OSM boxes hid this. Google's building meshes do not.
+
+**Not fixed at the datum.** Moving every track up by terrain height is one line in a
+shared render path, and every scenario, interceptor and landing aircraft was tuned
+against the current numbers. The recon swarm template was raised 50 m instead
+(`swarm_recon_cph_amk`, see its comment). Any other template that goes low over a
+built site needs the same look before it is trusted. The datum change is the right
+long-term fix and wants its own pass with every scenario re-flown.

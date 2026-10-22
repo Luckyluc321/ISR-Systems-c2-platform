@@ -190,6 +190,23 @@ export function createCoverageTracer({ Cesium, viewer } = {}) {
       const centre = new Cesium.Cartesian2(c.clientWidth / 2, c.clientHeight / 2);
       return add(groundPointAt(Cesium, viewer, centre), 'screen centre');
     },
+    /** Surface under the screen centre with its height, metres above
+     *  the ellipsoid, which is the datum drone positions are rendered
+     *  in. Point the crosshair at a roof to read what a track must
+     *  clear. Adds nothing to the ring. */
+    probe() {
+      const c = viewer.scene.canvas;
+      const centre = new Cesium.Cartesian2(c.clientWidth / 2, c.clientHeight / 2);
+      const scene = viewer.scene;
+      const p = scene.pickPositionSupported ? scene.pickPosition(centre) : null;
+      if (!p) return 'no surface under the screen centre';
+      const g = Cesium.Cartographic.fromCartesian(p);
+      return {
+        lat: +Cesium.Math.toDegrees(g.latitude).toFixed(6),
+        lon: +Cesium.Math.toDegrees(g.longitude).toFixed(6),
+        heightEllipsoidM: +g.height.toFixed(1),
+      };
+    },
     undo() {
       const p = ring.pop();
       redraw();

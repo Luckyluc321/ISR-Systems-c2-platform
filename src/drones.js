@@ -3076,25 +3076,42 @@ Object.assign(TEMPLATES, {
       { lat: 55.6164, lon: 12.6899, alt: 120, heading: 260, tSec:  28 },  // CPH ring edge, normal cruise
       { lat: 55.6180, lon: 12.6800, alt: 110, heading: 265, tSec:  48 },  // enter CPH sensors E, begin descent
 
+      // THE PASS IS 50 M HIGHER THAN IT WAS, 2026-10-22. WHY.
+      //
+      // `alt` is rendered as height above the ELLIPSOID (main.js writes
+      // it straight into Cartesian3.fromDegrees), and the ground at CPH
+      // sits about 42 m above the ellipsoid (37 m geoid separation plus
+      // the airport's few metres). So the old "alt: 50" low pass was
+      // ~8 m over the apron, and the wingmen at up: -8 were on it. The
+      // formation flew through Terminal 3 once Google's mesh replaced
+      // the OSM boxes and made the building solid.
+      //
+      // Every low waypoint is +50, the climb-out is held at 120 instead
+      // of dipping to 85/100 after the raise, and the overlap-sliver
+      // waypoint keeps its position and gains 5 m. Positions, headings
+      // and tSec are untouched, so the sensor-ring geometry claims in
+      // the comments below still hold. The datum itself is a shared
+      // render path and is NOT changed here; see
+      // docs/3d-vehicle-rendering.md, "Altitude datum".
       // Low-altitude S-shape recon over the EAST cargo apron (DHL / FedEx / WFS on Kystvejen)
-      { lat: 55.6210, lon: 12.6700, alt:  70, heading: 275, tSec:  70 },  // descend over east cargo — DHL/FedEx assessment start
-      { lat: 55.6215, lon: 12.6620, alt:  55, heading: 255, tSec:  86 },  // LOW pass over Apron East (cargo aircraft detail)
+      { lat: 55.6210, lon: 12.6700, alt: 120, heading: 275, tSec:  70 },  // descend over east cargo — DHL/FedEx assessment start
+      { lat: 55.6215, lon: 12.6620, alt: 105, heading: 255, tSec:  86 },  // LOW pass over Apron East (cargo aircraft detail)
 
       // Curve NW-then-W into the passenger pier belt at very low altitude
-      { lat: 55.6260, lon: 12.6580, alt:  50, heading: 250, tSec: 103 },  // LOW over Pier E (SAS long-haul widebody stands E1-E7)
-      { lat: 55.6272, lon: 12.6500, alt:  50, heading: 260, tSec: 120 },  // LOW over Piers C/D (mixed non-Schengen)
-      { lat: 55.6275, lon: 12.6420, alt:  55, heading: 265, tSec: 136 },  // LOW over Pier B (Schengen)
-      { lat: 55.6278, lon: 12.6350, alt:  65, heading: 275, tSec: 150 },  // starting to climb toward Pier A / Terminal 2
+      { lat: 55.6260, lon: 12.6580, alt: 100, heading: 250, tSec: 103 },  // LOW over Pier E (SAS long-haul widebody stands E1-E7)
+      { lat: 55.6272, lon: 12.6500, alt: 100, heading: 260, tSec: 120 },  // LOW over Piers C/D (mixed non-Schengen)
+      { lat: 55.6275, lon: 12.6420, alt: 105, heading: 265, tSec: 136 },  // LOW over Pier B (Schengen)
+      { lat: 55.6278, lon: 12.6350, alt: 115, heading: 275, tSec: 150 },  // starting to climb toward Pier A / Terminal 2
 
       // Climb and bank NW toward Amager Koblingsstation — begin egress from CPH
-      { lat: 55.6295, lon: 12.6280, alt:  85, heading: 305, tSec: 166 },  // climbing, banking NW
-      { lat: 55.6320, lon: 12.6220, alt: 100, heading: 320, tSec: 180 },  // approach CPH NW exit
+      { lat: 55.6295, lon: 12.6280, alt: 120, heading: 305, tSec: 166 },  // climbing, banking NW
+      { lat: 55.6320, lon: 12.6220, alt: 120, heading: 320, tSec: 180 },  // approach CPH NW exit
       // wp10 and wp11 had 8 s slots where their neighbours get 14-22, so
       // they flew 52 and 63 m/s inside an otherwise 31 m/s pass. Re-timed
       // by arc length across the t=152..190 window, which makes it
       // uniform at 34.4 m/s. POSITIONS ARE UNTOUCHED: the overlap sliver
       // is a geometric claim about two sensor rings, and it still holds.
-      { lat: 55.6347, lon: 12.6175, alt: 115, heading: 320, tSec: 192 },  // OVERLAP SLIVER — inside both CPH N22 and AMK-N01 rings, seamless handover
+      { lat: 55.6347, lon: 12.6175, alt: 120, heading: 320, tSec: 192 },  // OVERLAP SLIVER — inside both CPH N22 and AMK-N01 rings, seamless handover
       { lat: 55.6380, lon: 12.6120, alt: 120, heading: 315, tSec: 207 },  // fully inside AMK coverage
       { lat: 55.6410, lon: 12.6088, alt: 120, heading: 315, tSec: 218 },  // over AMK substation, peak AMK detection
 
