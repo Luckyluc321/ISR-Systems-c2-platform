@@ -2803,3 +2803,26 @@ against the current numbers. The recon swarm template was raised 50 m instead
 (`swarm_recon_cph_amk`, see its comment). Any other template that goes low over a
 built site needs the same look before it is trusted. The datum change is the right
 long-term fix and wants its own pass with every scenario re-flown.
+
+### Measured 2026-10-22, and why the fix is parked
+
+`__isr_altAudit()` sampled the map's own terrain under every template. 22 of 52 are drawn
+partly underground, worst at Landerupgård (84 m under), Billund (up to 82 m) and the
+Esbjerg surface drone (41 m under the water). Copenhagen's scenarios are excluded from any
+fix on Lucas's instruction; several of them also dip, and that is accepted.
+
+Two fixes were built and reviewed, and neither merged:
+
+1. **Rewriting waypoint altitudes.** Wrong: the panel ("m AGL"), recordings and export
+   (`altitude_agl_m`), the summary agent's altitude score, interceptor climb targets and
+   the 500 m attack-profile advisory all read that number as height above ground, so all
+   of them moved.
+2. **Adding a measured lift where a track is drawn** (`ground_lift.js`, branch
+   `wip/ground-lift`). Right for the picture, but interceptor aim, engagement odds, the
+   kill altitude in the debrief, the wreckage fall and swarm jam-fall read the drawn
+   billboard height back as height above ground. To merge, those read-back sites must
+   subtract the lift (Copenhagen lifts 0, so it stays identical by construction), and the
+   gate must test behaviour, not source text.
+
+Until then: a new site's scenarios should be authored with the site's ground height
+already in `alt`, the convention every Copenhagen scenario follows today.
