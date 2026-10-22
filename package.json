@@ -35,7 +35,8 @@
     "check:fixedwing-flight": "node scripts/check-fixedwing-flight.mjs",
     "check:status-bar": "node scripts/check-status-bar.mjs",
     "check:hidden-guards": "node scripts/check-hidden-guards.mjs",
-    "check:concurrent-events": "node scripts/check-concurrent-events.mjs"
+    "check:concurrent-events": "node scripts/check-concurrent-events.mjs",
+    "check:nn-integration-index": "node scripts/check-nn-integration-index.mjs"
   },
   "devDependencies": {
     "vite": "^8.1.1"

@@ -23,7 +23,7 @@ Where `[live]` and `[planned]` differ on a field name or shape, both are shown. 
 | 0 | Conventions | `[live]` |
 | 1 | System context and topology | `[live]` |
 | IF-2 | Site configuration and onboarding contract | `[live]` |
-| IF-1 | Sensor node to C2 ingest | pending |
+| IF-1 | Sensor node to C2 ingest | `[live]` |
 | IF-3 | Detection lifecycle and marker/aggregation contract | `[live]` |
 | IF-4 | Event data contract | pending |
 | IF-5 | Escalation, routing, tenant isolation | pending |
