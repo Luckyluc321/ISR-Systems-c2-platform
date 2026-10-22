@@ -52,6 +52,7 @@ function validTrack(over = {}) {
   return {
     object_id: '01HQ8Z4K2M5N7P9R3T6V8W0XYZ',
     node_id: 'edge-node-cph-01',
+    site_id: 'cph',
     location: {
       x: 12.647, y: 55.618, z: 120,
       coordinate_system: LOCATION_COORDINATE_SYSTEM.LAT_LNG_DEG_M,
@@ -76,6 +77,25 @@ check('an empty object_id is not treated as absent-but-fine',
 check('a track with no node_id is rejected',
   trackRejectionReason(validTrack({ node_id: undefined })) === 'missing_node_id',
   'on a multi-node site an unattributable track cannot be traced to the sensor that produced it');
+// SCOPE TRAVELS WITH THE DATA, NOT WITH THE PLUMBING.
+//
+// Open question Q7 asked whether the module-level adapter registry and
+// listener set should become per-tenant. They should not: a track
+// carried no site and no tenant at all, so nothing downstream could
+// route it correctly however the registry were shaped. One required
+// field answers it for every future deployment shape, and tenant
+// derives from site through the mapping sites already declare.
+check('a site id is required, so a track can always be routed',
+  trackRejectionReason(validTrack({ site_id: undefined })) === 'missing_site_id'
+  && trackRejectionReason(validTrack({ site_id: '' })) === 'missing_site_id',
+  'without it a second feed, or an Azure tenant split, has nothing to route on, '
+  + 'and retrofitting scope once two feeds have mixed is the one thing that '
+  + 'cannot be done afterwards');
+check('the mock publisher sets it, so the contract is satisfied in practice',
+  /site_id:\s*siteId/.test(
+    readFileSync(new URL('../src/adapters/track_mock.js', import.meta.url), 'utf8')),
+  'siteId was already an argument there, used only to derive node_id');
+
 check('nothing in the seam generates an identifier',
   !/object_id\s*[:=]\s*(?!track\.|t\.)[`'"]/.test(trackSrc.replace(/^\s*\/\/.*$/gm, ''))
   && !/crypto\.randomUUID|Math\.random\(\)/.test(trackSrc),
@@ -110,7 +130,7 @@ console.log('\nA bearing with no range is a real observation, not a broken one')
 check('a bearing-only track is accepted',
   (() => {
     const r = pub({
-      object_id: 'BEARINGONLY0000000000000AA', node_id: 'rf-node-1',
+      object_id: 'BEARINGONLY0000000000000AA', node_id: 'rf-node-1', site_id: 'cph',
       range_bearing: { azimuth: 137.5, azimuth_error: 4.0 },
     });
     return r.status === 'accepted' && r.bearingOnly === true;
@@ -121,15 +141,15 @@ check('a bearing-only track carries range as an explicit null',
   'a consumer must not mistake "not measured" for "not sent"');
 check('a track with both a location and a range-bearing is rejected as ambiguous',
   trackRejectionReason({
-    object_id: 'X0000000000000000000000AAA', node_id: 'n1',
+    object_id: 'X0000000000000000000000AAA', node_id: 'n1', site_id: 'cph',
     location: validTrack().location, range_bearing: { azimuth: 90 },
   }) === 'ambiguous_position',
   'the standard models these as a mandatory oneof; both is ambiguous about what was actually measured');
 check('a track with neither is rejected',
-  trackRejectionReason({ object_id: 'X0000000000000000000000AAA', node_id: 'n1' }) === 'missing_position');
+  trackRejectionReason({ object_id: 'X0000000000000000000000AAA', node_id: 'n1', site_id: 'cph' }) === 'missing_position');
 check('an azimuth outside a circle is rejected',
   trackRejectionReason({
-    object_id: 'X0000000000000000000000AAA', node_id: 'n1', range_bearing: { azimuth: 400 },
+    object_id: 'X0000000000000000000000AAA', node_id: 'n1', site_id: 'cph', range_bearing: { azimuth: 400 },
   }) === 'azimuth_out_of_range');
 
 console.log('\nAltitude without a datum is refused rather than guessed');

@@ -177,6 +177,29 @@ export function trackRejectionReason(track) {
   // which is the job it is explicitly not doing.
   if (!isNonEmptyString(track.object_id)) return 'missing_object_id';
   if (!isNonEmptyString(track.node_id)) return 'missing_node_id';
+  // SCOPE TRAVELS WITH THE DATA, NOT WITH THE PLUMBING.
+  //
+  // Open question Q7 asked whether the adapter registry and listener
+  // set should become per-tenant, since both are module-level. The
+  // answer is that the registry is not the problem: a track carried no
+  // site and no tenant at all, so nothing downstream could route it
+  // correctly however the registry were shaped.
+  //
+  // One field fixes that permanently. Sites already declare `tenant:`
+  // in their manifest and events already carry tenantId, so tenant
+  // derives from site through a mapping that exists and is maintained.
+  // There is no second source of truth to drift.
+  //
+  // Required rather than optional, now, while exactly one publisher
+  // exists and setting it is free. The same reasoning nn_source.js
+  // gives for its sim/live tag: cheap now, impossible to retrofit once
+  // two feeds have mixed.
+  //
+  // Deliberately NOT per-tenant registries. Plumbing gets rewritten at
+  // every deployment shape -- one feed, many feeds, Azure, many regions
+  // -- and this question would be reopened each time. A field on the
+  // contract never moves.
+  if (!isNonEmptyString(track.site_id)) return 'missing_site_id';
 
   const hasLocation = track.location != null;
   const hasRangeBearing = track.range_bearing != null;

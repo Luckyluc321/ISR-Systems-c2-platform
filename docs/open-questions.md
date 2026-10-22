@@ -153,6 +153,33 @@ This is the one place in the codebase that already models "the same object, re-i
 
 ### Q7 · Track source is a single registry, not per tenant
 
+
+**ANSWERED AND CLOSED 2026-10-22.** The registry was not the problem.
+
+A track carried no site and no tenant at all: `track_source.js` had zero
+references to either. So nothing downstream could route one correctly
+however the registry were shaped, and making `_adapters` per-tenant
+would have moved the question rather than answered it.
+
+One required field settles it. `site_id` is now mandatory on every
+track, validated in `trackRejectionReason()` and asserted by
+`check:track-identity`. Sites already declare `tenant:` in their
+manifest and events already carry `tenantId`, so tenant derives from
+site through a mapping that exists and is maintained. There is no second
+source of truth to drift.
+
+`buildMockTrack` already took `siteId` as an argument and used it only
+to derive `node_id`; it now puts it on the track, which was the entire
+code change.
+
+Required rather than optional, now, while exactly one publisher exists
+and setting it costs nothing. Same reasoning `nn_source.js` gives for
+its sim/live tag: cheap now, impossible once two feeds have mixed.
+
+Deliberately NOT per-tenant registries. Plumbing is rewritten at every
+deployment shape -- one feed, many feeds, Azure, many regions -- and
+this question would reopen each time. A field on the contract does not
+move.
 **Owner:** unassigned · **Trigger:** second concurrent feed, or Azure tenant isolation work
 
 `_adapters` and the listener set in both `track_source.js` and `dispatch_telemetry.js` are module-level. Counters are per provider, which is enough to tell which feed is broken, but not per tenant. Fine for one feed. Revisit before per-tenant isolation lands.

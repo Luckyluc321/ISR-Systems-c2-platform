@@ -81,6 +81,13 @@ export function buildMockTrack({
   const track = {
     object_id: objectIdForMember(memberKey),
     node_id: nodeIdForSite(siteId),
+    // THE TRACK SAYS WHICH SITE IT BELONGS TO.
+    //
+    // siteId was already an argument here, used only to derive node_id.
+    // Putting it on the track itself is what makes scope travel with
+    // the data instead of living in the plumbing, and it is the whole
+    // of the answer to open question Q7.
+    site_id: siteId,
     location: {
       // SAPIENT orders these x then y, where x is longitude. Written
       // out rather than passed positionally, because transposing them
