@@ -3338,9 +3338,7 @@ function subWaypoints(siteLat, siteLon, bearing, startKm, altStart, altEnd, dura
 // registered as templates nor offered under Simulate threat. A key comes
 // off this list when its scenario is recreated with the site's measured
 // ground height in alt.
-const RETIRED_SUBSTATION_THREATS = new Set([
-  'energinet_hovegaard_missile_hostile',
-]);
+const RETIRED_SUBSTATION_THREATS = new Set([]);
 // Recreated from the list above with the site's measured ground built
 // into alt: metres above the ellipsoid, added to every waypoint of that
 // key and no other (__isr_altAudit, 2026-10-22, terrain under the
@@ -3355,6 +3353,7 @@ const SUBSTATION_GROUND_M = {
   energinet_ferslev_quad_hostile:          95,
   energinet_bjaeverskov_missile_hostile:   75,
   energinet_bjaeverskov_quad_hostile:      75,
+  energinet_hovegaard_missile_hostile:     55,
 };
 export function makeSubstationThreats(siteId, siteName, siteLat, siteLon, sensorIds) {
   const short = siteName.split(' ')[0];
