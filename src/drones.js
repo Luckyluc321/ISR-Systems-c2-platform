@@ -3339,8 +3339,6 @@ function subWaypoints(siteLat, siteLon, bearing, startKm, altStart, altEnd, dura
 // off this list when its scenario is recreated with the site's measured
 // ground height in alt.
 const RETIRED_SUBSTATION_THREATS = new Set([
-  'energinet_landerupgaard_missile_hostile',
-  'energinet_landerupgaard_quad_hostile',
   'energinet_kassoe_missile_hostile',
   'energinet_kassoe_quad_hostile',
   'energinet_ferslev_missile_hostile',
@@ -3349,6 +3347,14 @@ const RETIRED_SUBSTATION_THREATS = new Set([
   'energinet_bjaeverskov_quad_hostile',
   'energinet_hovegaard_missile_hostile',
 ]);
+// Recreated from the list above with the site's measured ground built
+// into alt: metres above the ellipsoid, added to every waypoint of that
+// key and no other (__isr_altAudit, 2026-10-22, terrain under the
+// template's lowest point, rounded up to 5 m).
+const SUBSTATION_GROUND_M = {
+  energinet_landerupgaard_missile_hostile: 105,
+  energinet_landerupgaard_quad_hostile:    105,
+};
 export function makeSubstationThreats(siteId, siteName, siteLat, siteLon, sensorIds) {
   const short = siteName.split(' ')[0];
   const s0 = sensorIds[0] || `${siteId}-N01`;
@@ -3398,6 +3404,9 @@ export function makeSubstationThreats(siteId, siteName, siteLat, siteLon, sensor
     })(),
   };
   for (const key of RETIRED_SUBSTATION_THREATS) delete threats[key];
+  for (const [key, groundM] of Object.entries(SUBSTATION_GROUND_M)) {
+    if (threats[key]) threats[key].waypoints = threats[key].waypoints.map(w => ({ ...w, alt: w.alt + groundM }));
+  }
   return threats;
 }
 
