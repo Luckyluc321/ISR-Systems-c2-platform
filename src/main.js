@@ -799,6 +799,7 @@ import {
   GeoDanmarkFeatureRenderer,
 } from './sovereign_geodanmark_features.js';
 import { applyBuildingSwap, clearBuildingSwap, footprintsFor, coverageFor, sitesWithFootprints } from './building_footprints.js';
+import { createCoverageTracer, createBoxClipOwner, coverageClipPolygons, coverageRings } from './photoreal_coverage.js';
 // Danish imagery over ground where we built the buildings, and nowhere
 // else. Default stays Bing + Google photoreal. See basemap_meshed_sites.js.
 import { createMeshedSiteBasemap } from './basemap_meshed_sites.js';
@@ -1260,6 +1261,28 @@ async function main() {
     viewer.scene.primitives.add(osmBuildings);
   } catch (err) { console.warn('OSM Buildings failed:', err); }
 
+  // Where Google ships building meshes, the boxes above cover the real
+  // buildings: inner Copenhagen rendered as grey blocks over a photoreal
+  // city. Inside the hand-traced rings in src/data/photoreal_coverage.json
+  // the boxes are clipped away; outside them nothing changes. The owner
+  // is the one writer of clippingPolygons on this tileset from here on,
+  // and the base layer only applies while photoreal is actually shown.
+  const _boxClip = createBoxClipOwner({
+    Cesium,
+    boxTileset: osmBuildings,
+    isPhotorealShown: () => !!googlePhotoreal && googlePhotoreal.show,
+  });
+  if (googlePhotoreal && osmBuildings) {
+    if (Cesium.ClippingPolygonCollection.isSupported(viewer.scene)) {
+      const polys = coverageClipPolygons(Cesium);
+      _boxClip.setBase(polys);
+      console.log(`[photoreal_coverage] ${polys.length} ring(s) (${Object.keys(coverageRings()).join(', ')}): OSM boxes clipped inside Google building-mesh coverage`);
+    } else {
+      console.warn('[photoreal_coverage] clipping needs WebGL2; boxes drawn everywhere');
+    }
+  }
+  viewer.scene.preRender.addEventListener(() => _boxClip.follow());
+
   // ── Photorealistic mesh, reconstructed from Danish state imagery ──
   //
   // Google Photorealistic 3D covers six Danish cities and Billund is not
@@ -1431,6 +1454,7 @@ async function main() {
           siteId,
           meshTileset: buildingsOnly ? null : ts,
           boxTileset: osmBuildings,
+          boxClip: _boxClip,
         });
         console.log(
           `[site_mesh] ${siteId} ${why}, height offset ${heightOffsetM} m, ` +
@@ -1535,7 +1559,7 @@ async function main() {
     // OSM tileset, which outlives any one site, so leaving it set cuts
     // holes in the boxes somewhere the mesh no longer draws and reads
     // as buildings gone missing for no reason.
-    clearBuildingSwap({ boxTileset: osmBuildings });
+    clearBuildingSwap({ boxTileset: osmBuildings, boxClip: _boxClip });
   }
 
   // Console handle for tuning the height against the real terrain, and
@@ -1574,6 +1598,7 @@ async function main() {
           siteId: _siteMeshId,
           meshTileset: pre ? null : ts,
           boxTileset: osmBuildings,
+          boxClip: _boxClip,
         });
         return r.mode === 'coverage'
           ? `${r.polygons} coverage rectangle(s): every OSM box inside the `
@@ -1581,7 +1606,7 @@ async function main() {
           : `${r.polygons} outlines: boxes hidden`
             + (pre ? ', mesh already buildings-only' : ', mesh clipped');
       }
-      clearBuildingSwap({ meshTileset: ts, boxTileset: osmBuildings });
+      clearBuildingSwap({ meshTileset: ts, boxTileset: osmBuildings, boxClip: _boxClip });
       // Says what to expect, because on a buildings-only mesh turning
       // this off brings the white boxes back and changes nothing else.
       return pre
@@ -1770,6 +1795,18 @@ async function main() {
       return 'reset to shipped look';
     },
   };
+
+  // Traces the edge of Google's building-mesh coverage from inside the
+  // map. Records points, draws a line, prints a ring. Clips nothing;
+  // see photoreal_coverage.js for why that half is separate.
+  window.__isr_coverage = createCoverageTracer({ Cesium, viewer });
+  // A/B the clip without reloading: clipOff() brings every box back,
+  // clipOn() re-applies the bundled rings, clipState() says what is on.
+  Object.assign(window.__isr_coverage, {
+    clipOff() { _boxClip.setBase([]); return 'boxes drawn everywhere'; },
+    clipOn() { const p = coverageClipPolygons(Cesium); _boxClip.setBase(p); return `${p.length} ring(s) clipped`; },
+    clipState() { return _boxClip.state(); },
+  });
 
   // ── SDFI GeoDanmark Ortofoto (Denmark, sovereign, CC BY 4.0) ──
   // Danish state imagery, activated when VITE_SDFI_TOKEN is set in

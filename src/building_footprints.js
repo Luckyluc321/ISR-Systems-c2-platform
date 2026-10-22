@@ -62,7 +62,7 @@
 // ═══════════════════════════════════════════════════════════════════
 
 import * as Cesium from 'cesium';
-import BUNDLED from './data/building_footprints.json';
+import BUNDLED from './data/building_footprints.json' with { type: 'json' };
 
 // Above this, the signed distance texture Cesium builds for clipping
 // stops being cheap. Nothing near it today with one site; the warning
@@ -202,7 +202,7 @@ export function clipPolygonsFor(siteId, rings) {
  * Returns what it did, so a caller can log or assert on it rather than
  * assuming it worked.
  */
-export function applyBuildingSwap({ siteId, meshTileset, boxTileset, quality } = {}) {
+export function applyBuildingSwap({ siteId, meshTileset, boxTileset, boxClip, quality } = {}) {
   const coverage = coverageFor(siteId);
   const result = {
     siteId, mode: null, polygons: 0, mesh: false, boxes: false,
@@ -237,7 +237,13 @@ export function applyBuildingSwap({ siteId, meshTileset, boxTileset, quality } =
     result.polygons = polygons.length;
     if (!polygons.length) return result;
     if (meshTileset) meshTileset.clippingPolygons = undefined;
-    if (boxTileset) {
+    // The box side goes through the owner when one is given, so the
+    // city coverage rings underneath it survive this site's polygons
+    // coming and going. See photoreal_coverage.js.
+    if (boxClip) {
+      boxClip.setSite(polygons);
+      result.boxes = true;
+    } else if (boxTileset) {
       boxTileset.clippingPolygons = collection(polygons, false);
       result.boxes = true;
     }
@@ -260,7 +266,13 @@ export function applyBuildingSwap({ siteId, meshTileset, boxTileset, quality } =
     meshTileset.clippingPolygons = collection(polygons, true);
     result.mesh = true;
   }
-  if (boxTileset) {
+  // The box side goes through the owner when one is given, so the
+  // city coverage rings underneath it survive this site's polygons
+  // coming and going. See photoreal_coverage.js.
+  if (boxClip) {
+    boxClip.setSite(polygons);
+    result.boxes = true;
+  } else if (boxTileset) {
     boxTileset.clippingPolygons = collection(polygons, false);
     result.boxes = true;
   }
@@ -274,9 +286,10 @@ export function applyBuildingSwap({ siteId, meshTileset, boxTileset, quality } =
  * keep cutting holes in the OSM boxes somewhere the mesh no longer
  * draws, which shows up as buildings missing for no visible reason.
  */
-export function clearBuildingSwap({ meshTileset, boxTileset } = {}) {
+export function clearBuildingSwap({ meshTileset, boxTileset, boxClip } = {}) {
   if (meshTileset) meshTileset.clippingPolygons = undefined;
-  if (boxTileset) boxTileset.clippingPolygons = undefined;
+  if (boxClip) boxClip.clearSite();
+  else if (boxTileset) boxTileset.clippingPolygons = undefined;
 }
 
 /** Sites with bundled outlines. */
