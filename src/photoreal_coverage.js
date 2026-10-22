@@ -156,10 +156,16 @@ export function createCoverageTracer({ Cesium, viewer } = {}) {
   let handler = null;
   let drawn = null;
 
+  // Draped on whatever is drawn there, terrain and 3D tiles alike. It
+  // used to sit at a fixed 2 m above the ELLIPSOID, which is 35-45 m
+  // under Danish ground, so the line was never visible. From three
+  // points on it closes back to the first, so the outline being traced
+  // reads as the area it will become.
   function redraw() {
     if (!drawn) return;
-    drawn.polyline.positions = ring.length >= 2
-      ? ring.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat, 2))
+    const pts = ring.length >= 3 ? [...ring, ring[0]] : ring;
+    drawn.polyline.positions = pts.length >= 2
+      ? pts.map(([lon, lat]) => Cesium.Cartesian3.fromDegrees(lon, lat))
       : [];
   }
 
@@ -220,7 +226,7 @@ export function createCoverageTracer({ Cesium, viewer } = {}) {
             positions: [],
             width: 3,
             material: Cesium.Color.CYAN,
-            clampToGround: false,
+            clampToGround: true,
           },
         });
       }
