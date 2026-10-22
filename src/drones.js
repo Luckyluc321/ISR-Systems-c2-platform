@@ -3339,8 +3339,6 @@ function subWaypoints(siteLat, siteLon, bearing, startKm, altStart, altEnd, dura
 // off this list when its scenario is recreated with the site's measured
 // ground height in alt.
 const RETIRED_SUBSTATION_THREATS = new Set([
-  'energinet_ferslev_missile_hostile',
-  'energinet_ferslev_quad_hostile',
   'energinet_bjaeverskov_missile_hostile',
   'energinet_bjaeverskov_quad_hostile',
   'energinet_hovegaard_missile_hostile',
@@ -3354,6 +3352,9 @@ const SUBSTATION_GROUND_M = {
   energinet_landerupgaard_quad_hostile:    105,
   energinet_kassoe_missile_hostile:        80,
   energinet_kassoe_quad_hostile:           80,
+  // Ferslev's ground differs under the two routes, so each has its own.
+  energinet_ferslev_missile_hostile:       70,
+  energinet_ferslev_quad_hostile:          95,
 };
 export function makeSubstationThreats(siteId, siteName, siteLat, siteLon, sensorIds) {
   const short = siteName.split(' ')[0];
