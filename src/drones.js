@@ -2800,6 +2800,44 @@ export const TEMPLATES = {
   },
 };
 
+// THE MOHAJER-2 ROUTE, ENTERING FROM THE WEST.
+//
+// Built for the two-hostiles combination. The swarm in that pair spends
+// its first four minutes coming in from the Øresund, and the original
+// recon route also enters from the east, so launched together they
+// passed within 138 m on the same side and read as one formation. That
+// is why the pair used to wait 240 s before spawning the recon.
+//
+// Turned 180 degrees about the CPH site centre (sites/cph.yaml
+// coordinates). A rotation, not a mirror: every turn keeps its sense and
+// its rate, so the airframe flies exactly the manoeuvres it flies today,
+// from the other side. Measured against the swarm, launched together:
+// both detected from 54 s, together for 144 s, never closer than
+// 1120 m, 174 degrees apart. The original template is untouched.
+//
+// contributingSensors are the five the ROTATED route actually passes
+// nearest, measured, not the east-side list copied across.
+const _CPH_CENTRE = { lat: 55.618, lon: 12.647 };
+const _RECON_ROUTE_WEST = _RECON_ROUTE.map(w => ({
+  ...w,
+  lat: +(2 * _CPH_CENTRE.lat - w.lat).toFixed(6),
+  lon: +(2 * _CPH_CENTRE.lon - w.lon).toFixed(6),
+  heading: (w.heading + 180) % 360,
+}));
+TEMPLATES.cph_recon_hostile_west = {
+  ...TEMPLATES.cph_recon_hostile,
+  evidence: { ...TEMPLATES.cph_recon_hostile.evidence },
+  contributingSensors: [
+    { id: 'N18', confidence: 0.68 },   // NW Perimeter, 3 m from the route
+    { id: 'N25', confidence: 0.65 },   // 56 m
+    { id: 'N15', confidence: 0.61 },   // Runway 04R Central, 266 m
+    { id: 'N12', confidence: 0.58 },   // Central W Airside, 288 m
+    { id: 'N22', confidence: 0.55 },   // NW Perimeter, 417 m
+  ],
+  waypoints: _RECON_ROUTE_WEST,
+  durationSec: Math.round(_RECON_ROUTE_WEST[_RECON_ROUTE_WEST.length - 1].tSec),
+};
+
 // TWO-TIER SCENARIO — single continuous cruise missile track.
 // Detected at Kassø, transits blind through central Denmark (sensor gap),
 // re-acquired at CPH airport, neutralised by F-35 at intercept station.

@@ -9981,3 +9981,20 @@ body.workspace-map-active #receiver-view {
    every level: a confident "no coordination" must not borrow the
    pattern verdict's hostile red. Same geometry as .mc-conf-low. */
 .mc-conf-neutral { background: rgba(150, 160, 170, 0.10); color: var(--text); border: 1px solid rgba(150, 160, 170, 0.30); }
+
+/* A line under "Other detections on site" is a button that opens that
+   detection. Same hover tint and accent as a Linked Events row, kept
+   lighter (no border, no fill at rest) because it sits inside the
+   agent chapter rather than being a section of its own. */
+.mc-goto {
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+  padding: 3px 6px; margin: 0 -6px; border-radius: 4px;
+  cursor: pointer; transition: background 100ms;
+}
+.mc-goto:hover, .mc-goto:focus-visible { background: rgba(77, 210, 255, 0.10); outline: none; }
+.mc-goto-arrow { color: var(--accent); flex: none; font-size: 18px; line-height: 1; font-weight: 600; padding-left: 4px; }
+
+/* Back, on the live-event panel. Same button as the closed-event panel
+   (.pl-back-btn); this only gives it room above the event id. */
+.dp-hdr .dp-back-btn { margin-bottom: 8px; }
+

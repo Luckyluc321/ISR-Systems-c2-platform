@@ -271,7 +271,7 @@ export function coordinationReadingFor(event) {
   const ok = r && typeof r.text === 'string' && r.text.trim()
     && ['low', 'medium', 'high'].includes(r.confidence);
   if (!ok) {
-    return { assessed: false, text: 'Not assessed. Inference not connected.' };
+    return { assessed: false, text: 'not yet assessed' };
   }
   return {
     assessed: true,

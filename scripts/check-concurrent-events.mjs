@@ -160,7 +160,7 @@ check('a panel line carries distance and approach, no confidence',
   /km away|m away/.test(_lines[0]) && !/confidence/i.test(_lines[0]));
 const _none = coordinationReadingFor({ id: 'X' });
 check('no model reading: says "not assessed", never silent',
-  _none.assessed === false && /Not assessed\. Inference not connected\./.test(_none.text));
+  _none.assessed === false && /^not yet assessed$/.test(_none.text));
 const _bad = coordinationReadingFor({ coordinationReading: { text: 'Coordinated', confidence: 'certain' } });
 check('a reading without a valid confidence is not shown as assessed', _bad.assessed === false);
 const _ok = coordinationReadingFor({ coordinationReading: { text: ' No coordination indicated. ', confidence: 'low', modelVersion: 'mistral-large-2' } });
@@ -183,6 +183,15 @@ check('the panel counts what it is not showing',
   /maxEvents: Infinity/.test(_main) && /\+ \$\{_concMore\} more at this site/.test(_main));
 check('a coordination confidence never borrows the hostile verdict colour',
   /mc-conf mc-conf-neutral">Confidence · \$\{_coord\.confidence/.test(_main) && !/mc-conf-\$\{_coord\.confidence\}/.test(_main));
+check('each line opens its detection, through its own attribute, not data-linked-id',
+  /class="mc-goto" data-goto-event="\$\{escapeHtml\(_conc\[i\]\.id\)\}"/.test(_main)
+  && /querySelectorAll\('\[data-goto-event\]'\)/.test(_main)
+  && !/mc-goto[^>]*data-linked-id/.test(_main));
+check('jumping to another event from the live panel offers Back',
+  /const _navFromHere = \(toId\) =>/.test(_main)
+  && /const go = \(\) => _navFromHere\(row\.dataset\.gotoEvent\);/.test(_main)
+  && /_navFromHere\(row\.dataset\.linkedId\)/.test(_main)
+  && /id="dp-back-btn"/.test(_main));
 check('nothing in the panel path writes linkedEventIds',
   !/_concurrentEvents\([\s\S]{0,600}linkedEventIds\s*=/.test(_main));
 

@@ -106,14 +106,14 @@ and keeps facts, which is the right way round.
 
 Lucas, 2026-10-22: the ASSESSED coordination line renders **every time**
 the Mission Console shows concurrent tracks. With no model reading it
-says so ("Not assessed. Inference not connected.") instead of going
+says so ("Coordination · not yet assessed") instead of going
 quiet, so an operator can tell "checked, nothing" from "never looked".
 
 ## Built, 2026-10-22
 
 In the existing Mission Console section, no new section:
 
-- **Concurrent activity** row, MEASURED. One line per other live,
+- **Other detections on site** row, MEASURED. One line per other live,
   detected, non-friendly track at the site, from the same tenant-scoped
   list the agent receives: type, classification, distance, which side
   of the site, and how long before or after this track it appeared.

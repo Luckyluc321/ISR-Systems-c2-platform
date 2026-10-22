@@ -23693,20 +23693,22 @@ async function main() {
       // unexplained tracks at once with no established link between
       // them. The recon draws the response, the swarm does the work.
       //
-      // 240 s, measured rather than chosen. The recon's own detection
-      // flips at its t = 27, so the pair is live and detected together
-      // for 171 s, never closer than 2709 m, mean separation 3955 m.
-      // At the midpoint the swarm bears 225 degrees from the site
-      // centre and the recon 114, which is the opposite-ends geometry
-      // Lucas asked for rather than two tracks on the same side.
+      // LAUNCHED TOGETHER, FROM OPPOSITE SIDES. This used to spawn the
+      // east-entry recon 240 s in, because both it and the swarm come in
+      // from the east and any earlier start put them within 138-623 m
+      // on the same side: one formation, not two problems. Lucas: four
+      // minutes is far too long to wait for the second case.
       //
-      // Offsets of 120 and 160 were measured too: both bring them
-      // within 625 m and 1220 m respectively, which reads as one
-      // formation rather than two separate problems.
-      { key: '__combo_cph_two_hostiles', threat: '5-drone swarm + fixed-wing recon', pathLabel: 'Two hostiles, opposite ends, 171 s concurrent', cls: 'critical',
+      // The fix is the route, not the wait. cph_recon_hostile_west is
+      // the same airframe and manoeuvres turned 180 degrees about the
+      // site centre (drones.js). Launched at 0, both are detected from
+      // 54 s, together for 144 s, never closer than 1120 m, 174 degrees
+      // apart. The recon spawns outside coverage and flies in, so it is
+      // not drawn before a sensor hears it.
+      { key: '__combo_cph_two_hostiles', threat: '5-drone swarm + fixed-wing recon', pathLabel: 'Two hostiles, opposite sides, both detected within a minute', cls: 'critical',
         combo: [
           { key: 'cph_swarm_runway_incursion' },
-          { key: 'cph_recon_hostile', atTSec: 240 },
+          { key: 'cph_recon_hostile_west', atTSec: 0 },
         ] },
       // WITHOUT ISR. Neither a template nor a combo, because the run has
       // to take this site's sensor grid offline for its duration as well
@@ -27153,8 +27155,8 @@ async function main() {
       const _coord = _conc.length ? _coordinationReadingFor(e) : null;
       const concurrentRow = _conc.length ? `
         <div class="mc-row">
-          <div class="mc-k">Concurrent activity</div>
-          <div class="mc-v">${_concurrentPanelLines(_conc).map(l => `<div>${escapeHtml(l)}</div>`).join('')}${_concMore > 0 ? `<div class="mc-dim">+ ${_concMore} more at this site</div>` : ''}</div>
+          <div class="mc-k">Other detections on site</div>
+          <div class="mc-v">${_concurrentPanelLines(_conc).map((l, i) => `<div class="mc-goto" data-goto-event="${escapeHtml(_conc[i].id)}" role="button" tabindex="0" title="Open this detection"><span>${escapeHtml(l)}</span><span class="mc-goto-arrow">›</span></div>`).join('')}${_concMore > 0 ? `<div class="mc-dim">+ ${_concMore} more at this site</div>` : ''}</div>
         </div>` : '';
       // Confidence here is the model's confidence in its OWN reading, and
       // a confident "no coordination" must not render in hostile red. So
@@ -27556,8 +27558,15 @@ async function main() {
         </div>
       </div>` : '';
 
+    // BACK, the same rule the closed-event panel already follows: if
+    // the operator got here from another event's panel, they can return
+    // to it. Same button, same stack (_eventNavHistory).
+    const dpBackBtnHtml = _eventNavHistory.length > 0
+      ? `<button class="pl-back-btn dp-back-btn" id="dp-back-btn" title="Back to previous event">← Back</button>`
+      : '';
     detailBodyEl.innerHTML = `
       <div class="dp-hdr">
+        ${dpBackBtnHtml}
         <div class="dp-id">${e.id}${isActive ? ' <span class="dp-live">● LIVE</span>' : ''}</div>
         <div class="dp-class">
           <span class="dp-class-dot dp-class-${e.classification}"></span>
@@ -27631,11 +27640,39 @@ async function main() {
       });
     });
 
+    // Moving from this panel to another event remembers where it came
+    // from, so the next panel can offer Back. Used by every in-panel
+    // jump below. Not pushed twice in a row for the same event.
+    const _navFromHere = (toId) => {
+      if (!toId || toId === e.id || !getEvent(toId)) return;
+      if (_eventNavHistory[_eventNavHistory.length - 1] !== e.id) _eventNavHistory.push(e.id);
+      selectEvent(toId);
+    };
+
     // Wire linked-event chip clicks → jump to that event's report
     detailBodyEl.querySelectorAll('[data-linked-id]').forEach(row => {
-      row.addEventListener('click', () => {
-        const lid = row.dataset.linkedId;
-        if (lid && getEvent(lid)) selectEvent(lid);
+      row.addEventListener('click', () => _navFromHere(row.dataset.linkedId));
+    });
+
+    const dpBackBtn = detailBodyEl.querySelector('#dp-back-btn');
+    if (dpBackBtn) {
+      dpBackBtn.addEventListener('click', () => {
+        dpBackBtn.blur();
+        const prevId = _eventNavHistory.pop();
+        if (prevId && getEvent(prevId)) selectEvent(prevId);
+      });
+    }
+
+    // Other detections on site → open that detection. Its own attribute,
+    // not data-linked-id: these are NOT linked events, nothing has
+    // established a relationship, and the code should not say otherwise
+    // either. Same navigation as a linked chip otherwise, plus the
+    // keyboard, since the line is a button.
+    detailBodyEl.querySelectorAll('[data-goto-event]').forEach(row => {
+      const go = () => _navFromHere(row.dataset.gotoEvent);
+      row.addEventListener('click', go);
+      row.addEventListener('keydown', ev => {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); }
       });
     });
 
