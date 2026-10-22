@@ -23737,12 +23737,15 @@ async function main() {
       { key: 'esbjerg_missile_hostile', threat: 'Cruise missile from sea, critical', cls: 'critical' },
     ],
     billund: [
+      { key: 'billund_quad_hostile', threat: 'Quadcopter, hostile (low pass over terminal + cargo)' },
       { key: 'billund_fixedwing_hostile', threat: 'Fixed wing recon (E-W runway axis)' },
       { key: 'billund_swarm_recon', threat: 'SWARM · 4-drone recon over CHBA cargo apron', cls: 'critical' },
       // The benign counterpart to the line above, over the same ground.
       // Shown next to it on purpose: the pair is what demonstrates the
       // platform tells them apart, and either alone demonstrates nothing.
       { key: 'billund_commercial_survey', threat: 'SWARM · 3-drone pavement survey, authorised', cls: 'friendly' },
+      { key: 'billund_missile_hostile', threat: 'Cruise missile from S, critical', cls: 'critical' },
+      { key: 'billund_lego_recon', threat: 'LEGO adjacency recon (transits BLL → LEGO HQ)', cls: 'recon' },
       { key: 'billund_geran2_north', threat: 'Geran-2 (piston, 185 km/h)', pathLabel: 'N transit, BLL → Karup → Skagen', cls: 'critical' },
       { key: 'billund_geran4_north', threat: 'Geran-4 (jet, 320 km/h)', pathLabel: 'N transit, BLL → Karup → Skagen', cls: 'critical' },
       { key: 'billund_geran5_north', threat: 'Geran-5 (jet, 525 km/h)', pathLabel: 'N transit, BLL → Karup → Skagen', cls: 'critical' },

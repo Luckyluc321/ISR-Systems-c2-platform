@@ -2347,6 +2347,48 @@ export const TEMPLATES = {
   // adjacency scenario. ARP 55.7405, 9.158 verified via Naviair AIP.
   // ═══════════════════════════════════════════════════════════════════
 
+  // ── Quadcopter, hostile (low pass along the southern apron line) ──
+  // alt includes the measured ground, 115 m above the ellipsoid
+  // (__isr_altAudit, 2026-10-22, rounded up to 5 m).
+  billund_quad_hostile: {
+    siteId: 'billund',
+    classification: 'hostile',
+    threat: 'high',
+    platform: 'quadcopter',
+    droneType: 'DJI Matrice 300 RTK',
+    confidence: 0.86,
+    confidenceTrend: 'Steady climb 0.51 to 0.86',
+    contributingSensors: [
+      { id: 'BLL-N03', confidence: 0.90 },   // Passenger terminal apron
+      { id: 'BLL-N04', confidence: 0.85 },   // Cargo apron CHBA
+      { id: 'BLL-N08', confidence: 0.79 },   // Runway centre (Core)
+      { id: 'BLL-N07', confidence: 0.72 },   // Runway mid-W
+      { id: 'BLL-N02', confidence: 0.64 },   // S apron W
+    ],
+    evidence: { rfCarrier: '2.412 GHz', rfBandwidth: '20 MHz OFDM', rfMatch: 'OcuSync 89%', modality: 'RF + acoustic + visual', evidenceSize: '31.2 MB', note: 'Quadcopter low pass along the southern apron line, over the CHBA cargo apron and the general-aviation apron. Consistent with tourist / hobbyist NOT complying with restricted airspace, escalated to hostile after refusal to descend.' },
+    waypoints: [
+      { lat: 55.7360, lon: 9.13800, alt: 225, heading:  75, tSec:  0 },   // Enter SW, cruise altitude
+      { lat: 55.7375, lon: 9.14700, alt: 205, heading:  70, tSec:  9 },   // Descend
+      { lat: 55.7378, lon: 9.15000, alt: 190, heading:  75, tSec: 16 },   // LOW over W apron
+      // NOTE 2026-09-22: this track was laid out against Billund asset
+      // positions that were later found to be up to 1.4 km wrong. The
+      // verified passenger terminal sits on the NORTH side
+      // (55.746014, 9.147362); this southern apron line does not pass
+      // over it. The cargo story still holds: the corrected CHBA
+      // terminal and cargo apron are both within ~215 m of this path.
+      // Left as flown rather than re-routed. To make the terminal
+      // overflight real, bend the mid-track north toward 55.7460.
+      { lat: 55.7378, lon: 9.15450, alt: 185, heading:  85, tSec: 24 },   // Along southern apron line
+      { lat: 55.7378, lon: 9.16000, alt: 185, heading:  90, tSec: 34 },   // Over CHBA cargo apron (highlight #3)
+      { lat: 55.7378, lon: 9.16800, alt: 190, heading:  95, tSec: 44 },   // Over GA/business apron
+      { lat: 55.7385, lon: 9.17500, alt: 200, heading: 110, tSec: 52 },   // Bank NE, climbing
+      { lat: 55.7395, lon: 9.18500, alt: 215, heading: 105, tSec: 62 },   // E protrusion pass-through
+      { lat: 55.7400, lon: 9.19200, alt: 230, heading: 100, tSec: 70 },   // Exit E
+      { lat: 55.7400, lon: 9.20500, alt: 240, heading:  95, tSec: 80 },
+    ],
+    durationSec: 80,
+  },
+
   // ── Fixed-wing, hostile (high-alt straight recon pass W to E along runway axis) ──
   billund_fixedwing_hostile: {
     siteId: 'billund',
@@ -2518,6 +2560,33 @@ export const TEMPLATES = {
       { lat: 55.74150, lon: 9.14600, alt:  0, heading: 270, tSec: 338 },   // recovered
     ],
     durationSec: 338,
+  },
+
+  // ── Cruise missile (low altitude ingress from S, hits runway) ──
+  // alt includes the measured ground, 110 m above the ellipsoid
+  // (__isr_altAudit, 2026-10-22, rounded up to 5 m).
+  billund_missile_hostile: {
+    siteId: 'billund',
+    classification: 'hostile',
+    threat: 'high',
+    platform: 'missile',
+    droneType: 'Cruise missile signature (unknown class)',
+    confidence: 0.94,
+    confidenceTrend: 'Rapid spike 0.32 to 0.94 in 5s',
+    contributingSensors: [
+      { id: 'BLL-N02', confidence: 0.96 },
+      { id: 'BLL-N01', confidence: 0.93 },
+      { id: 'BLL-N08', confidence: 0.92 },
+      { id: 'BLL-N06', confidence: 0.89 },
+    ],
+    evidence: { rfCarrier: 'Passive, no active emitter', modality: 'RF + acoustic + visual', evidenceSize: '162 MB', note: 'CRITICAL. Cruise missile signature transiting BLL from S at 40m AGL. Bearing 000° consistent with direct impact on runway 09/27. No transponder, no comms.' },
+    waypoints: [
+      { lat: 55.7180, lon: 9.15800, alt: 150, heading:   0, tSec:  0 },   // ingress from S at low alt
+      { lat: 55.7280, lon: 9.15800, alt: 145, heading:   0, tSec:  6 },
+      { lat: 55.7360, lon: 9.15800, alt: 140, heading:   0, tSec: 12 },
+      { lat: 55.7400, lon: 9.15800, alt: 135, heading:   0, tSec: 18 },   // impact runway centre
+    ],
+    durationSec: 18,
   },
 
   // ── Shahed up the spine of Jutland, Billund to Skagen ────────────
@@ -2704,6 +2773,41 @@ export const TEMPLATES = {
       { lat: 57.7400, lon: 10.5800, alt: 700, heading: 71, tSec: 1836 },
     ],
     durationSec: 1836,
+  },
+
+  // ── LEGO adjacency recon (drone crosses BLL airspace en route to LEGO HQ/Legoland) ──
+  // Unique to Billund: adjacent to strategic Danish enterprise sites.
+  // The drone is not targeting BLL itself; it's transiting BLL sensors
+  // on its way to overfly LEGO HQ (~2km S) and Legoland Resort. Tests
+  // the platform's ability to classify "transit through" vs "targeting"
+  // and to route the alert to LEGO corporate security (out-of-scope
+  // for BLL but relevant for the cross-agency picture).
+  // alt includes the measured ground, 105 m above the ellipsoid
+  // (__isr_altAudit, 2026-10-22, rounded up to 5 m).
+  billund_lego_recon: {
+    siteId: 'billund',
+    classification: 'unknown',
+    threat: 'medium',
+    platform: 'quadcopter',
+    droneType: 'DJI Mavic 3 (corporate recon suspected)',
+    confidence: 0.71,
+    confidenceTrend: 'Held 0.65 to 0.74',
+    contributingSensors: [
+      { id: 'BLL-N01', confidence: 0.78 },   // SW perimeter (near Legoland vector)
+      { id: 'BLL-N06', confidence: 0.72 },
+      { id: 'BLL-N12', confidence: 0.68 },
+      { id: 'BLL-N02', confidence: 0.61 },
+    ],
+    evidence: { rfCarrier: '2.400 GHz', rfBandwidth: '10 MHz OcuSync', rfMatch: 'DJI Mavic 3 74%', modality: 'RF + visual', evidenceSize: '38.4 MB', note: 'Drone transits BLL sensor coverage briefly on SW vector, exits airspace toward LEGO Group HQ / Legoland Resort. Not targeting airport assets. Alert relevant for LEGO corporate security + Sydøstjyllands Politi.' },
+    waypoints: [
+      { lat: 55.7440, lon: 9.14000, alt: 195, heading: 200, tSec:  0 },   // enter NW
+      { lat: 55.7405, lon: 9.13500, alt: 185, heading: 210, tSec: 12 },   // brief BLL cov crossing
+      { lat: 55.7370, lon: 9.13000, alt: 180, heading: 215, tSec: 22 },
+      { lat: 55.7340, lon: 9.12500, alt: 170, heading: 220, tSec: 32 },   // exit BLL SW
+      { lat: 55.7310, lon: 9.12000, alt: 160, heading: 220, tSec: 42 },   // approach LEGO HQ area (out-of-cov)
+      { lat: 55.7280, lon: 9.11500, alt: 155, heading: 220, tSec: 52 },   // over Legoland vector
+    ],
+    durationSec: 52,
   },
 };
 
