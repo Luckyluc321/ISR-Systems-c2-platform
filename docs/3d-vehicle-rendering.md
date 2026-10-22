@@ -2804,25 +2804,45 @@ against the current numbers. The recon swarm template was raised 50 m instead
 built site needs the same look before it is trusted. The datum change is the right
 long-term fix and wants its own pass with every scenario re-flown.
 
-### Measured 2026-10-22, and why the fix is parked
+### Measured 2026-10-22, and what was done about it
 
-`__isr_altAudit()` sampled the map's own terrain under every template. 22 of 52 are drawn
-partly underground, worst at Landerupgård (84 m under), Billund (up to 82 m) and the
-Esbjerg surface drone (41 m under the water). Copenhagen's scenarios are excluded from any
-fix on Lucas's instruction; several of them also dip, and that is accepted.
+`__isr_altAudit()` samples the map's own terrain under every template. On 2026-10-22, 22 of
+52 were drawn partly underground, worst at Landerupgård (84 m under), Billund (up to 82 m)
+and the Esbjerg surface drone (41 m under the water).
 
-Two fixes were built and reviewed, and neither merged:
+**Fixed: 14 scenarios recreated above ground** (commits `c5e046e` to `e2917d9`). Same routes,
+timing and text, with the site's measured ground height added to `alt`, the convention
+every Copenhagen scenario already follows:
 
-1. **Rewriting waypoint altitudes.** Wrong: the panel ("m AGL"), recordings and export
-   (`altitude_agl_m`), the summary agent's altitude score, interceptor climb targets and
-   the 500 m attack-profile advisory all read that number as height above ground, so all
-   of them moved.
-2. **Adding a measured lift where a track is drawn** (`ground_lift.js`, branch
-   `wip/ground-lift`). Right for the picture, but interceptor aim, engagement odds, the
-   kill altitude in the debrief, the wreckage fall and swarm jam-fall read the drawn
-   billboard height back as height above ground. To merge, those read-back sites must
-   subtract the lift (Copenhagen lifts 0, so it stays identical by construction), and the
-   gate must test behaviour, not source text.
+| Site | Added to `alt` |
+|---|---|
+| Esbjerg | surface drone +44 m (exact, it is a boat), missile +45 m |
+| Billund | quadcopter +115 m, missile +110 m, LEGO recon +105 m |
+| Landerupgård | quadcopter and missile +105 m |
+| Kassø | quadcopter and missile +80 m |
+| Ferslev | missile +70 m, quadcopter +95 m (different ground under the two routes) |
+| Bjæverskov | quadcopter and missile +75 m |
+| Hovegård | missile +55 m |
 
-Until then: a new site's scenarios should be authored with the site's ground height
-already in `alt`, the convention every Copenhagen scenario follows today.
+Re-audited after: all 14 above ground, lowest point the Esbjerg boat at 3 m over the water.
+
+**Still below ground, deliberately not touched:**
+- Billund swarm recon (36 m under) and the authorised survey pair (81 m under), pending Lucas
+- Amager Koblingsstation missile (22 m under)
+- Kassø two-tier missile to Amalienborg (3 m under), a Copenhagen story
+- Four Copenhagen airport scenarios (3 to 36 m under). Copenhagen is off limits.
+
+**The known cost of ground in `alt`.** The panel ("m AGL"), recordings and export
+(`altitude_agl_m`), the summary agent's altitude score and interceptor climb targets all
+read `alt` as height above ground, so for these 14 they read high by the ground height. The
+Billund missile shows 135 to 150 m while its evidence text says 40 m. Copenhagen has always
+read about 40 m high for the same reason.
+
+**The proper fix, still parked** on branch `wip/ground-lift`: keep `alt` as authored and add
+the measured lift only where a track is drawn. That needs six read-back sites that convert
+a drawn billboard height back into height above ground to subtract the lift first: the live
+target position, the swarm target altitude, the seeker, the burst target, the kill fall and
+explosion start, and the jam-fall. Copenhagen lifts 0, so it stays identical by
+construction. The gate must test behaviour, not source text. Until that lands, author every
+new site's scenarios with the site's ground height already in `alt`, and run
+`__isr_altAudit()` before shipping them.
