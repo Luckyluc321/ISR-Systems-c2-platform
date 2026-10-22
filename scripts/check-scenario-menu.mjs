@@ -40,14 +40,16 @@ check('menu segment found', start > 0 && end > start);
 const segment = main.slice(start, end);
 check('no entry carries a `label` the picker would ignore', !/\blabel:/.test(segment));
 
-const THREAT_MENU = new Function('SITES', `${segment}\nreturn THREAT_MENU;`)(SITES);
-
 // Same registration main.js does at module init.
 const ALL = { ...TEMPLATES };
 for (const site of Object.values(SITES).filter(s => s.siteType === 'energy')) {
   Object.assign(ALL, makeSubstationThreats(site.id, site.name, site.coordinates.lat,
     site.coordinates.lon, site.sensors.map(s => s.id)));
 }
+
+// The energy-site loop offers only templates that exist, so it reads the
+// registry main.js has by the time the menu is built.
+const THREAT_MENU = new Function('SITES', 'TEMPLATES', `${segment}\nreturn THREAT_MENU;`)(SITES, ALL);
 
 let entries = 0;
 for (const [site, menu] of Object.entries(THREAT_MENU)) {

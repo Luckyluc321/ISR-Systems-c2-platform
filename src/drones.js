@@ -2246,36 +2246,6 @@ export const TEMPLATES = {
     durationSec: 80,
   },
 
-  // ── USV, hostile (surface vessel drone, low altitude, along Sønderhavn quay) ──
-  esbjerg_usv_hostile: {
-    siteId: 'esbjerg',
-    classification: 'hostile',
-    threat: 'high',
-    platform: 'quadcopter',   // rendered as quad for now; USV silhouette is a future icon
-    droneType: 'Unmanned Surface Vessel (USV, small craft)',
-    confidence: 0.71,
-    confidenceTrend: 'Late detection, low RCS on water',
-    contributingSensors: [
-      { id: 'N16', confidence: 0.78 },
-      { id: 'N14', confidence: 0.72 },
-      { id: 'N15', confidence: 0.68 },
-      { id: 'N13', confidence: 0.55 },
-    ],
-    evidence: { rfCarrier: '433 MHz LoRa telemetry', rfMatch: 'Unknown transmitter, 62% pattern match to naval USV comms', modality: 'RF + acoustic (hull noise)', evidenceSize: '54.2 MB', note: 'Low altitude surface vessel. RF signature extremely small. Detected primarily by acoustic hull signature.' },
-    waypoints: [
-      { lat: 55.45000, lon: 8.48800, alt: 3,  heading: 285, tSec: 0  },
-      { lat: 55.45100, lon: 8.48000, alt: 3,  heading: 285, tSec: 10 },
-      { lat: 55.45200, lon: 8.47200, alt: 3,  heading: 285, tSec: 20 },
-      { lat: 55.45268, lon: 8.46400, alt: 3,  heading: 270, tSec: 30 },
-      { lat: 55.45300, lon: 8.45500, alt: 3,  heading: 260, tSec: 40 },
-      { lat: 55.45350, lon: 8.44700, alt: 3,  heading: 250, tSec: 50 },
-      { lat: 55.45450, lon: 8.44000, alt: 3,  heading: 200, tSec: 60 },
-      { lat: 55.45300, lon: 8.43600, alt: 3,  heading: 180, tSec: 70 },
-      { lat: 55.45100, lon: 8.43600, alt: 3,  heading: 165, tSec: 80 },
-    ],
-    durationSec: 80,
-  },
-
   // ── Fixed-wing, hostile (reconnaissance overflight along coast) ──
   esbjerg_fixedwing_hostile: {
     siteId: 'esbjerg',
@@ -2304,83 +2274,12 @@ export const TEMPLATES = {
     durationSec: 60,
   },
 
-  // ── Missile from Baltic (cruise-missile from east, direct attack on port infrastructure) ──
-  esbjerg_missile_hostile: {
-    siteId: 'esbjerg',
-    classification: 'hostile',
-    threat: 'high',
-    platform: 'missile',
-    droneType: 'Cruise missile signature (sea launched)',
-    confidence: 0.92,
-    confidenceTrend: 'Rapid spike 0.28 to 0.92 in 6s',
-    contributingSensors: [
-      { id: 'N16', confidence: 0.94 },
-      { id: 'N14', confidence: 0.93 },
-      { id: 'N13', confidence: 0.90 },
-      { id: 'N10', confidence: 0.88 },
-      { id: 'N08', confidence: 0.85 },
-    ],
-    evidence: { rfCarrier: 'Passive, no active emitter', modality: 'RF + acoustic + visual', evidenceSize: '198.6 MB', note: 'CRITICAL. Sea launched cruise missile signature. Origin bearing east, likely Baltic launch. All response tiers auto notified. Kystvagten handoff in progress.' },
-    waypoints: [
-      { lat: 55.45500, lon: 8.55000, alt: 55, heading: 270, tSec: 0  },
-      { lat: 55.45500, lon: 8.53500, alt: 50, heading: 270, tSec: 3  },
-      { lat: 55.45600, lon: 8.51800, alt: 45, heading: 270, tSec: 6  },
-      { lat: 55.45700, lon: 8.50200, alt: 40, heading: 265, tSec: 10 },
-      { lat: 55.45800, lon: 8.48500, alt: 35, heading: 265, tSec: 14 },
-      { lat: 55.45814, lon: 8.46800, alt: 30, heading: 265, tSec: 18 },
-      { lat: 55.45814, lon: 8.45289, alt: 25, heading: 265, tSec: 22 },  // Direct hit vector on Port Authority
-      { lat: 55.45900, lon: 8.43800, alt: 20, heading: 260, tSec: 26 },
-      { lat: 55.46000, lon: 8.42500, alt: 15, heading: 260, tSec: 28 },
-    ],
-    durationSec: 28,
-  },
-
   // ═══════════════════════════════════════════════════════════════════
   // BILLUND AIRPORT (BLL / EKBI)
   // Runway 09/27 orientation, single strip. Templates model the four
   // primary threat archetypes plus a Billund-specific LEGO/Legoland
   // adjacency scenario. ARP 55.7405, 9.158 verified via Naviair AIP.
   // ═══════════════════════════════════════════════════════════════════
-
-  // ── Quadcopter, hostile (low pass along the southern apron line) ──
-  billund_quad_hostile: {
-    siteId: 'billund',
-    classification: 'hostile',
-    threat: 'high',
-    platform: 'quadcopter',
-    droneType: 'DJI Matrice 300 RTK',
-    confidence: 0.86,
-    confidenceTrend: 'Steady climb 0.51 to 0.86',
-    contributingSensors: [
-      { id: 'BLL-N03', confidence: 0.90 },   // Passenger terminal apron
-      { id: 'BLL-N04', confidence: 0.85 },   // Cargo apron CHBA
-      { id: 'BLL-N08', confidence: 0.79 },   // Runway centre (Core)
-      { id: 'BLL-N07', confidence: 0.72 },   // Runway mid-W
-      { id: 'BLL-N02', confidence: 0.64 },   // S apron W
-    ],
-    evidence: { rfCarrier: '2.412 GHz', rfBandwidth: '20 MHz OFDM', rfMatch: 'OcuSync 89%', modality: 'RF + acoustic + visual', evidenceSize: '31.2 MB', note: 'Quadcopter low pass along the southern apron line, over the CHBA cargo apron and the general-aviation apron. Consistent with tourist / hobbyist NOT complying with restricted airspace, escalated to hostile after refusal to descend.' },
-    waypoints: [
-      { lat: 55.7360, lon: 9.13800, alt: 110, heading:  75, tSec:  0 },   // Enter SW, cruise altitude
-      { lat: 55.7375, lon: 9.14700, alt:  90, heading:  70, tSec:  9 },   // Descend
-      { lat: 55.7378, lon: 9.15000, alt:  75, heading:  75, tSec: 16 },   // LOW over W apron
-      // NOTE 2026-09-22: this track was laid out against Billund asset
-      // positions that were later found to be up to 1.4 km wrong. The
-      // verified passenger terminal sits on the NORTH side
-      // (55.746014, 9.147362); this southern apron line does not pass
-      // over it. The cargo story still holds: the corrected CHBA
-      // terminal and cargo apron are both within ~215 m of this path.
-      // Left as flown rather than re-routed. To make the terminal
-      // overflight real, bend the mid-track north toward 55.7460.
-      { lat: 55.7378, lon: 9.15450, alt:  70, heading:  85, tSec: 24 },   // Along southern apron line
-      { lat: 55.7378, lon: 9.16000, alt:  70, heading:  90, tSec: 34 },   // Over CHBA cargo apron (highlight #3)
-      { lat: 55.7378, lon: 9.16800, alt:  75, heading:  95, tSec: 44 },   // Over GA/business apron
-      { lat: 55.7385, lon: 9.17500, alt:  85, heading: 110, tSec: 52 },   // Bank NE, climbing
-      { lat: 55.7395, lon: 9.18500, alt: 100, heading: 105, tSec: 62 },   // E protrusion pass-through
-      { lat: 55.7400, lon: 9.19200, alt: 115, heading: 100, tSec: 70 },   // Exit E
-      { lat: 55.7400, lon: 9.20500, alt: 125, heading:  95, tSec: 80 },
-    ],
-    durationSec: 80,
-  },
 
   // ── Fixed-wing, hostile (high-alt straight recon pass W to E along runway axis) ──
   billund_fixedwing_hostile: {
@@ -2555,38 +2454,6 @@ export const TEMPLATES = {
     durationSec: 338,
   },
 
-  // ── Cruise missile (low altitude ingress from S, hits runway) ──
-  billund_missile_hostile: {
-    siteId: 'billund',
-    classification: 'hostile',
-    threat: 'high',
-    platform: 'missile',
-    droneType: 'Cruise missile signature (unknown class)',
-    confidence: 0.94,
-    confidenceTrend: 'Rapid spike 0.32 to 0.94 in 5s',
-    contributingSensors: [
-      { id: 'BLL-N02', confidence: 0.96 },
-      { id: 'BLL-N01', confidence: 0.93 },
-      { id: 'BLL-N08', confidence: 0.92 },
-      { id: 'BLL-N06', confidence: 0.89 },
-    ],
-    evidence: { rfCarrier: 'Passive, no active emitter', modality: 'RF + acoustic + visual', evidenceSize: '162 MB', note: 'CRITICAL. Cruise missile signature transiting BLL from S at 40m AGL. Bearing 000° consistent with direct impact on runway 09/27. No transponder, no comms.' },
-    waypoints: [
-      { lat: 55.7180, lon: 9.15800, alt:  40, heading:   0, tSec:  0 },   // ingress from S at low alt
-      { lat: 55.7280, lon: 9.15800, alt:  35, heading:   0, tSec:  6 },
-      { lat: 55.7360, lon: 9.15800, alt:  30, heading:   0, tSec: 12 },
-      { lat: 55.7400, lon: 9.15800, alt:  25, heading:   0, tSec: 18 },   // impact runway centre
-    ],
-    durationSec: 18,
-  },
-
-  // ── LEGO adjacency recon (drone crosses BLL airspace en route to LEGO HQ/Legoland) ──
-  // Unique to Billund: adjacent to strategic Danish enterprise sites.
-  // The drone is not targeting BLL itself; it's transiting BLL sensors
-  // on its way to overfly LEGO HQ (~2km S) and Legoland Resort. Tests
-  // the platform's ability to classify "transit through" vs "targeting"
-  // and to route the alert to LEGO corporate security (out-of-scope
-  // for BLL but relevant for the cross-agency picture).
   // ── Shahed up the spine of Jutland, Billund to Skagen ────────────
   //
   // Enters 5 km west of Billund and runs due north, passing 11 km off
@@ -2771,32 +2638,6 @@ export const TEMPLATES = {
       { lat: 57.7400, lon: 10.5800, alt: 700, heading: 71, tSec: 1836 },
     ],
     durationSec: 1836,
-  },
-
-  billund_lego_recon: {
-    siteId: 'billund',
-    classification: 'unknown',
-    threat: 'medium',
-    platform: 'quadcopter',
-    droneType: 'DJI Mavic 3 (corporate recon suspected)',
-    confidence: 0.71,
-    confidenceTrend: 'Held 0.65 to 0.74',
-    contributingSensors: [
-      { id: 'BLL-N01', confidence: 0.78 },   // SW perimeter (near Legoland vector)
-      { id: 'BLL-N06', confidence: 0.72 },
-      { id: 'BLL-N12', confidence: 0.68 },
-      { id: 'BLL-N02', confidence: 0.61 },
-    ],
-    evidence: { rfCarrier: '2.400 GHz', rfBandwidth: '10 MHz OcuSync', rfMatch: 'DJI Mavic 3 74%', modality: 'RF + visual', evidenceSize: '38.4 MB', note: 'Drone transits BLL sensor coverage briefly on SW vector, exits airspace toward LEGO Group HQ / Legoland Resort. Not targeting airport assets. Alert relevant for LEGO corporate security + Sydøstjyllands Politi.' },
-    waypoints: [
-      { lat: 55.7440, lon: 9.14000, alt: 90, heading: 200, tSec:  0 },   // enter NW
-      { lat: 55.7405, lon: 9.13500, alt: 80, heading: 210, tSec: 12 },   // brief BLL cov crossing
-      { lat: 55.7370, lon: 9.13000, alt: 75, heading: 215, tSec: 22 },
-      { lat: 55.7340, lon: 9.12500, alt: 65, heading: 220, tSec: 32 },   // exit BLL SW
-      { lat: 55.7310, lon: 9.12000, alt: 55, heading: 220, tSec: 42 },   // approach LEGO HQ area (out-of-cov)
-      { lat: 55.7280, lon: 9.11500, alt: 50, heading: 220, tSec: 52 },   // over Legoland vector
-    ],
-    durationSec: 52,
   },
 };
 
@@ -3321,12 +3162,29 @@ function subWaypoints(siteLat, siteLon, bearing, startKm, altStart, altEnd, dura
   }
   return wps;
 }
+// RETIRED 2026-10-22. __isr_altAudit (alt_audit.js) found these drawn
+// underground: alt is height above the ellipsoid, and the ground at
+// these sites sits above the track. Skipped below, so they are neither
+// registered as templates nor offered under Simulate threat. A key comes
+// off this list when its scenario is recreated with the site's measured
+// ground height in alt.
+const RETIRED_SUBSTATION_THREATS = new Set([
+  'energinet_landerupgaard_missile_hostile',
+  'energinet_landerupgaard_quad_hostile',
+  'energinet_kassoe_missile_hostile',
+  'energinet_kassoe_quad_hostile',
+  'energinet_ferslev_missile_hostile',
+  'energinet_ferslev_quad_hostile',
+  'energinet_bjaeverskov_missile_hostile',
+  'energinet_bjaeverskov_quad_hostile',
+  'energinet_hovegaard_missile_hostile',
+]);
 export function makeSubstationThreats(siteId, siteName, siteLat, siteLon, sensorIds) {
   const short = siteName.split(' ')[0];
   const s0 = sensorIds[0] || `${siteId}-N01`;
   const s1 = sensorIds[1] || s0;
   const s2 = sensorIds[2] || s0;
-  return {
+  const threats = {
     [`${siteId}_quad_hostile`]: {
       siteId, classification: 'hostile', threat: 'medium', platform: 'quadcopter',
       droneType: 'Military grade quadcopter, hostile',
@@ -3369,6 +3227,8 @@ export function makeSubstationThreats(siteId, siteName, siteLat, siteLon, sensor
       };
     })(),
   };
+  for (const key of RETIRED_SUBSTATION_THREATS) delete threats[key];
+  return threats;
 }
 
 // Bearing in degrees from point A to point B (0° = north, clockwise)
