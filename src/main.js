@@ -815,6 +815,7 @@ import {
 import { applyBuildingSwap, clearBuildingSwap, footprintsFor, coverageFor, sitesWithFootprints } from './building_footprints.js';
 import { createCoverageTracer, createBoxClipOwner, coverageClipPolygons, coverageRings } from './photoreal_coverage.js';
 import { createAltAudit } from './alt_audit.js';
+import { groundLiftM as _groundLiftM } from './ground_lift.js';
 // Danish imagery over ground where we built the buildings, and nowhere
 // else. Default stays Bing + Google photoreal. See basemap_meshed_sites.js.
 import { createMeshedSiteBasemap } from './basemap_meshed_sites.js';
@@ -19844,7 +19845,10 @@ async function main() {
             + ((window.__isr_airliner_tuning || {}).groundOffsetM
                ?? TEMPLATES[event.templateKey]?.groundOffsetM ?? 0);
         } else {
-          state._absAlt = p.alt;
+          // Drawn height only: p.alt stays the authored height above
+          // ground everywhere else. 0 for every CPH template. See
+          // ground_lift.js.
+          state._absAlt = p.alt + _groundLiftM(event.templateKey);
         }
         // AGL for the orientation rig, which fades its pitch offset out
         // near the ground and cannot read it off the cartographic height.
@@ -20023,7 +20027,7 @@ async function main() {
           // Only corrected for the templates that opted in, so every
           // other drop line keeps the length it has today.
           Cesium.Cartesian3.fromDegrees(p.lon, p.lat,
-            _terrainRel ? (state._terrOff || 0) : 0),
+            _terrainRel ? (state._terrOff || 0) : _groundLiftM(event.templateKey)),
         );
 
         _trailAppendCounter++;
@@ -20668,7 +20672,10 @@ async function main() {
           // Lucas's rule: symbol visible IFF drone inside ANY sensor cov
           // at ANY site. Uniform. Every event type. Every drone.
           const swShouldShow = inCov;
-          sw.billboard.position = Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, pos.alt);
+          // Drawn height only, as for a single track. pos.alt stays the
+          // height above ground used for coverage just above.
+          const _swLift = _groundLiftM(event.templateKey);
+          sw.billboard.position = Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, pos.alt + _swLift);
           // Suppress this drone's own icon while the operator is INSIDE
           // it in first-person POV — otherwise the billboard renders
           // right in front of the camera (disableDepthTestDistance =
@@ -20932,7 +20939,7 @@ async function main() {
           // Post-detection: trail switches to the solid confirmed-path
           // polyline and the dashed trailing line is hidden.
           if (inCov) {
-            sw.trailPositions.push(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, _safeTrailAlt(pos.alt)));
+            sw.trailPositions.push(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, _safeTrailAlt(pos.alt) + _swLift));
             if (sw.trailPositions.length > 400) sw.trailPositions.shift();
             sw.projLine.show = false;
             // Wipe projPositions on re-entry so the NEXT out-of-cov
@@ -20970,7 +20977,7 @@ async function main() {
             if (sw.projPositions.length) sw.projPositions.length = 0;
             sw.projLine.show = false;
           } else {
-            sw.projPositions.push(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, pos.alt));
+            sw.projPositions.push(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, pos.alt + _swLift));
             if (sw.projPositions.length > 300) sw.projPositions.shift();
             sw.projLine.show = sw.projPositions.length >= 2;
           }
