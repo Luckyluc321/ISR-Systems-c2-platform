@@ -2246,6 +2246,39 @@ export const TEMPLATES = {
     durationSec: 80,
   },
 
+  // ── USV, hostile (surface vessel drone, low altitude, along Sønderhavn quay) ──
+  // alt includes the measured ground, 44 m above the ellipsoid
+  // (__isr_altAudit, 2026-10-22), so the boat sits 3 m over it. Exact,
+  // not rounded up like the others, because rounding would float a boat.
+  esbjerg_usv_hostile: {
+    siteId: 'esbjerg',
+    classification: 'hostile',
+    threat: 'high',
+    platform: 'quadcopter',   // rendered as quad for now; USV silhouette is a future icon
+    droneType: 'Unmanned Surface Vessel (USV, small craft)',
+    confidence: 0.71,
+    confidenceTrend: 'Late detection, low RCS on water',
+    contributingSensors: [
+      { id: 'N16', confidence: 0.78 },
+      { id: 'N14', confidence: 0.72 },
+      { id: 'N15', confidence: 0.68 },
+      { id: 'N13', confidence: 0.55 },
+    ],
+    evidence: { rfCarrier: '433 MHz LoRa telemetry', rfMatch: 'Unknown transmitter, 62% pattern match to naval USV comms', modality: 'RF + acoustic (hull noise)', evidenceSize: '54.2 MB', note: 'Low altitude surface vessel. RF signature extremely small. Detected primarily by acoustic hull signature.' },
+    waypoints: [
+      { lat: 55.45000, lon: 8.48800, alt: 47, heading: 285, tSec: 0  },
+      { lat: 55.45100, lon: 8.48000, alt: 47, heading: 285, tSec: 10 },
+      { lat: 55.45200, lon: 8.47200, alt: 47, heading: 285, tSec: 20 },
+      { lat: 55.45268, lon: 8.46400, alt: 47, heading: 270, tSec: 30 },
+      { lat: 55.45300, lon: 8.45500, alt: 47, heading: 260, tSec: 40 },
+      { lat: 55.45350, lon: 8.44700, alt: 47, heading: 250, tSec: 50 },
+      { lat: 55.45450, lon: 8.44000, alt: 47, heading: 200, tSec: 60 },
+      { lat: 55.45300, lon: 8.43600, alt: 47, heading: 180, tSec: 70 },
+      { lat: 55.45100, lon: 8.43600, alt: 47, heading: 165, tSec: 80 },
+    ],
+    durationSec: 80,
+  },
+
   // ── Fixed-wing, hostile (reconnaissance overflight along coast) ──
   esbjerg_fixedwing_hostile: {
     siteId: 'esbjerg',
@@ -2272,6 +2305,39 @@ export const TEMPLATES = {
       { lat: 55.48700, lon: 8.43400, alt: 420, heading: 20,  tSec: 60 },
     ],
     durationSec: 60,
+  },
+
+  // ── Missile from Baltic (cruise-missile from east, direct attack on port infrastructure) ──
+  // alt includes the measured ground, 45 m above the ellipsoid
+  // (__isr_altAudit, 2026-10-22, rounded up to 5 m).
+  esbjerg_missile_hostile: {
+    siteId: 'esbjerg',
+    classification: 'hostile',
+    threat: 'high',
+    platform: 'missile',
+    droneType: 'Cruise missile signature (sea launched)',
+    confidence: 0.92,
+    confidenceTrend: 'Rapid spike 0.28 to 0.92 in 6s',
+    contributingSensors: [
+      { id: 'N16', confidence: 0.94 },
+      { id: 'N14', confidence: 0.93 },
+      { id: 'N13', confidence: 0.90 },
+      { id: 'N10', confidence: 0.88 },
+      { id: 'N08', confidence: 0.85 },
+    ],
+    evidence: { rfCarrier: 'Passive, no active emitter', modality: 'RF + acoustic + visual', evidenceSize: '198.6 MB', note: 'CRITICAL. Sea launched cruise missile signature. Origin bearing east, likely Baltic launch. All response tiers auto notified. Kystvagten handoff in progress.' },
+    waypoints: [
+      { lat: 55.45500, lon: 8.55000, alt: 100, heading: 270, tSec: 0  },
+      { lat: 55.45500, lon: 8.53500, alt: 95,  heading: 270, tSec: 3  },
+      { lat: 55.45600, lon: 8.51800, alt: 90,  heading: 270, tSec: 6  },
+      { lat: 55.45700, lon: 8.50200, alt: 85,  heading: 265, tSec: 10 },
+      { lat: 55.45800, lon: 8.48500, alt: 80,  heading: 265, tSec: 14 },
+      { lat: 55.45814, lon: 8.46800, alt: 75,  heading: 265, tSec: 18 },
+      { lat: 55.45814, lon: 8.45289, alt: 70,  heading: 265, tSec: 22 },  // Direct hit vector on Port Authority
+      { lat: 55.45900, lon: 8.43800, alt: 65,  heading: 260, tSec: 26 },
+      { lat: 55.46000, lon: 8.42500, alt: 60,  heading: 260, tSec: 28 },
+    ],
+    durationSec: 28,
   },
 
   // ═══════════════════════════════════════════════════════════════════

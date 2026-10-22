@@ -23732,7 +23732,9 @@ async function main() {
     ],
     esbjerg: [
       { key: 'esbjerg_quad_hostile', threat: 'Quadcopter, hostile' },
+      { key: 'esbjerg_usv_hostile', threat: 'USV (surface drone), hostile' },
       { key: 'esbjerg_fixedwing_hostile', threat: 'Fixed wing reconnaissance, hostile' },
+      { key: 'esbjerg_missile_hostile', threat: 'Cruise missile from sea, critical', cls: 'critical' },
     ],
     billund: [
       { key: 'billund_fixedwing_hostile', threat: 'Fixed wing recon (E-W runway axis)' },
