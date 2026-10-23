@@ -329,7 +329,10 @@ sensors:
   - { sensor_id: AAR-N03, label: "Quay Front Upper 3", position: { lat: 56.16280, lon: 10.22833 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
   - { sensor_id: AAR-N04, label: "Quay Front Upper 4", position: { lat: 56.16056, lon: 10.22107 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
   - { sensor_id: AAR-N05, label: "Container Yard 1", position: { lat: 56.15584, lon: 10.21986 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
-  - { sensor_id: AAR-N06, label: "Container Yard 2", position: { lat: 56.15225, lon: 10.23881 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+  # Moved 36 m onto the crane quay, under the container cranes, for the
+  # promo shot that looks up from the quay past the cranes (Lucas,
+  # 2026-10-23). Three-eye coverage re-checked after the move.
+  - { sensor_id: AAR-N06, label: "Crane Quay", position: { lat: 56.15247, lon: 10.23838 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
   - { sensor_id: AAR-N07, label: "Container Yard 3", position: { lat: 56.15202, lon: 10.21543 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
   - { sensor_id: AAR-N08, label: "Container Yard 4", position: { lat: 56.14865, lon: 10.23196 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
   - { sensor_id: AAR-N09, label: "Container Yard 5", position: { lat: 56.14843, lon: 10.22309 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }

@@ -18502,6 +18502,46 @@ async function main() {
     const billboard = viewer.entities.add(_droneEntitySpec);
     _billboardRef = billboard;
 
+    // SYMBOL OR MODEL, NEVER BOTH, AND THE MODEL WHEN LOOKING UP.
+    //
+    // A single track's model carries no distance limit, so past the swap
+    // distance the symbol appeared AND the model kept drawing at its
+    // 20 px floor: "renders way too early". From below it was worse: the
+    // symbol is a top-down icon aligned to the flight path, which reads
+    // as pointing at the ground and swings with the camera.
+    //
+    // Opt-in per template (modelSwapM), so every existing track keeps
+    // exactly the behaviour it has. For those that opt in: the model
+    // when the camera is within modelSwapM, or below the aircraft and
+    // within 4 km, which is the zoom from a sensor on the quay straight
+    // up to the drone; the symbol otherwise. Entity.show (the coverage
+    // gate) still decides whether either is drawn at all.
+    const _swapTpl = TEMPLATES[event.templateKey];
+    if (_shouldSwapModel && typeof _swapTpl?.modelSwapM === 'number' && billboard.model && billboard.billboard) {
+      const _swapM = _swapTpl.modelSwapM;
+      const _scratchCam = new Cesium.Cartographic();
+      const _scratchDrone = new Cesium.Cartographic();
+      let _lastT = -1, _lastUse = false;
+      const _useModel = () => {
+        // Once per frame, not once per graphic.
+        const t = viewer.scene.frameState?.frameNumber ?? 0;
+        if (t === _lastT) return _lastUse;
+        _lastT = t;
+        const pos = billboard.position?.getValue?.(viewer.clock.currentTime);
+        const cam = viewer.camera.positionWC;
+        if (!pos || !cam) { _lastUse = false; return false; }
+        const d = Cesium.Cartesian3.distance(cam, pos);
+        if (d <= _swapM) { _lastUse = true; return true; }
+        const ch = Cesium.Cartographic.fromCartesian(cam, undefined, _scratchCam)?.height;
+        const dh = Cesium.Cartographic.fromCartesian(pos, undefined, _scratchDrone)?.height;
+        _lastUse = typeof ch === 'number' && typeof dh === 'number' && ch < dh && d <= 4000;
+        return _lastUse;
+      };
+      billboard.billboard.distanceDisplayCondition = undefined;
+      billboard.billboard.show = new Cesium.CallbackProperty(() => !_useModel(), false);
+      billboard.model.show = new Cesium.CallbackProperty(() => _useModel(), false);
+    }
+
     // Swarm formation — if the template declares template.swarm.formation
     // with size > 1, spawn additional billboards for the non-lead slots.
     // Each slot has { role, offset: { forward, right } } in metres. Positions

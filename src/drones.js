@@ -897,10 +897,11 @@ const _RECON_ROUTE = _reconRouteWaypoints();
 //     it reaches the port, which is the time ISR buys
 //   over the container terminal's east tip, turning down its length
 //   southwest along the terminal, past the largest hangar (AAR-N19)
-//   turning north across the inner basin to the oil terminal pier
-//   ONE FULL LOITER CIRCLE, 280 m radius, over the pier south of
-//     AAR-N18: the four corners of a 560 m square filleted at R are a
-//     true circle, which is why the corners sit where they do
+//   north across the inner basin, straight over the oil terminal pier
+//   out north-east over the water and a wide turn back over the bay
+//   THE LOITER COMES LATE (Lucas, 2026-10-23: not early, it does not
+//     serve the video there): back in over the pier and round it, a
+//     280 m radius loop on the corners of a 560 m square
 //   out northeast over the bay, climbing, leaving coverage
 //
 // It stays over the port and the water. Aarhus city centre is west of
@@ -915,12 +916,14 @@ const _AARHUS_PROBE_ROUTE = (() => {
     { e: 2400,      n:  150,      alt: 750 + g },   // west over the water, entering coverage
     { e: 1500,      n:  450,      alt: 650 + g },   // container terminal east tip, easing down
     { e:  420,      n: -640,      alt: 600 + g },   // down the terminal, past the big hangar
-    { e: C.e + r,   n: C.n - r,   alt: 600 + g },   // loiter, SE corner
-    { e: C.e + r,   n: C.n + r,   alt: 600 + g },   // NE
+    { e: C.e,       n: C.n,       alt: 600 + g },   // straight over the oil pier, no circle yet
+    { e:  900,      n: 1500,      alt: 650 + g },   // out north-east over the water
+    { e: 1900,      n:  900,      alt: 650 + g },   // wide turn back over the bay
+    { e: C.e + r,   n: C.n + r,   alt: 600 + g },   // back in: the loiter, entering at NE
     { e: C.e - r,   n: C.n + r,   alt: 600 + g },   // NW
     { e: C.e - r,   n: C.n - r,   alt: 600 + g },   // SW
-    { e: C.e + r,   n: C.n - r,   alt: 600 + g },   // SE again, circle closed
-    { e: C.e + r,   n: C.n + r,   alt: 620 + g },   // NE, breaking off
+    { e: C.e + r,   n: C.n - r,   alt: 600 + g },   // SE
+    { e: C.e + r,   n: C.n + r,   alt: 620 + g },   // NE again, breaking off
     { e: 1200,      n: 1900,      alt: 750 + g },   // out over the bay, climbing
     { e: 2600,      n: 2800,      alt: 850 + g },   // clear of every sensor ring
   ], { lat0: 56.1508, lon0: 10.2284 });
@@ -1890,7 +1893,7 @@ export const TEMPLATES = {
       rfMatch: 'Loiter signature, no catalogue match',
       modality: 'RF passive + acoustic + visual',
       evidenceSize: '61.3 MB',
-      note: 'Fixed-wing, no transponder, no filed flight. Ingressed over Aarhus Bay at about 800 m, ran the length of the container terminal, then flew one full circle over the oil terminal pier before breaking off northeast over the bay and leaving coverage.',
+      note: 'Fixed-wing, no transponder, no filed flight. Ingressed over Aarhus Bay at about 800 m, ran the length of the container terminal, crossed the oil terminal pier and went out over the bay, then came back to loiter over the pier before breaking off northeast and leaving coverage.',
     },
     // Symbol until the camera is within 700 m, then the 3D model. The
     // fixed-wing default of 1800 m showed the model at every normal zoom
