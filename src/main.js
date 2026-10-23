@@ -23786,7 +23786,7 @@ async function main() {
     // Promo trailer site. One scenario for now: a grey-zone probe, not a
     // strike. See _AARHUS_PROBE_ROUTE in drones.js.
     aarhus_harbour: [
-      { key: 'aarhus_fixedwing_probe', threat: 'Fixed-wing loitering munition', pathLabel: 'Bay ingress, terminal run, loiter over the oil pier', cls: 'recon' },
+      { key: 'aarhus_fixedwing_probe', threat: 'Baykar Sivrisinek', pathLabel: 'Bay ingress, terminal run, loiter over the oil pier', cls: 'recon' },
     ],
     esbjerg: [
       { key: 'esbjerg_quad_hostile', threat: 'Quadcopter, hostile' },
