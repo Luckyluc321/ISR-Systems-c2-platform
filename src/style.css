@@ -10006,3 +10006,11 @@ body.workspace-map-active #receiver-view {
    here so the original .sensor-row rule above is untouched. */
 .sensor-row { grid-template-columns: minmax(40px, max-content) 1fr 40px; }
 .sensor-row .s-lbl { white-space: nowrap; }
+
+/* Decisions section on a live event. The button rows sit inside a
+   .dp-section, which already pads 14 px, so the rows' own padding is
+   taken back to avoid doubling it. Three secondary actions share one
+   row. New selectors only; .dp-actions above is untouched. */
+.dp-decisions .dp-actions { padding: 6px 0 0; }
+.dp-actions.three { grid-template-columns: 1fr 1fr 1fr; }
+

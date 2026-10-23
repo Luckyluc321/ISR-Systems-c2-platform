@@ -27553,18 +27553,25 @@ async function main() {
         </div>
       </div>` : '';
 
+    // DECISIONS. The operator's actions on a live event, as one section
+    // instead of three loose rows (Lucas, 2026-10-23). Escalate is the
+    // full-width first line, so it is never behind a click; the section
+    // starts expanded and collapses like every other. The two Evidence
+    // downloads are gone from the live panel: the same JSON and CSV, and
+    // the PDF, are in the post-incident view, where they are used. Same
+    // buttons and data-actions otherwise, so every handler is unchanged.
+    // The closed-event branch below is untouched.
     const actionsBlock = isActive ? `
-      <div class="dp-actions">
-        <button class="btn danger" data-action="escalate">Escalate</button>
-      </div>
-      <div class="dp-actions">
-        <button class="btn" data-action="runbook">Response Playbook</button>
-        <button class="btn" data-action="download-evidence" data-id="${e.id}">Evidence · JSON</button>
-        <button class="btn" data-action="download-evidence-csv" data-id="${e.id}">Evidence · CSV</button>
-      </div>
-      <div class="dp-actions">
-        <button class="btn" data-action="reclassify">Re-classify</button>
-        <button class="btn" data-action="note">Add Note</button>
+      <div class="dp-section dp-decisions">
+        <div class="dp-section-title">Decisions</div>
+        <div class="dp-actions single">
+          <button class="btn danger" data-action="escalate">Escalate</button>
+        </div>
+        <div class="dp-actions three">
+          <button class="btn" data-action="runbook">Response playbook</button>
+          <button class="btn" data-action="reclassify">Re-classify</button>
+          <button class="btn" data-action="note">Add note</button>
+        </div>
       </div>` : `
       <div class="dp-actions">
         <button class="btn danger" data-action="escalate">Escalate</button>
