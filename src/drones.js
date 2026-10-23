@@ -1868,19 +1868,17 @@ export const TEMPLATES = {
   // of civil broadcast signals (DVB-T, FM) bouncing off the target. Backed by
   // SATCOM downlink capture on Ku/Ka band (needs wideband SDR). Lower confidence
   // than close-range detection because signal is weak and cross-section is small.
-  // See _AARHUS_PROBE_ROUTE. The type reads "Baykar Sivrisinek" (Lucas,
-  // 2026-10-23, video thread): the fusion graphic's output card names it
-  // so, and the dissolve from the graphic into this event card has to
-  // land on identical text. Class, count, speed and confidence match that
-  // card too (Hostile · Medium, 1, 130 km/h, 0.76).
+  // See _AARHUS_PROBE_ROUTE. The type is deliberately unnamed: naming
+  // an airframe is the neural net's job, and the model used to render it
+  // is a Baykar design, which must not be presented as the attacker.
   aarhus_fixedwing_probe: {
     coverageGated: true,
     siteId: 'aarhus_harbour',
     classification: 'hostile',
     threat: 'medium',
     platform: 'fixed-wing',
-    droneType: 'Baykar Sivrisinek',
-    confidence: 0.76,
+    droneType: 'Fixed-wing loitering munition, unidentified',
+    confidence: 0.64,
     confidenceTrend: 'Detected low over the bay, held by the container terminal sensors',
     // The five the route passes nearest, measured against the route.
     contributingSensors: [
@@ -1892,7 +1890,7 @@ export const TEMPLATES = {
     ],
     evidence: {
       rfCarrier: 'No control uplink observed, datalink bursts only',
-      rfMatch: 'Sivrisinek datalink signature 76%',
+      rfMatch: 'Loiter signature, no catalogue match',
       modality: 'RF passive + acoustic + visual',
       evidenceSize: '61.3 MB',
       note: 'Fixed-wing, no transponder, no filed flight. Ingressed over Aarhus Bay at about 800 m, ran the length of the container terminal, crossed the oil terminal pier and went out over the bay, then came back to loiter over the pier before breaking off northeast and leaving coverage.',
