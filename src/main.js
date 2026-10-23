@@ -23355,6 +23355,18 @@ async function main() {
       pitch: -45,
       duration: 3.0,
     },
+    // The harbour is about 3.7 km tip to tip, so the default 2 km
+    // substation framing would open on a single quay.
+    aarhus_harbour: {
+      type: 'site',
+      siteId: 'aarhus_harbour',
+      centerLon: 10.2284,
+      centerLat: 56.1508,
+      range: 7000,
+      heading: 0,
+      pitch: -45,
+      duration: 3.0,
+    },
     billund: {
       type: 'site',
       siteId: 'billund',
@@ -23729,6 +23741,11 @@ async function main() {
       { key: 'cph_quad_recon_apron', threat: 'Quadcopter recon', pathLabel: 'Cargo apron loiter' },
       { key: 'cph_dji_flight_demo', threat: 'DJI Air 3', pathLabel: 'Airframe demonstration, central apron' },
       { key: 'cph_dji_hobbyist', threat: 'DJI hobbyist', pathLabel: 'Perimeter stray' },
+    ],
+    // Promo trailer site. One scenario for now: a grey-zone probe, not a
+    // strike. See _AARHUS_PROBE_ROUTE in drones.js.
+    aarhus_harbour: [
+      { key: 'aarhus_fixedwing_probe', threat: 'Fixed-wing loitering munition', pathLabel: 'Bay ingress, terminal run, loiter over the oil pier', cls: 'recon' },
     ],
     esbjerg: [
       { key: 'esbjerg_quad_hostile', threat: 'Quadcopter, hostile' },

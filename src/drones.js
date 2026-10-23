@@ -758,11 +758,8 @@ const _SHOWCASE_PATH = _showcaseWaypoints();
 // instead of 6. The flight model differentiates this path, so a
 // staircase in the altitude becomes a staircase in the pitch.
 function _reconRouteWaypoints() {
-  const D = Math.PI / 180, V = 36, R = 280, EMIT = 0.25;
-  const LAT0 = 55.618, LON0 = 12.656;
-  const M_LAT = 111320, M_LON = 111320 * Math.cos(LAT0 * D);
   // metres east, north of the airport centre, and the altitude to hold
-  const P = [
+  return _filletedRoute([
     { e: 3200, n:  150, alt: 600 },   // start, east, outside the perimeter
     { e: 2300, n:  150, alt: 620 },   // steady west, entering coverage
     { e: 1600, n: -500, alt: 720 },   // soft LEFT, the track bends south
@@ -770,7 +767,18 @@ function _reconRouteWaypoints() {
     { e: -150, n:   60, alt: 900 },   // across the middle of the site
     { e:  700, n: -900, alt: 820 },   // coming about to the south
     { e: 3000, n: -350, alt: 520 },   // exit east over the Oresund
-  ];
+  ], { lat0: 55.618, lon0: 12.656 });
+}
+
+// The builder above, for any site. Key points in metres east and north
+// of (lat0, lon0) with the altitude to hold at each; turns filleted at
+// radius R, emitted every EMIT seconds at V m/s. Extracted unchanged so
+// a second fixed-wing route (Aarhus) flies the same physics; the CPH
+// route it was lifted from is byte-identical, checked when extracted.
+function _filletedRoute(P, { lat0, lon0, V = 36, R = 280, EMIT = 0.25 }) {
+  const D = Math.PI / 180;
+  const LAT0 = lat0, LON0 = lon0;
+  const M_LAT = 111320, M_LON = 111320 * Math.cos(LAT0 * D);
   const sub = (a, b) => ({ e: a.e - b.e, n: a.n - b.n });
   const len = (v) => Math.hypot(v.e, v.n);
   const unit = (v) => { const L = len(v); return { e: v.e / L, n: v.n / L }; };
@@ -813,9 +821,27 @@ function _reconRouteWaypoints() {
   // Each key point located by its closest approach on the flown path, so
   // the climb between two of them is spread over the distance actually
   // flown rather than the straight line between them.
-  const keyS = P.map((kp) => {
+  //
+  // ONLY ON ITS OWN STRETCH: the line leading into that point's turn and
+  // the turn itself. A route that passes the same corner twice (the
+  // Aarhus loiter circle) otherwise matched a point to whichever pass
+  // came closer, the altitude profile ran backwards between them, and
+  // the aircraft jumped 20 m in a quarter second. On a route that never
+  // revisits a point the closest approach already lies on its own
+  // stretch, so the CPH recon route is byte-identical (checked).
+  const segStart = [];
+  { let acc = 0; for (const L of segLen) { segStart.push(acc); acc += L; } }
+  // Key point i (1..n-2) owns line segment 2(i-1) and arc segment 2i-1.
+  const windowFor = (i) => {
+    if (i <= 0 || i >= P.length - 1) return [0, total];
+    const lineIdx = 2 * (i - 1), arcIdx = 2 * i - 1;
+    return [segStart[lineIdx], segStart[arcIdx] + segLen[arcIdx]];
+  };
+  const keyS = P.map((kp, i) => {
+    const [lo, hi] = windowFor(i);
     let best = Infinity, bs = 0;
     for (let s = 0; s <= total; s += 5) {
+      if (s < lo || s > hi) continue;
       const q = at(s); const d = Math.hypot(q.e - kp.e, q.n - kp.n);
       if (d < best) { best = d; bs = s; }
     }
@@ -844,6 +870,60 @@ function _reconRouteWaypoints() {
   return W;
 }
 const _RECON_ROUTE = _reconRouteWaypoints();
+
+// ── AARHUS HARBOUR: A PROBE, NOT A STRIKE ─────────────────────────
+//
+// Built for the promo trailer (Lucas, 2026-10-23). The story is grey-zone
+// probing: it maps the port, loiters long enough to time the response,
+// and leaves once it has been seen. The intent is never stated anywhere
+// in the template; the agent reads it from the dwell.
+//
+// Same airframe, speed and turn radius as the CPH recon route, built by
+// the same _filletedRoute. Metres east and north of the site centroid
+// (sites/aarhus_harbour.yaml coordinates), altitudes ABOVE THE ELLIPSOID:
+// 42 m of Aarhus ground (geoid plus a few metres of quay) is added to
+// every height below, so "300 + 42" is 300 m over the water.
+//
+// RECON HEIGHTS, 300 TO 850 m (Lucas, 2026-10-23). A first version flew
+// 60 to 150 m, which is not how a fixed-wing maps a port, and put it
+// inside the 1800 m symbol-to-model swap at every normal zoom. These are
+// the heights the CPH Mohajer-2 flies, where that swap is tuned, and all
+// under the passive sensors' 1500 m ceiling, so it is held throughout.
+// Climb stays under 6 m/s, inside the airframe's limit at 36 m/s.
+//
+//   start 3.2 km east over Aarhus Bay, outside every sensor ring
+//   west, low over the water: detected by the east tip sensors before
+//     it reaches the port, which is the time ISR buys
+//   over the container terminal's east tip, turning down its length
+//   southwest along the terminal, past the largest hangar (AAR-N19)
+//   turning north across the inner basin to the oil terminal pier
+//   ONE FULL LOITER CIRCLE, 280 m radius, over the pier south of
+//     AAR-N18: the four corners of a 560 m square filleted at R are a
+//     true circle, which is why the corners sit where they do
+//   out northeast over the bay, climbing, leaving coverage
+//
+// It stays over the port and the water. Aarhus city centre is west of
+// the site and nothing here goes west of the oil terminal pier.
+const _AAR_GROUND_M = 42;
+const _AARHUS_PROBE_ROUTE = (() => {
+  const g = _AAR_GROUND_M;
+  const C = { e: -211, n: 412 };            // loiter centre, oil terminal pier
+  const r = 280;                            // must equal the builder's R
+  return _filletedRoute([
+    { e: 3200,      n:    0,      alt: 300 + g },   // start, over the bay
+    { e: 2400,      n:  150,      alt: 300 + g },   // west over the water, entering coverage
+    { e: 1500,      n:  450,      alt: 450 + g },   // container terminal east tip, climbing
+    { e:  420,      n: -640,      alt: 500 + g },   // down the terminal, past the big hangar
+    { e: C.e + r,   n: C.n - r,   alt: 600 + g },   // loiter, SE corner
+    { e: C.e + r,   n: C.n + r,   alt: 600 + g },   // NE
+    { e: C.e - r,   n: C.n + r,   alt: 600 + g },   // NW
+    { e: C.e - r,   n: C.n - r,   alt: 600 + g },   // SW
+    { e: C.e + r,   n: C.n - r,   alt: 600 + g },   // SE again, circle closed
+    { e: C.e + r,   n: C.n + r,   alt: 620 + g },   // NE, breaking off
+    { e: 1200,      n: 1900,      alt: 750 + g },   // out over the bay, climbing
+    { e: 2600,      n: 2800,      alt: 850 + g },   // clear of every sensor ring
+  ], { lat0: 56.1508, lon0: 10.2284 });
+})();
 
 export const TEMPLATES = {
   cph_quad_hostile: {
@@ -1784,6 +1864,36 @@ export const TEMPLATES = {
   // of civil broadcast signals (DVB-T, FM) bouncing off the target. Backed by
   // SATCOM downlink capture on Ku/Ka band (needs wideband SDR). Lower confidence
   // than close-range detection because signal is weak and cross-section is small.
+  // See _AARHUS_PROBE_ROUTE. The type is deliberately unnamed: naming
+  // an airframe is the neural net's job, and the model used to render it
+  // is a Baykar design, which must not be presented as the attacker.
+  aarhus_fixedwing_probe: {
+    coverageGated: true,
+    siteId: 'aarhus_harbour',
+    classification: 'hostile',
+    threat: 'medium',
+    platform: 'fixed-wing',
+    droneType: 'Fixed-wing loitering munition, unidentified',
+    confidence: 0.64,
+    confidenceTrend: 'Detected low over the bay, held by the container terminal sensors',
+    // The five the route passes nearest, measured against the route.
+    contributingSensors: [
+      { id: 'AAR-N08', confidence: 0.71 },   // 16 m
+      { id: 'AAR-N05', confidence: 0.68 },   // 72 m
+      { id: 'AAR-N18', confidence: 0.66 },   // 98 m, middle pier tip
+      { id: 'AAR-N17', confidence: 0.63 },   // 110 m
+      { id: 'AAR-N16', confidence: 0.58 },   // 253 m
+    ],
+    evidence: {
+      rfCarrier: 'No control uplink observed, datalink bursts only',
+      rfMatch: 'Loiter signature, no catalogue match',
+      modality: 'RF passive + acoustic + visual',
+      evidenceSize: '61.3 MB',
+      note: 'Fixed-wing, no transponder, no filed flight. Ingressed over Aarhus Bay at about 300 m, ran the length of the container terminal, then flew one full circle over the oil terminal pier before breaking off northeast over the bay and leaving coverage.',
+    },
+    waypoints: _AARHUS_PROBE_ROUTE,
+    durationSec: Math.round(_AARHUS_PROBE_ROUTE[_AARHUS_PROBE_ROUTE.length - 1].tSec),
+  },
   cph_recon_hostile: {
     // Approaches from 3.2 km east, outside the perimeter AND outside
     // sensor coverage, so it must not be marked detected at spawn. Same

@@ -1,0 +1,381 @@
+# Aarhus Harbour site manifest
+# Wire contract: docs/integration-contracts.md Section 3 "Site definition"
+# Flow doc:      docs/sites/aarhus-harbour.md
+#
+# Built 2026-10-22 for the promo trailer, alongside CPH. Denmark's largest
+# container port, with the ferry terminal, the oil terminal and the inner
+# city quays inside one boundary.
+
+site_id: aarhus_harbour
+label: Aarhus Harbour
+code: AAR
+tenant: op-aarhus-port
+site_type: port
+# SIMULATED, like every shipped site. See cph.yaml for why this field
+# exists at all.
+mode: sim
+coordinates:
+  lat: 56.1508
+  lon: 10.2284
+
+domain_scope:
+  - maritime
+  - ground
+
+# Traced by Lucas on 2026-10-22 inside the platform (shift-click tracer,
+# src/photoreal_coverage.js), in three passes: the outer loop, then the
+# inner edge of the northern basin, then the indentation at the city
+# quay. 273 vertices after an 8 m simplification, 3.48 km2, no
+# self-intersections (checked). The south edge crosses the harbour
+# entrance over water, from the south quay to the container pier, which
+# is normal for a port boundary. Where the northern basin meets the city
+# quay, a 20 m strip of water along 600 m of quay is narrowed to a 4 m
+# corridor so the two edges never cross; no sensor is placed within
+# 25 m of it.
+boundary:
+  - [10.225835, 56.169555]
+  - [10.222755, 56.169564]
+  - [10.221294, 56.168083]
+  - [10.218964, 56.165511]
+  - [10.217885, 56.164258]
+  - [10.217134, 56.163583]
+  - [10.219402, 56.162266]
+  - [10.216453, 56.160676]
+  - [10.215673, 56.160372]
+  - [10.214791, 56.15995]
+  - [10.213765, 56.158025]
+  - [10.213657, 56.152469]
+  - [10.215739, 56.151444]
+  - [10.215837, 56.151233]
+  - [10.21416, 56.149583]
+  - [10.213133, 56.148226]
+  - [10.209721, 56.14494]
+  - [10.209228, 56.144032]
+  - [10.209175, 56.143855]
+  - [10.209198, 56.143583]
+  - [10.209441, 56.143036]
+  - [10.209726, 56.14267]
+  - [10.210087, 56.142353]
+  - [10.210301, 56.142235]
+  - [10.21087, 56.141962]
+  - [10.211202, 56.141899]
+  - [10.210309, 56.141147]
+  - [10.209721, 56.141088]
+  - [10.20891, 56.141186]
+  - [10.208573, 56.141156]
+  - [10.207765, 56.140193]
+  - [10.208921, 56.139864]
+  - [10.208628, 56.139364]
+  - [10.211467, 56.138675]
+  - [10.211504, 56.138297]
+  - [10.213397, 56.136975]
+  - [10.215032, 56.1376]
+  - [10.215442, 56.137353]
+  - [10.216284, 56.137746]
+  - [10.217032, 56.137678]
+  - [10.218033, 56.138062]
+  - [10.21823, 56.13851]
+  - [10.220608, 56.139505]
+  - [10.221359, 56.139839]
+  - [10.221581, 56.139971]
+  - [10.227216, 56.139555]
+  - [10.227727, 56.139666]
+  - [10.246118, 56.147269]
+  - [10.250451, 56.14912]
+  - [10.254892, 56.150406]
+  - [10.254935, 56.150502]
+  - [10.254401, 56.151076]
+  - [10.25545, 56.152254]
+  - [10.255388, 56.152323]
+  - [10.256714, 56.153911]
+  - [10.256693, 56.153975]
+  - [10.256594, 56.154007]
+  - [10.256491, 56.153983]
+  - [10.254536, 56.151672]
+  - [10.252871, 56.152068]
+  - [10.253629, 56.153157]
+  - [10.253532, 56.153204]
+  - [10.253451, 56.153198]
+  - [10.252456, 56.152182]
+  - [10.251544, 56.152439]
+  - [10.251131, 56.152055]
+  - [10.250815, 56.152123]
+  - [10.25048, 56.152277]
+  - [10.250452, 56.152402]
+  - [10.250777, 56.153001]
+  - [10.250728, 56.153043]
+  - [10.250635, 56.15304]
+  - [10.250243, 56.152378]
+  - [10.250514, 56.152148]
+  - [10.251085, 56.151981]
+  - [10.251148, 56.151758]
+  - [10.250927, 56.151594]
+  - [10.250476, 56.151609]
+  - [10.249592, 56.151585]
+  - [10.24932, 56.151532]
+  - [10.249106, 56.151338]
+  - [10.248803, 56.151217]
+  - [10.247824, 56.152066]
+  - [10.247888, 56.152237]
+  - [10.248582, 56.152618]
+  - [10.250398, 56.15383]
+  - [10.250237, 56.154145]
+  - [10.246539, 56.157951]
+  - [10.246192, 56.158105]
+  - [10.24499, 56.158447]
+  - [10.244908, 56.158403]
+  - [10.244936, 56.158343]
+  - [10.246146, 56.15803]
+  - [10.245682, 56.157744]
+  - [10.246102, 56.157542]
+  - [10.23666, 56.15163]
+  - [10.232361, 56.148875]
+  - [10.231896, 56.149099]
+  - [10.231423, 56.148804]
+  - [10.231304, 56.148849]
+  - [10.231104, 56.149021]
+  - [10.230989, 56.149012]
+  - [10.231158, 56.148837]
+  - [10.232019, 56.146574]
+  - [10.231425, 56.146348]
+  - [10.23073, 56.147383]
+  - [10.230597, 56.14734]
+  - [10.23135, 56.146311]
+  - [10.219354, 56.14165]
+  - [10.219026, 56.141848]
+  - [10.218064, 56.142215]
+  - [10.218911, 56.142958]
+  - [10.223141, 56.146385]
+  - [10.222521, 56.14662]
+  - [10.22204, 56.147155]
+  - [10.224253, 56.148983]
+  - [10.224172, 56.150238]
+  - [10.224689, 56.150276]
+  - [10.226638, 56.149715]
+  - [10.226729, 56.149787]
+  - [10.227078, 56.149646]
+  - [10.231668, 56.152507]
+  - [10.230824, 56.152905]
+  - [10.230783, 56.153242]
+  - [10.23093, 56.1534]
+  - [10.232507, 56.154197]
+  - [10.233715, 56.15505]
+  - [10.234362, 56.155415]
+  - [10.234514, 56.155969]
+  - [10.234277, 56.156478]
+  - [10.234229, 56.156683]
+  - [10.23355, 56.157147]
+  - [10.231658, 56.158613]
+  - [10.231894, 56.158889]
+  - [10.232186, 56.159403]
+  - [10.232198, 56.160159]
+  - [10.231911, 56.160564]
+  - [10.231468, 56.161057]
+  - [10.231355, 56.161117]
+  - [10.231301, 56.161068]
+  - [10.231979, 56.160193]
+  - [10.23203, 56.159489]
+  - [10.231626, 56.158799]
+  - [10.229494, 56.157316]
+  - [10.227997, 56.155628]
+  - [10.225979, 56.155338]
+  - [10.225929, 56.155352]
+  - [10.227968, 56.157666]
+  - [10.226659, 56.157932]
+  - [10.226463, 56.158004]
+  - [10.226397, 56.157979]
+  - [10.226403, 56.157889]
+  - [10.226482, 56.157872]
+  - [10.226507, 56.157902]
+  - [10.226611, 56.157875]
+  - [10.222257, 56.152973]
+  - [10.221168, 56.151393]
+  - [10.219654, 56.149898]
+  - [10.215366, 56.146672]
+  - [10.213836, 56.145421]
+  - [10.21361, 56.145552]
+  - [10.213681, 56.145644]
+  - [10.213349, 56.145775]
+  - [10.216328, 56.148191]
+  - [10.21631, 56.148266]
+  - [10.214589, 56.148933]
+  - [10.214399, 56.148808]
+  - [10.214195, 56.148876]
+  - [10.214247, 56.148929]
+  - [10.214169, 56.148974]
+  - [10.213984, 56.1488]
+  - [10.213807, 56.148872]
+  - [10.215697, 56.150771]
+  - [10.216113, 56.150964]
+  - [10.218985, 56.151525]
+  - [10.220585, 56.152733]
+  - [10.220496, 56.152773]
+  - [10.218294, 56.152356]
+  - [10.218189, 56.152421]
+  - [10.221319, 56.154915]
+  - [10.222661, 56.156429]
+  - [10.222781, 56.156515]
+  - [10.222749, 56.15657]
+  - [10.222582, 56.156551]
+  - [10.222577, 56.156495]
+  - [10.221659, 56.155462]
+  - [10.221124, 56.155596]
+  - [10.222047, 56.156641]
+  - [10.220493, 56.157071]
+  - [10.220089, 56.15697]
+  - [10.219387, 56.15604]
+  - [10.21944, 56.155871]
+  - [10.218143, 56.154284]
+  - [10.216153, 56.152738]
+  - [10.214723, 56.152066]
+  - [10.213722, 56.152469]
+  - [10.21383, 56.158025]
+  - [10.214262, 56.158202]
+  - [10.216554, 56.15788]
+  - [10.216844, 56.158718]
+  - [10.216759, 56.158758]
+  - [10.216834, 56.158954]
+  - [10.216931, 56.158956]
+  - [10.217189, 56.158837]
+  - [10.216963, 56.158258]
+  - [10.217101, 56.158249]
+  - [10.218517, 56.157561]
+  - [10.220272, 56.158237]
+  - [10.220305, 56.158301]
+  - [10.21652, 56.160145]
+  - [10.21647, 56.160207]
+  - [10.218098, 56.161079]
+  - [10.220492, 56.159952]
+  - [10.220241, 56.159809]
+  - [10.220585, 56.159631]
+  - [10.221126, 56.159659]
+  - [10.221862, 56.159321]
+  - [10.221985, 56.159335]
+  - [10.222299, 56.159543]
+  - [10.22226, 56.159648]
+  - [10.222303, 56.159775]
+  - [10.222116, 56.159796]
+  - [10.222055, 56.159883]
+  - [10.222765, 56.16003]
+  - [10.22278, 56.159981]
+  - [10.224039, 56.160255]
+  - [10.224013, 56.160292]
+  - [10.223772, 56.160319]
+  - [10.223583, 56.160558]
+  - [10.224757, 56.160841]
+  - [10.224545, 56.161087]
+  - [10.226058, 56.161442]
+  - [10.226084, 56.161532]
+  - [10.22225, 56.163338]
+  - [10.224182, 56.164385]
+  - [10.224981, 56.163994]
+  - [10.224416, 56.163636]
+  - [10.224428, 56.163528]
+  - [10.224607, 56.163454]
+  - [10.226227, 56.163419]
+  - [10.226452, 56.163308]
+  - [10.22643, 56.163281]
+  - [10.226686, 56.162975]
+  - [10.226778, 56.162955]
+  - [10.226966, 56.163066]
+  - [10.228901, 56.162156]
+  - [10.229022, 56.161783]
+  - [10.228969, 56.161775]
+  - [10.228975, 56.161729]
+  - [10.229053, 56.161705]
+  - [10.229145, 56.161719]
+  - [10.229189, 56.161758]
+  - [10.229106, 56.161839]
+  - [10.229077, 56.162035]
+  - [10.229129, 56.162072]
+  - [10.228963, 56.162604]
+  - [10.22909, 56.162985]
+  - [10.229196, 56.163152]
+  - [10.229103, 56.16323]
+  - [10.229185, 56.163411]
+  - [10.229261, 56.163389]
+  - [10.229411, 56.163793]
+  - [10.230051, 56.164129]
+  - [10.229964, 56.164196]
+  - [10.230213, 56.164317]
+  - [10.230309, 56.164263]
+  - [10.231418, 56.164864]
+  - [10.231347, 56.164925]
+  - [10.231569, 56.165053]
+  - [10.231673, 56.165029]
+  - [10.232639, 56.165544]
+  - [10.228715, 56.167436]
+  - [10.22685, 56.168286]
+
+# 17 sensors, computed against the THREE-EYE policy (same as
+# odense.yaml and cph.yaml): every point inside the boundary is within
+# 1000 m of at least three nodes. Greedy set cover over a 17 m sample
+# grid (12,096 points), candidates on a 25 m grid INSIDE THE BOUNDARY
+# only and at least 25 m from its edge, 500 m MINIMUM SEPARATION (solved
+# at 505 m so the platform's own spherical distance also reads 500+).
+# Result: 100% of the site at three or more eyes. Solver:
+# scripts/three-eye-solver.py. Ids carry the site prefix, as Billund's
+# BLL- do: bare N01-N16 collided with CPH's N-ids, and the incident report
+# looks a sensor up by id across every site.
+#
+# Labels follow the four zones of the 2026-04 deployment plan for the
+# port. That plan has 105 nodes for a denser, multi-modality build; this
+# is the three-eye minimum. Positions are computed, not surveyed: some
+# may land on a crane rail or a roof edge, and each needs an eye before
+# hardware is ordered.
+sensors:
+  - { sensor_id: AAR-N01, label: "Quay Front Upper 1", position: { lat: 56.16909, lon: 10.22309 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+  - { sensor_id: AAR-N02, label: "Quay Front Upper 2", position: { lat: 56.16505, lon: 10.21906 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+  - { sensor_id: AAR-N03, label: "Quay Front Upper 3", position: { lat: 56.16280, lon: 10.22833 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+  - { sensor_id: AAR-N04, label: "Quay Front Upper 4", position: { lat: 56.16056, lon: 10.22107 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+  - { sensor_id: AAR-N05, label: "Container Yard 1", position: { lat: 56.15584, lon: 10.21986 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+  - { sensor_id: AAR-N06, label: "Container Yard 2", position: { lat: 56.15225, lon: 10.23881 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+  - { sensor_id: AAR-N07, label: "Container Yard 3", position: { lat: 56.15202, lon: 10.21543 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+  - { sensor_id: AAR-N08, label: "Container Yard 4", position: { lat: 56.14865, lon: 10.23196 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+  - { sensor_id: AAR-N09, label: "Container Yard 5", position: { lat: 56.14843, lon: 10.22309 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+  - { sensor_id: AAR-N10, label: "Lower Port and Quay 1", position: { lat: 56.14596, lon: 10.21623 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+  - { sensor_id: AAR-N11, label: "Lower Port and Quay 2", position: { lat: 56.14439, lon: 10.22712 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+  - { sensor_id: AAR-N12, label: "Lower Port and Quay 3", position: { lat: 56.14281, lon: 10.21018 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+  - { sensor_id: AAR-N13, label: "Lower Port and Quay 4", position: { lat: 56.14147, lon: 10.21825 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+  - { sensor_id: AAR-N14, label: "Lower Port and Quay 5", position: { lat: 56.13832, lon: 10.21220 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+  - { sensor_id: AAR-N15, label: "East Tip Open Cargo 1", position: { lat: 56.15517, lon: 10.24526 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+  - { sensor_id: AAR-N16, label: "East Tip Open Cargo 2", position: { lat: 56.15180, lon: 10.25293 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+  - { sensor_id: AAR-N17, label: "East Tip Open Cargo 3", position: { lat: 56.14955, lon: 10.24567 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+# Added on request (Lucas, 2026-10-22) at the tip of the middle pier,
+# the oil terminal pier. Outside the solver: the site was already at
+# 100% three-eye without it. It sits 472 m from AAR-N04 and 479 m from
+# AAR-N05, under the 500 m separation the solver keeps, accepted for
+# coverage of the pier head.
+  - { sensor_id: AAR-N18, label: "Middle Pier Tip", position: { lat: 56.15775, lon: 10.22679 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+# Added on request (Lucas, 2026-10-22), shift-clicked on the map just
+# east of the largest hangar on the container terminal. Outside the
+# solver, like AAR-N18. Nearest: AAR-N11 543 m, AAR-N08 600 m.
+  - { sensor_id: AAR-N19, label: "Container Terminal Hangar East", position: { lat: 56.14370, lon: 10.23580 }, coverage_radius_m: 1000, modalities: [RF, Acoustic, Visual], status: online, hardware: "Radxa Rock 4SE", detectionsLast24h: 0, issues: null }
+
+sensorsOnline: 19
+sensorsTotal: 19
+stats:
+  flaggedEvents24h: 0
+  hostileEvents24h: 0
+  falseAlarms24h: 0
+
+# Aarhus is Østjyllands Politi (hovedstation Ridderstræde 1, Aarhus C,
+# already in receiver_bases.js). Beredskabsstyrelsen Midtjylland sits in
+# Herning. Maritime response mirrors Esbjerg.
+receivers:
+  # Actors (maritime + industrial)
+  - { id: politi-ostjyl,          mode: actor,    role: primary-response,    tier: 1 }
+  - { id: brs-herning,            mode: actor,    role: emergency-response,  tier: 2 }
+  - { id: sov-frederikshavn,      mode: actor,    role: maritime-response,   tier: 3 }
+  - { id: agency-sof,             mode: actor,    role: regulator,           tier: 3 }
+  - { id: kom-aarhus,             mode: actor,    role: municipal-crisis,    tier: 4 }
+  # Observers (in the loop, no CTAs)
+  - { id: rigspoliti,             mode: observer }
+  - { id: pet,                    mode: observer }
+  - { id: forsvaret,              mode: observer }
+  - { id: fe,                     mode: observer }
+  - { id: min-just,               mode: observer }
+  - { id: min-fors,               mode: observer }
+  # Conditional observers (auto-added only on matching condition)
+  - { id: region-midt,            mode: observer, condition: casualty-scenario }
+  - { id: brs-kemisk,             mode: observer, condition: cbrn-threat }

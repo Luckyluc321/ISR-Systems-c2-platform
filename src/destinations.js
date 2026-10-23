@@ -270,6 +270,80 @@ const DESTINATIONS = [
   // canonical; this inline copy is removed.
 
   // ═══════════════════════════════════════════════════════════
+  // AARHUS HARBOUR
+  // ═══════════════════════════════════════════════════════════
+  // Same structure as Esbjerg, the other port. Local police is
+  // Østjyllands Politi (hovedstation Ridderstræde 1, Aarhus C, see
+  // receiver_bases.js). Site personnel are named for the site, not the
+  // port company, until the port agrees to appear by name. Tier 5 NORDEFCO
+  // comes from the universal generator further down, as for Esbjerg.
+
+  // Tier 1, site personnel
+  { id: 'aar-t1-sec-ops', siteId: 'aarhus_harbour', tier: 1, type: 'internal',
+    name: 'Aarhus Harbour Security Operations Centre',
+    contactMethods: ['in-app', 'sms'], availabilityStatus: 'on-shift' },
+  { id: 'aar-t1-duty', siteId: 'aarhus_harbour', tier: 1, type: 'internal',
+    name: 'Aarhus Harbour Duty Officer',
+    contactMethods: ['phone', 'sms'], availabilityStatus: 'on-shift' },
+  { id: 'aar-t1-control', siteId: 'aarhus_harbour', tier: 1, type: 'internal',
+    name: 'Harbour Control Room',
+    contactMethods: ['in-app', 'phone'], availabilityStatus: 'on-shift' },
+  { id: 'aar-t1-terminal', siteId: 'aarhus_harbour', tier: 1, type: 'internal',
+    name: 'Container Terminal Operations Centre',
+    contactMethods: ['in-app', 'phone'], availabilityStatus: 'on-shift' },
+  // Tier 1, integrated systems
+  { id: 'aar-sys-cameras', siteId: 'aarhus_harbour', tier: 1, type: 'system',
+    name: 'Aarhus Harbour Camera Surveillance System',
+    contactMethods: ['webhook'], availabilityStatus: 'on-shift' },
+  { id: 'aar-sys-broker', siteId: 'aarhus_harbour', tier: 1, type: 'system',
+    name: 'Aarhus Harbour Operations Data Broker',
+    contactMethods: ['mqtt'], availabilityStatus: 'on-shift' },
+
+  // Tier 2, local law enforcement + maritime coordination
+  { id: 'aar-t2-politi', siteId: 'aarhus_harbour', tier: 2, type: 'agency',
+    name: 'Østjyllands Politi',
+    contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
+  { id: 'aar-t2-pet', siteId: 'aarhus_harbour', tier: 2, type: 'agency',
+    name: 'PET · Operations, Politiets Efterretningstjeneste',
+    contactMethods: ['encrypted-email', 'phone'], availabilityStatus: 'on-shift' },
+  { id: 'aar-sys-vts', siteId: 'aarhus_harbour', tier: 2, type: 'system',
+    name: 'Vessel Traffic Services',
+    contactMethods: ['api'], availabilityStatus: 'on-shift' },
+
+  // Tier 3, national authorities
+  { id: 'aar-t3-rigspoliti', siteId: 'aarhus_harbour', tier: 3, type: 'agency',
+    name: 'Rigspolitiet',
+    contactMethods: ['api', 'encrypted-email'], availabilityStatus: 'on-shift' },
+  { id: 'aar-t3-fe', siteId: 'aarhus_harbour', tier: 3, type: 'agency',
+    name: 'Forsvarets Efterretningstjeneste (FE)',
+    contactMethods: ['api'], availabilityStatus: 'off-hours' },
+  { id: 'aar-t3-beredskab', siteId: 'aarhus_harbour', tier: 3, type: 'agency',
+    name: 'Beredskabsstyrelsen',
+    contactMethods: ['api', 'phone'], availabilityStatus: 'on-shift' },
+
+  // Tier 4, military response (maritime priority, as Esbjerg)
+  { id: 'aar-t4-navy', siteId: 'aarhus_harbour', tier: 4, type: 'agency',
+    name: 'Søværnets Operative Kommando',
+    contactMethods: ['api', 'phone'], availabilityStatus: 'on-shift' },
+  { id: 'aar-t4-qra', siteId: 'aarhus_harbour', tier: 4, type: 'agency',
+    name: 'Flyvevåbnet Quick Reaction Alert, Skrydstrup (F-35)',
+    contactMethods: ['api'], availabilityStatus: 'on-shift' },
+  { id: 'aar-t4-airforce', siteId: 'aarhus_harbour', tier: 4, type: 'agency',
+    name: 'Flyvevåbnet Kontrolgruppen og Luftforsvarsgruppen',
+    contactMethods: ['api', 'phone'], availabilityStatus: 'on-shift' },
+  { id: 'aar-t4-forsvar', siteId: 'aarhus_harbour', tier: 4, type: 'agency',
+    name: 'Forsvarskommandoen',
+    contactMethods: ['api', 'encrypted-email'], availabilityStatus: 'on-shift' },
+  { id: 'aar-t4-hjv', siteId: 'aarhus_harbour', tier: 4, type: 'agency',
+    name: 'Hjemmeværnet',
+    contactMethods: ['api', 'phone'], availabilityStatus: 'on-shift' },
+
+  // Tier 5, NATO / international (maritime, as Esbjerg)
+  { id: 'aar-t5-marcom', siteId: 'aarhus_harbour', tier: 5, type: 'agency',
+    name: 'NATO Allied Maritime Command, Northwood',
+    contactMethods: ['api'], availabilityStatus: 'on-shift' },
+
+  // ═══════════════════════════════════════════════════════════
   // ENERGINET · Hovegård
   // ═══════════════════════════════════════════════════════════
 
@@ -695,6 +769,7 @@ const DESTINATIONS = [
 const _SITE_PREFIXES = {
   cph: 'cph',
   esbjerg: 'esb',
+  aarhus_harbour: 'aar',
   energinet_hovegaard: 'hvg',
   energinet_bjaeverskov: 'bjk',
   energinet_landerupgaard: 'ldg',

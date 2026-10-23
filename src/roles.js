@@ -99,6 +99,25 @@ export const OPERATORS = [
     brandTint: '#ffb84d',
   },
   {
+    id: 'op-aarhus-port',
+    kind: 'operator',
+    // Neutral name until the port has agreed to appear in the promo
+    // trailer. Rename org and label here when it has.
+    org: 'Aarhus Harbour',
+    label: 'Aarhus Harbour',
+    person: 'Duty Officer',
+    initials: 'AH',
+    // No logo file. Falls back to the initials mark on brandTint.
+    scope: 'assigned-sites',
+    destinationIds: [],
+    siteIds: ['aarhus_harbour'],
+    sensorCount: 19,
+    isMultiSite: false,
+    sector: 'Maritime',
+    description: 'Aarhus Harbour. Container terminal, ferry and oil terminal, and the inner city quays.',
+    brandTint: '#b48cff',
+  },
+  {
     id: 'op-energinet',
     kind: 'operator',
     org: 'Energinet',
@@ -138,7 +157,7 @@ export const RECEIVERS = [
     id: 'pet', kind: 'receiver', type: 'parent',
     org: 'PET', label: 'PET — Politiets Efterretningstjeneste',
     person: 'K. Larsen', initials: 'KL',
-    scope: 'all-sites', destinationIds: ['cph-t2-pet', 'esb-t2-pet', 'hvg-t2-pet', 'bjk-t2-pet', 'ldg-t2-pet', 'kas-t2-pet', 'frv-t2-pet'],
+    scope: 'all-sites', destinationIds: ['cph-t2-pet', 'esb-t2-pet', 'hvg-t2-pet', 'bjk-t2-pet', 'ldg-t2-pet', 'kas-t2-pet', 'frv-t2-pet', 'aar-t2-pet'],
     childrenIds: ['pet-cta', 'pet-livvagt'],
     description: 'National security service. Tier 2 escalation, national scope. Sub-units: CTA (fusion centre) + Livvagtsstyrken (PPU).',
   },
@@ -146,7 +165,7 @@ export const RECEIVERS = [
     id: 'fe', kind: 'receiver', type: 'leaf',
     org: 'FE', label: 'Forsvarets Efterretningstjeneste',
     person: 'A. Sørensen', initials: 'AS',
-    scope: 'all-sites', destinationIds: ['cph-t3-fe', 'esb-t3-fe', 'hvg-t3-fe', 'bjk-t3-fe', 'ldg-t3-fe', 'kas-t3-fe', 'frv-t3-fe'],
+    scope: 'all-sites', destinationIds: ['cph-t3-fe', 'esb-t3-fe', 'hvg-t3-fe', 'bjk-t3-fe', 'ldg-t3-fe', 'kas-t3-fe', 'frv-t3-fe', 'aar-t3-fe'],
     description: 'Defence intelligence service.',
   },
 
@@ -155,14 +174,14 @@ export const RECEIVERS = [
     id: 'beredskab', kind: 'receiver', type: 'leaf',
     org: 'Beredskabsstyrelsen', label: 'Beredskabsstyrelsen',
     person: 'H. Christensen', initials: 'HC',
-    scope: 'all-sites', destinationIds: ['cph-t3-beredskab', 'esb-t3-beredskab', 'hvg-t3-beredskab', 'bjk-t3-beredskab', 'ldg-t3-beredskab', 'kas-t3-beredskab', 'frv-t3-beredskab'],
+    scope: 'all-sites', destinationIds: ['cph-t3-beredskab', 'esb-t3-beredskab', 'hvg-t3-beredskab', 'bjk-t3-beredskab', 'ldg-t3-beredskab', 'kas-t3-beredskab', 'frv-t3-beredskab', 'aar-t3-beredskab'],
     description: 'National emergency management.',
   },
   {
     id: 'forsvarskmd', kind: 'receiver', type: 'leaf',
     org: 'Forsvarskommandoen', label: 'Forsvarskommandoen',
     person: 'P. Møller', initials: 'PM',
-    scope: 'all-sites', destinationIds: ['cph-t4-forsvar', 'esb-t4-forsvar', 'hvg-t4-forsvar', 'bjk-t4-forsvar', 'ldg-t4-forsvar', 'kas-t4-forsvar', 'frv-t4-forsvar'],
+    scope: 'all-sites', destinationIds: ['cph-t4-forsvar', 'esb-t4-forsvar', 'hvg-t4-forsvar', 'bjk-t4-forsvar', 'ldg-t4-forsvar', 'kas-t4-forsvar', 'frv-t4-forsvar', 'aar-t4-forsvar'],
     description: 'Defence command HQ. Tier 4 national coordination.',
   },
 
@@ -192,7 +211,7 @@ export const RECEIVERS = [
     parentId: 'flyvevaabnet',
     org: 'Flyvevåbnet · Skrydstrup', label: 'Fighter Wing Skrydstrup (F-35 QRA)',
     person: 'T. Andersen', initials: 'TA',
-    scope: 'aviation', destinationIds: ['cph-t4-qra', 'esb-t4-qra', 'hvg-t4-qra', 'bjk-t4-qra', 'ldg-t4-qra', 'kas-t4-qra', 'frv-t4-qra'],
+    scope: 'aviation', destinationIds: ['cph-t4-qra', 'esb-t4-qra', 'hvg-t4-qra', 'bjk-t4-qra', 'ldg-t4-qra', 'kas-t4-qra', 'frv-t4-qra', 'aar-t4-qra'],
     childrenIds: ['flv-esk-727'],
     description: 'Fighter Wing Skrydstrup. F-35 QRA. National airborne intercept.',
   },
@@ -201,7 +220,7 @@ export const RECEIVERS = [
     parentId: 'flyvevaabnet',
     org: 'Flyvevåbnet · Karup', label: 'Helicopter Wing Karup',
     person: 'B. Rasmussen', initials: 'BR',
-    scope: 'all-sites', destinationIds: ['cph-t4-qra', 'esb-t4-qra', 'hvg-t4-qra', 'bjk-t4-qra', 'ldg-t4-qra', 'kas-t4-qra', 'frv-t4-qra'],
+    scope: 'all-sites', destinationIds: ['cph-t4-qra', 'esb-t4-qra', 'hvg-t4-qra', 'bjk-t4-qra', 'ldg-t4-qra', 'kas-t4-qra', 'frv-t4-qra', 'aar-t4-qra'],
     childrenIds: ['flv-esk-722', 'flv-esk-723', 'flv-esk-724'],
     description: 'Helicopter Wing Karup. EH-101 Merlin + AS550 Fennec tactical intercept.',
   },
@@ -220,7 +239,7 @@ export const RECEIVERS = [
     parentId: 'haeren',
     org: 'Hæren · Slagelse', label: 'Gardehusarregimentet (Slagelse)',
     person: 'C. Kristensen', initials: 'CK',
-    scope: 'all-sites', destinationIds: ['cph-t4-forsvar', 'esb-t4-forsvar', 'hvg-t4-forsvar', 'bjk-t4-forsvar', 'ldg-t4-forsvar', 'kas-t4-forsvar', 'frv-t4-forsvar'],
+    scope: 'all-sites', destinationIds: ['cph-t4-forsvar', 'esb-t4-forsvar', 'hvg-t4-forsvar', 'bjk-t4-forsvar', 'ldg-t4-forsvar', 'kas-t4-forsvar', 'frv-t4-forsvar', 'aar-t4-forsvar'],
     description: 'Gardehusarregimentet garrison, Slagelse. Own ISR drones + C-UAS team.',
   },
   {
@@ -228,7 +247,7 @@ export const RECEIVERS = [
     parentId: 'haeren',
     org: 'Hæren · Høvelte', label: 'Livgarden (Høvelte)',
     person: 'M. Petersen', initials: 'MP',
-    scope: 'all-sites', destinationIds: ['cph-t4-forsvar', 'esb-t4-forsvar', 'hvg-t4-forsvar', 'bjk-t4-forsvar', 'ldg-t4-forsvar', 'kas-t4-forsvar', 'frv-t4-forsvar'],
+    scope: 'all-sites', destinationIds: ['cph-t4-forsvar', 'esb-t4-forsvar', 'hvg-t4-forsvar', 'bjk-t4-forsvar', 'ldg-t4-forsvar', 'kas-t4-forsvar', 'frv-t4-forsvar', 'aar-t4-forsvar'],
     description: 'Livgarden garrison, Høvelte. Rapid ground reinforcement, north Zealand.',
   },
   {
@@ -236,7 +255,7 @@ export const RECEIVERS = [
     parentId: 'haeren',
     org: 'Hæren · Varde', label: 'Efterretningsregimentet (Varde)',
     person: 'N. Jørgensen', initials: 'NJ',
-    scope: 'all-sites', destinationIds: ['cph-t4-forsvar', 'esb-t4-forsvar', 'hvg-t4-forsvar', 'bjk-t4-forsvar', 'ldg-t4-forsvar', 'kas-t4-forsvar', 'frv-t4-forsvar'],
+    scope: 'all-sites', destinationIds: ['cph-t4-forsvar', 'esb-t4-forsvar', 'hvg-t4-forsvar', 'bjk-t4-forsvar', 'ldg-t4-forsvar', 'kas-t4-forsvar', 'frv-t4-forsvar', 'aar-t4-forsvar'],
     description: 'Efterretningsregimentet garrison, Varde. ISR + electronic warfare + RF C-UAS.',
   },
   {
@@ -244,7 +263,7 @@ export const RECEIVERS = [
     parentId: 'haeren',
     org: 'Hæren · Bornholm', label: 'Bornholms Værn (Almegård)',
     person: 'L. Madsen', initials: 'LM',
-    scope: 'all-sites', destinationIds: ['cph-t4-forsvar', 'esb-t4-forsvar', 'hvg-t4-forsvar', 'bjk-t4-forsvar', 'ldg-t4-forsvar', 'kas-t4-forsvar', 'frv-t4-forsvar'],
+    scope: 'all-sites', destinationIds: ['cph-t4-forsvar', 'esb-t4-forsvar', 'hvg-t4-forsvar', 'bjk-t4-forsvar', 'ldg-t4-forsvar', 'kas-t4-forsvar', 'frv-t4-forsvar', 'aar-t4-forsvar'],
     description: 'Bornholms Værn, Almegård Kaserne. Baltic strategic position, air defence radar.',
   },
   {
@@ -252,7 +271,7 @@ export const RECEIVERS = [
     parentId: 'haeren',
     org: 'Hæren · Oksbøl', label: 'Hærens Kampskole (Oksbøl)',
     person: 'F. Thomsen', initials: 'FT',
-    scope: 'all-sites', destinationIds: ['cph-t4-forsvar', 'esb-t4-forsvar', 'hvg-t4-forsvar', 'bjk-t4-forsvar', 'ldg-t4-forsvar', 'kas-t4-forsvar', 'frv-t4-forsvar'],
+    scope: 'all-sites', destinationIds: ['cph-t4-forsvar', 'esb-t4-forsvar', 'hvg-t4-forsvar', 'bjk-t4-forsvar', 'ldg-t4-forsvar', 'kas-t4-forsvar', 'frv-t4-forsvar', 'aar-t4-forsvar'],
     description: 'Hærens Kampskole, Oksbøl. Training doctrine + reserve C-UAS instructor cadre.',
   },
 
@@ -270,7 +289,7 @@ export const RECEIVERS = [
     parentId: 'sovaernet',
     org: 'Søværnet · Frederikshavn', label: 'Søværnet Base Frederikshavn',
     person: 'J. Olsen', initials: 'JO',
-    scope: 'maritime', destinationIds: ['esb-t4-navy'],
+    scope: 'maritime', destinationIds: ['esb-t4-navy', 'aar-t4-navy'],
     description: 'Søværnet operations base, Frederikshavn. Patrol vessels.',
   },
   {
@@ -278,7 +297,7 @@ export const RECEIVERS = [
     parentId: 'sovaernet',
     org: 'Søværnet · Korsør', label: 'Søværnet Base Korsør',
     person: 'D. Iversen', initials: 'DI',
-    scope: 'maritime', destinationIds: ['esb-t4-navy'],
+    scope: 'maritime', destinationIds: ['esb-t4-navy', 'aar-t4-navy'],
     description: 'Søværnet base Korsør. Belt-crossing patrol.',
   },
 
@@ -296,7 +315,7 @@ export const RECEIVERS = [
     parentId: 'sok',
     org: 'SOK · Jægerkorpset', label: 'Jægerkorpset (Aalborg)',
     person: 'V. Holm', initials: 'VH',
-    scope: 'all-sites', destinationIds: ['cph-t4-forsvar', 'esb-t4-forsvar', 'hvg-t4-forsvar', 'bjk-t4-forsvar', 'ldg-t4-forsvar', 'kas-t4-forsvar', 'frv-t4-forsvar'],
+    scope: 'all-sites', destinationIds: ['cph-t4-forsvar', 'esb-t4-forsvar', 'hvg-t4-forsvar', 'bjk-t4-forsvar', 'ldg-t4-forsvar', 'kas-t4-forsvar', 'frv-t4-forsvar', 'aar-t4-forsvar'],
     description: 'Jægerkorpset SOF, Aalborg. Loitering-munition interdiction + tactical response.',
   },
 
@@ -341,7 +360,7 @@ export const RECEIVERS = [
     parentId: 'politi',
     org: 'Rigspolitiet', label: 'Rigspolitiet — National Police HQ',
     person: 'M. Nielsen', initials: 'MN',
-    scope: 'all-sites', destinationIds: ['cph-t3-rigspoliti', 'esb-t3-rigspoliti', 'hvg-t3-rigspoliti', 'bjk-t3-rigspoliti', 'ldg-t3-rigspoliti', 'kas-t3-rigspoliti', 'frv-t3-rigspoliti'],
+    scope: 'all-sites', destinationIds: ['cph-t3-rigspoliti', 'esb-t3-rigspoliti', 'hvg-t3-rigspoliti', 'bjk-t3-rigspoliti', 'ldg-t3-rigspoliti', 'kas-t3-rigspoliti', 'frv-t3-rigspoliti', 'aar-t3-rigspoliti'],
     description: 'National police coordination + C-UAS response team.',
   },
   {
@@ -436,7 +455,7 @@ export const RECEIVERS = [
   {
     id: 'politi-ostjyl', kind: 'receiver', type: 'leaf', parentId: 'politi',
     org: 'Østjyllands Politi', label: 'Østjyllands Politi', initials: 'ØJ',
-    scope: 'regional', destinationIds: [],
+    scope: 'regional', destinationIds: ['aar-t2-politi'],   // Aarhus Harbour
     description: 'East Jutland district. Covers Aarhus, Silkeborg, Randers.',
   },
   {

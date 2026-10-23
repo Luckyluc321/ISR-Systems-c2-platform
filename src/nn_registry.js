@@ -41,6 +41,7 @@ export const SITE_SOURCE_CONFIG = {
   // listed here still default to mock via the fallback in _buildSource.
   cph:                            { source: 'mock' },
   esbjerg:                        { source: 'mock' },
+  aarhus_harbour:                 { source: 'mock' },
   billund:                        { source: 'mock' },
   energinet_hovegaard:            { source: 'mock' },
   energinet_bjaeverskov:          { source: 'mock' },
