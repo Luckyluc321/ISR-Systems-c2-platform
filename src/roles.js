@@ -105,9 +105,14 @@ export const OPERATORS = [
     // trailer. Rename org and label here when it has.
     org: 'Aarhus Harbour',
     label: 'Aarhus Harbour',
-    person: 'Duty Officer',
+    // Fictional, in the same initial-and-surname style as CPH's operator.
+    // Never a real person at the port.
+    person: 'K. Holm',
     initials: 'AH',
-    // No logo file. Falls back to the initials mark on brandTint.
+    // A neutral mark drawn for the platform (a container crane), NOT the
+    // port company's logo: the harbour has no relationship with ISR
+    // Systems, and a company logo in our product reads as a customer.
+    logo: '/logos/aarhus-harbour.svg',
     scope: 'assigned-sites',
     destinationIds: [],
     siteIds: ['aarhus_harbour'],

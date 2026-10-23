@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Aarhus Harbour">
+  <!-- Neutral mark drawn for the platform: a container crane on the account's
+       purple. Deliberately NOT the port company's logo; Aarhus Harbour has no
+       relationship with ISR Systems (decided 2026-10-23). -->
+  <rect width="64" height="64" rx="12" fill="#7d5bd9"/>
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M27 18 L13 29 M27 18 L52 29" stroke-width="1.8"/>
+    <path d="M20 29 L27 18 L34 29" stroke-width="3"/>
+    <path d="M9 29 H55" stroke-width="3.4"/>
+    <path d="M20 29 V51 M34 29 V51" stroke-width="3.4"/>
+    <path d="M20 41 H34" stroke-width="2.4"/>
+    <path d="M46 29 V35" stroke-width="1.8"/>
+    <path d="M14 51 H40" stroke-width="2.4"/>
+  </g>
+  <rect x="41.5" y="35" width="9" height="5.5" rx="1" fill="#ffffff"/>
+</svg>
