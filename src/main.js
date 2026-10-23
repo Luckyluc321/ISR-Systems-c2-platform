@@ -17621,7 +17621,8 @@ async function main() {
     //   __isr_fixedwing_tuning = { swapM: 2500 }
     const MODEL_SWAP_M = isHostileHeli ? 6000
       : (isAirliner ? 5000
-        : (isFixedWing ? (_fixedWingSpec().swapM ?? 1800) : 250));
+        : (isFixedWing ? (TEMPLATES[event.templateKey]?.modelSwapM
+            ?? _fixedWingSpec().swapM ?? 1800) : 250));
     const _modelUri = isLoiterMun
       ? '/aircraft/shahed_238_drone.glb'
       : (isQuadcopter ? _quadModelSpec(_quadKey).uri

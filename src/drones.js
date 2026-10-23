@@ -884,7 +884,8 @@ const _RECON_ROUTE = _reconRouteWaypoints();
 // 42 m of Aarhus ground (geoid plus a few metres of quay) is added to
 // every height below, so "300 + 42" is 300 m over the water.
 //
-// RECON HEIGHTS, 300 TO 850 m (Lucas, 2026-10-23). A first version flew
+// RECON HEIGHTS, 600 TO 850 m (Lucas, 2026-10-23: start higher). It
+// comes in at 800 m and eases down to 600 for the run and the circle. A first version flew
 // 60 to 150 m, which is not how a fixed-wing maps a port, and put it
 // inside the 1800 m symbol-to-model swap at every normal zoom. These are
 // the heights the CPH Mohajer-2 flies, where that swap is tuned, and all
@@ -910,10 +911,10 @@ const _AARHUS_PROBE_ROUTE = (() => {
   const C = { e: -211, n: 412 };            // loiter centre, oil terminal pier
   const r = 280;                            // must equal the builder's R
   return _filletedRoute([
-    { e: 3200,      n:    0,      alt: 300 + g },   // start, over the bay
-    { e: 2400,      n:  150,      alt: 300 + g },   // west over the water, entering coverage
-    { e: 1500,      n:  450,      alt: 450 + g },   // container terminal east tip, climbing
-    { e:  420,      n: -640,      alt: 500 + g },   // down the terminal, past the big hangar
+    { e: 3200,      n:    0,      alt: 800 + g },   // start, high over the bay
+    { e: 2400,      n:  150,      alt: 750 + g },   // west over the water, entering coverage
+    { e: 1500,      n:  450,      alt: 650 + g },   // container terminal east tip, easing down
+    { e:  420,      n: -640,      alt: 600 + g },   // down the terminal, past the big hangar
     { e: C.e + r,   n: C.n - r,   alt: 600 + g },   // loiter, SE corner
     { e: C.e + r,   n: C.n + r,   alt: 600 + g },   // NE
     { e: C.e - r,   n: C.n + r,   alt: 600 + g },   // NW
@@ -1889,8 +1890,12 @@ export const TEMPLATES = {
       rfMatch: 'Loiter signature, no catalogue match',
       modality: 'RF passive + acoustic + visual',
       evidenceSize: '61.3 MB',
-      note: 'Fixed-wing, no transponder, no filed flight. Ingressed over Aarhus Bay at about 300 m, ran the length of the container terminal, then flew one full circle over the oil terminal pier before breaking off northeast over the bay and leaving coverage.',
+      note: 'Fixed-wing, no transponder, no filed flight. Ingressed over Aarhus Bay at about 800 m, ran the length of the container terminal, then flew one full circle over the oil terminal pier before breaking off northeast over the bay and leaving coverage.',
     },
+    // Symbol until the camera is within 700 m, then the 3D model. The
+    // fixed-wing default of 1800 m showed the model at every normal zoom
+    // here (Lucas: "renders way too early").
+    modelSwapM: 700,
     waypoints: _AARHUS_PROBE_ROUTE,
     durationSec: Math.round(_AARHUS_PROBE_ROUTE[_AARHUS_PROBE_ROUTE.length - 1].tSec),
   },
