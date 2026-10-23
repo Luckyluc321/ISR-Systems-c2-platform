@@ -9998,3 +9998,11 @@ body.workspace-map-active #receiver-view {
    (.pl-back-btn); this only gives it room above the event id. */
 .dp-hdr .dp-back-btn { margin-bottom: 8px; }
 
+
+/* Sensor ids with a site prefix (AAR-N17, BLL-N01) did not fit the 40 px
+   label column built for CPH's three-character ids, and wrapped onto two
+   lines in Contributing Sensors. The column now grows to the id. 40 px
+   stays the minimum, so CPH's rows render exactly as before. Appended
+   here so the original .sensor-row rule above is untouched. */
+.sensor-row { grid-template-columns: minmax(40px, max-content) 1fr 40px; }
+.sensor-row .s-lbl { white-space: nowrap; }
