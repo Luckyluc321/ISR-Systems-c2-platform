@@ -280,10 +280,10 @@ const DESTINATIONS = [
 
   // Tier 1, site personnel
   { id: 'aar-t1-sec-ops', siteId: 'aarhus_harbour', tier: 1, type: 'internal',
-    name: 'Aarhus Harbour Security Operations Centre',
+    name: 'DK Harbour Security Operations Centre',
     contactMethods: ['in-app', 'sms'], availabilityStatus: 'on-shift' },
   { id: 'aar-t1-duty', siteId: 'aarhus_harbour', tier: 1, type: 'internal',
-    name: 'Aarhus Harbour Duty Officer',
+    name: 'DK Harbour Duty Officer',
     contactMethods: ['phone', 'sms'], availabilityStatus: 'on-shift' },
   { id: 'aar-t1-control', siteId: 'aarhus_harbour', tier: 1, type: 'internal',
     name: 'Harbour Control Room',
@@ -293,10 +293,10 @@ const DESTINATIONS = [
     contactMethods: ['in-app', 'phone'], availabilityStatus: 'on-shift' },
   // Tier 1, integrated systems
   { id: 'aar-sys-cameras', siteId: 'aarhus_harbour', tier: 1, type: 'system',
-    name: 'Aarhus Harbour Camera Surveillance System',
+    name: 'DK Harbour Camera Surveillance System',
     contactMethods: ['webhook'], availabilityStatus: 'on-shift' },
   { id: 'aar-sys-broker', siteId: 'aarhus_harbour', tier: 1, type: 'system',
-    name: 'Aarhus Harbour Operations Data Broker',
+    name: 'DK Harbour Operations Data Broker',
     contactMethods: ['mqtt'], availabilityStatus: 'on-shift' },
 
   // Tier 2, local law enforcement + maritime coordination

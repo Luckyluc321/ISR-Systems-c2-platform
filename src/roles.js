@@ -103,8 +103,8 @@ export const OPERATORS = [
     kind: 'operator',
     // Neutral name until the port has agreed to appear in the promo
     // trailer. Rename org and label here when it has.
-    org: 'Aarhus Harbour',
-    label: 'Aarhus Harbour',
+    org: 'DK Harbour',
+    label: 'DK Harbour',
     // Fictional, in the same initial-and-surname style as CPH's operator.
     // Never a real person at the port.
     person: 'K. Holm',
@@ -119,7 +119,7 @@ export const OPERATORS = [
     sensorCount: 19,
     isMultiSite: false,
     sector: 'Maritime',
-    description: 'Aarhus Harbour. Container terminal, ferry and oil terminal, and the inner city quays.',
+    description: 'DK Harbour. Container terminal, ferry and oil terminal, and the inner city quays.',
     brandTint: '#b48cff',
   },
   {

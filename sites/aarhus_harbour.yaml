@@ -7,7 +7,7 @@
 # city quays inside one boundary.
 
 site_id: aarhus_harbour
-label: Aarhus Harbour
+label: DK Harbour
 code: AAR
 tenant: op-aarhus-port
 site_type: port
