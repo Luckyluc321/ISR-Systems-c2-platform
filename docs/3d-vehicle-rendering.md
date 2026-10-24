@@ -2783,6 +2783,62 @@ anything that draws it** — one pass over the waypoints computing ground
 speed and vertical rate found this in minutes, and the round numbers in
 the waypoint list named the mechanism outright.
 
+## 8af. The A320 landed with a clean wing
+
+The model ships with slats (`FrontFlaps*`) and flaps (`BackFlaps*`), 16
+parts in 36 nodes, already lifted out of the skin as rigid nodes by
+`split_airliner_surfaces.py`. Nothing drove them. The bind pose is the
+clean wing, so every airliner flew its whole approach and touched down
+with slats and flaps retracted.
+
+**The poses come from the model's own animation.** Its single 28 s clip
+moves them between about 4.8 and 7.0 s and holds them out after that.
+`scripts/pose_from_animation.py` computes each part's delta from bind
+pose to the clip at any time, by the same method that reproduces
+`a320_rigid_gearup.js` and `a320_rigid_brakes.js` to 0.01 mm and 0.12°.
+`scripts/build_flap_manifest.mjs` writes `src/a320_rigid_flaps.js`
+with each part at a quarter, half, three quarters and all of its travel.
+
+**Why four stops and not one delta.** A straight blend from clean to
+fully out is exact for a part that turns about its own hinge. The outer
+segments also ride on the inner one, so a straight line cuts the corner
+of that arc: 57 mm off at mid travel. Through four stops the worst error
+against the clip sampled every 50 ms is 6 mm and 0.3°.
+
+**The schedule is `src/airliner_flaps.js`**, pure, no Cesium. A320
+lever positions as fractions of FULL (slats 18, 22, 22, 27°; flaps 0,
+15, 20, 40°), selected by height above ground:
+
+| Lever | Selected at or below | Why there |
+|---|---|---|
+| 1 | 1,000 m | about 3,300 ft, slowing on the intermediate approach |
+| 2 | 650 m | about 2,100 ft, near glide slope capture |
+| gear | 300 m | unchanged, `extendBelowAglM` |
+| 3 | 250 m | after the gear is down and locked, as on the real aircraft |
+| FULL | 200 m | fully out by about 155 m, inside the 500 ft visual gate |
+
+A track first seen below a threshold appears with that setting already
+out. On the way down the lever only ever moves forward. On a go-around
+it moves one step up as soon as the aircraft climbs 20 m above its
+lowest point (the gear still waits for 80 m), then to 1 above 450 m and
+to 0 above 600 m. Slats travel full range in 20 s and flaps in 25 s.
+
+**The driver writes only the groups that moved.** A flap selection
+writes 36 nodes, not all 154. Each group's last-written record is
+updated only when that group was written, otherwise a slow movement
+would creep past the 0.002 threshold without ever being drawn.
+
+**The way back**, live, no reload:
+
+```js
+window.__isr_airliner_tuning = { flaps: false }   // clean wing, as before
+window.__isr_surfaces(1, 0, 1)                     // gear down, FULL, for a look
+```
+
+Gated by `check:airliner-flaps`, which flies every airliner route in
+the scenarios through the schedule and checks order, FULL at touchdown,
+the go-around step, clean-up on the climb and travel rate.
+
 ## Altitude datum: `alt` is above the ellipsoid, not above ground
 
 Recorded 2026-10-22 after the recon swarm flew through Terminal 3.

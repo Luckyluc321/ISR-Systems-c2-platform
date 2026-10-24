@@ -39,7 +39,8 @@
     "check:nn-integration-index": "node scripts/check-nn-integration-index.mjs",
     "check:photoreal-coverage": "node scripts/check-photoreal-coverage.mjs",
     "check:scenario-menu": "node scripts/check-scenario-menu.mjs",
-    "check:detection-line": "node scripts/check-detection-line.mjs"
+    "check:detection-line": "node scripts/check-detection-line.mjs",
+    "check:airliner-flaps": "node scripts/check-airliner-flaps.mjs"
   },
   "devDependencies": {
     "vite": "^8.1.1"

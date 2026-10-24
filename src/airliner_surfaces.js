@@ -1,4 +1,5 @@
-// Landing gear for the airliner, driven on the model primitive directly.
+// Landing gear, ground spoilers, slats and flaps for the airliner, driven
+// on the model primitive directly. The flap schedule is airliner_flaps.js.
 //
 // WHY THE MODEL HAS NO SKIN. Cesium's ModelSceneGraph.update calls
 // updateJointMatrices() INSIDE its loop over every runtime node:
@@ -51,6 +52,8 @@
 
 import { RIGID_PARTS } from './a320_rigid_gearup.js';
 import { RIGID_PARTS as BRAKES_OUT } from './a320_rigid_brakes.js';
+import { FLAPS_OUT, FLAP_STOPS } from './a320_rigid_flaps.js';
+import { createFlapSchedule } from './airliner_flaps.js';
 
 // Which extracted parts are landing gear. The manifest covers the whole
 // airframe, because the whole airframe had to come out of the skin.
@@ -135,12 +138,16 @@ export function findModelPrimitive(viewer, entity) {
 }
 
 /**
- * Gear driver for one track.
+ * Gear, ground spoilers, slats and flaps for one track.
  * @param extendBelowAglM  height above ground at which gear is selected
  * @param extendMs         travel time; a real A320 is 10 to 15 seconds
+ * @param flapsOn          () => bool, read every tick. False holds the
+ *                         wing clean, which is how every airliner flew
+ *                         before the flaps were wired. airliner_flaps.js
+ *                         has the schedule.
  */
 export function createGearDriver(Cesium, viewer, {
-  monoNow, extendBelowAglM = 300, extendMs = 12000,
+  monoNow, extendBelowAglM = 300, extendMs = 12000, flapsOn = () => true,
 } = {}) {
   let model = null;
   let t0 = null;          // when gear was selected down
@@ -150,7 +157,9 @@ export function createGearDriver(Cesium, viewer, {
   let minAgl = null;      // lowest point reached, for spotting a climb
   let lastPos = null;     // for ground speed, measured not assumed
   let lastPosMs = 0;
-  let applied = null;     // last fraction written, so we only write on change
+  let applied = null;     // last pose written per group, so we only write on change
+  const flaps = createFlapSchedule();
+  let flapPose = { slat: 0, flap: 0 };
   const scratch = new Cesium.Matrix4();
 
   // Precomputed delta per node: bind (gear DOWN, the model's rest pose)
@@ -174,15 +183,53 @@ export function createGearDriver(Cesium, viewer, {
   // BRAKES run the other way: identity is stowed and the delta is
   // deployed, so they go from identity out to the delta.
   for (const p of BRAKES_OUT) if (BRAKE.test(p.joint)) add(p, 'brake');
+  // SLATS AND FLAPS also run from identity, the clean wing the model
+  // ships with, out through the stops in a320_rigid_flaps.js. Several
+  // stops rather than one delta, because the outer segments ride on the
+  // inner ones and a single straight blend cuts the corner of that arc.
+  for (const p of FLAPS_OUT) {
+    const k = p.k.map(q => ({
+      t: new Cesium.Cartesian3(q.t[0], q.t[1], q.t[2]),
+      r: new Cesium.Quaternion(q.r[0], q.r[1], q.r[2], q.r[3]),
+      s: new Cesium.Cartesian3(q.s[0], q.s[1], q.s[2]),
+    }));
+    for (const node of p.nodes) parts.push({ node, kind: p.kind, k });
+  }
   const ONE = new Cesium.Cartesian3(1, 1, 1);
   const IDENT = new Cesium.Quaternion(0, 0, 0, 1);
+  const REST = { t: Cesium.Cartesian3.ZERO, r: IDENT, s: ONE };
+  const KINDS = ['gear', 'brake', 'slat', 'flap'];
 
-  function write(entity, f, bf, report) {
+  // A part with stops at a fraction x of its travel: between the two
+  // stops either side of x, or between rest and the first stop.
+  function stopPose(k, x, T, R, S) {
+    if (!(x > 0)) {
+      Cesium.Cartesian3.clone(Cesium.Cartesian3.ZERO, T);
+      Cesium.Quaternion.clone(IDENT, R);
+      Cesium.Cartesian3.clone(ONE, S);
+      return;
+    }
+    let i = 0;
+    while (i < FLAP_STOPS.length - 1 && x > FLAP_STOPS[i]) i++;
+    const lo = i === 0 ? REST : k[i - 1];
+    const loF = i === 0 ? 0 : FLAP_STOPS[i - 1];
+    const u = Math.min(1, (x - loF) / (FLAP_STOPS[i] - loF));
+    Cesium.Cartesian3.lerp(lo.t, k[i].t, u, T);
+    Cesium.Cartesian3.lerp(lo.s, k[i].s, u, S);
+    Cesium.Quaternion.slerp(lo.r, k[i].r, u, R);
+  }
+
+  // pose: { gear, brake, slat, flap }, each 0 to 1.
+  // only: a Set of the groups to write, or null for all of them. Writing
+  // only what moved keeps a flap selection at 36 node writes instead of
+  // the 154 of the whole set.
+  function write(entity, pose, only, report) {
     if (!model) model = findModelPrimitive(viewer, entity);
     if (!model) return false;               // not built yet, try next tick
     const T = new Cesium.Cartesian3();
     const S = new Cesium.Cartesian3();
     const R = new Cesium.Quaternion();
+    const f = pose.gear, bf = pose.brake;
     // FINDING THE MODEL IS NOT THE SAME AS IT BEING READY. Model.getNode
     // THROWS until the glTF has loaded, and the primitive exists well
     // before that. Counting actual writes is the difference between
@@ -192,10 +239,13 @@ export function createGearDriver(Cesium, viewer, {
     // success, and the change guard then blocked every retry.
     let written = 0;
     for (const p of parts) {
+      if (only && !only.has(p.kind)) continue;
       let node;
       try { node = model.getNode(p.node); } catch (_) { node = null; }
       if (!node) continue;
-      if (p.kind === 'brake') {
+      if (p.kind === 'slat' || p.kind === 'flap') {
+        stopPose(p.k, pose[p.kind], T, R, S);
+      } else if (p.kind === 'brake') {
         // identity -> deployed
         Cesium.Cartesian3.lerp(Cesium.Cartesian3.ZERO, p.t, bf, T);
         Cesium.Cartesian3.lerp(ONE, p.s, bf, S);
@@ -216,8 +266,10 @@ export function createGearDriver(Cesium, viewer, {
     }
     if (report) {
       const brakes = parts.filter(p => p.kind === 'brake').length;
+      const wing = parts.filter(p => p.kind === 'slat' || p.kind === 'flap').length;
       console.log(`[surfaces] wrote ${written} of ${parts.length} nodes`
-        + ` (${brakes} are spoiler panels), gear ${f}, spoilers ${bf}`);
+        + ` (${brakes} are spoiler panels, ${wing} slats and flaps), gear ${f}, spoilers ${bf},`
+        + ` slats ${pose.slat.toFixed(2)}, flaps ${pose.flap.toFixed(2)}`);
       return written;
     }
     return written > 0;
@@ -304,22 +356,46 @@ export function createGearDriver(Cesium, viewer, {
       }
       let bf = td === null ? 0 : Math.min(1, (now - td) / BRAKE_DEPLOY_MS);
       if (ts !== null) bf *= Math.max(0, 1 - (now - ts) / BRAKE_STOW_MS);
+      // Slats and flaps, from height above ground (airliner_flaps.js).
+      const fl = flaps.step(aglM, now, flapsOn());
+      flapPose = { slat: fl.slat, flap: fl.flap };
+      const pose = { gear: f, brake: bf, slat: fl.slat, flap: fl.flap };
       // Write only on a real change, and keep retrying until the model
       // finishes loading, otherwise it renders in its rest pose, which
       // for this asset is gear DOWN with the bay doors hanging open.
-      if (applied !== null && Math.abs(f - applied.f) < 0.002
-          && Math.abs(bf - applied.bf) < 0.002) return;
-      if (write(entity, f, bf)) applied = { f, bf };
+      // The first write covers every group. After that, only the groups
+      // that moved, and each group's record is updated only when that
+      // group was written: updating it without writing would let a
+      // slow movement creep past the threshold and never be drawn.
+      // Arriving at an end, fully in or fully out, always writes: the
+      // last step of a travel is usually smaller than the threshold, and
+      // skipping it left a "clean" wing a tenth of a degree out.
+      let only = null;
+      if (applied !== null) {
+        only = new Set(KINDS.filter(k => Math.abs(pose[k] - applied[k]) >= 0.002
+          || (pose[k] !== applied[k] && (pose[k] === 0 || pose[k] === 1))));
+        if (!only.size) return;
+      }
+      if (write(entity, pose, only)) {
+        if (!applied) applied = { ...pose };
+        else for (const k of only) applied[k] = pose[k];
+      }
     },
     /** Force a pose, for settling on screen what argument cannot:
-     *    window.__isr_surfaces(1, 1)   gear down, spoilers out
-     *    window.__isr_surfaces(0, 0)   gear up, spoilers stowed
-     *  Returns how many nodes were actually written, which is the
-     *  number that matters: zero means the model is not loaded or the
-     *  names do not resolve. */
-    force(entity, gearF, brakeF) {
-      const n = write(entity, gearF, brakeF, true);
-      applied = { f: gearF, bf: brakeF };
+     *    window.__isr_surfaces(1, 1)      gear down, spoilers out
+     *    window.__isr_surfaces(0, 0)      gear up, spoilers stowed
+     *    window.__isr_surfaces(1, 0, 1)   gear down, slats and flaps FULL
+     *    window.__isr_surfaces(1, 0, 0)   gear down, wing clean
+     *  Leave the third number out to keep the slats and flaps where the
+     *  schedule has them. Returns how many nodes were actually written,
+     *  which is the number that matters: zero means the model is not
+     *  loaded or the names do not resolve. */
+    force(entity, gearF, brakeF, flapF = null) {
+      const wing = typeof flapF === 'number'
+        ? { slat: flapF, flap: flapF } : flapPose;
+      const pose = { gear: gearF, brake: brakeF, ...wing };
+      const n = write(entity, pose, null, true);
+      applied = { ...pose };
       return n;
     },
   };

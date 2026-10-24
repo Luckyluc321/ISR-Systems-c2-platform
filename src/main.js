@@ -17440,9 +17440,13 @@ async function main() {
     // ModelGraphics.nodeTransformations, which is what froze the map:
     // that property is re-evaluated and re-applied EVERY frame while it
     // is defined. See airliner_surfaces.js.
+    // Slats and flaps on approach. The way back to the clean wing every
+    // airliner flew before, live, no reload:
+    //   window.__isr_airliner_tuning = { flaps: false }
     const _gear = createGearDriver(Cesium, viewer, { monoNow,
       extendBelowAglM: (window.__isr_airliner_tuning || {}).gearBelowAglM ?? 300,
-      extendMs: (window.__isr_airliner_tuning || {}).gearExtendMs ?? 12000 });
+      extendMs: (window.__isr_airliner_tuning || {}).gearExtendMs ?? 12000,
+      flapsOn: () => (window.__isr_airliner_tuning || {}).flaps ?? true });
     let _animT0 = null;
     let _clockWasAnimating = null;
     // Airbrakes. Four nodes driven by hand instead of the whole 142-joint
@@ -19969,9 +19973,9 @@ async function main() {
         // pose actually changes, and keeps retrying until the model has
         // finished loading, because this asset's rest pose is gear DOWN.
         if (state._gear && !window.__isr_surfaces) {
-          window.__isr_surfaces = (g = 1, b = 1) => {
+          window.__isr_surfaces = (g = 1, b = 1, fl = null) => {
             let n = 0;
-            for (const [, st] of droneState) if (st._gear) n += st._gear.force(st.billboard, g, b) || 0;
+            for (const [, st] of droneState) if (st._gear) n += st._gear.force(st.billboard, g, b, fl) || 0;
             if (!n) console.warn('[surfaces] nothing written: no live airliner, or the model is still loading');
             return n;
           };
