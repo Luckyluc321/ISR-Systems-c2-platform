@@ -17440,13 +17440,14 @@ async function main() {
     // ModelGraphics.nodeTransformations, which is what froze the map:
     // that property is re-evaluated and re-applied EVERY frame while it
     // is defined. See airliner_surfaces.js.
-    // Slats and flaps on approach. The way back to the clean wing every
-    // airliner flew before, live, no reload:
-    //   window.__isr_airliner_tuning = { flaps: false }
+    // Slats, flaps and elevators. The way back to how every airliner
+    // flew before they were wired, live, no reload:
+    //   window.__isr_airliner_tuning = { flaps: false, elevator: false }
     const _gear = createGearDriver(Cesium, viewer, { monoNow,
       extendBelowAglM: (window.__isr_airliner_tuning || {}).gearBelowAglM ?? 300,
       extendMs: (window.__isr_airliner_tuning || {}).gearExtendMs ?? 12000,
-      flapsOn: () => (window.__isr_airliner_tuning || {}).flaps ?? true });
+      flapsOn: () => (window.__isr_airliner_tuning || {}).flaps ?? true,
+      elevatorOn: () => (window.__isr_airliner_tuning || {}).elevator ?? true });
     let _animT0 = null;
     let _clockWasAnimating = null;
     // Airbrakes. Four nodes driven by hand instead of the whole 142-joint
@@ -19982,7 +19983,7 @@ async function main() {
         }
         if (state._gear && TEMPLATES[event.templateKey]?.gearRetracts
             && ((window.__isr_airliner_tuning || {}).gear ?? true)) {
-          state._gear.update(state.billboard, p.alt);
+          state._gear.update(state.billboard, p.alt, state.stateHolder?.attitude?.pitch);
         }
         // The propeller. Wires itself once the glTF is ready, then costs
         // one length check a frame.

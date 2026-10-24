@@ -2839,6 +2839,43 @@ Gated by `check:airliner-flaps`, which flies every airliner route in
 the scenarios through the schedule and checks order, FULL at touchdown,
 the go-around step, clean-up on the climb and travel rate.
 
+## 8ag. The elevators were there all along, named BackAileron
+
+Asked for the tail flaps, I said the model had none, from a search for
+"elevator", "rudder" and "tail" in the node names. The elevators are
+`BackAileron.L` and `.R`: 17 to 19 m aft, 1 to 3.8 m either side of the
+centreline, on the back edge of the horizontal tail, hinged on their own
+local X axis, which is swept like a real hinge line. The model's
+animation swings them from about 31 up to 21 down. **Search by position
+and motion, not by name: an artist's names are not a schema.** There is
+no rudder part. The fin is fuselage geometry.
+
+**Which way is up was measured, not assumed.** A positive turn about the
+local X axis drops the trailing edge, on the real vertices of all four
+nodes, so the driver writes the negative for trailing edge up.
+`check:airliner-elevator` repeats that measurement on every run.
+
+**What drives them** (`src/airliner_elevator.js`, pure):
+
+| Term | Input | What it shows |
+|---|---|---|
+| Pitch rate | `stateHolder.attitude.pitch`, the pitch the model is drawn at | about 9 up at a go-around rotation |
+| Flare | height, last 15 m of a descent | up to 5 up at touchdown |
+| Ground | wheels on the runway | eases back to neutral at 2 deg/s while the nose comes down |
+
+The rate sits behind a 1.2 deg/s dead zone. Without it, a replay of the
+go-around swung the tail from 8 down to 8 up in the climb out, because
+the attitude rig's nose wanders a degree or two as the path's climb rate
+varies. With it the approach is still, the climb out stays within 3, and
+the rotation still reads. That wander in the nose itself is the rig's,
+and is not changed here.
+
+**The way back**, live: `window.__isr_airliner_tuning = { elevator: false }`.
+
+**`__isr_surfaces()` does not hold a pose.** `update()` runs every tick and
+rewrites any group that differs from the schedule, so a forced pose lasts
+one frame unless it matches. It proves the nodes resolve and move.
+
 ## Altitude datum: `alt` is above the ellipsoid, not above ground
 
 Recorded 2026-10-22 after the recon swarm flew through Terminal 3.

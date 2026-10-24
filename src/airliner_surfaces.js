@@ -54,6 +54,10 @@ import { RIGID_PARTS } from './a320_rigid_gearup.js';
 import { RIGID_PARTS as BRAKES_OUT } from './a320_rigid_brakes.js';
 import { FLAPS_OUT, FLAP_STOPS } from './a320_rigid_flaps.js';
 import { createFlapSchedule } from './airliner_flaps.js';
+import { createElevator } from './airliner_elevator.js';
+
+// The elevators. The model calls them BackAileron; see airliner_elevator.js.
+const ELEVATOR = /^BackAileron/;
 
 // Which extracted parts are landing gear. The manifest covers the whole
 // airframe, because the whole airframe had to come out of the skin.
@@ -145,9 +149,12 @@ export function findModelPrimitive(viewer, entity) {
  *                         wing clean, which is how every airliner flew
  *                         before the flaps were wired. airliner_flaps.js
  *                         has the schedule.
+ * @param elevatorOn       () => bool, read every tick. False holds the
+ *                         elevators neutral. airliner_elevator.js.
  */
 export function createGearDriver(Cesium, viewer, {
   monoNow, extendBelowAglM = 300, extendMs = 12000, flapsOn = () => true,
+  elevatorOn = () => true,
 } = {}) {
   let model = null;
   let t0 = null;          // when gear was selected down
@@ -160,6 +167,8 @@ export function createGearDriver(Cesium, viewer, {
   let applied = null;     // last pose written per group, so we only write on change
   const flaps = createFlapSchedule();
   let flapPose = { slat: 0, flap: 0 };
+  const elevator = createElevator();
+  let elevatorDeg = 0;
   const scratch = new Cesium.Matrix4();
 
   // Precomputed delta per node: bind (gear DOWN, the model's rest pose)
@@ -195,10 +204,21 @@ export function createGearDriver(Cesium, viewer, {
     }));
     for (const node of p.nodes) parts.push({ node, kind: p.kind, k });
   }
+  // ELEVATORS turn about their own hinge, which is the node's local X
+  // axis, by the deflection airliner_elevator.js returns. No stored
+  // pose: the angle is the whole of it.
+  for (const p of RIGID_PARTS) {
+    if (ELEVATOR.test(p.joint)) for (const node of p.nodes) parts.push({ node, kind: 'elevator' });
+  }
   const ONE = new Cesium.Cartesian3(1, 1, 1);
   const IDENT = new Cesium.Quaternion(0, 0, 0, 1);
   const REST = { t: Cesium.Cartesian3.ZERO, r: IDENT, s: ONE };
-  const KINDS = ['gear', 'brake', 'slat', 'flap'];
+  const KINDS = ['gear', 'brake', 'slat', 'flap', 'elevator'];
+  // What counts as a change worth a write, per group, and the values a
+  // group comes to rest at, which are always written exactly. The
+  // elevator is in degrees, the rest are fractions of their travel.
+  const STEP = { gear: 0.002, brake: 0.002, slat: 0.002, flap: 0.002, elevator: 0.1 };
+  const ENDS = { gear: [0, 1], brake: [0, 1], slat: [0, 1], flap: [0, 1], elevator: [0] };
 
   // A part with stops at a fraction x of its travel: between the two
   // stops either side of x, or between rest and the first stop.
@@ -245,6 +265,13 @@ export function createGearDriver(Cesium, viewer, {
       if (!node) continue;
       if (p.kind === 'slat' || p.kind === 'flap') {
         stopPose(p.k, pose[p.kind], T, R, S);
+      } else if (p.kind === 'elevator') {
+        // Positive deflection is trailing edge UP, which is a NEGATIVE
+        // turn about this model's hinge axis.
+        Cesium.Cartesian3.clone(Cesium.Cartesian3.ZERO, T);
+        Cesium.Cartesian3.clone(ONE, S);
+        Cesium.Quaternion.fromAxisAngle(Cesium.Cartesian3.UNIT_X,
+          -(pose.elevator || 0) * Math.PI / 180, R);
       } else if (p.kind === 'brake') {
         // identity -> deployed
         Cesium.Cartesian3.lerp(Cesium.Cartesian3.ZERO, p.t, bf, T);
@@ -267,9 +294,10 @@ export function createGearDriver(Cesium, viewer, {
     if (report) {
       const brakes = parts.filter(p => p.kind === 'brake').length;
       const wing = parts.filter(p => p.kind === 'slat' || p.kind === 'flap').length;
+      const elev = parts.filter(p => p.kind === 'elevator').length;
       console.log(`[surfaces] wrote ${written} of ${parts.length} nodes`
-        + ` (${brakes} are spoiler panels, ${wing} slats and flaps), gear ${f}, spoilers ${bf},`
-        + ` slats ${pose.slat.toFixed(2)}, flaps ${pose.flap.toFixed(2)}`);
+        + ` (${brakes} are spoiler panels, ${wing} slats and flaps, ${elev} elevator), gear ${f}, spoilers ${bf},`
+        + ` slats ${pose.slat.toFixed(2)}, flaps ${pose.flap.toFixed(2)}, elevator ${(pose.elevator || 0).toFixed(1)} deg up`);
       return written;
     }
     return written > 0;
@@ -314,8 +342,9 @@ export function createGearDriver(Cesium, viewer, {
 
   return {
     dispose() { try { removeSpin(); } catch (_) {} },
-    /** Call from the tick with height above ground. */
-    update(entity, aglM) {
+    /** Call from the tick with height above ground and the aircraft's
+     *  pitch (radians, nose up positive, stateHolder.attitude.pitch). */
+    update(entity, aglM, pitchRad) {
       if (t0 === null && typeof aglM === 'number' && aglM > 0 && aglM <= extendBelowAglM) {
         t0 = monoNow();
       }
@@ -359,7 +388,9 @@ export function createGearDriver(Cesium, viewer, {
       // Slats and flaps, from height above ground (airliner_flaps.js).
       const fl = flaps.step(aglM, now, flapsOn());
       flapPose = { slat: fl.slat, flap: fl.flap };
-      const pose = { gear: f, brake: bf, slat: fl.slat, flap: fl.flap };
+      // Elevators, from the rate the nose is moving (airliner_elevator.js).
+      elevatorDeg = elevator.step(pitchRad, aglM, now, elevatorOn());
+      const pose = { gear: f, brake: bf, slat: fl.slat, flap: fl.flap, elevator: elevatorDeg };
       // Write only on a real change, and keep retrying until the model
       // finishes loading, otherwise it renders in its rest pose, which
       // for this asset is gear DOWN with the bay doors hanging open.
@@ -372,8 +403,8 @@ export function createGearDriver(Cesium, viewer, {
       // skipping it left a "clean" wing a tenth of a degree out.
       let only = null;
       if (applied !== null) {
-        only = new Set(KINDS.filter(k => Math.abs(pose[k] - applied[k]) >= 0.002
-          || (pose[k] !== applied[k] && (pose[k] === 0 || pose[k] === 1))));
+        only = new Set(KINDS.filter(k => Math.abs(pose[k] - applied[k]) >= STEP[k]
+          || (pose[k] !== applied[k] && ENDS[k].includes(pose[k]))));
         if (!only.size) return;
       }
       if (write(entity, pose, only)) {
@@ -389,11 +420,16 @@ export function createGearDriver(Cesium, viewer, {
      *  Leave the third number out to keep the slats and flaps where the
      *  schedule has them. Returns how many nodes were actually written,
      *  which is the number that matters: zero means the model is not
-     *  loaded or the names do not resolve. */
+     *  loaded or the names do not resolve.
+     *
+     *  It does NOT hold. update() runs every tick and writes whatever
+     *  the schedule says the moment it differs, so a forced pose lasts
+     *  one frame unless it matches. It proves the nodes resolve and
+     *  move; it is not a way to park a pose for a close-up. */
     force(entity, gearF, brakeF, flapF = null) {
       const wing = typeof flapF === 'number'
         ? { slat: flapF, flap: flapF } : flapPose;
-      const pose = { gear: gearF, brake: brakeF, ...wing };
+      const pose = { gear: gearF, brake: brakeF, ...wing, elevator: elevatorDeg };
       const n = write(entity, pose, null, true);
       applied = { ...pose };
       return n;
