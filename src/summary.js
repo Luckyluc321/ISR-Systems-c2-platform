@@ -6,6 +6,12 @@
 import { responseBundle } from './response_assets.js';
 import { siteName } from './events.js';
 
+// The line under Confidence is the model's (agents/agent_detection_line.js),
+// never a canned trend written into the scenario. Escaped, because it is
+// model output. Blank when the model has not answered.
+const _escBrief = (v) => String(v).replace(/[&<>"']/g, c => (
+  { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
 // Bearing helper: converts a heading in degrees to an 8-point compass origin/direction.
 // heading is the platform's direction of travel; origin is computed by adding 180°.
 // 8-point matches aviation and modern military reporting (16-point is nautical/legacy).
@@ -109,7 +115,7 @@ export function renderDetectionBrief(event) {
         <div class="brief-cell">
           <div class="brief-cell-k">Confidence</div>
           <div class="brief-cell-v">${Math.round(event.confidence * 100)}<span class="brief-unit">%</span></div>
-          <div class="brief-cell-sub">${event.confidenceTrend || 'Trend unavailable'}</div>
+          <div class="brief-cell-sub">${_escBrief(event.detectionLine?.text || '')}</div>
         </div>
         <div class="brief-cell">
           <div class="brief-cell-k">Kinematic</div>

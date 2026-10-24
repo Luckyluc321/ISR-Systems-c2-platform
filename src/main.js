@@ -824,6 +824,7 @@ import { TARGETS as TARGETS_CORE } from './targets.js';
 import { HV_SUBSTATION_TARGETS } from './targets_hv.js';
 const TARGETS = [...TARGETS_CORE, ...HV_SUBSTATION_TARGETS];
 import { getRules, onRulesChange, toggleRule, removeRule, upsertRule, resetRulesToDefault, ruleSummaryText } from './rules.js';
+import { maybeRequestDetectionLine, detectionLineSuffix, detectionLineTitle, isDetectionLineParked, pruneDetectionLineState, streamCompletion, getInferenceConfig } from './mistral.js';
 import { isMistralConfigured, inferenceHost, inferenceCheck, streamCaseFileNarrative, streamDebriefNarrative, ensureSiteContextDigest, invalidateSiteContextDigest, writeNarrativeCache, readNarrativeCache, readNarrativeCacheIfSignalMatch, invalidateNarrativeCache } from './mistral.js';
 import { resolveHighlightsAsync, extractAndRankSignals, buildAgentBPromptBlock, writePreprocessed, rehydratePreprocessed, invalidatePreprocessed } from './preprocessing.js';
 import { invalidateFallbackHighlights } from './agents/agent_a2_highlights.js';
@@ -11840,7 +11841,7 @@ async function main() {
     <div class="kv"><span class="k">Type</span><span>${e.droneType}</span></div>
     <div class="kv"><span class="k">Classification</span><span>${(e.classification || '').toUpperCase()}</span></div>
     <div class="kv"><span class="k">Threat level</span><span>${(e.threat || '').toUpperCase()}</span></div>
-    <div class="kv"><span class="k">Confidence</span><span>${(typeof e.confidence === 'number' ? e.confidence.toFixed(2) : '—')} · ${e.confidenceTrend || ''}</span></div>
+    <div class="kv"><span class="k">Confidence</span><span>${(typeof e.confidence === 'number' ? e.confidence.toFixed(2) : '—')}${escapeHtml(detectionLineSuffix(e))}</span></div>
     <div class="kv"><span class="k">First detect</span><span>${e.startTime.slice(11,19)}Z · ${siteName(e.siteId)}</span></div>
     <div class="kv"><span class="k">Duration</span><span>${formatDuration(e.duration)}</span></div>
   </div>
@@ -13577,6 +13578,9 @@ async function main() {
   const _CONF_TAU_MIN_MS = 120;   // thin, responsive
   const _CONF_TAU_MAX_MS = 800;   // well held, steady
   const _CONF_BAND_MAX = 0.085;   // widest uncertainty, at no evidence
+  // Single drones only (see the fused-confidence block in the tick): the
+  // fastest the headline confidence may move, per second.
+  const _FC_MAX_RATE_PER_S = 0.03;
   // EVERY MEMBER SCORES ITSELF OFF THE SENSORS THAT HOLD IT.
   //
   // This read _evidenceQ(event), the mass of the CASE's whole sensor
@@ -14179,7 +14183,11 @@ async function main() {
       threat: primary.threat,
       droneType: primary.droneType,
       platform: primary.platform,
-      confidence: primary.confidence,
+      // The primary's STARTING confidence, not its live value: single
+      // drones now follow their sensors, and a linked event (no
+      // templateKey, so no fused update of its own) would freeze whatever
+      // the primary read at the moment of linking for its whole life.
+      confidence: TEMPLATES[primary.templateKey]?.confidence ?? primary.confidence,
       confidenceTrend: primary.confidenceTrend,
       status: 'active',
       startTime: new Date().toISOString(),
@@ -19710,6 +19718,68 @@ async function main() {
           : (leadInCov || beingChased || _coop));
         state.billboard.show = shouldShow;
         state.shadow.show = shouldShow && !povSuppressed;
+        // FUSED CONFIDENCE FOR EVERY SINGLE DRONE, the same approach as
+        // the swarms (Lucas, 2026-10-23: "always the same approach"). The
+        // swarms read their confidence off the eyes on them: the summed
+        // scores of the sensors holding the track, so it rises as more
+        // and closer sensors hold it and falls as they lose it
+        // (_fusedMemberConfidence). Single drones kept their template's
+        // starting number for the whole run, which is why Aarhus and the
+        // Mohajer-2 sat at a flat 64 and 62.
+        //
+        // slotIdx null with no member key is the case-union path the model
+        // already defines for single-platform events. NOT applied to:
+        // swarms (they already do this), templates with their own
+        // mockConfidenceRamp (two would then fight), and friendly
+        // airliners, whose identity comes from the transponder rather than
+        // from sensor eyes. A template can force it either way with
+        // fusedConfidence: true / false.
+        const _fcTpl = TEMPLATES[event.templateKey];
+        const _fcOn = !!_fcTpl && (_fcTpl.fusedConfidence
+          ?? (!_fcTpl.swarm && !_fcTpl.mockConfidenceRamp && _fcTpl.classification !== 'friendly'));
+        //
+        // TWO GUARDS, both learned the hard way on this wiring:
+        //  - THE BASE IS THE TEMPLATE'S, captured once. _fusedTarget scales
+        //    event.confidence, and this writes event.confidence, so reading
+        //    the live field fed each result back in as the next base and
+        //    the number sank towards the 0.30 floor over a run.
+        //  - SLEW-LIMITED to _FC_MAX_RATE_PER_S. The model's own smoothing
+        //    settles in under a second, so a track could read 0.8 and 0.4
+        //    a couple of seconds apart, which no operator would trust.
+        //    At 0.03 a second, 0.8 to 0.4 takes at least 13 s and a fresh
+        //    detection firms up over about 15. Sim clock, so a pause
+        //    freezes it.
+        //  - IT STARTS WHERE THE DETECTION STARTS. The first in-coverage
+        //    tick has no contributing sensors yet, so seeding from the
+        //    model put a fresh detection at 0.2 to 0.4. The rules engine
+        //    reads event.confidence 3 s after detection, and the two-tier
+        //    missile stopped escalating at Kassø. Seeded at the template's
+        //    value, every rule fires at detection exactly as before, and
+        //    the number then follows the sensors at the capped rate.
+        //  - peakConfidence is kept beside it, because the report's
+        //    "peak confidence" was reading whatever the value was at close.
+        if (_fcOn && leadInCov && !state.closedAt) {
+          if (state._fcBase == null) state._fcBase = _fcTpl.confidence ?? event.confidence ?? 0.85;
+          const _raw = _fusedMemberConfidence({
+            id: event.id,
+            contributingSensors: event.contributingSensors,
+            confidence: state._fcBase,
+          }, state, null, false, null);
+          const _nowFc = monoNow();
+          if (typeof _raw === 'number') {
+            if (state._fcVal == null) {
+              state._fcVal = state._fcBase;
+            } else {
+              const _dtFc = state._fcLastMs ? Math.min(1, Math.max(0, (_nowFc - state._fcLastMs) / 1000)) : 0;
+              const _step = _FC_MAX_RATE_PER_S * _dtFc;
+              state._fcVal += Math.max(-_step, Math.min(_step, _raw - state._fcVal));
+            }
+            state._fcLastMs = _nowFc;
+            const _shown = +state._fcVal.toFixed(2);
+            state._fcPeak = Math.max(state._fcPeak || 0, _shown);
+            if (_shown !== event.confidence) mutateEvent(event.id, { confidence: _shown, peakConfidence: state._fcPeak });
+          }
+        }
         // Also hide the lead's trail polyline once the lead is dead —
         // without this the DRONE-1 trendline kept growing all the way
         // out over Øresund after the drone was neutralised at AMK.
@@ -26574,7 +26644,8 @@ async function main() {
       const conf = stats.confidence ?? event.confidence ?? 0;
       const fill = section.querySelector('[data-live="confFill"]');
       if (fill) fill.style.width = `${Math.round(conf * 100)}%`;
-      setTxt('[data-live="confTxt"]', `${conf.toFixed(2)} · ${event.confidenceTrend || ''}`);
+      setTxt('[data-live="confTxt"]', `${conf.toFixed(2)}${detectionLineSuffix(event)}`);
+      { const _ct = section.querySelector('[data-live="confTxt"]'); if (_ct) _ct.title = detectionLineTitle(event); }
     }
 
     // Patch swarm roster rows (all rows update, not just focused)
@@ -26888,7 +26959,7 @@ async function main() {
         <div class="conf-wrap">
           <div class="kv-k">Detection Confidence</div>
           <div class="conf-bar"><div class="conf-fill" data-live="confFill" style="width:${Math.round(telemConf*100)}%;"></div></div>
-          <div class="conf-txt" data-live="confTxt">${telemConf.toFixed(2)} · ${e.confidenceTrend || ''}</div>
+          <div class="conf-txt" data-live="confTxt" title="${escapeHtml(detectionLineTitle(e))}">${telemConf.toFixed(2)}${escapeHtml(detectionLineSuffix(e))}</div>
         </div>
       </div>`;
     }
@@ -29418,6 +29489,47 @@ async function main() {
       if (codeEl) codeEl.textContent = 'DK · 55.6180°N 012.6470°E';
     }
   }
+
+  // THE DETECTION LINE, from Mistral only. Every 5 s, each active,
+  // detected event is offered to the agent, which asks the model only
+  // when the picture changed and at most every 20 s per event. See
+  // agents/agent_detection_line.js. Skipped while the sim is paused, so a
+  // frozen scene does not keep buying sentences about itself.
+  const _detectionLineTransport = {
+    configured: () => isMistralConfigured(),
+    stream: (messages, cb, opts) => streamCompletion(messages, cb, opts),
+    model: () => getInferenceConfig().model,
+  };
+  setInterval(() => {
+    if (simIsPaused()) return;
+    // Parked (key rejected): a model reading must be absent, not stale.
+    if (isDetectionLineParked()) {
+      for (const ev of EVENTS) if (ev?.detectionLine) mutateEvent(ev.id, { detectionLine: null });
+      return;
+    }
+    const _activeIds = [];
+    for (const ev of EVENTS) {
+      if (!ev || ev.status !== 'active' || ev.detected === false) continue;
+      _activeIds.push(ev.id);
+      const _st = droneState.get(ev.id);
+      // The number the operator actually sees. A swarm shows the lead's
+      // fused value, not the event's static template number, and the
+      // sentence beside it has to describe the same number.
+      const _shownConf = TEMPLATES[ev.templateKey]?.swarm
+        ? (_st?.leadStats?.confidence ?? ev.confidence)
+        : ev.confidence;
+      maybeRequestDetectionLine(ev, {
+        siteName: SITES[ev.siteId]?.name || null,
+        transport: _detectionLineTransport,
+        confidenceShown: _shownConf,
+        // Held time on the sim clock from first detection, so ingress
+        // before coverage and paused time are not counted.
+        heldSeconds: _st?._firstDetectedMs ? Math.round((monoNow() - _st._firstDetectedMs) / 1000) : null,
+        write: (id, line) => mutateEvent(id, { detectionLine: line }),
+      });
+    }
+    pruneDetectionLineState(_activeIds);
+  }, 5000);
 
   // Credential self-test, see mistral_client.js. Console only.
   if (typeof window !== 'undefined') {

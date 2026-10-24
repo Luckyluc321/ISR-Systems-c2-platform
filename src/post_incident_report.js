@@ -332,7 +332,11 @@ function _defaultSummary(event) {
   const drone = event.droneType || event.platform || 'unknown platform';
   const cls = event.classification || 'unknown';
   const site = event.siteId || 'site';
-  const conf = event.confidence != null ? Math.round(event.confidence * 100) + '%' : 'unknown confidence';
+  // peakConfidence where the track kept one (single drones follow their
+  // sensors, so the value at close is not the peak); the flat field for
+  // everything else, which never moved.
+  const _pc = event.peakConfidence ?? event.confidence;
+  const conf = _pc != null ? Math.round(_pc * 100) + '%' : 'unknown confidence';
   const durSec = event.duration || 0;
   const durMin = Math.max(1, Math.round(durSec / 60));
   return `${drone} classified ${cls} at ${site}, ${conf} peak confidence, tracked for ${durMin} minute${durMin === 1 ? '' : 's'}. No cached narrative available; this summary was generated from the raw event record at close.`;

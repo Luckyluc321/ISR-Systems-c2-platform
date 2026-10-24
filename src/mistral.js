@@ -45,3 +45,10 @@ export {
 export {
   streamCaseFileNarrative,
 } from './agents/agent_case_file.js';
+export {
+  maybeRequestDetectionLine,
+  detectionLineSuffix,
+  detectionLineTitle,
+  isDetectionLineParked,
+  pruneDetectionLineState,
+} from './agents/agent_detection_line.js';

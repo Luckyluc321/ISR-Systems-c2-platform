@@ -130,3 +130,36 @@ In the existing Mission Console section, no new section:
 
 Still a proposal: the visual MEASURED / ESTABLISHED / ASSESSED markers
 on every row. The rows above use the panel's existing styles.
+
+## The detection line, built 2026-10-24
+
+The sentence beside a detection's confidence ("0.71 · Held by four sensors
+and firming.") is a model reading, so it comes only from Mistral
+(`src/agents/agent_detection_line.js`). It used to be `confidenceTrend`, a
+sentence written into each scenario; that field is no longer shown anywhere,
+and `check:detection-line` fails if any code reads it.
+
+- **Input:** measured facts only. The confidence on screen and how it has
+  moved since first seen, the sensors holding the track and the strongest
+  three, altitude, speed, heading, seconds held on the sim clock. The
+  scenario's commentary is stripped from the type string.
+- **Output:** one sentence of at most 14 words. No intent, no identity beyond
+  the type given, no recommendation, the number not repeated.
+- **Cadence:** on first hold, then when a sensor is gained or lost or the
+  confidence on screen moves by 0.05, at most every 20 s per event, never
+  while the sim is paused.
+- **Absent, never stale:** no key, an error, an empty answer or a rejected
+  key clears the line, and the panel shows the number alone. A 401/403 parks
+  it for the session.
+- **Provenance:** hovering the line shows "Model reading · <model> · <time>".
+
+## Single-drone confidence follows the sensors, 2026-10-23
+
+Every single-drone threat now reads its confidence off the sensors holding
+it, as the swarms always did (`_fusedMemberConfidence`). It starts at the
+scenario's own value, so rules that read confidence fire at detection exactly
+as before, then moves with the sensors at no more than 0.03 a second, so it
+never swings from 0.8 to 0.4 in a couple of seconds. `peakConfidence` is kept
+beside it for the report. Airliners (transponder identity), swarms and the
+two `mockConfidenceRamp` scenarios are unchanged. Linked site events inherit
+the starting value.
