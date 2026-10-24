@@ -17780,7 +17780,12 @@ async function main() {
         // both fixed here: a permanent 2 degree yaw crab (stripIconTrim
         // below) and an inverted pitch sign putting the nose DOWN on a
         // descent, at up to 12x model scale.
-        pitchOffsetDeg: 5,
+        // SEVEN since 2026-10-24 (was 5). On a 3 degree descent 5 gave
+        // about 2 degrees nose up, the low end of an A320 on final (about
+        // 2.5 to 4) and barely visible from most camera angles; Lucas: the
+        // approach should sit tail-low like an airliner. 7 gives about 4.
+        // Go back live: __isr_airliner_tuning = { pitchOffsetDeg: 5 }
+        pitchOffsetDeg: 7,
         pitchClampDeg: 12,     // not an agile airframe
         bankClampDeg: 25,
         bankFactor: 1.2,       // gentle, and it is flying straight anyway
