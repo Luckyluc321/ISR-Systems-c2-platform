@@ -54,9 +54,13 @@ Ownership mirrors Esbjerg: each national account (PET, FE, Rigspolitiet, Beredsk
 
 The manifest's receivers mirror Esbjerg's, with Østjyllands Politi, Beredskabsstyrelsen Herning and Aarhus Kommune as local actors, and Region Midtjylland as a conditional observer for casualty scenarios.
 
-## 5. Not built yet
+## 5. Agent context
+
+Built 2026-10-24 in `src/site_context.js`. Without it the Mission Console (Agent B) never rendered for this site, because the agent chapter is skipped for a site with no context. Every position comes from our own data: the traced boundary (container terminal centre), Lucas's click beside the largest hangar, the middle pier where AAR-N18 sits, and the crane quay where AAR-N06 sits. All marked `approximate`. Names are descriptive, never an operator, and tank contents are not claimed. Refine from OSM or the port's plan.
+
+## 6. Not built yet
 
 - **Scenarios.** The simulate-threat panel says none are authored. The first one is the Baykar case for the trailer. Its altitudes must include the site's ground height, and `__isr_altAudit()` must pass before it ships. See `docs/3d-vehicle-rendering.md`, "Altitude datum".
-- **Agent context** (`src/site_context.js`): critical areas, high-value assets, normal patterns. Without it the agents have no site knowledge to reason with. It needs verified positions, not guesses.
+
 - **Consequence routing** (`src/consequence_routing.js`): fire, hospital and rescue for a scene. It returns nothing for this site until an entry exists. The fire service is already modelled as `kbr-ostjyllands` (Østjyllands Brandvæsen, which covers Aarhus); it needs a destination and an entry here.
 - **3D buildings.** Aarhus has no photoreal coverage ring yet, so in day mode the OSM boxes may cover Google's buildings, the same issue Copenhagen had. Check on 1574 with `__isr_buildings.hide()` over the harbour, then trace a ring if Google has meshes there.

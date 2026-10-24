@@ -728,6 +728,96 @@ export const SITE_CONTEXT = {
     ],
   },
 
+  // ── Aarhus Harbour (shown as "DK Harbour" for the promo video) ────
+  // Built 2026-10-24. Without an entry here the Mission Console (Agent B)
+  // never rendered for this site at all: _generateAgentBNarrative returns
+  // nothing when a site has no context, so the whole chapter was skipped.
+  //
+  // EVERY POSITION COMES FROM OUR OWN DATA, not from guessing a map: the
+  // boundary Lucas traced in the platform, his shift-click beside the
+  // largest hangar, the middle pier tip where AAR-N18 sits, and the crane
+  // quay where AAR-N06 sits. All 'approximate'. Names are descriptive,
+  // never an operator or a company, and nothing is claimed about cargo or
+  // tank contents. Refine from OSM or the port's own plan when available.
+  aarhus_harbour: {
+    site_id: 'aarhus_harbour',
+    name: 'Aarhus Harbour',
+    site_type: 'container_port',
+    schema_version: '1.0',
+    generated_at: '2026-10-24T00:00:00Z',
+    generated_by: 'Agent A (stub, replaced by Mistral post-demo)',
+    port_reference_point: { lat: 56.1508, lon: 10.2284 },
+
+    critical_areas: [
+      // Centre of the container terminal, averaged from the four corners
+      // of the traced terminal outline.
+      { id: 'container_terminal', name: 'Container terminal', center: { lat: 56.1500, lon: 10.2407 }, criticality: 'critical', verified: 'approximate',
+        reason: 'Container stacks, gantry cranes and the terminal yard. The largest single operational area inside the site.' },
+      // AAR-N06 was placed on this quay, under the container cranes.
+      { id: 'crane_quay', name: 'Container crane quay', center: { lat: 56.15247, lon: 10.23838 }, criticality: 'critical', verified: 'approximate',
+        reason: 'Ship-to-shore cranes along the berth. Where vessels are worked alongside.' },
+    ],
+
+    high_value_assets: [
+      // Lucas shift-clicked just east of the hangar; this is that point.
+      { id: 'terminal_hangar', name: 'Largest container terminal hangar (east side)', location: { lat: 56.14370, lon: 10.23580 }, asset_type: 'warehouse', criticality: 'high', verified: 'approximate',
+        reason: 'The largest covered building on the container terminal.' },
+      // The middle of the three southern piers, AAR-N18 at its tip. The
+      // point is the pier south of the tip, where the storage tanks stand.
+      { id: 'middle_pier_tanks', name: 'Middle pier, storage tanks', location: { lat: 56.15450, lon: 10.22500 }, asset_type: 'fuel_storage', criticality: 'high', verified: 'approximate',
+        reason: 'Round storage tanks on the middle pier. Contents not recorded.' },
+    ],
+
+    highlights: [
+      { asset_id: 'container_terminal', priority: 1, rationale: 'The largest operational area. Denial here stops cargo handling across the port.' },
+      { asset_id: 'middle_pier_tanks', priority: 2, rationale: 'Storage tanks inside the port. A hazard that reaches beyond the pier if hit.' },
+      { asset_id: 'crane_quay', priority: 3, rationale: 'Where vessels are worked. The cranes are the tallest structures on the site.' },
+      { asset_id: 'terminal_hangar', priority: 4, rationale: 'The largest covered building on the terminal.' },
+    ],
+
+    sensitive_setups: [
+      { id: 'bay_approach', name: 'Approach from Aarhus Bay', note: 'Open water to the east. The direction a low maritime or air approach comes from.' },
+    ],
+
+    // Assumed for a working container port, not taken from the operator.
+    normal_patterns: {
+      operating_hours: 'Assumed around the clock for cargo handling.',
+      typical_ambient_activity: 'Vessel, crane and truck movement across the terminal.',
+      civilian_drone_activity: 'Authorised inspection drones possible over quays. Anything else is unexpected.',
+    },
+
+    correlator_hints: {
+      dwell_alarm_zones: [
+        { name: 'Container terminal', center: { lat: 56.1500, lon: 10.2407 }, radius_m: 400, threshold_sec: 20 },
+        { name: 'Middle pier, storage tanks', center: { lat: 56.15450, lon: 10.22500 }, radius_m: 250, threshold_sec: 15 },
+      ],
+      unusual_pattern_flags: [
+        'Approach from the bay with a run along the terminal = survey of cargo handling',
+        'Loiter over the storage tanks = interest in a hazard site',
+      ],
+    },
+
+    cooperative_traffic: {
+      expected: true,
+      source: 'opensky',
+      match_radius_m: 800,
+      match_time_window_s: 8,
+      bbox_padding_deg: 0.15,
+    },
+
+    // Same set as Esbjerg, the other port: physical response on the
+    // quays, the maritime advisory, municipality and region.
+    response_capabilities: [
+      'deploy-patrol', 'set-cordon',
+      'brs-standby', 'brs-deploy',
+      'army-c-uas', 'army-ground',
+      'issue-maritime-advisory',
+      'kom-crisis', 'kom-shelter',
+      'hjv-reinforce',
+      'region-ambulance-standby', 'region-triage-prep',
+    ],
+  },
+
   // ── Billund Airport (BLL / EKBI) ──────────────────────────────────
   // Denmark's second-busiest passenger airport + largest air cargo hub
   // (Cargo Handling Billund Airport / CHBA). Municipal-owned (7 Jylland
