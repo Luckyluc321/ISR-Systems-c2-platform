@@ -23756,7 +23756,7 @@ async function main() {
       { key: 'cph_recon_hostile', threat: 'Mohajer-2 reconnaissance', pathLabel: 'High-altitude loiter', cls: 'recon' },
       { key: 'cph_jet_friendly', threat: 'Jet (SAS 743), friendly', pathLabel: 'Filed airliner route', cls: 'friendly' },
       { key: 'cph_jet_goaround', threat: 'Jet (SAS 743), friendly', pathLabel: 'Missed approach, 04R', cls: 'friendly' },
-      { key: 'cph_jet_goaround_early', threat: 'Jet (SAS 743), friendly', pathLabel: 'Crew-spotted missed approach, 37 m at 700 m', cls: 'friendly' },
+      { key: 'cph_jet_goaround_early', threat: 'Jet (SAS 743), friendly', pathLabel: 'Crew-spotted missed approach, 60 m at 700 m', cls: 'friendly' },
       { key: 'cph_jet_goaround_atc', threat: 'Jet (SAS 743), friendly', pathLabel: 'ATC-warned missed approach, 398 m at 7.6 km', cls: 'friendly' },
       { key: 'cph_missile_hostile', threat: 'Cruise missile', pathLabel: 'Baltic sea ingress', cls: 'critical' },
       { key: 'cph_missile_inbound_sw', threat: 'Cruise missile', pathLabel: 'SW continuation ingress', cls: 'critical' },

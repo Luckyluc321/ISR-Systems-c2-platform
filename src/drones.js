@@ -3742,3 +3742,45 @@ export function pointInPolygon(lat, lon, perimeter) {
   }
   return inside;
 }
+
+// ── THE CREW-SPOTTED GO-AROUND ON A TRUE 3 DEGREE GLIDE PATH ─────────
+//
+// Lucas, 2026-10-24: the airliner in the WITHOUT ISR run should come in
+// slightly higher. Measured against a 3 degree path to the 04R touchdown
+// point (the first ground contact of cph_jet_friendly), the authored
+// approach sat 20 to 25 m low the whole way in and flattened to about
+// 1.8 degrees over the last 2 km, breaking off at 37 m where the path
+// puts an aircraft at about 60 m.
+//
+// The approach is now ON the 3 degree line to touchdown, up to the
+// break-off (the lowest point before the climb). The extra height then
+// bleeds off over the first 30 s of the go-around, so the climb rejoins
+// its authored path with no step. Positions and timing are untouched, so
+// both combos that use this aircraft meet the swarm exactly as before.
+//
+// GO BACK: set _GLIDEPATH_3DEG to false and the approach is the old one,
+// byte for byte (checked when this was written).
+const _GLIDEPATH_3DEG = true;
+const _04R_TOUCHDOWN = { lat: 55.59523, lon: 12.60823 };
+function _onThreeDegreeGlidePath(wps, td, bleedSec = 30) {
+  const K = 111320, c = Math.cos(td.lat * Math.PI / 180), tan3 = Math.tan(3 * Math.PI / 180);
+  const dist = (w) => Math.hypot((w.lat - td.lat) * K, (w.lon - td.lon) * K * c);
+  // Break-off: the lowest point before the aircraft climbs away.
+  let bo = 0;
+  for (let i = 1; i < wps.length; i++) {
+    if (wps[i].alt < wps[bo].alt) bo = i;
+    if (wps[bo].alt < 100 && wps[i].alt > wps[bo].alt + 60) break;
+  }
+  const lift = dist(wps[bo]) * tan3 - wps[bo].alt;
+  const tBo = wps[bo].tSec;
+  return wps.map((w, i) => {
+    if (i <= bo) return { ...w, alt: +Math.max(w.alt, dist(w) * tan3).toFixed(2) };
+    const k = Math.max(0, 1 - (w.tSec - tBo) / bleedSec);
+    return k > 0 ? { ...w, alt: +(w.alt + lift * k).toFixed(2) } : w;
+  });
+}
+if (_GLIDEPATH_3DEG && TEMPLATES.cph_jet_goaround_early) {
+  TEMPLATES.cph_jet_goaround_early.waypoints =
+    _onThreeDegreeGlidePath(TEMPLATES.cph_jet_goaround_early.waypoints, _04R_TOUCHDOWN);
+}
+
