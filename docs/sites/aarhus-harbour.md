@@ -65,9 +65,11 @@ Both fly the same fixed-wing, at 36 m/s with 280 m turns, through `_filletedRout
 | Scenario | Path | What it is for |
 |---|---|---|
 | `aarhus_fixedwing_probe` | In off the bay, west down the container terminal, over the oil pier, a late loiter over the pier, out northeast | The probe story: it maps the port, dwells, leaves |
-| `aarhus_fixedwing_inland` (2026-10-26) | In from 3 km inland, dead straight and level at 650 m east across the container yards and the Crane Quay to the east tip, one circle over the bay, out east-northeast | The film. A follow view behind it looks out over the harbour and the bay, so after a pause everything ahead is loaded or is water |
+| `aarhus_fixedwing_terminal` (2026-10-26) | One straight line along the container terminal's long axis (about 46 degrees, measured from the traced boundary), level at 650 m from well before the terminal, past the east tip and out over the bay, one circle inside sensor range, out east-northeast | The film. A follow view behind it looks along the harbour and out over the water, and nothing new turns up at the sides. A first version crossed the yards west to east and kept streaming detail in under the camera |
 
-The inland route, measured: detected at 42 s, the straight level leg runs 67 to 134 s, the circle 148 to 203 s fully inside sensor range, contact lost at 212 s, scenario ends at 244 s.
+Measured: detected at 10 s, dead straight at 46 to 47 degrees and level at 650 m from 38 to 121 s, the circle fully inside sensor range, contact lost at 195 s, scenario ends at 225 s.
+
+The route builder (`_filletedRoute`) had a fault this route exposed: a key point exactly in line with its neighbours is a zero turn, and it moved the aircraft 280 m sideways. Fixed. The other 35 routes are byte-identical (hashed before and after).
 
 ## 7. Not built yet
 

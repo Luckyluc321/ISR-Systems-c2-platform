@@ -795,7 +795,12 @@ function _filletedRoute(P, { lat0, lon0, V = 36, R = 280, EMIT = 0.25 }) {
       while (th < -Math.PI) th += 2 * Math.PI;
       const d = R * Math.tan(Math.abs(th) / 2);
       const st = { e: P[i + 1].e - d * u.e, n: P[i + 1].n - d * u.n };
-      const sgn = Math.sign(th);
+      // A key point exactly in line with its neighbours is a zero turn.
+      // Math.sign(0) is 0, which put the turn's centre ON the line and
+      // moved the aircraft R metres sideways in no time (1,141 m/s on the
+      // Aarhus terminal run). Either side gives a zero-length arc that
+      // ends where it starts. Routes with no such point are unchanged.
+      const sgn = th === 0 ? 1 : Math.sign(th);
       const c = { e: st.e + sgn * R * u.n, n: st.n - sgn * R * u.e };
       arc = { c, from: Math.atan2(st.e - c.e, st.n - c.n), th, sgn };
       arcIn = d;
@@ -929,46 +934,45 @@ const _AARHUS_PROBE_ROUTE = (() => {
   ], { lat0: 56.1508, lon0: 10.2284 });
 })();
 
-// ── AARHUS HARBOUR: IN FROM INLAND, OUT OVER THE HARBOUR ──────────
+// ── AARHUS HARBOUR: ALONG THE CONTAINER TERMINAL, OUT TO THE BAY ──
 //
 // Built for the film (Lucas, 2026-10-26). The probe above comes in off
 // the bay and flies west into the port, so a camera following it always
-// looks inland, over city and forest that stream in as it moves: "you
-// always have forest, city and such". The film needs ten seconds where
-// everything around the aircraft is fully drawn. Flying OUTWARD fixes
-// that: from behind it, the view ahead is the harbour and then open
-// water. Pause on the follow view, let the harbour load, resume, and
-// what lies ahead is already loaded or is water, which costs nothing.
+// looks inland, over city and forest that stream in as it moves. The
+// film needs ten to fifteen seconds where nothing around the aircraft is
+// still loading. A first version of this route crossed the harbour west
+// to east, over the yards: "too many things constantly rendering". Lucas:
+// "It just needs to fly along with it and not across it".
 //
-// Same airframe, speed and turn radius as the probe, same builder. The
-// whole Aarhus photoreal fence spans about 23 by 26 km, so every point
-// here is inside it; the gain is in what the camera has to load next.
+// So the whole run is ONE straight line along the container terminal's
+// long axis, measured from the traced boundary: its main body runs
+// south-west to north-east at about 46 degrees, centre from (140, -850)
+// to (1030, 0). The aircraft is on that line, level at 650 m, long before
+// it reaches the terminal, so a follow view set up behind it and paused
+// until loaded sees the same picture slide forward with nothing new
+// turning up at the sides. Past the east tip it carries straight on over
+// the bay, circles once inside sensor range, and leaves.
 //
-//   start 3 km inland, west, outside every sensor ring
-//   east over the city, easing down from 800 m
-//   the harbour's west edge at 650 m, level from here
-//   THE CLIP LEG: dead straight and level, heading east, across the
-//     container yards and the Crane Quay to the east tip and out over
-//     the bay. About 2.4 km, 65 s.
-//   one circle over the water off the east tip, never over the city
-//   out east-northeast over the bay, climbing, leaving coverage. Ends
-//     shortly after the last contact rather than flying on unseen.
-const _AARHUS_INLAND_ROUTE = (() => {
+// Same airframe, speed and turn radius as the probe, same builder.
+const _AARHUS_TERMINAL_ROUTE = (() => {
   const g = _AAR_GROUND_M;
-  const C = { e: 2100, n: -100 };           // circle centre, over the bay off the east tip, inside coverage
+  // The terminal's axis: through (140, -850) and (1030, 0).
+  const ax = (t) => ({ e: 140 + 890 * t, n: -850 + 850 * t });
+  const C = { e: 2050, n: 450 };            // circle centre, over the bay off the east tip
   const r = 280;                            // must equal the builder's R
   return _filletedRoute([
-    { e: -3300,     n:  320,      alt: 800 + g },   // start, 3 km inland
-    { e: -2000,     n:  230,      alt: 720 + g },   // east over the city
-    { e:  -900,     n:  150,      alt: 650 + g },   // harbour west edge, level from here
-    { e:  1500,     n:  300,      alt: 650 + g },   // across the Crane Quay to the east tip
-    { e: C.e - r,   n: C.n + r,   alt: 650 + g },   // out over the bay: the circle, entering NW
+    { ...ax(-2.0),  alt: 800 + g },   // start, south-west, outside every sensor ring
+    { ...ax(-0.9),  alt: 650 + g },   // on the axis and level, well before the terminal
+    { ...ax( 0.0),  alt: 650 + g },   // the terminal's south-west end
+    { ...ax( 1.0),  alt: 650 + g },   // the terminal's middle, still dead straight
+    { ...ax( 1.53), alt: 650 + g },   // the east tip, out over the water
+    { e: C.e - r,   n: C.n + r,   alt: 650 + g },   // the circle, entering NW
     { e: C.e + r,   n: C.n + r,   alt: 640 + g },   // NE
     { e: C.e + r,   n: C.n - r,   alt: 630 + g },   // SE
     { e: C.e - r,   n: C.n - r,   alt: 630 + g },   // SW
     { e: C.e - r,   n: C.n + r,   alt: 640 + g },   // NW again
     { e: C.e + r,   n: C.n + r,   alt: 660 + g },   // NE, breaking off
-    { e: 3500,      n:  850,      alt: 760 + g },   // out over the bay, climbing, gone
+    { e: 3300,      n: 1150,      alt: 760 + g },   // out over the bay, climbing, gone
   ], { lat0: 56.1508, lon0: 10.2284 });
 })();
 
@@ -1947,12 +1951,12 @@ export const TEMPLATES = {
   },
 
   // The same aircraft and the same detection as aarhus_fixedwing_probe,
-  // flown the other way: in from inland, out over the harbour. See
-  // _AARHUS_INLAND_ROUTE. Type, class, threat, confidence and signal
+  // flown along the container terminal and out to the bay, for the film.
+  // See _AARHUS_TERMINAL_ROUTE. Type, class, threat, confidence and signal
   // evidence are the probe's, unchanged. The seed sensors are the five
   // this route passes nearest, with the probe's own scores in the same
   // order, and the evidence note describes this route.
-  aarhus_fixedwing_inland: {
+  aarhus_fixedwing_terminal: {
     coverageGated: true,
     siteId: 'aarhus_harbour',
     classification: 'hostile',
@@ -1961,22 +1965,22 @@ export const TEMPLATES = {
     droneType: 'Fixed-wing loitering munition, unidentified',
     confidence: 0.64,
     contributingSensors: [
-      { id: 'AAR-N07', confidence: 0.71 },   // 20 m, container yard 3
-      { id: 'AAR-N06', confidence: 0.68 },   // 59 m, Crane Quay
-      { id: 'AAR-N16', confidence: 0.66 },   // east tip
-      { id: 'AAR-N15', confidence: 0.63 },   // east tip
-      { id: 'AAR-N05', confidence: 0.58 },   // container yard 1
+      { id: 'AAR-N17', confidence: 0.71 },   // 129 m, east tip
+      { id: 'AAR-N19', confidence: 0.68 },   // 177 m, terminal hangar
+      { id: 'AAR-N11', confidence: 0.66 },   // 250 m, lower port
+      { id: 'AAR-N16', confidence: 0.63 },   // 259 m, east tip
+      { id: 'AAR-N15', confidence: 0.58 },   // 341 m, east tip
     ],
     evidence: {
       rfCarrier: 'No control uplink observed, datalink bursts only',
       rfMatch: 'Loiter signature, no catalogue match',
       modality: 'RF passive + acoustic + visual',
       evidenceSize: '61.3 MB',
-      note: 'Fixed-wing, no transponder, no filed flight. Came in from inland at about 800 m, crossed the harbour heading east at 650 m over the container yards and the Crane Quay, circled once over the bay off the east tip, then climbed out east-northeast and left coverage.',
+      note: 'Fixed-wing, no transponder, no filed flight. Came in from the south-west at about 800 m, flew the length of the container terminal at 650 m, circled once over the bay off the east tip, then climbed out east-northeast and left coverage.',
     },
     modelSwapM: 700,
-    waypoints: _AARHUS_INLAND_ROUTE,
-    durationSec: Math.round(_AARHUS_INLAND_ROUTE[_AARHUS_INLAND_ROUTE.length - 1].tSec),
+    waypoints: _AARHUS_TERMINAL_ROUTE,
+    durationSec: Math.round(_AARHUS_TERMINAL_ROUTE[_AARHUS_TERMINAL_ROUTE.length - 1].tSec),
   },
   cph_recon_hostile: {
     // Approaches from 3.2 km east, outside the perimeter AND outside
