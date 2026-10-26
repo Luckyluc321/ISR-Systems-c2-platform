@@ -7,21 +7,26 @@
 // evidence pack.
 //
 // This writes the line that should have been there. Each recipient gets
-// what the event means FOR THEM and what is actually being asked. The
-// air traffic tower is asked to hold traffic. Intelligence is told what
-// the emitters look like. The NOTAM system gets an airspace advisory.
-// None of them get the same sentence.
+// what the event means FOR THEM and where to find it. The tower is told
+// the live track is up and the traffic call is theirs. Intelligence is
+// told the signatures are in the pack. None of them get the same
+// sentence, and none of them is told what to do.
 //
 // WHAT THIS IS NOT. The operator's own message always wins. This only
 // fills the gap when the box was left blank, and it is a draft in the
 // operator's voice, not the platform speaking for them.
 //
-// TONE, AND WHY IT CHANGES WITH THE RECIPIENT. ISR reports, the
-// authorities decide. A message to the site's own teams can be
-// directive, because the operator runs that organisation. A message to
-// the police, to intelligence or to defence states what was observed
-// and requests, it does not instruct. That line is deliberate and
-// should not be smoothed over into one uniform register.
+// THE MESSENGER, NOT THE DECISION MAKER (Lucas, 2026-10-26). This used
+// to let messages to the site's own teams be directive ("Request ground
+// stop. Inbounds to hold or divert", "Runway unavailable until further
+// notice", "Stop vehicle movement") and let others carry claims the
+// platform cannot back ("Local district already engaged", "No cyber
+// indicators seen", "No assistance required at this stage"). Every one
+// of those is a decision or a judgement that belongs to the recipient.
+// Now every message states what was observed and where to find it, and
+// leaves the decision with the reader. What still changes with the
+// recipient is what they need to know, not whether they are told what
+// to do. check:escalation-flow [messages] holds it.
 
 // HOW AN AIRPORT ACTUALLY TALKS.
 //
@@ -77,28 +82,31 @@ const _WANTS_MODELS = new Set(['t2-pet', 't3-fe', 't3-cta', 't3-nc3', 't4-forsva
 // Keyed on the id suffix, which is stable across sites: cph-t1-atc and
 // billund-t1-atc both end in t1-atc.
 const BY_SUFFIX = {
-  't1-atc':      'Request ground stop on arrivals and departures. Inbounds to hold or divert.',
-  't1-duty-mgr': 'Runway status is your call. Recommend ops room.',
-  't1-sec-ops':  'Patrols to the affected sector. Live track is on the shared view.',
-  't1-fire':     'Crews to standby. No response required unless we get a ground impact.',
-  't1-ground':   'Stop vehicle movement on the manoeuvring area until we call it clear.',
-  't2-politi':   'Request patrol response to the perimeter. Position and heading are in the brief.',
+  't1-atc':      'Live track on the shared view. Traffic decisions are yours.',
+  't1-duty-mgr': 'Live track on the shared view. Runway status is your call.',
+  't1-sec-ops':  'Live track on the shared view. Position and heading are in the brief.',
+  't1-fire':     'Passing for readiness. Position and heading are in the brief.',
+  't1-ground':   'Passing for the manoeuvring area. Position and heading are in the brief.',
+  't2-politi':   'Position and heading are in the brief. Live track on the shared view.',
   't2-pet':      'Signatures do not match commercial traffic. Passing for your awareness.',
-  't3-rigspoliti': 'Local district already engaged. Passing for national coordination.',
-  't3-fe':       'Coordinated flight profile, no library match on the link. Request assessment.',
-  't3-cta':      'Pattern, timing and target selection are in the pack. Request assessment.',
-  't3-cfcs':     'No cyber indicators seen. Passing in case it correlates with your reporting.',
+  't3-rigspoliti': 'Passing for national coordination.',
+  't3-fe':       'Track and emitter signatures are in the pack. Passing for assessment.',
+  't3-cta':      'Track history and timing are in the pack. Passing for assessment.',
+  't3-cfcs':     'Passing in case it correlates with your reporting.',
   't3-nc3':      'Passing in case the emitter signature matches anything you hold.',
-  't3-beredskab':'No assistance required at this stage. Passing for readiness.',
+  't3-beredskab':'Passing for readiness.',
   't4-forsvar':  'Track and emitter signatures are in the pack.',
-  't5-stm':      'Critical infrastructure affected. Local response running.',
+  't5-stm':      'Detection over critical infrastructure. Passing for national awareness.',
 };
 
-// Systems are machines. They get an instruction.
+// Systems are machines, and the site's own. The camera system still
+// gets an instruction: pointing a camera at a track is sensing, not a
+// response. A NOTAM is an airspace decision, so the NOTAM system is told
+// what was seen and nothing more.
 function _systemMessage(dest, event, siteName) {
   const n = String(dest.name || '').toLowerCase();
   if (n.includes('notam') || n.includes('eurocontrol')) {
-    return `NOTAM request. ${siteName}, drone activity in the vicinity. Runway unavailable until further notice.`;
+    return `${siteName}, drone activity in the vicinity. Position and heading in the brief.`;
   }
   if (n.includes('camera') || n.includes('surveillance')) {
     return 'Slew to the live track. Record continuous.';
@@ -128,8 +136,8 @@ export function defaultEscalationMessage(dest, event, siteName = 'the site') {
   if (body) return `${head}${body}`;
 
   const byTier = {
-    1: 'Site response requested.',
-    2: 'Request response and coordination.',
+    1: 'Passing for site awareness. Live track on the shared view.',
+    2: 'Position and heading are in the brief. Passing for your decision.',
     3: 'Passing for national awareness.',
     4: 'Passing for the air picture.',
     5: 'National notification.',

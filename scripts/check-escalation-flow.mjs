@@ -16,6 +16,7 @@ import { TEMPLATES } from '../src/drones.js';
 import { destinationsForSite, isInternationalBody } from '../src/destinations.js';
 import { recommendationFor, preselectedDestinationIds } from '../src/escalation_recommendation.js';
 import { renderDetectionBrief } from '../src/summary.js';
+import { defaultEscalationMessage } from '../src/escalation_messages.js';
 import {
   assessmentFacts, parseAssessment, cleanSituation, showResponseAssets,
   maybeRequestEscalationAssessment, _resetEscalationAssessmentState, ASSESS_CFG,
@@ -165,6 +166,21 @@ console.log('\n[the agent]');
   maybeRequestEscalationAssessment(ev, ctx);
   check('a rejected key parks it for the session', calls === before);
   _resetEscalationAssessmentState();
+}
+
+console.log('\n[the messages, every recipient at every site]');
+{
+  const DECIDES = /\b(request ground stop|hold or divert|recommend|stop vehicle|patrols to|crews to standby|no response required|no assistance required|runway unavailable|until further notice|already engaged|no cyber indicators|request patrol|request response|response requested|target selection|local response running|dispatch)\b/i;
+  const SITES = ['cph', 'aarhus_harbour', 'billund', 'esbjerg', 'odense', 'energinet_amager_koblingsstation', 'energinet_kassoe',
+    'energinet_bjaeverskov', 'energinet_ferslev', 'energinet_hovegaard', 'energinet_landerupgaard'];
+  const ev = { classification: 'hostile', threat: 'high', platform: 'quadcopter', droneType: '5x quadcopter (recon formation)', confidence: 0.9 };
+  const bad = []; let n = 0;
+  for (const site of SITES) { let l = []; try { l = destinationsForSite(site); } catch (_) {}
+    for (const d of l) { const m = defaultEscalationMessage(d, ev, site); n++;
+      if (DECIDES.test(m)) bad.push(`${d.id}: ${m}`); } }
+  check(`no default message decides for its recipient (${n} checked)`, n > 200 && !bad.length, bad.slice(0, 3).join(' | '));
+  const cam = destinationsForSite('cph').find(d => d.type === 'system' && /camera/i.test(d.name));
+  check('the camera system is still told to slew, which is sensing, not response', cam && /Slew to the live track/.test(defaultEscalationMessage(cam, ev, 'Copenhagen Airport')));
 }
 
 console.log('\n[the wiring]');
