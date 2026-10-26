@@ -37,10 +37,19 @@ const DANISH = ['NOST · National Operativ Stab', 'Statsministeriet · Krisebere
   'Forsvarskommandoen', 'Flyvevåbnet', 'PET · Operations, Politiets Efterretningstjeneste', 'Trafikstyrelsen · Aviation Authority'];
 const wrong = DANISH.filter(n => isInternationalBody({ name: n }));
 check('no Danish body is taken for one', !wrong.length, wrong.join(', '));
+check('an explicit flag wins either way', isInternationalBody({ name: 'Grenzschutz', international: true }) && !isInternationalBody({ name: 'European desk, PET', international: false }));
+{
+  const SITES = ['cph', 'aarhus_harbour', 'billund', 'esbjerg', 'odense', 'energinet_amager_koblingsstation', 'energinet_kassoe',
+    'energinet_bjaeverskov', 'energinet_ferslev', 'energinet_hovegaard', 'energinet_landerupgaard'];
+  const odd = [];
+  for (const site of SITES) { let l = []; try { l = destinationsForSite(site); } catch (_) {}
+    for (const d of l) if (isInternationalBody(d) && d.tier !== 5 && !/eurocontrol/i.test(d.name)) odd.push(`${site}: T${d.tier} ${d.name}`); }
+  check('across every site, only Tier 5 bodies and Eurocontrol count as international', !odd.length, odd.slice(0, 4).join(' | '));
+}
 
 console.log('\n[defaults, every scenario at every site]');
 let scenarios = 0;
-const ticked = [], decided = [], tier5 = [];
+const ticked = [], decided = [];
 for (const [key, t] of Object.entries(TEMPLATES)) {
   if (!t.siteId) continue;
   let dests; try { dests = destinationsForSite(t.siteId); } catch (_) { continue; }
@@ -50,12 +59,17 @@ for (const [key, t] of Object.entries(TEMPLATES)) {
   const pre = new Set(preselectedDestinationIds(rec, dests));
   for (const d of dests) if (pre.has(d.id) && isInternationalBody(d)) ticked.push(`${key}: ${d.name}`);
   if (/\bdispatch|\bescalate to tier|within \d+ seconds|radio silence/i.test(rec.text)) decided.push(`${key}: ${rec.text}`);
-  if (rec.tiers.includes(5)) tier5.push(key);
 }
 check(`checked ${scenarios} scenarios`, scenarios >= 30, `${scenarios}`);
 check('no international body is ever ticked by default', !ticked.length, ticked.slice(0, 4).join(' | '));
 check('no default text decides the response', !decided.length, decided.slice(0, 2).join(' | '));
-check('Tier 5 is never recommended', !tier5.length, tier5.join(', '));
+{
+  const kassoe = destinationsForSite('energinet_kassoe');
+  const pre = new Set(preselectedDestinationIds(recommendationFor({ classification: 'hostile', threat: 'high', platform: 'missile' }), kassoe));
+  const t5 = kassoe.filter(d => d.tier === 5);
+  check('a missile ticks the Danish crisis staffs in Tier 5', t5.filter(d => /NOST|Statsministeriet/.test(d.name)).every(d => pre.has(d.id)) && t5.some(d => pre.has(d.id)));
+  check('and none of the international bodies beside them', !t5.some(d => isInternationalBody(d) && pre.has(d.id)));
+}
 {
   const cph = destinationsForSite('cph');
   const pre = new Set(preselectedDestinationIds(recommendationFor({ classification: 'hostile', threat: 'high', platform: 'quadcopter' }), cph));
@@ -95,6 +109,16 @@ const hasTables = html => /Tactical Response Assets|Ground Coordination|Conseque
   const html = renderDetectionBrief(ev);
   check('the agent calls a state attack: the asset tables are there', /Tactical Response Assets/.test(html));
   check('framed as reference for the authorities who decide', /who decide the response/.test(html));
+}
+{
+  // The floor under the agent: a recon swarm never gets the tables,
+  // even if the model answers true.
+  const ev = { ...baseEvent, escalationAssessment: { situation: 'Five drones hold over the cargo area.', stateAttack: true, at: '2026-10-26T10:01:00.000Z', model: 'mistral-test' } };
+  check('a recon swarm with a wrong "true" from the model: still no tables', !hasTables(renderDetectionBrief(ev)) && showResponseAssets(ev) === false);
+  const lm = { ...ev, platform: 'loitering-munition' };
+  check('a loitering munition with "true": tables', showResponseAssets(lm) === true);
+  const mil = { ...ev, platform: 'quadcopter', subject: { threat_profile: { weaponized_signature: true } } };
+  check('a weapon-class signature with "true": tables', showResponseAssets(mil) === true);
 }
 
 console.log('\n[the agent]');
@@ -150,7 +174,11 @@ check('the modal preselects through preselectedDestinationIds', /new Set\(presel
 check('"Apply recommended" uses the same rule', /_recIds = new Set\(preselectedDestinationIds\(rec, dests\)\)/.test(main));
 check('every tier header carries the fold control', /data-esc-tier="\$\{tier\}"/.test(main));
 check('tiers reset to recommended-open each time the modal opens', /_tierFolded = new Set\(Object\.keys\(destsByTier\)/.test(main));
-check('opening the modal asks for the assessment', /function openEscalateModal[\s\S]{0,600}maybeRequestEscalationAssessment\(e,/.test(main));
+check('opening the modal asks for the assessment', /function openEscalateModal[\s\S]{0,200}_requestEscalationAssessment\(e\)/.test(main));
+check('an escalation an auto-rule sent is assessed once', /ev\.escalations\?\.length && !_assessAsked\.has\(ev\.id\)[\s\S]{0,120}_requestEscalationAssessment\(ev\)/.test(main));
+const rules = readFileSync(new URL('../src/rules.js', import.meta.url), 'utf8');
+check('an auto-rule never sends to an international body', /escalateToTiers\.includes\(d\.tier\) && !isInternationalBody\(d\)/.test(rules));
+check('no default rule says it dispatches', !/name: '[^']*dispatch/i.test(rules));
 
 console.log(failures ? `\n${failures} failing` : '\nall passing');
 process.exit(failures ? 1 : 0);

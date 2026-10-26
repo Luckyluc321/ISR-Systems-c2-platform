@@ -174,8 +174,13 @@ maker." The brief now describes and stops
 - **What it decides:** whether the brief carries the response asset tables,
   as reference for the authorities. Nothing else. No recommendation section
   exists any more. ASSESSED tier.
+- **The floor under it:** a `true` counts only on a military-class track, a
+  missile, a loitering munition, or a weapon-class or known military platform
+  in the detection subject. "It should never ever happen at a recon swarm" is
+  held in code, not left to the prompt.
 - **Cadence:** once when the operator opens the escalate modal, again only if
-  the stored one is older than 60 s. The preview re-renders when it lands.
+  the stored one is older than 60 s. An escalation an auto-rule sent is
+  assessed once too. The preview re-renders when it lands.
 - **Absent, never stale:** no key, an error or an unparseable reply clears it.
   The brief then carries measured facts and no tables, which is the safe
   default. A 401/403 parks it for the session.
@@ -186,8 +191,10 @@ Gated by `check:escalation-flow`, with the defaults below.
 **Escalation defaults** (`src/escalation_recommendation.js`): the
 recommendation says who to notify, never what anyone should do. No
 international body (Eurocontrol, Europol, ENTSO-E, NATO, NORDEFCO) is ever
-ticked by default, and Tier 5 is never recommended. They stay on the list to
-pick by hand. Every tier folds with the sections' own control. The
+ticked by default, and no auto-rule sends to one (`rules.js` filters them,
+which holds rules saved in a browser too). They stay on the list to pick by
+hand. A missile still ticks Tier 5's two Danish crisis staffs, NOST and
+Statsministeriet. Every tier folds with the sections' own control. The
 recommended tiers open, the rest start folded.
 
 ## Single-drone confidence follows the sensors, 2026-10-23

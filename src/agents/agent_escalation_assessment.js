@@ -115,9 +115,24 @@ export function parseAssessment(raw) {
   return { situation, stateAttack: o.state_attack === true };
 }
 
-/** Whether the brief carries the response asset tables. */
+/** A track a state attack could be made of: a missile or loitering
+ *  munition, or a weapon-class or known military platform in the
+ *  detection subject. A quadcopter or a fixed-wing drone is neither. */
+const _MILITARY_PLATFORMS = new Set(['missile', 'loitering-munition']);
+export function militaryClassTrack(event) {
+  const tp = event?.subject?.threat_profile;
+  return _MILITARY_PLATFORMS.has(event?.platform)
+    || tp?.weaponized_signature === true
+    || tp?.known_military_platform === true;
+}
+
+/** Whether the brief carries the response asset tables. The agent
+ *  decides, and code holds a floor under it: "It should never ever
+ *  happen at a recon swarm" (Lucas, 2026-10-26) is a guarantee, not a
+ *  prompt instruction, so a `true` on a track that is not military
+ *  class is ignored. */
 export function showResponseAssets(event) {
-  return event?.escalationAssessment?.stateAttack === true;
+  return event?.escalationAssessment?.stateAttack === true && militaryClassTrack(event);
 }
 
 /** For a tooltip or a provenance line: a model reading, which model, when. */

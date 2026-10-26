@@ -34,7 +34,10 @@ export function recommendationFor(event) {
   const threat = event?.threat;
   if (cls === 'friendly') return { tiers: [1], text: 'Friendly identification. Log it with site security for the record.', urgency: 'low' };
   if (cls === 'resolved') return { tiers: [], text: 'Already dismissed. Nothing to send.', urgency: 'low' };
-  if (platform === 'missile') return { tiers: [1, 2, 3, 4], text: 'Missile signature. Notify site security, the police, the national agencies and defence now.', urgency: 'critical' };
+  // Tier 5 stays recommended for a missile: it holds the Danish national
+  // crisis staffs (NOST, Statsministeriet), which are ticked. The
+  // international bodies beside them are not (preselectedDestinationIds).
+  if (platform === 'missile') return { tiers: [1, 2, 3, 4, 5], text: 'Missile signature. Notify site security, the police, the national agencies, defence and the national crisis staff now.', urgency: 'critical' };
   if (cls === 'hostile' && threat === 'high') return { tiers: [1, 2, 3], text: 'High-threat hostile track. Notify site security, the police and the national agencies now.', urgency: 'high' };
   if (cls === 'hostile' && threat === 'medium') return { tiers: [1, 2], text: 'Hostile track. Notify site security and the police.', urgency: 'med' };
   if (platform === 'fixed-wing') return { tiers: [1, 2, 3], text: 'Fixed-wing platform. Notify site security, the police and the national agencies.', urgency: 'high' };

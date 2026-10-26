@@ -28160,15 +28160,14 @@ async function main() {
     5: 'Tier 5  ·  International partners',
   };
 
-  function openEscalateModal(eventId) {
-    const e = getEvent(eventId);
-    if (!e) return;
-    const rec = recommendationFor(e);
-    // The brief's Situation section, and the one call on whether it
-    // carries response assets: agents/agent_escalation_assessment.js.
-    // One request per escalation, not a loop. The preview re-renders when
-    // the answer lands. With no answer the brief is facts only.
-    maybeRequestEscalationAssessment(e, {
+  // The brief's Situation section, and the one call on whether it
+  // carries response assets: agents/agent_escalation_assessment.js.
+  // Asked when the operator opens the escalate modal, and once for an
+  // escalation an auto-rule sent without it (the detection line loop
+  // below). The preview re-renders when the answer lands. With no
+  // answer the brief is facts only.
+  function _requestEscalationAssessment(e) {
+    return maybeRequestEscalationAssessment(e, {
       siteName: SITES[e.siteId]?.name || siteName(e.siteId),
       siteKind: contextForSite(e.siteId)?.site_type || null,
       heldSeconds: (() => {
@@ -28185,6 +28184,13 @@ async function main() {
         _refreshBriefPreview(id);
       },
     });
+  }
+
+  function openEscalateModal(eventId) {
+    const e = getEvent(eventId);
+    if (!e) return;
+    const rec = recommendationFor(e);
+    _requestEscalationAssessment(e);
     // Domain-filtered pool. Inland Energinet event will hide Kystvagten;
     // maritime harbour drone shows the full set; cross-linked event
     // pulls in every domain any linked event carries. Config UI stays
@@ -29542,6 +29548,7 @@ async function main() {
   // when the picture changed and at most every 20 s per event. See
   // agents/agent_detection_line.js. Skipped while the sim is paused, so a
   // frozen scene does not keep buying sentences about itself.
+  const _assessAsked = new Set();   // events whose auto-escalation was assessed
   const _detectionLineTransport = {
     configured: () => isMistralConfigured(),
     stream: (messages, cb, opts) => streamCompletion(messages, cb, opts),
@@ -29574,6 +29581,14 @@ async function main() {
         heldSeconds: _st?._firstDetectedMs ? Math.round((monoNow() - _st._firstDetectedMs) / 1000) : null,
         write: (id, line) => mutateEvent(id, { detectionLine: line }),
       });
+      // An escalation an auto-rule sent, with no operator opening the
+      // modal, still gets its brief's Situation section and the
+      // state-attack call. Once per event: an error leaves it absent
+      // rather than asking every 5 s.
+      if (ev.escalations?.length && !_assessAsked.has(ev.id)) {
+        _assessAsked.add(ev.id);
+        _requestEscalationAssessment(ev);
+      }
     }
     pruneDetectionLineState(_activeIds);
   }, 5000);

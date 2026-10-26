@@ -4,7 +4,7 @@
 // Real product: rule editor in Config module. For now: preset defaults per site.
 
 import { EVENTS, onSelectionChange, escalateEvent, setEscalationOverdue } from './events.js';
-import { destinationsForSite, destinationsForEvent } from './destinations.js';
+import { destinationsForSite, destinationsForEvent, isInternationalBody } from './destinations.js';
 
 // Per-tier SLA window (minutes) for escalation acknowledgement. Anything
 // still un-ack'd past this threshold gets flipped to overdue by the sweep
@@ -22,7 +22,7 @@ export const SLA_MINS_BY_TIER = { 1: 5, 2: 15, 3: 30, 4: 60, 5: 120 };
 const DEFAULT_RULES = [
   {
     id: 'r-missile-all-tiers',
-    name: 'Cruise missile classification, automatic dispatch to all tiers',
+    name: 'Cruise missile classification, automatic notification of every Danish tier',
     // Re-enabled. Cruise missile signature triggers national response
     // automatically — no operator gate. Air Force gets the notification via
     // this rule, meaning operator does not need to manually escalate. The
@@ -153,8 +153,14 @@ function fireRule(rule, event) {
   // domains, so an inland substation rule never fires to Kystvagten
   // and a maritime-crossing quadcopter reaches the coast guard the
   // moment it enters harbour scope.
+  // NEVER AN INTERNATIONAL BODY, whatever the rule says. A rule is a
+  // default, and the default for Eurocontrol, Europol, NATO, NORDEFCO and
+  // ENTSO-E is "not unless an operator picks them by hand" (Lucas,
+  // 2026-10-26: we are the messenger, the Danish authorities decide who
+  // else is told). Filtered here rather than in the rule's tiers so a
+  // rule saved in a browser before this change is held to it too.
   const destIds = destinationsForEvent(event)
-    .filter(d => rule.then.escalateToTiers.includes(d.tier))
+    .filter(d => rule.then.escalateToTiers.includes(d.tier) && !isInternationalBody(d))
     .map(d => d.id);
   if (!destIds.length) return;
   const doFire = () => {
