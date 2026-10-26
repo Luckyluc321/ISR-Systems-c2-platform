@@ -181,6 +181,8 @@ import {
   onDestinationsChange, resetDestinationsToDefault,
   CHANNEL_META, getDestinationGuidance, getAllDestinations,
 } from './destinations.js';
+import { recommendationFor, preselectedDestinationIds } from './escalation_recommendation.js';
+import { maybeRequestEscalationAssessment } from './agents/agent_escalation_assessment.js';
 import { renderDetectionBrief } from './summary.js';
 import { getSourceFor as _getNnSourceFor, SITE_SOURCE_CONFIG } from './nn_registry.js';
 import { contextForSite, nearestCriticalArea, dwellZonesAtPoint } from './site_context.js';
@@ -28092,6 +28094,17 @@ async function main() {
   function closeBriefPreview() {
     briefBackdrop.style.display = 'none';
     briefCard.innerHTML = '';
+    _briefPreviewEventId = null;
+  }
+  // The preview is static HTML. When the escalation assessment lands
+  // after it opened, swap the brief body in place so the Situation
+  // section appears without the operator reopening it.
+  let _briefPreviewEventId = null;
+  function _refreshBriefPreview(eventId) {
+    if (_briefPreviewEventId !== eventId) return;
+    const body = briefCard.querySelector('#brief-print-area');
+    const ev = getEvent(eventId);
+    if (body && ev) body.innerHTML = renderDetectionBrief(ev);
   }
   function openBriefPreview(eventId, onSend) {
     const e = getEvent(eventId);
@@ -28120,23 +28133,11 @@ async function main() {
     });
     briefBackdrop.addEventListener('click', (ev) => { if (ev.target === briefBackdrop) closeBriefPreview(); }, { once: true });
     briefBackdrop.style.display = 'flex';
+    _briefPreviewEventId = eventId;
   }
 
-  // Threat-type → recommended escalation preset
-  function recommendationFor(event) {
-    const cls = event.classification;
-    const platform = event.platform || 'quadcopter';
-    const threat = event.threat;
-    if (cls === 'friendly') return { tiers:[1], text:'Non-threat identification. Log to Tier 1 for audit record.', urgency:'low' };
-    if (cls === 'resolved') return { tiers:[], text:'Already dismissed. No action required.', urgency:'low' };
-    if (platform === 'missile') return { tiers:[1,2,3,4,5], text:'Missile signature confirmed. Dispatch all response tiers immediately. Radio silence protocol takes effect on Tier 4 dispatch.', urgency:'critical' };
-    if (cls === 'hostile' && threat === 'high') return { tiers:[1,2,3], text:'High-threat classification. Dispatch Tier 1 and Tier 2 immediately. Escalate to Tier 3 within 60 seconds if unresolved.', urgency:'high' };
-    if (cls === 'hostile' && threat === 'medium') return { tiers:[1,2], text:'Confirmed threat. Dispatch Tier 1 and Tier 2.', urgency:'med' };
-    if (platform === 'fixed-wing') return { tiers:[1,2,3], text:'Fixed wing platform detected. Include Tier 3 with local response.', urgency:'high' };
-    if (platform === 'non-identifiable') return { tiers:[1,2], text:'Non-identifiable contact detected. Dispatch Tier 1 for visual acquisition and Tier 2 for signature analysis. Escalate on ID confirmation.', urgency:'med' };
-    if (cls === 'unknown') return { tiers:[1], text:'Classification pending. Dispatch Tier 1. Escalate as characteristics develop.', urgency:'med' };
-    return { tiers:[1], text:'Dispatch Tier 1. Escalate as required.', urgency:'med' };
-  }
+  // Who to tell by default: escalation_recommendation.js. Never an
+  // international body, and worded as who to notify, not what to do.
 
   // Per-destination selected channels state, keyed by dest ID
   let _selectedChannels = {}; // { destId: Set([...methods]) }
@@ -28145,6 +28146,11 @@ async function main() {
   // destination list room. Module scope, not per-render, because every
   // checkbox click rebuilds the modal.
   const _escCollapsed = new Set();
+  // Folded tiers, the same control as the sections above. Reset each
+  // time the modal opens: the recommended tiers open, the rest folded,
+  // so a hostile drone does not open on a wall of military and
+  // international recipients. Held across re-renders like _escCollapsed.
+  let _tierFolded = new Set();
   // legacy _escView removed with the P19 Palantir redesign (list-view only)
   const TIER_LABELS = {
     1: 'Tier 1  ·  First responders on site',
@@ -28158,14 +28164,36 @@ async function main() {
     const e = getEvent(eventId);
     if (!e) return;
     const rec = recommendationFor(e);
+    // The brief's Situation section, and the one call on whether it
+    // carries response assets: agents/agent_escalation_assessment.js.
+    // One request per escalation, not a loop. The preview re-renders when
+    // the answer lands. With no answer the brief is facts only.
+    maybeRequestEscalationAssessment(e, {
+      siteName: SITES[e.siteId]?.name || siteName(e.siteId),
+      siteKind: contextForSite(e.siteId)?.site_type || null,
+      heldSeconds: (() => {
+        const st = droneState.get(e.id);
+        return st?._firstDetectedMs ? Math.round((monoNow() - st._firstDetectedMs) / 1000) : null;
+      })(),
+      transport: {
+        configured: () => isMistralConfigured(),
+        stream: (messages, cb, opts) => streamCompletion(messages, cb, opts),
+        model: () => getInferenceConfig().model,
+      },
+      write: (id, a) => {
+        mutateEvent(id, { escalationAssessment: a });
+        _refreshBriefPreview(id);
+      },
+    });
     // Domain-filtered pool. Inland Energinet event will hide Kystvagten;
     // maritime harbour drone shows the full set; cross-linked event
     // pulls in every domain any linked event carries. Config UI stays
     // on destinationsForSite so admin sees the full unfiltered catalog.
     const dests = destinationsForEvent(e);
     const destsByTier = dests.reduce((acc, d) => { (acc[d.tier] = acc[d.tier] || []).push(d); return acc; }, {});
-    // Preselect destinations matching recommendation tiers
-    const preselected = new Set(dests.filter(d => rec.tiers.includes(d.tier)).map(d => d.id));
+    // Preselect the recommended tiers, never an international body.
+    const preselected = new Set(preselectedDestinationIds(rec, dests));
+    _tierFolded = new Set(Object.keys(destsByTier).map(Number).filter(t => !rec.tiers.includes(t)));
     // Default channel selection: primary method for each preselected destination
     _selectedChannels = {};
     dests.forEach(d => { _selectedChannels[d.id] = new Set(preselected.has(d.id) ? [d.contactMethods[0]] : []); });
@@ -28270,15 +28298,17 @@ async function main() {
               ${isOpen ? `<div class="escp-agency-body">${g.departments.map(d => destRow(d, { withinAgency: true })).join('')}</div>` : ''}
             </div>`;
         }).join('');
+        const folded = _tierFolded.has(parseInt(tier));
         return `
-          <div class="escp-tier">
+          <div class="escp-tier${folded ? ' is-folded' : ''}">
             <div class="escp-tier-hdr">
               <span class="escp-tier-lbl">${TIER_LABELS[tier] || 'Tier ' + tier}</span>
               ${isRec ? `<span class="escp-tier-rec">Recommended</span>` : ''}
+              <button class="escp-collapse escp-tier-fold" data-esc-tier="${tier}" title="${folded ? 'Expand' : 'Collapse'}" aria-label="Toggle tier">${folded ? '+' : '−'}</button>
             </div>
-            <div class="escp-tier-body">
+            ${folded ? '' : `<div class="escp-tier-body">
               ${groupsHtml}
-            </div>
+            </div>`}
           </div>`;
       }).join('');
 
@@ -28396,6 +28426,12 @@ async function main() {
         if (_escCollapsed.has(key)) _escCollapsed.delete(key); else _escCollapsed.add(key);
         renderModal();
       }));
+      modalCard.querySelectorAll('[data-esc-tier]').forEach(el => el.addEventListener('click', (ev) => {
+        ev.preventDefault(); ev.stopPropagation();
+        const t = parseInt(el.dataset.escTier);
+        if (_tierFolded.has(t)) _tierFolded.delete(t); else _tierFolded.add(t);
+        renderModal();
+      }));
       modalCard.querySelectorAll('[data-esc="toggle"]').forEach(el => el.addEventListener('click', (ev) => {
         ev.preventDefault(); ev.stopPropagation();
         const id = el.dataset.id;
@@ -28424,7 +28460,8 @@ async function main() {
       }));
       modalCard.querySelector('[data-esc="apply-rec"]').addEventListener('click', () => {
         _selectedChannels = {};
-        dests.forEach(d => { _selectedChannels[d.id] = new Set(rec.tiers.includes(d.tier) ? [d.contactMethods[0]] : []); });
+        const _recIds = new Set(preselectedDestinationIds(rec, dests));
+        dests.forEach(d => { _selectedChannels[d.id] = new Set(_recIds.has(d.id) ? [d.contactMethods[0]] : []); });
         renderModal();
       });
       const previewBtn = modalCard.querySelector('[data-esc="preview-brief"]');

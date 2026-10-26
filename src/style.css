@@ -1825,6 +1825,10 @@ body.details-collapsed #control-panel {
   flex-direction: column;
   gap: 6px;
 }
+/* Every tier folds with the sections' own control, pushed to the right
+   of its header. A folded tier is its header row and nothing else. */
+.escp-tier-fold { margin-left: auto; }
+.escp-tier.is-folded > .escp-tier-hdr { margin-bottom: 0; }
 
 /* Agency group — parent row + collapsible department list */
 .escp-agency {

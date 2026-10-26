@@ -1087,6 +1087,18 @@ export function destinationShortLabel(dest) {
   return label.trim();
 }
 
+// A European or international body: Eurocontrol, Europol, ENTSO-E, NATO
+// and its air and maritime commands, NORDEFCO. Never preselected in an
+// escalation (escalation_recommendation.js): a site operator tells the
+// Danish authorities, and they decide whether these are told. Matched by
+// name because that is what identifies them across the per-site copies.
+// Tier 5 also holds two Danish bodies, NOST and Statsministeriet's crisis
+// staff, which are not international and do not match.
+const _INTERNATIONAL_BODY = /\b(eurocontrol|europol|entso-e|nato|nordefco)\b|combined air operations centre/i;
+export function isInternationalBody(d) {
+  return _INTERNATIONAL_BODY.test(d?.name || '');
+}
+
 // Group destinations by parent agency within a single tier.
 // Returns [{ parent, departments: [dest, ...] }, ...] alphabetically
 // ordered by parent name — but 'Other' (catch-all bucket) always sorts

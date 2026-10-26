@@ -153,6 +153,43 @@ and `check:detection-line` fails if any code reads it.
   it for the session.
 - **Provenance:** hovering the line shows "Model reading · <model> · <time>".
 
+## The escalation brief's Situation section, built 2026-10-26
+
+The Detection Brief an escalation sends used to list the nearest fighter
+jets, military helicopters, police units and emergency services for every
+detection, a recon swarm included, and closed on "Recommended Action:
+dispatch Tier 1 and Tier 2". Lucas: "We are the messenger, not the decision
+maker." The brief now describes and stops
+(`src/agents/agent_escalation_assessment.js`, `src/summary.js`).
+
+- **Input:** measured facts only. Site and its kind, the detector's type
+  without scenario commentary, class, threat level, platform category and
+  the weapon-class flag from the detection subject, airframes in the track,
+  confidence, sensors holding, altitude, speed, heading, inside or outside
+  the perimeter, seconds held on the sim clock.
+- **Output:** strict JSON. `situation`, two or three sentences of at most 60
+  words, descriptive only. `state_attack`, true only when the facts show an
+  armed attack on Denmark by a state. A recon flight, a single drone or an
+  observing swarm is never one. Only an explicit `true` counts.
+- **What it decides:** whether the brief carries the response asset tables,
+  as reference for the authorities. Nothing else. No recommendation section
+  exists any more. ASSESSED tier.
+- **Cadence:** once when the operator opens the escalate modal, again only if
+  the stored one is older than 60 s. The preview re-renders when it lands.
+- **Absent, never stale:** no key, an error or an unparseable reply clears it.
+  The brief then carries measured facts and no tables, which is the safe
+  default. A 401/403 parks it for the session.
+- **Provenance:** the section carries "Model reading · <model> · <time>".
+
+Gated by `check:escalation-flow`, with the defaults below.
+
+**Escalation defaults** (`src/escalation_recommendation.js`): the
+recommendation says who to notify, never what anyone should do. No
+international body (Eurocontrol, Europol, ENTSO-E, NATO, NORDEFCO) is ever
+ticked by default, and Tier 5 is never recommended. They stay on the list to
+pick by hand. Every tier folds with the sections' own control. The
+recommended tiers open, the rest start folded.
+
 ## Single-drone confidence follows the sensors, 2026-10-23
 
 Every single-drone threat now reads its confidence off the sensors holding

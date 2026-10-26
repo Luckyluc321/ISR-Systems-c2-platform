@@ -68,8 +68,8 @@ flowchart TD
     G --> H{Threat real?}
     H -->|Friendly / false| I[Log only, mark resolved]
     H -->|Hostile / unknown| J[Click Escalate]
-    J --> K[Select destinations per tier, pick channels]
-    K --> L[Preview Detection Brief PDF]
+    J --> K[Select destinations per tier, pick channels. Recommended tiers ticked, never an international body]
+    K --> L[Preview Detection Brief PDF. Situation from the model, asset tables only on a state attack]
     L --> M[Send. Escalation stamped on event]
     E --> N[Receiver acks land back on event ledger]
     M --> N

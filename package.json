@@ -41,7 +41,8 @@
     "check:scenario-menu": "node scripts/check-scenario-menu.mjs",
     "check:detection-line": "node scripts/check-detection-line.mjs",
     "check:airliner-flaps": "node scripts/check-airliner-flaps.mjs",
-    "check:airliner-elevator": "node scripts/check-airliner-elevator.mjs"
+    "check:airliner-elevator": "node scripts/check-airliner-elevator.mjs",
+    "check:escalation-flow": "node scripts/check-escalation-flow.mjs"
   },
   "devDependencies": {
     "vite": "^8.1.1"

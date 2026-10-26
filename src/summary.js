@@ -5,6 +5,18 @@
 
 import { responseBundle } from './response_assets.js';
 import { siteName } from './events.js';
+import { showResponseAssets, assessmentTitle } from './agents/agent_escalation_assessment.js';
+
+// THE MESSENGER, NOT THE DECISION MAKER (Lucas, 2026-10-26). This brief
+// used to list the nearest fighter jets, military helicopters, police
+// units and emergency services for every detection, a recon swarm
+// included, and closed on "Recommended Action: dispatch Tier 1 and Tier
+// 2". Now it describes the situation and stops there:
+//   - the Situation section is the model's reading of measured facts
+//     (agents/agent_escalation_assessment.js), absent when there is none
+//   - the response asset tables appear only when that agent judges the
+//     facts a state attack on Denmark, as reference for the authorities
+//   - no recommendation. The authorities decide the response.
 
 // The line under Confidence is the model's (agents/agent_detection_line.js),
 // never a canned trend written into the scenario. Escaped, because it is
@@ -47,20 +59,6 @@ function platformLabel(platform) {
   }[platform] || 'Unclassified airborne platform';
 }
 
-function recommendedAction(event) {
-  const cls = event.classification;
-  const platform = event.platform || 'quadcopter';
-  const threat = event.threat;
-  if (cls === 'friendly') return 'No action required. Detection logged to audit record.';
-  if (cls === 'resolved') return 'No action required. Signal already dismissed.';
-  if (platform === 'missile') return 'Notify all response tiers immediately. Radio silence protocol takes effect on Tier 4 dispatch. Non-recallable.';
-  if (cls === 'hostile' && threat === 'high') return 'Dispatch Tier 1 and Tier 2 responders immediately. Escalate to Tier 3 within 60 seconds if unresolved.';
-  if (cls === 'hostile' && threat === 'medium') return 'Dispatch Tier 1 and Tier 2 responders.';
-  if (platform === 'fixed-wing') return 'Fixed wing platform detected. Include Tier 3 (Rigspolitiet / FE) with local response.';
-  if (cls === 'unknown') return 'Dispatch Tier 1 responders. Escalate as classification firms.';
-  return 'Dispatch Tier 1 responders. Escalate as required.';
-}
-
 // Generate the sha-256-looking hash for the brief (mock, but deterministic per event).
 function mockHash(str) {
   let h = 0;
@@ -75,7 +73,10 @@ export function renderDetectionBrief(event) {
   const clsColor = threatColor(event.classification, event.threat);
   const threatLabel = threatLevelLabel(event.classification, event.threat, platform);
   const pos = event.lastPosition || (event.entry ? { lat: event.entry.lat, lon: event.entry.lon, alt: event.entry.alt || 0, speed: 0, heading: event.entry.heading || 0, rangeToPerim: null } : null);
-  const respBundle = pos ? responseBundle(pos.lat, pos.lon) : { tactical: [], ground: [], consequence: [] };
+  const respBundle = pos && showResponseAssets(event)
+    ? responseBundle(pos.lat, pos.lon)
+    : { tactical: [], ground: [], consequence: [] };
+  const situation = event.escalationAssessment?.situation || '';
   const originCompass = pos ? compassFromOrigin(pos.heading) : '-';
   const headingCompass = pos ? compassFromHeading(pos.heading) : '-';
   const genTs = new Date().toISOString().replace('T', ' ').slice(0, 19) + ' UTC';
@@ -129,6 +130,13 @@ export function renderDetectionBrief(event) {
         </div>
       </section>
 
+      ${situation ? `
+      <section class="brief-section">
+        <div class="brief-section-hdr">Situation</div>
+        <p class="brief-prose">${_escBrief(situation)}</p>
+        <div class="brief-section-note">${_escBrief(assessmentTitle(event))}</div>
+      </section>` : ''}
+
       <section class="brief-section">
         <div class="brief-section-hdr">Detection Summary</div>
         <p class="brief-prose">
@@ -150,7 +158,7 @@ export function renderDetectionBrief(event) {
       ${respBundle.tactical.length ? `
       <section class="brief-section">
         <div class="brief-section-hdr">Tactical Response Assets</div>
-        <div class="brief-section-note">Airborne intercept and maritime response. Only these assets can act on the threat in flight.</div>
+        <div class="brief-section-note">Reference for the responsible authorities, who decide the response. Airborne and maritime units nearest the track.</div>
         <table class="brief-table">
           <thead>
             <tr>
@@ -221,11 +229,6 @@ export function renderDetectionBrief(event) {
           </tbody>
         </table>
       </section>` : ''}
-
-      <section class="brief-section">
-        <div class="brief-section-hdr">Recommended Action</div>
-        <p class="brief-prose brief-action">${recommendedAction(event)}</p>
-      </section>
 
       <section class="brief-section">
         <div class="brief-section-hdr">Signal Attribution</div>
