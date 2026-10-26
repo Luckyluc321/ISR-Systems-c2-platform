@@ -929,6 +929,49 @@ const _AARHUS_PROBE_ROUTE = (() => {
   ], { lat0: 56.1508, lon0: 10.2284 });
 })();
 
+// ── AARHUS HARBOUR: IN FROM INLAND, OUT OVER THE HARBOUR ──────────
+//
+// Built for the film (Lucas, 2026-10-26). The probe above comes in off
+// the bay and flies west into the port, so a camera following it always
+// looks inland, over city and forest that stream in as it moves: "you
+// always have forest, city and such". The film needs ten seconds where
+// everything around the aircraft is fully drawn. Flying OUTWARD fixes
+// that: from behind it, the view ahead is the harbour and then open
+// water. Pause on the follow view, let the harbour load, resume, and
+// what lies ahead is already loaded or is water, which costs nothing.
+//
+// Same airframe, speed and turn radius as the probe, same builder. The
+// whole Aarhus photoreal fence spans about 23 by 26 km, so every point
+// here is inside it; the gain is in what the camera has to load next.
+//
+//   start 3 km inland, west, outside every sensor ring
+//   east over the city, easing down from 800 m
+//   the harbour's west edge at 650 m, level from here
+//   THE CLIP LEG: dead straight and level, heading east, across the
+//     container yards and the Crane Quay to the east tip and out over
+//     the bay. About 2.4 km, 65 s.
+//   one circle over the water off the east tip, never over the city
+//   out east-northeast over the bay, climbing, leaving coverage. Ends
+//     shortly after the last contact rather than flying on unseen.
+const _AARHUS_INLAND_ROUTE = (() => {
+  const g = _AAR_GROUND_M;
+  const C = { e: 2100, n: -100 };           // circle centre, over the bay off the east tip, inside coverage
+  const r = 280;                            // must equal the builder's R
+  return _filletedRoute([
+    { e: -3300,     n:  320,      alt: 800 + g },   // start, 3 km inland
+    { e: -2000,     n:  230,      alt: 720 + g },   // east over the city
+    { e:  -900,     n:  150,      alt: 650 + g },   // harbour west edge, level from here
+    { e:  1500,     n:  300,      alt: 650 + g },   // across the Crane Quay to the east tip
+    { e: C.e - r,   n: C.n + r,   alt: 650 + g },   // out over the bay: the circle, entering NW
+    { e: C.e + r,   n: C.n + r,   alt: 640 + g },   // NE
+    { e: C.e + r,   n: C.n - r,   alt: 630 + g },   // SE
+    { e: C.e - r,   n: C.n - r,   alt: 630 + g },   // SW
+    { e: C.e - r,   n: C.n + r,   alt: 640 + g },   // NW again
+    { e: C.e + r,   n: C.n + r,   alt: 660 + g },   // NE, breaking off
+    { e: 3500,      n:  850,      alt: 760 + g },   // out over the bay, climbing, gone
+  ], { lat0: 56.1508, lon0: 10.2284 });
+})();
+
 export const TEMPLATES = {
   cph_quad_hostile: {
     siteId: 'cph',
@@ -1901,6 +1944,39 @@ export const TEMPLATES = {
     modelSwapM: 700,
     waypoints: _AARHUS_PROBE_ROUTE,
     durationSec: Math.round(_AARHUS_PROBE_ROUTE[_AARHUS_PROBE_ROUTE.length - 1].tSec),
+  },
+
+  // The same aircraft and the same detection as aarhus_fixedwing_probe,
+  // flown the other way: in from inland, out over the harbour. See
+  // _AARHUS_INLAND_ROUTE. Type, class, threat, confidence and signal
+  // evidence are the probe's, unchanged. The seed sensors are the five
+  // this route passes nearest, with the probe's own scores in the same
+  // order, and the evidence note describes this route.
+  aarhus_fixedwing_inland: {
+    coverageGated: true,
+    siteId: 'aarhus_harbour',
+    classification: 'hostile',
+    threat: 'medium',
+    platform: 'fixed-wing',
+    droneType: 'Fixed-wing loitering munition, unidentified',
+    confidence: 0.64,
+    contributingSensors: [
+      { id: 'AAR-N07', confidence: 0.71 },   // 20 m, container yard 3
+      { id: 'AAR-N06', confidence: 0.68 },   // 59 m, Crane Quay
+      { id: 'AAR-N16', confidence: 0.66 },   // east tip
+      { id: 'AAR-N15', confidence: 0.63 },   // east tip
+      { id: 'AAR-N05', confidence: 0.58 },   // container yard 1
+    ],
+    evidence: {
+      rfCarrier: 'No control uplink observed, datalink bursts only',
+      rfMatch: 'Loiter signature, no catalogue match',
+      modality: 'RF passive + acoustic + visual',
+      evidenceSize: '61.3 MB',
+      note: 'Fixed-wing, no transponder, no filed flight. Came in from inland at about 800 m, crossed the harbour heading east at 650 m over the container yards and the Crane Quay, circled once over the bay off the east tip, then climbed out east-northeast and left coverage.',
+    },
+    modelSwapM: 700,
+    waypoints: _AARHUS_INLAND_ROUTE,
+    durationSec: Math.round(_AARHUS_INLAND_ROUTE[_AARHUS_INLAND_ROUTE.length - 1].tSec),
   },
   cph_recon_hostile: {
     // Approaches from 3.2 km east, outside the perimeter AND outside

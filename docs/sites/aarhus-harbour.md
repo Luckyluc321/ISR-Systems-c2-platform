@@ -58,9 +58,17 @@ The manifest's receivers mirror Esbjerg's, with Østjyllands Politi, Beredskabss
 
 Built 2026-10-24 in `src/site_context.js`. Without it the Mission Console (Agent B) never rendered for this site, because the agent chapter is skipped for a site with no context. Every position comes from our own data: the traced boundary (container terminal centre), Lucas's click beside the largest hangar, the middle pier where AAR-N18 sits, and the crane quay where AAR-N06 sits. All marked `approximate`. Names are descriptive, never an operator, and tank contents are not claimed. Refine from OSM or the port's plan.
 
-## 6. Not built yet
+## 6. Scenarios
 
-- **Scenarios.** The simulate-threat panel says none are authored. The first one is the Baykar case for the trailer. Its altitudes must include the site's ground height, and `__isr_altAudit()` must pass before it ships. See `docs/3d-vehicle-rendering.md`, "Altitude datum".
+Both fly the same fixed-wing, at 36 m/s with 280 m turns, through `_filletedRoute` in `src/drones.js`, with the same detection data. Altitudes include the site's 42 m of ground.
+
+| Scenario | Path | What it is for |
+|---|---|---|
+| `aarhus_fixedwing_probe` | In off the bay, west down the container terminal, over the oil pier, a late loiter over the pier, out northeast | The probe story: it maps the port, dwells, leaves |
+| `aarhus_fixedwing_inland` (2026-10-26) | In from 3 km inland, dead straight and level at 650 m east across the container yards and the Crane Quay to the east tip, one circle over the bay, out east-northeast | The film. A follow view behind it looks out over the harbour and the bay, so after a pause everything ahead is loaded or is water |
+
+The inland route, measured: detected at 42 s, the straight level leg runs 67 to 134 s, the circle 148 to 203 s fully inside sensor range, contact lost at 212 s, scenario ends at 244 s.
+
+## 7. Not built yet
 
 - **Consequence routing** (`src/consequence_routing.js`): fire, hospital and rescue for a scene. It returns nothing for this site until an entry exists. The fire service is already modelled as `kbr-ostjyllands` (Østjyllands Brandvæsen, which covers Aarhus); it needs a destination and an entry here.
-- **3D buildings.** Aarhus has no photoreal coverage ring yet, so in day mode the OSM boxes may cover Google's buildings, the same issue Copenhagen had. Check on 1574 with `__isr_buildings.hide()` over the harbour, then trace a ring if Google has meshes there.
