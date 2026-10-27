@@ -12428,6 +12428,43 @@ async function main() {
     return ent;
   }
 
+  // WARM THE MARKER SHADERS AT LOAD, NOT MID-SHOT.
+  //
+  // A lifecycle marker is a ground-clamped billboard plus a label on a
+  // translucent background, and nothing else in the scene uses that
+  // combination. Cesium compiles a shader the first time it DRAWS it, so
+  // the first marker of a session cost five compiles, about 0.23 s, in
+  // the frame it appeared. Measured in the WITHOUT ISR run: the aircraft's
+  // ENTRY marker at the go-around, a 0.19 s hitch inside the ten seconds
+  // the film needs smooth (Lucas, 2026-10-27).
+  //
+  // So one marker is drawn through the same builder a few seconds after
+  // load, scaled to a fraction of a pixel so nothing shows, in the middle
+  // of the view so it is not culled, and removed three frames later. The
+  // compiles land at load, where nobody is recording. Which markers
+  // appear, and when, is unchanged.
+  (function _warmMarkerShaders() {
+    const run = () => {
+      try {
+        const c = viewer.scene.canvas;
+        const mid = viewer.camera.pickEllipsoid(new Cesium.Cartesian2(c.clientWidth / 2, c.clientHeight / 2));
+        if (!mid) { setTimeout(run, 2000); return; }
+        const carto = Cesium.Cartographic.fromCartesian(mid);
+        const ent = _dropMarker(Cesium.Math.toDegrees(carto.latitude), Cesium.Math.toDegrees(carto.longitude), '#4dd2ff', 'WARM');
+        ent.billboard.scale = 0.001;
+        ent.label.scale = 0.001;
+        let frames = 0;
+        const stop = viewer.scene.postRender.addEventListener(() => {
+          if (++frames < 3) return;
+          stop();
+          try { viewer.entities.remove(ent); } catch (_) {}
+        });
+        viewer.scene.requestRender();
+      } catch (err) { console.warn('[markers] shader warm-up skipped:', err?.message || err); }
+    };
+    setTimeout(run, 4000);
+  })();
+
   function _setEventMarkersVisibility(eventId, show) {
     const list = _perEventMarkers.get(eventId);
     if (!list) return;
