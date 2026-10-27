@@ -2902,11 +2902,30 @@ munitions) and the swarm members. The F-35, helicopter and interceptor quad
 swap to their models kilometres out, where their cap governs, and the same
 law anchored there would balloon them; unchanged.
 
-Live knob, and the way back:
+**Zoomed out, a little bigger.** Lucas, same day: "you can barely see the
+drones ... not dramatically, as that would ruin the entire video because of
+how unrealistic it is". A quad at its 14 px floor is a speck next to the 32 px
+symbol it replaces. `farBoost` (1.4) raises the floor at and beyond the swap
+and fades out as the camera closes, so a close shot is as realistic as before:
+
+```
+floor(d) = N * (swap / d) ^ growth * (1 + (farBoost - 1) * d / swap)
+```
+
+| | at the swap | half way in | a tenth of the way |
+|---|---|---|---|
+| quadcopter, 250 m swap | 20 px (was 14) | 24 px | 46 px at 25 m, true size 19 |
+| Aarhus fixed-wing, 700 m swap | 28 px (was 20) | 34 px | 66 px at 70 m, true size 40 |
+
+The fade is held under the growth, so the drawn size never dips while zooming
+in. The 12x exaggeration cap still governs where it binds (a 3 m fixed-wing at
+1800 m stays at 18.7 px).
+
+Live knobs, and the way back:
 
 ```js
-window.__isr_model_tuning = { zoomGrowth: 0.5 }   // default
-window.__isr_model_tuning = { zoomGrowth: 0 }     // the flat floor of before
+window.__isr_model_tuning = { farBoost: 1.2 }               // subtler
+window.__isr_model_tuning = { zoomGrowth: 0, farBoost: 1 }  // the flat floor of before
 ```
 
 Gated by `check:model-zoom`, which runs Cesium's sizing rule over the zoom.

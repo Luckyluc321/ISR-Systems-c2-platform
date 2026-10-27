@@ -10,6 +10,7 @@
 // ═══════════════════════════════════════════════════════════════════
 import { readFileSync } from 'node:fs';
 import { zoomFloorPx, ZOOM_CFG } from '../src/model_zoom_floor.js';
+const flat = (n) => n;   // the original flat floor
 
 let failures = 0;
 const check = (label, ok, why) => {
@@ -28,10 +29,12 @@ const drawn = (lengthM, d, floorPx, capX) => {
 };
 
 console.log('\n[the floor]');
-check('unchanged at the swap distance, where the map symbol hands over', zoomFloorPx(20, 700, 700) === 20);
-check('unchanged beyond it', zoomFloorPx(20, 700, 5000) === 20);
-check('growth 0 is the flat floor of before, everywhere', [700, 300, 50, 5].every(d => zoomFloorPx(20, 700, d, 0) === 20));
-check('1.4 times bigger each time the distance halves', Math.abs(zoomFloorPx(20, 700, 350) / 20 - Math.SQRT2) < 1e-9);
+check(`zoomed out, ${ZOOM_CFG.farBoost} times the old floor: seen, not dramatic`, ZOOM_CFG.farBoost >= 1.2 && ZOOM_CFG.farBoost <= 1.6
+  && Math.abs(zoomFloorPx(20, 700, 700) - 20 * ZOOM_CFG.farBoost) < 1e-9 && Math.abs(zoomFloorPx(20, 700, 5000) - 20 * ZOOM_CFG.farBoost) < 1e-9);
+check('the way back, growth 0 and boost 1, is the flat floor of before, everywhere', [700, 300, 50, 5].every(d => zoomFloorPx(20, 700, d, 0, 1) === flat(20)));
+check('without the boost, 1.4 times bigger each time the distance halves', Math.abs(zoomFloorPx(20, 700, 350, 0.5, 1) / 20 - Math.SQRT2) < 1e-9);
+check('a boost too large for the growth is held so the size still never dips', (() => {
+  let prev = 0; for (let d = 700; d >= 1; d *= 0.95) { const f = zoomFloorPx(20, 700, d, 0.5, 5) * 1; if (f < prev - 1e-9) return false; prev = f; } return true; })());
 check(`default growth is ${ZOOM_CFG.growth}`, ZOOM_CFG.growth === 0.5);
 
 console.log('\n[on screen, zooming in from the swap distance to point blank]');
@@ -53,12 +56,18 @@ for (const v of VEHICLES) {
   const flatShare = Math.round(100 * flat / (path.length - 1));
   check(`${v.name}: grows at every step of the zoom (before, it stood still for ${flatShare}% of it)`, shrinks === 0 && now.at(-1) > now[0]);
   const mid = path.findIndex(d => d <= v.swap / 4);
-  // Twice the pinned size there, unless its true size has already
-  // taken over (a 3.5 m Shahed at 60 m is past its floor either way).
-  const expect = drawn(v.lengthM, path[mid], v.floor * Math.sqrt(v.swap / path[mid]), v.cap);
-  check(`${v.name}: at a quarter of the swap distance, twice the pinned size or true size`, Math.abs(now[mid] - expect) < 1e-6 && now[mid] >= before[mid],
-    `${now[mid].toFixed(1)} px, before ${before[mid].toFixed(1)} px`);
-  check(`${v.name}: same size as before where the symbol hands over`, Math.abs(now[0] - before[0]) < 1e-9);
+  check(`${v.name}: at least as big as the old flat floor at every distance`, now.every((x, i) => x >= before[i] - 1e-9));
+  // Unless the exaggeration cap (maximumScale, 12 times life) already
+  // governs that far out, which it does for a 3 m fixed-wing at 1800 m.
+  const capped = drawn(v.lengthM, path[0], 1e9, v.cap);
+  const want = Math.min(capped, before[0] * ZOOM_CFG.farBoost);
+  check(`${v.name}: zoomed out, ${ZOOM_CFG.farBoost} times the old size where the symbol hands over, or the cap`,
+    Math.abs(now[0] - want) < 1e-6, `${now[0].toFixed(1)} px, want ${want.toFixed(1)}`);
+  // Up close the boost has faded: within 10% of the unboosted curve.
+  const near = path.findIndex(d => d <= v.swap / 20);
+  const unboosted = drawn(v.lengthM, path[near], zoomFloorPx(v.floor, v.swap, path[near], ZOOM_CFG.growth, 1), v.cap);
+  check(`${v.name}: up close the boost has faded, so a close shot is as realistic as before`, now[near] / unboosted < 1.1,
+    `${now[near].toFixed(1)} px against ${unboosted.toFixed(1)} px`);
 }
 
 console.log('\n[the wiring]');

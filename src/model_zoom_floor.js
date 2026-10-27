@@ -20,14 +20,29 @@
 //   floor(d) = N                         at and beyond the swap distance
 //   floor(d) = N * (swap / d) ^ growth   closer than that
 //
-// So the model is exactly the size it is today where the map symbol
-// hands over to it, and from there it only ever gets bigger as you zoom
-// in, until its real size takes over. growth 0.5 makes it 1.4 times
+// So the model starts where the map symbol hands over to it at the size
+// set below, and from there it only ever gets bigger as you zoom in,
+// until its real size takes over. growth 0.5 makes it 1.4 times
 // bigger each time the distance halves. The existing cap on exaggeration
 // (maximumScale) still applies unchanged.
 //
-// The way back, live: window.__isr_model_tuning = { zoomGrowth: 0 }
-// is today's flat floor exactly.
+// ZOOMED OUT, A LITTLE BIGGER (Lucas, same day: "you can barely see the
+// drones ... not dramatically, as that would ruin the entire video
+// because of how unrealistic it is. Just needs to be able to be seen").
+// A quadcopter model at its 14 px floor is a speck next to the 32 px
+// symbol it replaces. farBoost raises the floor at and beyond the swap
+// distance, 1.4 by default (a quad to about 20 px, a fixed-wing to 28,
+// still under the symbol), and fades out as the camera closes, so a
+// close shot is exactly as realistic as before:
+//
+//   floor(d) = N * (swap / d) ^ growth * (1 + (farBoost - 1) * d / swap)
+//
+// The fade is held under the growth, so the drawn size still only ever
+// gets bigger as you zoom in.
+//
+// Live knobs, and the way back to the flat floor of before:
+//   window.__isr_model_tuning = { farBoost: 1.2 }              // subtler
+//   window.__isr_model_tuning = { zoomGrowth: 0, farBoost: 1 } // as before
 //
 // Used for the threat tracks (hostile quads, fixed-wings, loitering
 // munitions) and the swarm members. The F-35, the helicopter and the
@@ -35,18 +50,32 @@
 // already governs, and are not changed.
 // ═══════════════════════════════════════════════════════════════════
 
-export const ZOOM_CFG = { growth: 0.5 };
+export const ZOOM_CFG = { growth: 0.5, farBoost: 1.4 };
 
 /** The pixel floor at camera distance distM. Pure. */
-export function zoomFloorPx(floorPx, swapM, distM, growth = ZOOM_CFG.growth) {
-  if (!(growth > 0) || !(swapM > 0) || !(distM > 0) || distM >= swapM) return floorPx;
-  return floorPx * Math.pow(swapM / Math.max(distM, 1), growth);
+export function zoomFloorPx(floorPx, swapM, distM, growth = ZOOM_CFG.growth, farBoost = ZOOM_CFG.farBoost) {
+  const g = growth > 0 ? growth : 0;
+  // The boost's fade must stay under the growth or the drawn size would
+  // dip as the camera closes: (1 + a d/M)(M/d)^g falls with d only while
+  // a < g / (1 - g). Held at 90% of that.
+  let a = Math.max(0, (typeof farBoost === 'number' ? farBoost : 1) - 1);
+  if (g > 0 && g < 1) a = Math.min(a, 0.9 * g / (1 - g));
+  else if (g === 0) a = 0;
+  if (!(swapM > 0) || !(distM > 0) || distM >= swapM) return floorPx * (1 + a);
+  return floorPx * Math.pow(swapM / Math.max(distM, 1), g) * (1 + a * distM / swapM);
 }
 
-/** The live tuning knob, read every frame so a console change applies at once. */
+/** The live tuning knobs, read every frame so a console change applies at once. */
+function _tuning() {
+  return (typeof window !== 'undefined' && window.__isr_model_tuning) || null;
+}
 export function zoomGrowth() {
-  const t = (typeof window !== 'undefined' && window.__isr_model_tuning) || null;
+  const t = _tuning();
   return typeof t?.zoomGrowth === 'number' ? t.zoomGrowth : ZOOM_CFG.growth;
+}
+export function farBoost() {
+  const t = _tuning();
+  return typeof t?.farBoost === 'number' ? t.farBoost : ZOOM_CFG.farBoost;
 }
 
 /**
@@ -58,8 +87,8 @@ export function zoomFloorProperty(Cesium, viewer, getEntity, floorPx, swapM) {
   return new Cesium.CallbackProperty((time) => {
     const e = getEntity();
     const p = e?.position?.getValue?.(time, scratch);
-    if (!p) return floorPx;
+    if (!p) return zoomFloorPx(floorPx, swapM, Infinity, zoomGrowth(), farBoost());
     const d = Cesium.Cartesian3.distance(viewer.camera.positionWC, p);
-    return zoomFloorPx(floorPx, swapM, d, zoomGrowth());
+    return zoomFloorPx(floorPx, swapM, d, zoomGrowth(), farBoost());
   }, false);
 }
