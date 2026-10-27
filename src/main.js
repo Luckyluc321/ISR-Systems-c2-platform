@@ -28201,12 +28201,12 @@ async function main() {
     // on destinationsForSite so admin sees the full unfiltered catalog.
     const dests = destinationsForEvent(e);
     const destsByTier = dests.reduce((acc, d) => { (acc[d.tier] = acc[d.tier] || []).push(d); return acc; }, {});
-    // Preselect the recommended tiers, never an international body.
-    const preselected = new Set(preselectedDestinationIds(rec, dests));
+    // NOTHING TICKED ON OPEN (Lucas, 2026-10-27): the security manager
+    // picks the recipients, or presses "Apply recommended" for ours.
+    // The recommended tiers are open and badged, the rest folded.
     _tierFolded = new Set(Object.keys(destsByTier).map(Number).filter(t => !rec.tiers.includes(t)));
-    // Default channel selection: primary method for each preselected destination
     _selectedChannels = {};
-    dests.forEach(d => { _selectedChannels[d.id] = new Set(preselected.has(d.id) ? [d.contactMethods[0]] : []); });
+    dests.forEach(d => { _selectedChannels[d.id] = new Set(); });
     _expanded = new Set();
 
     const renderModal = () => {

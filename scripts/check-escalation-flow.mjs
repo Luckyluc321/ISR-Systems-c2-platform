@@ -74,10 +74,24 @@ check('no default text decides the response', !decided.length, decided.slice(0, 
 {
   const cph = destinationsForSite('cph');
   const pre = new Set(preselectedDestinationIds(recommendationFor({ classification: 'hostile', threat: 'high', platform: 'quadcopter' }), cph));
-  check('a hostile drone at Copenhagen still ticks site security, the police and the national agencies',
-    cph.some(d => d.tier === 1 && pre.has(d.id)) && cph.some(d => d.tier === 2 && pre.has(d.id)) && cph.some(d => d.tier === 3 && pre.has(d.id)));
+  check('"Apply recommended" on a hostile drone at Copenhagen ticks site security and the police',
+    cph.some(d => d.tier === 1 && pre.has(d.id)) && cph.some(d => d.tier === 2 && pre.has(d.id)));
+  check('and leaves the national agencies for the manager to add', !cph.some(d => d.tier === 3 && pre.has(d.id)));
   const eurocontrol = cph.find(d => /eurocontrol/i.test(d.name));
   check('and leaves Eurocontrol on the list, unticked', eurocontrol && !pre.has(eurocontrol.id));
+}
+
+console.log('\n[what a drone suggests, Lucas 2026-10-27: Tier 1 and 2 to begin with]');
+{
+  const tiersFor = k => recommendationFor(TEMPLATES[k]).tiers.join(',');
+  const drones = Object.entries(TEMPLATES).filter(([, t]) => t.siteId && t.classification === 'hostile'
+    && !['missile', 'loitering-munition'].includes(t.platform));
+  const wider = drones.filter(([k]) => tiersFor(k) !== '1,2').map(([k]) => `${k}: ${tiersFor(k)}`);
+  check(`every hostile drone suggests Tier 1 and 2 only (${drones.length} scenarios)`, drones.length >= 12 && !wider.length, wider.slice(0, 4).join(' | '));
+  check('the recon swarm at Copenhagen suggests Tier 1 and 2', tiersFor('swarm_recon_cph_amk') === '1,2');
+  check('the Aarhus fixed-wings suggest Tier 1 and 2', tiersFor('aarhus_fixedwing_probe') === '1,2' && tiersFor('aarhus_fixedwing_terminal') === '1,2');
+  check('a loitering munition still suggests the national agencies', recommendationFor({ classification: 'hostile', threat: 'high', platform: 'loitering-munition' }).tiers.includes(3));
+  check('a missile still suggests defence', recommendationFor({ classification: 'hostile', threat: 'high', platform: 'missile' }).tiers.includes(4));
 }
 
 console.log('\n[the brief]');
@@ -186,7 +200,8 @@ console.log('\n[the messages, every recipient at every site]');
 console.log('\n[the wiring]');
 const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 check('main.js no longer carries its own recommendationFor', !/function recommendationFor\(/.test(main));
-check('the modal preselects through preselectedDestinationIds', /new Set\(preselectedDestinationIds\(rec, dests\)\)/.test(main));
+check('the modal opens with nothing ticked', /function openEscalateModal[\s\S]{0,1500}dests\.forEach\(d => \{ _selectedChannels\[d\.id\] = new Set\(\); \}\);/.test(main)
+  && !/const preselected = new Set\(preselectedDestinationIds/.test(main));
 check('"Apply recommended" uses the same rule', /_recIds = new Set\(preselectedDestinationIds\(rec, dests\)\)/.test(main));
 check('every tier header carries the fold control', /data-esc-tier="\$\{tier\}"/.test(main));
 check('tiers reset to recommended-open each time the modal opens', /_tierFolded = new Set\(Object\.keys\(destsByTier\)/.test(main));
@@ -195,6 +210,7 @@ check('an escalation an auto-rule sent is assessed once', /ev\.escalations\?\.le
 const rules = readFileSync(new URL('../src/rules.js', import.meta.url), 'utf8');
 check('an auto-rule never sends to an international body', /escalateToTiers\.includes\(d\.tier\) && !isInternationalBody\(d\)/.test(rules));
 check('no default rule says it dispatches', !/name: '[^']*dispatch/i.test(rules));
+check('the fixed-wing rule no longer tells Tier 3 on its own by default', /id: 'r-fixed-wing-t3',[\s\S]{0,500}enabled: false,/.test(rules));
 
 console.log(failures ? `\n${failures} failing` : '\nall passing');
 process.exit(failures ? 1 : 0);

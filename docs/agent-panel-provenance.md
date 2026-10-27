@@ -194,7 +194,15 @@ international body (Eurocontrol, Europol, ENTSO-E, NATO, NORDEFCO) is ever
 ticked by default, and no auto-rule sends to one (`rules.js` filters them,
 which holds rules saved in a browser too). They stay on the list to pick by
 hand. A missile still ticks Tier 5's two Danish crisis staffs, NOST and
-Statsministeriet. Every tier folds with the sections' own control. The
+Statsministeriet.
+
+**Nothing is ticked when the modal opens** (Lucas, 2026-10-27). The security
+manager picks the recipients, or presses "Apply recommended" for ours. A
+drone, a recon swarm or a fixed-wing included, suggests Tier 1 and Tier 2
+only, and the manager adds national agencies as they judge. Missiles and
+loitering munitions keep their national tiers. The auto-rule that told Tier
+3 about every hostile fixed-wing a minute in is off by default (rules storage
+bumped to v6 so a cached copy cannot keep it on). Every tier folds with the sections' own control. The
 recommended tiers open, the rest start folded.
 
 ## Single-drone confidence follows the sensors, 2026-10-23

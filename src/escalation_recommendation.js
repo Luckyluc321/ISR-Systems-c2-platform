@@ -19,6 +19,13 @@
 //      recommendation says who should be told, never what anyone should
 //      do about it.
 //
+//   3. NOTHING IS TICKED UNTIL THE MANAGER ASKS (Lucas, 2026-10-27). The
+//      modal opens with no recipient selected. "Apply recommended" ticks
+//      the suggestion. And a drone, a recon swarm or a fixed-wing
+//      included, suggests site security and the police only: "Tier 1
+//      and 2 to begin with, and then the security manager can select
+//      them for himself". Weapons keep their national tiers.
+//
 // Pure. No DOM, no store.
 // ═══════════════════════════════════════════════════════════════════
 
@@ -38,16 +45,17 @@ export function recommendationFor(event) {
   // crisis staffs (NOST, Statsministeriet), which are ticked. The
   // international bodies beside them are not (preselectedDestinationIds).
   if (platform === 'missile') return { tiers: [1, 2, 3, 4, 5], text: 'Missile signature. Notify site security, the police, the national agencies, defence and the national crisis staff now.', urgency: 'critical' };
-  if (cls === 'hostile' && threat === 'high') return { tiers: [1, 2, 3], text: 'High-threat hostile track. Notify site security, the police and the national agencies now.', urgency: 'high' };
-  if (cls === 'hostile' && threat === 'medium') return { tiers: [1, 2], text: 'Hostile track. Notify site security and the police.', urgency: 'med' };
-  if (platform === 'fixed-wing') return { tiers: [1, 2, 3], text: 'Fixed-wing platform. Notify site security, the police and the national agencies.', urgency: 'high' };
+  if (platform === 'loitering-munition') return { tiers: [1, 2, 3], text: 'Loitering munition signature. Notify site security, the police and the national agencies now.', urgency: 'critical' };
+  if (cls === 'hostile' && threat === 'high') return { tiers: [1, 2], text: 'High-threat hostile track. Notify site security and the police now. Add national agencies as you judge.', urgency: 'high' };
+  if (cls === 'hostile' && threat === 'medium') return { tiers: [1, 2], text: 'Hostile track. Notify site security and the police. Add national agencies as you judge.', urgency: 'med' };
+  if (platform === 'fixed-wing') return { tiers: [1, 2], text: 'Fixed-wing platform. Notify site security and the police. Add national agencies as you judge.', urgency: 'high' };
   if (platform === 'non-identifiable') return { tiers: [1, 2], text: 'Unidentified contact. Notify site security and the police. Add others as the picture firms up.', urgency: 'med' };
   if (cls === 'unknown') return { tiers: [1], text: 'Classification pending. Notify site security. Add others as the picture firms up.', urgency: 'med' };
   return { tiers: [1], text: 'Notify site security. Add others as required.', urgency: 'med' };
 }
 
-/** The destinations ticked when the modal opens, and by "Apply
- *  recommended": the recommended tiers, minus international bodies. */
+/** The destinations "Apply recommended" ticks: the recommended tiers,
+ *  minus international bodies. Nothing is ticked when the modal opens. */
 export function preselectedDestinationIds(rec, dests) {
   return (dests || [])
     .filter(d => rec.tiers.includes(d.tier) && !isInternationalBody(d))

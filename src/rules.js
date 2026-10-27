@@ -51,7 +51,11 @@ const DEFAULT_RULES = [
   {
     id: 'r-fixed-wing-t3',
     name: 'Fixed wing hostile → loop in Tier 3 within 60 seconds',
-    siteId: 'all', enabled: true,
+    // OFF BY DEFAULT since 2026-10-27. It told the national agencies
+    // about every hostile fixed-wing a minute in, with no one deciding.
+    // Lucas: Tier 1 and 2 to begin with, "and then the security manager
+    // can select them for himself". An operator can still turn it on.
+    siteId: 'all', enabled: false,
     when: { platform: 'fixed-wing', classification: 'hostile', minConfidence: 0.70 },
     then: { escalateToTiers: [3], payload: 'summary', message: '', delaySec: 60 },
   },
@@ -91,7 +95,10 @@ const DEFAULT_RULES = [
 // Bumped again 2026-10-15: the friendly rule is disabled in code, and a
 // cached v4 override would keep it enabled and keep escalating every
 // cooperative arrival to seven tier-1 destinations.
-const STORAGE_KEY = 'isr_c2_rules_overrides_v5';
+// Bumped again 2026-10-27: the fixed-wing rule is off by default, and a
+// cached v5 override would keep sending Tier 3 a minute after every
+// hostile fixed-wing without anyone deciding.
+const STORAGE_KEY = 'isr_c2_rules_overrides_v6';
 function loadRules() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
