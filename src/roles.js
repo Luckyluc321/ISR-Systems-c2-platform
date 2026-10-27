@@ -30,18 +30,21 @@ export const OPERATORS = [
   {
     id: 'op-cph-airports',
     kind: 'operator',
-    org: 'CPH Airports A/S',
-    label: 'CPH Airports A/S',
+    // TEMPORARY for the film (Lucas, 2026-10-27): the account reads "DK
+    // Airport" with a neutral mark, never the airport company's name or
+    // logo. Revert with the commit that made it.
+    org: 'DK Airport',
+    label: 'DK Airport',
     person: 'M. Sørensen',
-    initials: 'CA',
-    logo: '/logos/cph.svg',
+    initials: 'DA',
+    logo: '/logos/dk-airport.svg',
     scope: 'assigned-sites',
     destinationIds: [],
     siteIds: ['cph'],
     sensorCount: 22,
     isMultiSite: false,
     sector: 'Aviation',
-    description: 'Copenhagen Airport. National aviation gateway.',
+    description: 'DK Airport. National aviation gateway.',
     brandTint: '#4dd2ff',
   },
   {

@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="DK Airport">
+  <!-- Neutral mark drawn for the platform: a control tower on the account's
+       blue. Deliberately NOT Copenhagen Airports' logo; the account reads
+       "DK Airport" for the film (Lucas, 2026-10-27). Same drawing style as
+       aarhus-harbour.svg. -->
+  <rect width="64" height="64" rx="12" fill="#1f7fa8"/>
+  <g fill="none" stroke="#ffffff" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M19 20 H45 L41 30 H23 Z" stroke-width="3"/>
+    <path d="M25 24.5 H39" stroke-width="1.8"/>
+    <path d="M32 13 V20" stroke-width="2.4"/>
+    <path d="M26 30 L27.5 51 M38 30 L36.5 51" stroke-width="3.2"/>
+    <path d="M27 40 H37" stroke-width="2"/>
+    <path d="M14 51 H50" stroke-width="2.6"/>
+  </g>
+  <circle cx="32" cy="12" r="2.2" fill="#ffffff"/>
+</svg>
