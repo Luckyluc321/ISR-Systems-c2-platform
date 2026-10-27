@@ -38,6 +38,9 @@
 // Rewritten in that register. Fragments are correct here. The absence of
 // hedging is correct here. A duty manager at 02:00 wants to know what is
 // happening and what you want from them, in that order, in one breath.
+import { contextForSite } from './site_context.js';
+import { bareType } from './agents/agent_detection_line.js';
+
 function _confidenceWord(conf) {
   // Only said when it is NOT certain. "Confirmed detection" as a prefix
   // on every message is padding; ops assume confirmed unless told.
@@ -70,10 +73,10 @@ function _whatPlain(event) {
 }
 function _situation(event, siteName, detailed) {
   const what = detailed ? (event.droneType || 'Unidentified aircraft') : _whatPlain(event);
-  const lead = `${_confidenceWord(event.confidence)}${what}`;
-  // Capitalised here rather than in every table entry, because the word
-  // that lands first changes with the reader.
-  return `${lead.charAt(0).toUpperCase()}${lead.slice(1)} over ${siteName}. `;
+  // The subject is capitalised on its own: capitalising the whole lead
+  // only reached the confidence word, and read "Probable. five drones".
+  const subject = `${what.charAt(0).toUpperCase()}${what.slice(1)}`;
+  return `${_confidenceWord(event.confidence)}${subject} over ${siteName}. `;
 }
 
 // The recipients who assess airframes rather than respond to them.
@@ -123,14 +126,140 @@ function _benignMessage(event, siteName) {
   return `Track over ${siteName} assessed and stood down. Logged, no action.`;
 }
 
+// ── AIRPORTS: HOW AN AIRPORT ACTUALLY PASSES A DRONE REPORT ───────────
+//
+// Lucas, 2026-10-27, on the messages above at Copenhagen: "AI generated
+// as shit. Needs a real comms message for an airport ... choice of words
+// that are like an airport". An airport passes a drone report the way it
+// passes any traffic information: a header word, then where it is
+// against the RUNWAYS, height in FEET, track in three figures and speed
+// in KNOTS, and nothing else. No prose, no "passing for awareness".
+//
+//   DRONE ALERT, DK Airport (probable). Five drones over Runway 04R/22L,
+//   400 ft, tracking 270 at 30 kt. Live track on the platform.
+//
+// Position is measured, never guessed: against both thresholds where the
+// site context has them (on the runway, or on the approach beyond a
+// threshold), against a runway's centre where it has only that, and
+// otherwise against the airport reference point. Distances are rounded
+// coarsely enough that the reference point's exact definition does not
+// change the words. Still the messenger: no recipient is told what to do.
+const _FT = 3.28084, _KT = 1.943844, _NM = 1852;
+const _COMPASS = ['north', 'north-east', 'east', 'south-east', 'south', 'south-west', 'west', 'north-west'];
+
+function _airportCtx(siteId) {
+  const c = siteId ? contextForSite(siteId) : null;
+  return c && /airport/.test(c.site_type || '') && c.airport_reference_point ? c : null;
+}
+function _en(lat, lon, ref) {
+  const mLon = 111320 * Math.cos(ref.lat * Math.PI / 180);
+  return { e: (lon - ref.lon) * mLon, n: (lat - ref.lat) * 111320 };
+}
+const _compass = (e, n) => _COMPASS[Math.round(((Math.atan2(e, n) * 180 / Math.PI + 360) % 360) / 45) % 8];
+const _dist = (m) => (m < _NM ? `${Math.max(100, Math.round(m / 100) * 100)} m` : `${(m / _NM).toFixed(1)} NM`);
+
+/** Where the track is, in the words an airport uses. Null with no fix. */
+export function airportWhere(ctx, p) {
+  if (!ctx || !p || typeof p.lat !== 'number') return null;
+  const ref = ctx.airport_reference_point;
+  const q = _en(p.lat, p.lon, ref);
+  for (const rw of (ctx.critical_areas || []).filter(a => /^runway_/.test(a.id || ''))) {
+    const label = `Runway ${rw.id.replace(/^runway_/, '').replace('_', '/')}`;
+    if (rw.thresholds?.length === 2) {
+      const [ta, tb] = rw.thresholds;
+      const A = _en(ta.lat, ta.lon, ref), B = _en(tb.lat, tb.lon, ref);
+      const L = Math.hypot(B.e - A.e, B.n - A.n);
+      const u = { e: (B.e - A.e) / L, n: (B.n - A.n) / L };
+      const along = (q.e - A.e) * u.e + (q.n - A.n) * u.n;
+      const lateral = Math.abs((q.e - A.e) * u.n - (q.n - A.n) * u.e);
+      if (along >= 0 && along <= L && lateral <= 300) return `over ${label}`;
+      // Beyond a threshold and on the centreline: the approach to THAT
+      // runway end, since that is the end landing traffic crosses first.
+      if (along < 0 && -along <= 15000 && lateral <= 600) return `on the approach to Runway ${ta.id}, ${_dist(-along)} out`;
+      if (along > L && along - L <= 15000 && lateral <= 600) return `on the approach to Runway ${tb.id}, ${_dist(along - L)} out`;
+    } else if (rw.center) {
+      const c = _en(rw.center.lat, rw.center.lon, ref);
+      if (Math.hypot(q.e - c.e, q.n - c.n) <= 600) return `near ${label}`;
+    }
+  }
+  const d = Math.hypot(q.e, q.n);
+  const inside = typeof p.rangeToPerim === 'number' ? p.rangeToPerim <= 0 : d <= 1500;
+  if (inside) return `over the airport, ${_compass(q.e, q.n)} side`;
+  return `${_dist(d)} ${_compass(q.e, q.n)} of the airport`;
+}
+
+function _airportWhat(event) {
+  const n = _countFrom(event.droneType) ?? (typeof event.droneCount === 'number' ? event.droneCount : null);
+  if (event.platform === 'missile') return 'One missile';
+  const kind = event.platform === 'fixed-wing' ? 'fixed-wing drone' : 'drone';
+  if (n && n > 1) { const w = _WORDS[n] || String(n); return `${w.charAt(0).toUpperCase()}${w.slice(1)} ${kind}s`; }
+  return `One ${kind}`;
+}
+
+function _airportReport(event, siteName, ctx) {
+  const header = event.platform === 'missile' ? 'MISSILE ALERT' : 'DRONE ALERT';
+  const c = event.confidence;
+  const qual = typeof c !== 'number' || c >= 0.85 ? '' : (c >= 0.65 ? ' (probable)' : ' (unconfirmed)');
+  const p = event.lastPosition;
+  const where = airportWhere(ctx, p);
+  let fix = '';
+  if (where) {
+    const parts = [where];
+    if (typeof p.alt === 'number') parts.push(`${Math.max(0, Math.round(p.alt * _FT / 50) * 50).toLocaleString('en-US')} ft`);
+    if (typeof p.heading === 'number' && typeof p.speed === 'number') {
+      parts.push(p.speed < 1.5
+        ? 'hovering'
+        : `tracking ${String(((Math.round(p.heading) % 360) + 360) % 360).padStart(3, '0')} at ${Math.round(p.speed * _KT / 5) * 5} kt`);
+    }
+    fix = ` ${parts.join(', ')}`;
+  } else {
+    fix = ' at the airport';
+  }
+  return { head: `${header}, ${siteName}${qual}.`, body: `${_airportWhat(event)}${fix}.` };
+}
+
+// What each airport role is told after the report. The tower, the duty
+// manager, security and ground ops get the report and the live track:
+// what they do with it is theirs. Fire is told for awareness.
+// Intelligence gets the type as reported, because that is what it
+// assesses.
+const _AIRPORT_TAIL = {
+  't1-atc':          'Live track on the platform.',
+  't1-duty-mgr':     'Live track on the platform.',
+  't1-sec-ops':      'Live track on the platform.',
+  't1-ground':       'Live track on the platform.',
+  't1-fire':         'For your awareness. Live track on the platform.',
+  't1-arff':         'For your awareness. Live track on the platform.',
+  't2-politi':       'Live track on the platform.',
+  't2-trekantbrand': 'For your awareness.',
+};
+
+function _airportMessage(dest, suffix, event, siteName, ctx) {
+  const { head, body } = _airportReport(event, siteName, ctx);
+  if (dest.type === 'system') {
+    const n = String(dest.name || '').toLowerCase();
+    if (n.includes('camera') || n.includes('cctv') || n.includes('surveillance')) return 'Slew to the live track. Record continuous.';
+    if (n.includes('notam') || n.includes('eurocontrol') || n.includes('network manager')) return `Drone activity at ${siteName}. ${body}`;
+    return `${head} ${body}`;
+  }
+  if (suffix === 't2-pet') {
+    const type = bareType(event.droneType);
+    return `${head} ${body}${type ? ` Type reported: ${type}.` : ''} Signatures do not match commercial traffic.`;
+  }
+  const tail = _AIRPORT_TAIL[suffix] || BY_SUFFIX[suffix] || 'Live track on the platform.';
+  return `${head} ${body} ${tail}`;
+}
+
 export function defaultEscalationMessage(dest, event, siteName = 'the site') {
   if (!dest || !event) return '';
   if (event.classification && event.classification !== 'hostile') {
     return _benignMessage(event, siteName);
   }
+  const suffix = String(dest.id || '').replace(/^[a-z_]+-/, '');
+  const airport = _airportCtx(event.siteId);
+  if (airport) return _airportMessage(dest, suffix, event, siteName, airport);
   if (dest.type === 'system') return _systemMessage(dest, event, siteName);
 
-  const suffix = String(dest.id || '').replace(/^[a-z_]+-/, '');
   const head = _situation(event, siteName, _WANTS_MODELS.has(suffix));
   const body = BY_SUFFIX[suffix];
   if (body) return `${head}${body}`;

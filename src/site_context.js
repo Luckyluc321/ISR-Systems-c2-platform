@@ -38,11 +38,13 @@ export const SITE_CONTEXT = {
       // length 3571 m), which matches the published runway length.
       // Thresholds: 04L 55.592191/12.603521, 22R 55.616213/12.640677.
       { id: 'runway_04L_22R', name: 'Runway 04L/22R (primary)', center: { lat: 55.604202, lon: 12.622099 }, criticality: 'critical', verified: 'high',
+        thresholds: [{ id: '04L', lat: 55.592191, lon: 12.603521 }, { id: '22R', lat: 55.616213, lon: 12.640677 }],
         reason: 'Primary arrival axis. Airborne obstruction on approach triggers go-around; ground incursion closes the runway.' },
       // Corrected 2026-09-22, was 801 m out. OSM way 361451319, ref 04R/22L,
       // length 3302 m. Thresholds: 04R 55.603084/12.633033,
       // 22L 55.625446/12.667644.
       { id: 'runway_04R_22L', name: 'Runway 04R/22L (parallel)', center: { lat: 55.614265, lon: 12.650338 }, criticality: 'critical', verified: 'high',
+        thresholds: [{ id: '04R', lat: 55.603084, lon: 12.633033 }, { id: '22L', lat: 55.625446, lon: 12.667644 }],
         reason: 'Parallel arrival axis. Simultaneous ops with 04L; obstruction cascades to full airfield closure.' },
       // OSM way 361451323, ref 12/30, length 2800 m. Still OPERATIONAL, used
       // when crosswind on the parallels exceeds roughly 15-20 kt. Paved

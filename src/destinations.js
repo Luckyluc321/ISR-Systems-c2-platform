@@ -1,3 +1,4 @@
+import { contextForSite } from './site_context.js';
 // Escalation destination catalog (mock)
 // Real product: this comes from customer's Config module + server API.
 // Each destination represents someone who receives escalations.
@@ -1239,7 +1240,95 @@ const _DEST_GUIDANCE_BY_TIER_TYPE = {
   },
 };
 
+// ── AIRPORT ROLES, IN AIRPORT WORDS ───────────────────────────────────
+//
+// The tier-and-type guidance above gave the tower, the fire service, the
+// duty manager and ground ops the same three lines ("Primary physical
+// response on the ground", "Dispatch for any confirmed threat"), and
+// listed maritime impact for the NOTAM system. Lucas, 2026-10-27: "AI
+// generated as shit ... choice of words that are like an airport". At an
+// airport each role gets what it actually does and when it wants to
+// hear about a drone. Keyed on the id suffix, which both airports share
+// (cph-t1-atc, bll-t1-atc), and used only where the site is an airport.
+// What the role does with the report stays theirs: we are the messenger.
+const _AIRPORT_GUIDANCE = {
+  't1-atc': {
+    useCases: ['Drone inside the control zone or on the approach and climb-out paths', 'Drone near a runway, a threshold or the extended centreline'],
+    notAppropriate: ['Drones well clear of the control zone and the approach paths', 'Authorised flights the tower already knows about'],
+    notes: 'The tower decides runway use and traffic. Run by the air navigation service provider, not the airport. Wants position against the runways, height in feet and track.',
+  },
+  't1-duty-mgr': {
+    useCases: ['Every confirmed drone on or near the airport', 'Anything that could hold traffic or close a runway'],
+    notAppropriate: ['Detections already dismissed', 'Authorised flights logged for the record'],
+    notes: 'Runs the airport side from the operations centre: runway availability with the tower, terminals, airlines and other stakeholders. On duty around the clock.',
+  },
+  't1-sec-ops': {
+    useCases: ['Every confirmed drone on or near the airport', 'Search for the pilot and the launch point around the fence'],
+    notAppropriate: ['Detections already dismissed'],
+    notes: 'Airport security: cameras, fence, patrols and the line to the police. On duty around the clock.',
+  },
+  't1-ground': {
+    useCases: ['Drone over the manoeuvring area, the aprons or the stands', 'Drone low over vehicles and staff airside'],
+    notAppropriate: ['Drones landside or outside the fence'],
+    notes: 'Controls vehicles and staff airside, and agrees movements on the aprons with the tower.',
+  },
+  't1-fire': {
+    useCases: ['Drone over the runways, aprons or stands', 'Drone near the fuel farm or an aircraft being fuelled', 'Any report of a fall, debris or impact'],
+    notAppropriate: ['Drones outside the fence with no ground risk'],
+    notes: 'Airport rescue and fire fighting, on station around the clock. Told so the crews know.',
+  },
+  't1-arff': {
+    useCases: ['Drone over the runway, aprons or stands', 'Drone near the fuel farm or an aircraft being fuelled', 'Any report of a fall, debris or impact'],
+    notAppropriate: ['Drones outside the fence with no ground risk'],
+    notes: 'Airport rescue and fire fighting, on station around the clock. Told so the crews know.',
+  },
+  'sys-genetec': {
+    useCases: ['Every drone within reach of the airport cameras'],
+    notAppropriate: ['Anything that needs a person to decide'],
+    notes: 'Points the cameras at the live track and records it. Automatic, nobody acknowledges it.',
+  },
+  'sys-cameras': {
+    useCases: ['Every drone within reach of the airport cameras'],
+    notAppropriate: ['Anything that needs a person to decide'],
+    notes: 'Points the cameras at the live track and records it. Automatic, nobody acknowledges it.',
+  },
+  'sys-scada': {
+    useCases: ['Every confirmed drone, so it shows on the airport operations feed'],
+    notAppropriate: ['Anything that needs a person to decide'],
+    notes: "Puts the alert on the feed the airport's own systems read. Automatic, nobody acknowledges it.",
+  },
+  'sys-broker': {
+    useCases: ['Every confirmed drone, so it shows on the airport operations feed'],
+    notAppropriate: ['Anything that needs a person to decide'],
+    notes: "Puts the alert on the feed the airport's own systems read. Automatic, nobody acknowledges it.",
+  },
+  'sys-eurocontrol': {
+    useCases: ['Drone activity that may restrict the airspace or the runways for some time'],
+    notAppropriate: ['Short sightings already over', 'Drones clear of the airspace around the airport'],
+    notes: 'Airspace notices and flow measures are issued by the air navigation service and the network manager, not by the airport. Never ticked by default.',
+  },
+  't2-politi': {
+    useCases: ['Every confirmed hostile drone at the airport', 'Search for the pilot and the launch point', 'Repeated or persistent drone activity'],
+    notAppropriate: ['Authorised flights logged for the record'],
+    notes: 'The police lead the response to an unauthorised drone and search for the pilot. They decide what happens next.',
+  },
+  't2-pet': {
+    useCases: ['Drones that look organised: formations, repeat visits, no catalogue match', 'Drones over critical parts of the airport'],
+    notAppropriate: ['A single hobby drone straying near the fence'],
+    notes: 'The police intelligence and security service. Assesses who is behind it, so the reported type and signatures matter most.',
+  },
+  't2-trekantbrand': {
+    useCases: ['Any report of a fall, debris or fire on or near the airport', 'Back-up for the airport fire station'],
+    notAppropriate: ['Drones with no ground risk'],
+    notes: 'The regional fire and rescue service behind the airport fire station.',
+  },
+};
+
 export function getDestinationGuidance(dest) {
+  if (dest?.siteId && /airport/.test(contextForSite(dest.siteId)?.site_type || '')) {
+    const g = _AIRPORT_GUIDANCE[String(dest.id || '').replace(/^[a-z_]+-/, '')];
+    if (g) return g;
+  }
   const key = `${dest.tier}-${dest.type}`;
   return _DEST_GUIDANCE_BY_TIER_TYPE[key] || {
     useCases: ['Use per site specific escalation policy'],

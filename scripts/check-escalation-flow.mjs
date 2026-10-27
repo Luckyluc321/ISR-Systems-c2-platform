@@ -13,7 +13,7 @@
 // ═══════════════════════════════════════════════════════════════════
 import { readFileSync } from 'node:fs';
 import { TEMPLATES } from '../src/drones.js';
-import { destinationsForSite, isInternationalBody } from '../src/destinations.js';
+import { destinationsForSite, isInternationalBody, getDestinationGuidance } from '../src/destinations.js';
 import { recommendationFor, preselectedDestinationIds } from '../src/escalation_recommendation.js';
 import { renderDetectionBrief } from '../src/summary.js';
 import { defaultEscalationMessage } from '../src/escalation_messages.js';
@@ -195,6 +195,30 @@ console.log('\n[the messages, every recipient at every site]');
   check(`no default message decides for its recipient (${n} checked)`, n > 200 && !bad.length, bad.slice(0, 3).join(' | '));
   const cam = destinationsForSite('cph').find(d => d.type === 'system' && /camera/i.test(d.name));
   check('the camera system is still told to slew, which is sensing, not response', cam && /Slew to the live track/.test(defaultEscalationMessage(cam, ev, 'Copenhagen Airport')));
+}
+
+console.log('\n[airports talk like an airport, Lucas 2026-10-27]');
+{
+  const cph = destinationsForSite('cph');
+  const tower = cph.find(d => d.id === 'cph-t1-atc');
+  const over = { siteId: 'cph', classification: 'hostile', threat: 'high', platform: 'quadcopter', droneType: '5x quadcopter (recon formation)', confidence: 0.78,
+    lastPosition: { lat: 55.6140, lon: 12.6500, alt: 120, speed: 15, heading: 268, rangeToPerim: -400 } };
+  const m = defaultEscalationMessage(tower, over, 'DK Airport');
+  check('the tower hears it against the runway, in feet, three-figure track and knots',
+    /^DRONE ALERT, DK Airport \(probable\)\. Five drones over Runway 04R\/22L, 400 ft, tracking 268 at 30 kt\./.test(m), m);
+  const appr = { ...over, confidence: 0.9, lastPosition: { lat: 55.6400, lon: 12.6905, alt: 90, speed: 0.5, heading: 10, rangeToPerim: 1200 } };
+  check('beyond the 22L threshold on the centreline is the approach to 22L', /on the approach to Runway 22L, 1\.2 NM out/.test(defaultEscalationMessage(tower, appr, 'DK Airport')));
+  const far = { ...over, lastPosition: { lat: 55.5800, lon: 12.7200, alt: 450, speed: 30, heading: 45, rangeToPerim: 3000 } };
+  check('well outside, it is a distance and a direction from the airport', /NM south-east of the airport, 1,500 ft, tracking 045/.test(defaultEscalationMessage(tower, far, 'DK Airport')));
+  const PROSE = /passing for|shared view|position and heading are in the brief/i;
+  const prose = cph.filter(d => d.tier <= 2).map(d => defaultEscalationMessage(d, over, 'DK Airport')).filter(x => PROSE.test(x));
+  check('no airport message falls back to the old prose', !prose.length, prose[0]);
+  const notes = cph.filter(d => d.tier === 1 && d.type === 'internal').map(d => getDestinationGuidance(d).notes);
+  check('every airport role describes itself differently', new Set(notes).size === notes.length, notes.join(' | '));
+  const bad = cph.filter(d => d.tier <= 2).map(d => getDestinationGuidance(d)).filter(g => /dispatch|maritime|primary physical response/i.test([...g.useCases, ...g.notAppropriate, g.notes].join(' ')));
+  check('no airport role is told to dispatch or handed maritime cases', !bad.length, bad[0]?.notes);
+  const bll = destinationsForSite('billund').find(d => d.id === 'bll-t1-arff');
+  check('Billund shares the airport wording', /fire fighting/.test(getDestinationGuidance(bll).notes));
 }
 
 console.log('\n[the wiring]');
