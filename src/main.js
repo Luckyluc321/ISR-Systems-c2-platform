@@ -182,6 +182,7 @@ import {
   CHANNEL_META, getDestinationGuidance, getAllDestinations,
 } from './destinations.js';
 import { recommendationFor, preselectedDestinationIds } from './escalation_recommendation.js';
+import { createIdentificationClock, initialIdentified, isUnidentified } from './identification_gate.js';
 import { maybeRequestEscalationAssessment } from './agents/agent_escalation_assessment.js';
 import { renderDetectionBrief } from './summary.js';
 import { getSourceFor as _getNnSourceFor, SITE_SOURCE_CONFIG } from './nn_registry.js';
@@ -21501,6 +21502,10 @@ async function main() {
       // detector state machine. mockConfidenceRamp bumps subject confidence by
       // 0.025 per tick until 0.85 so demo templates can demonstrate the
       // unknown → identified transition without real NN in the loop.
+      // Classifying until the identification clock says otherwise; a
+      // cooperative or friendly track is known at once. Nothing about
+      // what it is goes out before then: identification_gate.js.
+      identified: initialIdentified(template),
       dynamicClassification: !!template.dynamicClassification,
       mockConfidenceRamp: !!template.mockConfidenceRamp,
       // multiSiteTrack: this track belongs to MORE THAN ONE site, so the
@@ -28330,7 +28335,7 @@ async function main() {
               <button class="escp-x" data-modal="cancel" aria-label="Close">×</button>
             </div>
             <div class="escp-eid pl-mono">${e.id}</div>
-            <div class="escp-summary">${e.droneType} at ${siteName(e.siteId)}. ${Math.round(e.confidence * 100)}% detection confidence.</div>
+            <div class="escp-summary">${isUnidentified(e) ? 'Unidentified track, classification in progress,' : e.droneType} at ${siteName(e.siteId)}. ${Math.round(e.confidence * 100)}% detection confidence.</div>
             <div class="escp-chips">
               <div class="escp-chip-box">
                 <div class="escp-chip-box-k">Created</div>
@@ -29552,6 +29557,16 @@ async function main() {
   // when the picture changed and at most every 20 s per event. See
   // agents/agent_detection_line.js. Skipped while the sim is paused, so a
   // frozen scene does not keep buying sentences about itself.
+  // THE IDENTIFICATION CLOCK (identification_gate.js). A detected track
+  // is "classifying" until its lead airframe would be identified, 8 s
+  // after first detection on the sim clock, the same moment the roster
+  // names it. Auto-rules and every escalation's wording wait for this.
+  const _identClock = createIdentificationClock();
+  setInterval(() => {
+    if (simIsPaused()) return;
+    const ids = _identClock.step(EVENTS, monoNow(), id => droneState.get(id)?._firstDetectedMs ?? null);
+    for (const id of ids) mutateEvent(id, { identified: true, identifiedAt: new Date().toISOString() });
+  }, 250);
   const _assessAsked = new Set();   // events whose auto-escalation was assessed
   const _detectionLineTransport = {
     configured: () => isMistralConfigured(),

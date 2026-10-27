@@ -197,6 +197,10 @@ export function evaluateAllRules() {
   EVENTS.forEach(event => {
     if (event.status !== 'active') return;
     if (event.detected === false) return;
+    // Not before the system knows what it is (identification_gate.js).
+    // An unidentified track waits; the rule fires on the next evaluation
+    // after it is identified, about 8 s after first detection.
+    if (event.identified === false) return;
     _rules.forEach(rule => {
       if (ruleMatches(rule, event)) fireRule(rule, event);
     });

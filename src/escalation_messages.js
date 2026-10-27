@@ -72,6 +72,8 @@ function _whatPlain(event) {
   return event.droneType || 'An unidentified aircraft';
 }
 function _situation(event, siteName, detailed) {
+  // Still classifying (identification_gate.js): nothing about what it is.
+  if (event.identified === false) return `Unidentified track over ${siteName}, classification in progress. `;
   const what = detailed ? (event.droneType || 'Unidentified aircraft') : _whatPlain(event);
   // The subject is capitalised on its own: capitalising the whole lead
   // only reached the confidence word, and read "Probable. five drones".
@@ -197,7 +199,10 @@ function _airportWhat(event) {
 }
 
 function _airportReport(event, siteName, ctx) {
-  const header = event.platform === 'missile' ? 'MISSILE ALERT' : 'DRONE ALERT';
+  // Still classifying: no type, no count of "drones", no header that
+  // says what it is. Only where it is and how it moves.
+  const unidentified = event.identified === false;
+  const header = unidentified ? 'UNIDENTIFIED TRACK' : (event.platform === 'missile' ? 'MISSILE ALERT' : 'DRONE ALERT');
   const c = event.confidence;
   const qual = typeof c !== 'number' || c >= 0.85 ? '' : (c >= 0.65 ? ' (probable)' : ' (unconfirmed)');
   const p = event.lastPosition;
@@ -214,6 +219,10 @@ function _airportReport(event, siteName, ctx) {
     fix = ` ${parts.join(', ')}`;
   } else {
     fix = ' at the airport';
+  }
+  if (unidentified) {
+    const at = where ? `${fix.trim().charAt(0).toUpperCase()}${fix.trim().slice(1)}.` : 'At the airport.';
+    return { head: `${header}, ${siteName}.`, body: `${at} Classification in progress.` };
   }
   return { head: `${header}, ${siteName}${qual}.`, body: `${_airportWhat(event)}${fix}.` };
 }
@@ -236,13 +245,25 @@ const _AIRPORT_TAIL = {
 
 function _airportMessage(dest, suffix, event, siteName, ctx) {
   const { head, body } = _airportReport(event, siteName, ctx);
+  // Still classifying: every role gets the same where-and-how-it-moves
+  // report and the live track. No role-specific claims (a signature
+  // judgement, "drone activity") until the system knows what it is.
+  if (event.identified === false) {
+    if (dest.type === 'system') {
+      const n = String(dest.name || '').toLowerCase();
+      if (n.includes('camera') || n.includes('cctv') || n.includes('surveillance')) return 'Slew to the live track. Record continuous.';
+      if (n.includes('notam') || n.includes('eurocontrol') || n.includes('network manager')) return `Unidentified track at ${siteName}. ${body}`;
+      return `${head} ${body}`;
+    }
+    return `${head} ${body} Live track on the platform.`;
+  }
   if (dest.type === 'system') {
     const n = String(dest.name || '').toLowerCase();
     if (n.includes('camera') || n.includes('cctv') || n.includes('surveillance')) return 'Slew to the live track. Record continuous.';
     if (n.includes('notam') || n.includes('eurocontrol') || n.includes('network manager')) return `Drone activity at ${siteName}. ${body}`;
     return `${head} ${body}`;
   }
-  if (suffix === 't2-pet') {
+  if (suffix === 't2-pet' && event.identified !== false) {
     const type = bareType(event.droneType);
     return `${head} ${body}${type ? ` Type reported: ${type}.` : ''} Signatures do not match commercial traffic.`;
   }
@@ -258,6 +279,16 @@ export function defaultEscalationMessage(dest, event, siteName = 'the site') {
   const suffix = String(dest.id || '').replace(/^[a-z_]+-/, '');
   const airport = _airportCtx(event.siteId);
   if (airport) return _airportMessage(dest, suffix, event, siteName, airport);
+  // Still classifying (identification_gate.js): the same neutral line
+  // for every recipient, no role-specific claims until it is known.
+  if (event.identified === false) {
+    if (dest.type === 'system') {
+      const n = String(dest.name || '').toLowerCase();
+      if (n.includes('camera') || n.includes('cctv') || n.includes('surveillance')) return 'Slew to the live track. Record continuous.';
+      return `Unidentified track flagged on the operations feed. ${siteName}.`;
+    }
+    return `${_situation(event, siteName, false)}Live track on the shared view.`;
+  }
   if (dest.type === 'system') return _systemMessage(dest, event, siteName);
 
   const head = _situation(event, siteName, _WANTS_MODELS.has(suffix));

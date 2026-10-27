@@ -64,7 +64,9 @@ export function assessmentFacts(event, ctx = {}) {
   const facts = {
     site: ctx.siteName || event?.siteId || null,
     site_kind: ctx.siteKind || null,
-    type_reported_by_detector: bareType(event?.droneType),
+    // Not before it is known (identification_gate.js).
+    type_reported_by_detector: event?.identified === false ? null : bareType(event?.droneType),
+    classification_in_progress: event?.identified === false,
     classification: event?.classification || null,
     threat_level: event?.threat || null,
     platform: event?.platform || null,

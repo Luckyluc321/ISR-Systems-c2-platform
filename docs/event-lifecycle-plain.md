@@ -20,7 +20,8 @@ else's case, or nobody's.
 
 | Step | What you see |
 |---|---|
-| 1 | Enters a sensor's range → **event opens**, DETECTED marker |
+| 1 | Enters a sensor's range → **event opens**, DETECTED marker. The track is **classifying** |
+| 1a | 8 s of observation later the lead is **identified**. Only now do auto-escalations fire and does anything say what it is |
 | 2 | Crosses the fence → ENTRY marker |
 | 3 | Flies around → symbol on the map, live telemetry |
 | 4 | Leaves the fence → EXIT marker |
@@ -38,6 +39,50 @@ That split is not a design decision anyone made. It is where the code happens
 to be. See "Known gaps".
 
 ---
+
+### Classifying, then identified (2026-10-27)
+
+Lucas: "2 seconds in the system cannot classify what it is, and thus we
+can't share a 'Drone here' before even knowing what it is." So an event is
+detected first and identified second, and nothing that names it goes out in
+between (`src/identification_gate.js`, gated by `check:identification-gate`).
+
+```mermaid
+stateDiagram-v2
+    [*] --> Undetected: spawns outside every sensor
+    Undetected --> Classifying: enters a sensor's range
+    [*] --> Classifying: spawns in range
+    Classifying --> Identified: 8 s on the sim clock, or the net reports a class
+    [*] --> Identified: cooperative aircraft, transponder says what it is
+    Identified --> [*]: event closes
+    note right of Classifying
+        Escalations say "Unidentified track,
+        classification in progress": where and
+        how it moves, nothing about what it is.
+        Auto-rules wait.
+    end note
+    note right of Identified
+        Auto-rules fire on their next check.
+        Messages, the brief and the agent get
+        the type, the class and the count.
+    end note
+```
+
+- **The moment** is the roster's own: the lead airframe is named 8 s after
+  the formation was first detected (`_IDENT_SCHEDULE_S[0]`). One number, two
+  readers, and the gate fails if they drift.
+- **On the sim clock**: a paused scene does not finish its classification.
+- **What waits**: auto-escalation rules; and any escalation an operator sends
+  by hand before then reads "Unidentified track, classification in progress"
+  in the default messages, the Detection Brief, the escalate modal and the
+  facts the brief's agent is given. No type, no class, no "drones", no
+  signature match.
+- **The seam**: with a real classifier the moment is the net's. Whatever
+  reports a class with enough confidence sets `identified: true`. Nothing
+  downstream reads the timer, only the flag.
+- `event.identified` is `false` while classifying, `true` once identified
+  with `identifiedAt` stamped, and absent on events this does not own (the
+  live sensor feed, history), which are treated as known.
 
 ## A drone we lose but that never left
 

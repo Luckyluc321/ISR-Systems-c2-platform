@@ -163,6 +163,17 @@ from a band that happens to carry it.
 
 ---
 
+**C2 holds every escalation until the track is identified** (2026-10-27,
+`src/identification_gate.js`). Before that, an operator who escalates by
+hand sends "Unidentified track, classification in progress" with position
+and movement only, and no auto-rule fires. Today the moment is a timer, 8 s
+after first detection, the same moment the roster names the lead. When the
+net is in the loop, the moment is the net's: set `identified: true` on the
+event when it reports a class with enough confidence. That flag is the whole
+integration; nothing downstream reads the timer.
+
+---
+
 ## 6. After identification — the signature bridge
 
 Read: `agentic-signature-bridge-architecture.md`. Status: planned,

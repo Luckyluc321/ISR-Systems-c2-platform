@@ -70,8 +70,12 @@ function mockHash(str) {
 // Main: return HTML for the Detection Brief for a given event.
 export function renderDetectionBrief(event) {
   const platform = event.platform || 'quadcopter';
-  const clsColor = threatColor(event.classification, event.threat);
-  const threatLabel = threatLevelLabel(event.classification, event.threat, platform);
+  // NOT BEFORE IT IS KNOWN (identification_gate.js, Lucas 2026-10-27). A
+  // brief sent while the track is still classifying names no type, no
+  // class and no signature match: it is an unidentified track.
+  const unidentified = event.identified === false;
+  const clsColor = unidentified ? threatColor('unknown', null) : threatColor(event.classification, event.threat);
+  const threatLabel = unidentified ? 'PENDING' : threatLevelLabel(event.classification, event.threat, platform);
   const pos = event.lastPosition || (event.entry ? { lat: event.entry.lat, lon: event.entry.lon, alt: event.entry.alt || 0, speed: 0, heading: event.entry.heading || 0, rangeToPerim: null } : null);
   const respBundle = pos && showResponseAssets(event)
     ? responseBundle(pos.lat, pos.lon)
@@ -105,13 +109,13 @@ export function renderDetectionBrief(event) {
       <section class="brief-hero">
         <div class="brief-cell">
           <div class="brief-cell-k">Platform</div>
-          <div class="brief-cell-v">${platformLabel(platform)}</div>
-          <div class="brief-cell-sub">${event.droneType}</div>
+          <div class="brief-cell-v">${unidentified ? 'Unidentified track' : platformLabel(platform)}</div>
+          <div class="brief-cell-sub">${unidentified ? 'Classification in progress' : event.droneType}</div>
         </div>
         <div class="brief-cell">
           <div class="brief-cell-k">Threat Level</div>
           <div class="brief-cell-v" style="color:${clsColor.border};">${threatLabel}</div>
-          <div class="brief-cell-sub">${event.classification.toUpperCase()}</div>
+          <div class="brief-cell-sub">${unidentified ? 'CLASSIFYING' : event.classification.toUpperCase()}</div>
         </div>
         <div class="brief-cell">
           <div class="brief-cell-k">Confidence</div>
@@ -140,10 +144,13 @@ export function renderDetectionBrief(event) {
       <section class="brief-section">
         <div class="brief-section-hdr">Detection Summary</div>
         <p class="brief-prose">
-          A ${clsColor.label.toLowerCase()} ${platformLabel(platform).toLowerCase()}, identified as
-          <b>${event.droneType}</b>, was detected over <b>${siteName(event.siteId)}</b>
+          ${unidentified
+            ? `An unidentified track was detected over <b>${siteName(event.siteId)}</b>`
+            : `A ${clsColor.label.toLowerCase()} ${platformLabel(platform).toLowerCase()}, identified as
+          <b>${event.droneType}</b>, was detected over <b>${siteName(event.siteId)}</b>`}
           at <b>${event.startTime.slice(11, 19)}Z</b> on ${event.startTime.slice(0, 10)}.
-          ${event.evidence?.rfMatch ? `Radio-frequency signature matched <b>${event.evidence.rfMatch}</b>.` : ''}
+          ${unidentified ? 'Classification is in progress.' : ''}
+          ${!unidentified && event.evidence?.rfMatch ? `Radio-frequency signature matched <b>${event.evidence.rfMatch}</b>.` : ''}
           ${contribList ? `Corroborated by <b>${event.contributingSensors.filter(s => !s.offline).length} sensor nodes</b> (${contribList}).` : ''}
         </p>
         ${pos ? `
@@ -236,7 +243,7 @@ export function renderDetectionBrief(event) {
           ${event.evidence?.modality  ? `<div><span class="k">Modality</span><span class="v">${event.evidence.modality}</span></div>` : ''}
           ${event.evidence?.rfCarrier ? `<div><span class="k">RF Carrier</span><span class="v">${event.evidence.rfCarrier}</span></div>` : ''}
           ${event.evidence?.rfBandwidth ? `<div><span class="k">Bandwidth</span><span class="v">${event.evidence.rfBandwidth}</span></div>` : ''}
-          ${event.evidence?.rfMatch   ? `<div><span class="k">Signature Match</span><span class="v">${event.evidence.rfMatch}</span></div>` : ''}
+          ${!unidentified && event.evidence?.rfMatch ? `<div><span class="k">Signature Match</span><span class="v">${event.evidence.rfMatch}</span></div>` : ''}
           ${contribList               ? `<div><span class="k">Contributing Nodes</span><span class="v">${contribList}</span></div>` : ''}
         </div>
       </section>
