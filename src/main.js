@@ -12564,6 +12564,14 @@ async function main() {
     // track that is genuinely seen is unaffected: by the time it crosses
     // a perimeter it has long since been detected.
     if (event.detected === false) return;
+    // A COOPERATIVE AIRCRAFT IS NOT AN INCURSION. A scheduled airliner
+    // crossing its own airport's fence on approach dropped an ENTRY pin
+    // with its type on it, in the middle of the WITHOUT ISR clip, beside
+    // the swarm it was about to meet (Lucas, 2026-10-27: "the ENTRY
+    // coordinate from the plane is STILL there"). Lifecycle pins are for
+    // tracks the operator has to account for. The event's own entry
+    // record (event.entry, written in the tick) is untouched.
+    if (TEMPLATES[event.templateKey]?.cooperative) return;
     // Lazily initialise tick-loop internal state via mutators. Silent
     // (no listener fire) because these init writes shouldn't provoke
     // a UI render — the tick loop's own render happens at end of tick.
@@ -17785,9 +17793,21 @@ async function main() {
     let _prevHeadingRad = null;
     let _prevPosCart = null;
     let _prevTime = performance.now();
+    let _frozenQ = null;
     const _bankedOrientation = () => {
       const cart = _billboardRef?.position?.getValue?.(Cesium.JulianDate.now());
       if (!cart) return undefined;
+      // FROZEN WITH THE SIMULATION. This runs every render frame on the
+      // wall clock, and the bank comes from how fast the heading is
+      // turning. Paused mid-turn, the heading stopped, the rate filter
+      // decayed and the aircraft rolled its wings level while frozen,
+      // then snapped back into the bank on resume: "jumps around from
+      // left to right before stabilizing" (Lucas, 2026-10-27; measured on
+      // the holding pattern, -6.5 to 0.2 degrees while paused and back in
+      // half a second). While paused the attitude is held exactly as it
+      // was and nothing is integrated; on resume the clock restarts from
+      // this frame, so there is no catch-up step.
+      if (simIsPaused() && _frozenQ) { _prevTime = performance.now(); return _frozenQ; }
       // PER-AIRFRAME, not one global. This rig read
       // __isr_shahed_tuning for every track that reached it, so an
       // airliner would have flown with a loitering munition's
@@ -18140,7 +18160,8 @@ async function main() {
         (_smoothedPitch + pitchOffset * _pitchFade + _wobPitch) * pitchSign,
         (_smoothedRoll + _wobRoll) * rollSign,
       );
-      return Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
+      _frozenQ = Cesium.Transforms.headingPitchRollQuaternion(cart, hpr);
+      return _frozenQ;
     };
 
     // ── QUADCOPTER FLIGHT MODEL, not a smoothing rig ────────────────
