@@ -50,7 +50,12 @@
 // already governs, and are not changed.
 // ═══════════════════════════════════════════════════════════════════
 
-export const ZOOM_CFG = { growth: 0.5, farBoost: 1.4 };
+// farBoost OFF by default since the same evening: "Why is the drones so
+// big when you're far away?" The WITHOUT ISR run draws the swarm's models
+// out to 20 km, so a boost held at and beyond the swap distance made
+// every far drone bigger than it had ever been. Far away is back to the
+// flat floor of before; zooming in still grows. The knob stays live.
+export const ZOOM_CFG = { growth: 0.5, farBoost: 1 };
 
 /** The pixel floor at camera distance distM. Pure. */
 export function zoomFloorPx(floorPx, swapM, distM, growth = ZOOM_CFG.growth, farBoost = ZOOM_CFG.farBoost) {

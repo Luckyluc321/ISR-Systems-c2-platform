@@ -29,8 +29,9 @@ const drawn = (lengthM, d, floorPx, capX) => {
 };
 
 console.log('\n[the floor]');
-check(`zoomed out, ${ZOOM_CFG.farBoost} times the old floor: seen, not dramatic`, ZOOM_CFG.farBoost >= 1.2 && ZOOM_CFG.farBoost <= 1.6
-  && Math.abs(zoomFloorPx(20, 700, 700) - 20 * ZOOM_CFG.farBoost) < 1e-9 && Math.abs(zoomFloorPx(20, 700, 5000) - 20 * ZOOM_CFG.farBoost) < 1e-9);
+check('far away is exactly the flat floor of before (boost off by default)', ZOOM_CFG.farBoost === 1
+  && zoomFloorPx(20, 700, 700) === 20 && zoomFloorPx(20, 700, 5000) === 20 && zoomFloorPx(14, 250, 20000) === 14);
+check('the boost knob still works when asked for', Math.abs(zoomFloorPx(20, 700, 700, 0.5, 1.4) - 28) < 1e-9);
 check('the way back, growth 0 and boost 1, is the flat floor of before, everywhere', [700, 300, 50, 5].every(d => zoomFloorPx(20, 700, d, 0, 1) === flat(20)));
 check('without the boost, 1.4 times bigger each time the distance halves', Math.abs(zoomFloorPx(20, 700, 350, 0.5, 1) / 20 - Math.SQRT2) < 1e-9);
 check('a boost too large for the growth is held so the size still never dips', (() => {
