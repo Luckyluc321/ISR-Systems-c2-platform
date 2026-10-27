@@ -19886,7 +19886,18 @@ async function main() {
           // the fallback everywhere else.
           let _g = 0;
           const _lowEnough = (p.alt || 0) < 80;
-          if (_lowEnough && viewer.scene.sampleHeightSupported) {
+          // ONLY ON A ROUTE THAT LANDS. Each sample is a GPU readback that
+          // stalls the frame, about seven a second below 80 m, and it
+          // exists to put the WHEELS on the runway. A go-around never
+          // touches down (the WITHOUT ISR run breaks off at 60 m), so
+          // there it bought nothing but stutter in the one stretch the
+          // film needs smooth (Lucas, 2026-10-27). Decided once per track
+          // from its own route: lands if any waypoint reaches the ground.
+          if (state._routeLands == null) {
+            state._routeLands = (TEMPLATES[event.templateKey]?.waypoints || [])
+              .some(w => typeof w.alt === 'number' && w.alt <= 1);
+          }
+          if (_lowEnough && state._routeLands && viewer.scene.sampleHeightSupported) {
             const _nowMs = monoNow();
             if (!state._surfAt || _nowMs - state._surfAt > 150) {
               state._surfAt = _nowMs;
