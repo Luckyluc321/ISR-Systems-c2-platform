@@ -23,7 +23,7 @@ const SITE_MOCK_TRAFFIC = [
     radiusKm: 20,
     tracks: [
       // Commercial airliner on final approach to 04L
-      { callsign: 'SAS831',  icao24: '4a5c9e', klass: 'fixed_wing_commercial',
+      { callsign: 'FLT831',  icao24: '4a5c9e', klass: 'fixed_wing_commercial',
         lat: 55.6350, lon: 12.6280, alt_m: 850, heading_deg: 40, speed_ms: 78 },
       // Cargo departure off 22R
       { callsign: 'DHL7',    icao24: '4bcaa1', klass: 'fixed_wing_commercial',

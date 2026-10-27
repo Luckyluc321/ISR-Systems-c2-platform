@@ -23766,10 +23766,10 @@ async function main() {
       { key: 'cph_quad_hostile', threat: 'Quadcopter, hostile', pathLabel: 'Perimeter ingress' },
       { key: 'cph_fixedwing_hostile', threat: 'Fixed-wing UAS', pathLabel: 'Recon transit' },
       { key: 'cph_recon_hostile', threat: 'Mohajer-2 reconnaissance', pathLabel: 'High-altitude loiter', cls: 'recon' },
-      { key: 'cph_jet_friendly', threat: 'Jet (SAS 743), friendly', pathLabel: 'Filed airliner route', cls: 'friendly' },
-      { key: 'cph_jet_goaround', threat: 'Jet (SAS 743), friendly', pathLabel: 'Missed approach, 04R', cls: 'friendly' },
-      { key: 'cph_jet_goaround_early', threat: 'Jet (SAS 743), friendly', pathLabel: 'Crew-spotted missed approach, 60 m at 700 m', cls: 'friendly' },
-      { key: 'cph_jet_goaround_atc', threat: 'Jet (SAS 743), friendly', pathLabel: 'ATC-warned missed approach, 398 m at 7.6 km', cls: 'friendly' },
+      { key: 'cph_jet_friendly', threat: 'Plane, friendly', pathLabel: 'Filed airliner route', cls: 'friendly' },
+      { key: 'cph_jet_goaround', threat: 'Plane, friendly', pathLabel: 'Missed approach, 04R', cls: 'friendly' },
+      { key: 'cph_jet_goaround_early', threat: 'Plane, friendly', pathLabel: 'Crew-spotted missed approach, 60 m at 700 m', cls: 'friendly' },
+      { key: 'cph_jet_goaround_atc', threat: 'Plane, friendly', pathLabel: 'ATC-warned missed approach, 398 m at 7.6 km', cls: 'friendly' },
       { key: 'cph_missile_hostile', threat: 'Cruise missile', pathLabel: 'Baltic sea ingress', cls: 'critical' },
       { key: 'cph_missile_inbound_sw', threat: 'Cruise missile', pathLabel: 'SW continuation ingress', cls: 'critical' },
       { key: 'swarm_recon_cph_amk', threat: '5-drone recon swarm', pathLabel: 'CPH → Amager transit', cls: 'critical' },
@@ -23779,7 +23779,7 @@ async function main() {
       // decision point is its own t = 285.4 s, so the aircraft spawns 210 s
       // in and breaks off at about t = 495 on the swarm's clock, moments
       // after the formation arrives over the runway.
-      { key: '__combo_cph_incursion', threat: '5-drone swarm + SAS 743', pathLabel: 'Sensors live, crew spots them at 480 m', cls: 'critical',
+      { key: '__combo_cph_incursion', threat: '5-drone swarm + plane', pathLabel: 'Sensors live, crew spots them at 480 m', cls: 'critical',
         combo: [
           { key: 'cph_swarm_runway_incursion' },
           // Spawned when the swarm's OWN clock reads 216 s, so the two
@@ -23800,7 +23800,7 @@ async function main() {
       // the formation still over the field, so the runway is clear long
       // before they reach it. Trigger 71 = the swarm at t = 300 minus the
       // aircraft's own 229.1 s to its decision point.
-      { key: '__combo_cph_incursion_isr', threat: '5-drone swarm + SAS 743', pathLabel: 'WITH ISR, tower warns at 7.6 km', cls: 'critical',
+      { key: '__combo_cph_incursion_isr', threat: '5-drone swarm + plane', pathLabel: 'WITH ISR, tower warns at 7.6 km', cls: 'critical',
         combo: [
           { key: 'cph_swarm_runway_incursion' },
           { key: 'cph_jet_goaround_atc', atTSec: 71 },
@@ -23813,7 +23813,7 @@ async function main() {
       // variant above so the two are compared on equal terms, and the
       // aircraft is still in the hold when the formation reaches the
       // runway, which is the point.
-      { key: '__combo_cph_incursion_isr_hold', threat: '5-drone swarm + SAS 743', pathLabel: 'WITH ISR, arrival held over the water, no approach flown', cls: 'critical',
+      { key: '__combo_cph_incursion_isr_hold', threat: '5-drone swarm + plane', pathLabel: 'WITH ISR, arrival held over the water, no approach flown', cls: 'critical',
         combo: [
           { key: 'cph_swarm_runway_incursion' },
           { key: 'cph_jet_hold_atc', atTSec: 0 },
@@ -23853,7 +23853,7 @@ async function main() {
       //
       // Delete that one file and the entry disappears from the list
       // below rather than sitting there failing on click.
-      { key: '__combo_cph_incursion_noisr', threat: '5-drone swarm + SAS 743', pathLabel: 'WITHOUT ISR, no sensor grid, crew spots them at 480 m', cls: 'critical',
+      { key: '__combo_cph_incursion_noisr', threat: '5-drone swarm + plane', pathLabel: 'WITHOUT ISR, no sensor grid, crew spots them at 480 m', cls: 'critical',
         module: '__isr_withoutIsr' },
       // Airframe check, not a threat scenario. Over the Øresund so the
       // envelope can be watched without rendering the city.

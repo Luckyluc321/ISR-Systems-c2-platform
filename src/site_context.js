@@ -84,9 +84,9 @@ export const SITE_CONTEXT = {
       { id: 'pier_d', name: 'Pier D (flexi Schengen / non-Schengen, gates D1-D4 + D101-D104)', center: { lat: 55.62780, lon: 12.65242 }, criticality: 'high', verified: 'medium',
         source: 'https://wiki.vatsim-scandinavia.org/books/danish-airports-charts/page/ekch-copenhagenkastrup',
         reason: 'Mixed Schengen and non-Schengen ("flexi"). 4 OSM gate nodes cluster.' },
-      { id: 'pier_e', name: 'Pier E / Finger E (non-Schengen, SAS long-haul, gates E1-E7 + E20-E36)', center: { lat: 55.62682, lon: 12.65581 }, criticality: 'critical', verified: 'high',
+      { id: 'pier_e', name: 'Pier E / Finger E (non-Schengen, long-haul, gates E1-E7 + E20-E36)', center: { lat: 55.62682, lon: 12.65581 }, criticality: 'critical', verified: 'high',
         source: 'https://www.openstreetmap.org/way/616277328',
-        reason: 'SAS long-haul hub since 2019 (moved from Pier C). Widebody stands including A350 / 787 / 777 operations.' },
+        reason: 'Long-haul hub since 2019 (moved from Pier C). Widebody stands including A350 / 787 / 777 operations.' },
       { id: 'pier_f', name: 'Pier F / CPH Go (low-cost, gates F1-F10)', center: { lat: 55.62574, lon: 12.65675 }, criticality: 'medium', verified: 'high',
         source: 'https://www.openstreetmap.org/way/242422297',
         reason: 'Low-cost carriers (easyJet, Ryanair, Wizz Air, Transavia). Bus-boarded remote stands.' },
@@ -137,7 +137,7 @@ export const SITE_CONTEXT = {
       { id: 'atis_broadcast',  name: 'ATIS broadcast antenna',           location: { lat: 55.61240, lon: 12.65810 }, asset_type: 'nav_broadcast', criticality: 'medium', verified: 'unverified',
         reason: 'Continuous weather / operations broadcast. Loss forces manual radio queries.' },
       // Maintenance + hangars (3)
-      { id: 'sas_hangar_141',  name: 'SAS Hangar 141 (maintenance)',     location: { lat: 55.61289, lon: 12.65980 }, asset_type: 'maintenance_facility', criticality: 'medium', verified: 'unverified',
+      { id: 'sas_hangar_141',  name: 'Hangar 141 (maintenance)',         location: { lat: 55.61289, lon: 12.65980 }, asset_type: 'maintenance_facility', criticality: 'medium', verified: 'unverified',
         reason: 'Deep maintenance of Nordic fleet. Fire risk and jet fuel storage.' },
       { id: 'hangar_2',        name: 'Hangar 2 (widebody)',              location: { lat: 55.61360, lon: 12.66130 }, asset_type: 'maintenance_facility', criticality: 'medium', verified: 'unverified',
         reason: 'Widebody deep maintenance. Contains active aircraft during scheduled works.' },
@@ -208,9 +208,10 @@ export const SITE_CONTEXT = {
     // Live system would sync with airport ground movement schedule +
     // customs manifest. Until then this is a demo-realistic snapshot.
     aircraft_of_interest: [
-      // SAS long-haul widebody at Pier E (SAS's actual long-haul hub since 2019)
+      // Long-haul widebody at Pier E (the airport's long-haul hub since 2019). No
+      // real carrier is named on screen: fictional callsign, generic operator.
       { id: 'sas_a350_jfk',
-        callsign: 'SK909', operator: 'SAS',
+        callsign: 'FLT909', operator: 'Scheduled carrier',
         aircraft: 'Airbus A350-900',
         registration: 'LN-RKF',
         stand: 'E4',
@@ -218,7 +219,7 @@ export const SITE_CONTEXT = {
         status: 'boarding',
         eta_departure: '2026-08-06T16:20:00Z',
         route: 'CPH → JFK',
-        manifest_note: 'Scheduled transatlantic. Standard passenger + belly cargo. SAS long-haul flagship route.' },
+        manifest_note: 'Scheduled transatlantic. Standard passenger + belly cargo. Long-haul flagship route.' },
 
       // Emirates 777 to DXB — daily service, historically Pier C/E
       { id: 'emirates_ek152',
@@ -280,7 +281,7 @@ export const SITE_CONTEXT = {
       { asset_id: 'fuel_farm',              priority: 1, rationale: 'Bulk aviation fuel (Jet A-1). Standoff attack cascades to fire on airfield and multi-week fuel supply disruption.' },
       { asset_id: 'atc_tower_syd',          priority: 2, rationale: 'ATC Tower Syd is the single point of airspace control. Loss triggers immediate airspace closure with national-scale impact.' },
       { asset_id: 'runway_04L_22R',         priority: 3, rationale: 'Primary arrival axis. Airborne obstruction on approach forces go-around; ground incursion closes the runway.' },
-      { asset_id: 'pier_e',                 priority: 4, rationale: 'SAS long-haul widebody hub since 2019. A350, 787, and 777 stands. Any incident here affects intercontinental operations.' },
+      { asset_id: 'pier_e',                 priority: 4, rationale: 'Long-haul widebody hub since 2019. A350, 787, and 777 stands. Any incident here affects intercontinental operations.' },
       { asset_id: 'vilhelm_lauritzen_terminal', priority: 5, rationale: 'Segregated VIP terminal for state visits, royals, and foreign military transport. Coordinated with PET.' },
       { asset_id: 'ils_04L',                priority: 6, rationale: 'ILS glideslope for primary runway. RF interference triggers immediate ILS re-certification and approach downgrade.' },
       { asset_id: 'fire_station_n',         priority: 7, rationale: 'Category 10 crash fire rescue (CFR). Degrading this station lowers emergency response capacity for any concurrent incident.' },
@@ -310,7 +311,7 @@ export const SITE_CONTEXT = {
     correlator_hints: {
       dwell_alarm_zones: [
         // Anchored to verified pier centroids
-        { name: 'Pier E (SAS long-haul widebody)', center: { lat: 55.62682, lon: 12.65581 }, radius_m: 300, threshold_sec: 20 },
+        { name: 'Pier E (long-haul widebody)', center: { lat: 55.62682, lon: 12.65581 }, radius_m: 300, threshold_sec: 20 },
         { name: 'Piers A/B (Schengen departures)', center: { lat: 55.62743, lon: 12.64360 }, radius_m: 400, threshold_sec: 30 },
         { name: 'Piers C/D (mixed + non-Schengen)', center: { lat: 55.62715, lon: 12.65099 }, radius_m: 350, threshold_sec: 30 },
         { name: 'Pier F / CPH Go (low-cost)', center: { lat: 55.62574, lon: 12.65675 }, radius_m: 250, threshold_sec: 30 },

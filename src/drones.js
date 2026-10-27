@@ -1054,7 +1054,7 @@ export const TEMPLATES = {
     classification: 'friendly',
     threat: null,
     platform: 'jet',
-    droneType: 'Commercial airliner (SAS 743, A320neo)',
+    droneType: 'Commercial airliner (Flight 743, A320neo)',
     confidence: 0.98,
     confidenceTrend: 'ADS-B correlated, flight plan match',
     contributingSensors: [
@@ -1064,7 +1064,7 @@ export const TEMPLATES = {
       { id: 'N15', confidence: 0.92 },
       { id: 'N17', confidence: 0.90 },
     ],
-    evidence: { rfCarrier: '1090 MHz ADS-B', rfMatch: 'SAS743 A320neo, flight plan match', modality: 'RF + acoustic + visual', evidenceSize: '92.1 MB', note: 'Cleared commercial approach, no threat, logged for audit.' },
+    evidence: { rfCarrier: '1090 MHz ADS-B', rfMatch: 'Flight 743 A320neo, flight plan match', modality: 'RF + acoustic + visual', evidenceSize: '92.1 MB', note: 'Cleared commercial approach, no threat, logged for audit.' },
     // TERRAIN-RELATIVE ALTITUDE. `alt` here is metres above the GROUND,
     // and this is the only template that says so. The shared track code
     // draws a waypoint altitude as a height above the WGS84 ellipsoid,
@@ -1251,7 +1251,7 @@ export const TEMPLATES = {
     classification: 'friendly',
     threat: null,
     platform: 'jet',
-    droneType: 'Commercial airliner (SAS 743, A320neo)',
+    droneType: 'Commercial airliner (Flight 743, A320neo)',
     confidence: 0.98,
     confidenceTrend: 'ADS-B correlated, flight plan match',
     contributingSensors: [
@@ -1261,7 +1261,7 @@ export const TEMPLATES = {
       { id: 'N15', confidence: 0.92 },
       { id: 'N17', confidence: 0.90 },
     ],
-    evidence: { rfCarrier: '1090 MHz ADS-B', rfMatch: 'SAS743 A320neo, flight plan match', modality: 'RF + acoustic + visual', evidenceSize: '92.1 MB', note: 'Cleared commercial approach, go-around flown at 185 ft. Logged for audit.' },
+    evidence: { rfCarrier: '1090 MHz ADS-B', rfMatch: 'Flight 743 A320neo, flight plan match', modality: 'RF + acoustic + visual', evidenceSize: '92.1 MB', note: 'Cleared commercial approach, go-around flown at 185 ft. Logged for audit.' },
     terrainRelativeAlt: true,
     // 0.1, not 2. The 2 m compensated for globe.getHeight() returning
     // the terrain under the photogrammetry mesh. Near the ground the
@@ -1431,7 +1431,7 @@ export const TEMPLATES = {
   // Decision point is its own t = 229.1 s, which is what the combined
   // launcher's trigger is derived from.
   cph_jet_goaround_atc: {
-    droneType: 'Commercial airliner (SAS 743, A320neo)',
+    droneType: 'Commercial airliner (Flight 743, A320neo)',
     platform: 'jet',
     classification: 'friendly',
     threat: null,
@@ -1453,7 +1453,7 @@ export const TEMPLATES = {
     ],
     evidence: {
       rfCarrier: '1090 MHz ADS-B',
-      rfMatch: 'SAS743 A320neo, flight plan match',
+      rfMatch: 'Flight 743 A320neo, flight plan match',
       modality: 'Cooperative transponder',
       evidenceSize: '1.2 MB',
       note: 'Scheduled arrival on 04R. Established on the approach, lined up and descending on a 3 degree path, and 27 km out through 1415 m when the tower turned it off. The first sensor had the formation at 8 seconds and three were holding it by 26, so the call reached the crew 62 seconds after the grid first heard anything and the approach was never commenced. It turned right, away from the city and the field, and is holding over Koge Bugt between 24 and 30 km out in contact with the tower, waiting on the next approach slot.',
@@ -1579,7 +1579,7 @@ export const TEMPLATES = {
 
 
   cph_jet_hold_atc: {
-    droneType: 'Commercial airliner (SAS 743, A320neo)',
+    droneType: 'Commercial airliner (Flight 743, A320neo)',
     platform: 'jet',
     classification: 'friendly',
     threat: null,
@@ -1594,7 +1594,7 @@ export const TEMPLATES = {
     gearRetracts: true,
     evidence: {
       rfCarrier: '1090 MHz ADS-B',
-      rfMatch: 'SAS743 A320neo, flight plan match',
+      rfMatch: 'Flight 743 A320neo, flight plan match',
       modality: 'Cooperative transponder',
       evidenceSize: '1.2 MB',
       note: 'Scheduled arrival on 04R. Established on the approach, lined up and descending on a 2.9 degree path, and 14 km out through 760 m when the tower turned it off. The first sensor had the formation at 8 seconds and three were holding it by 26, so the call reached the crew while the aircraft was still well outside the final approach segment. It turned right, away from the city and the field, and is holding over Koge Bugt between 11 and 17 km out in contact with the tower, waiting on the next approach slot.',
@@ -1607,7 +1607,7 @@ export const TEMPLATES = {
   },
 
   cph_jet_goaround_early: {
-    droneType: 'Commercial airliner (SAS 743, A320neo)',
+    droneType: 'Commercial airliner (Flight 743, A320neo)',
     platform: 'jet',
     classification: 'friendly',
     threat: null,
@@ -1636,7 +1636,7 @@ export const TEMPLATES = {
     ],
     evidence: {
       rfCarrier: '1090 MHz ADS-B',
-      rfMatch: 'SAS743 A320neo, flight plan match',
+      rfMatch: 'Flight 743 A320neo, flight plan match',
       modality: 'Cooperative transponder',
       evidenceSize: '1.2 MB',
       note: 'Scheduled arrival on 04R. Broke off the approach at 398 m, 7.6 km from the threshold, after the runway incursion was passed to the tower. Standard missed approach, climbed on runway heading and turned out over the Oresund.',
