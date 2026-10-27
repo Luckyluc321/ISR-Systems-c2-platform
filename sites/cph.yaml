@@ -3,7 +3,7 @@
 # Flow doc:      docs/sites/cph-airport.md
 
 site_id: cph
-label: Copenhagen Airport
+label: DK Airport
 code: CPH
 tenant: op-cph-airports
 site_type: airport

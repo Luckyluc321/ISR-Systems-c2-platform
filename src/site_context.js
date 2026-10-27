@@ -24,7 +24,7 @@ export const SITE_CONTEXT = {
   // pull from OSM or verified operational source.
   cph: {
     site_id: 'cph',
-    name: 'København Airport (CPH)',
+    name: 'DK Airport',
     site_type: 'commercial_airport',
     schema_version: '1.2',
     generated_at: '2026-08-06T00:00:00Z',
@@ -164,7 +164,7 @@ export const SITE_CONTEXT = {
       // Renamed and moved 2026-09-22, was 1725 m out. The two named airport
       // fire assets are WEST and SOUTHEAST, not north and south.
       // OSM way 401571568, Kystvejen 51.
-      { id: 'fire_station_n',  name: 'Copenhagen Airport Fire & Rescue (southeast)',       location: { lat: 55.611408, lon: 12.680162 }, asset_type: 'emergency_response', criticality: 'high', verified: 'high',
+      { id: 'fire_station_n',  name: 'DK Airport Fire & Rescue (southeast)',       location: { lat: 55.611408, lon: 12.680162 }, asset_type: 'emergency_response', criticality: 'high', verified: 'high',
         reason: 'Category 10 CFR (crash fire rescue). Attack on this station degrades emergency response for any incident.' },
       // Renamed and moved 2026-09-22, was 1231 m out.
       // OSM way 31578010, amenity=fire_station, name=Brandstation Vest.

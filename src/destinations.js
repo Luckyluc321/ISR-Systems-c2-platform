@@ -128,26 +128,26 @@ const DESTINATIONS = [
 
   // Tier 1, site personnel
   { id: 'cph-t1-sec-ops', siteId: 'cph', tier: 1, type: 'internal',
-    name: 'Copenhagen Airport Security Operations Centre',
+    name: 'DK Airport Security Operations Centre',
     contactMethods: ['in-app', 'sms'], availabilityStatus: 'on-shift' },
   { id: 'cph-t1-duty-mgr', siteId: 'cph', tier: 1, type: 'internal',
-    name: 'Copenhagen Airport Duty Manager',
+    name: 'DK Airport Duty Manager',
     contactMethods: ['phone', 'sms'], availabilityStatus: 'on-shift' },
   { id: 'cph-t1-fire', siteId: 'cph', tier: 1, type: 'internal',
-    name: 'Copenhagen Airport Fire and Rescue Service',
+    name: 'DK Airport Fire and Rescue Service',
     contactMethods: ['phone', 'in-app'], availabilityStatus: 'on-shift' },
   { id: 'cph-t1-atc', siteId: 'cph', tier: 1, type: 'internal',
-    name: 'Copenhagen Air Traffic Control Tower',
+    name: 'DK Airport Tower',
     contactMethods: ['phone', 'api'], availabilityStatus: 'on-shift' },
   { id: 'cph-t1-ground', siteId: 'cph', tier: 1, type: 'internal',
-    name: 'Copenhagen Airport Ground Operations',
+    name: 'DK Airport Ground Operations',
     contactMethods: ['in-app', 'phone'], availabilityStatus: 'on-shift' },
   // Tier 1, integrated systems
   { id: 'cph-sys-genetec', siteId: 'cph', tier: 1, type: 'system',
-    name: 'Copenhagen Airport Camera Surveillance System',
+    name: 'DK Airport Camera Surveillance System',
     contactMethods: ['webhook'], availabilityStatus: 'on-shift' },
   { id: 'cph-sys-scada', siteId: 'cph', tier: 1, type: 'system',
-    name: 'Copenhagen Airport Operations Data Broker',
+    name: 'DK Airport Operations Data Broker',
     contactMethods: ['mqtt'], availabilityStatus: 'on-shift' },
 
   // Tier 2, local law enforcement + aviation coordination
@@ -1030,7 +1030,7 @@ export function destinationsForSiteWithGeoContext(siteId, siteLatLon) {
 export function destinationParent(dest) {
   const n = dest.name || '';
   // Site-scoped operations + systems
-  if (n.startsWith('Copenhagen Airport') || n.startsWith('Port of Esbjerg')) {
+  if (n.startsWith('Copenhagen Airport') || n.startsWith('DK Airport') || n.startsWith('Port of Esbjerg')) {
     return dest.type === 'system' ? 'Site Systems' : 'Site Operations';
   }
   if (/Energinet/.test(n)) return dest.type === 'system' ? 'Energinet Systems' : 'Energinet Operations';
@@ -1079,6 +1079,7 @@ export function destinationShortLabel(dest) {
   const prefixes = [
     parent + ' ',
     'Copenhagen Airport ',
+    'DK Airport ',
     'Port of Esbjerg ',
   ];
   for (const p of prefixes) {

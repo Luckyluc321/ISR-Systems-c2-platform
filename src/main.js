@@ -33005,7 +33005,7 @@ async function main() {
       </div>`).join('') : '';
 
     const _scopeCopy = role.scope === 'all-sites' ? 'all sites nationally'
-      : role.scope === 'cph-only' ? 'Copenhagen Airport'
+      : role.scope === 'cph-only' ? 'DK Airport'
       : role.scope === 'esbjerg-only' ? 'Esbjerg Harbour'
       : role.scope;
     const standbyHero = `
