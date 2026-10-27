@@ -2876,6 +2876,41 @@ and is not changed here.
 rewrites any group that differs from the schedule, so a forced pose lasts
 one frame unless it matches. It proves the nodes resolve and move.
 
+## 8ah. Zooming in made a vehicle look smaller
+
+Lucas, 2026-10-27: "the more I zoom into a vehicle, the smaller it gets,
+until you're close enough where you're actually right around it".
+
+**Cause.** The pixel floor from sections 2 and 8e. Inside the distance where
+the 3D model is drawn, a drone's real size is a few pixels, so
+`minimumPixelSize` governs over most of the zoom: Cesium holds the model at
+N pixels and shrinks its scale to stay there as the camera closes. On screen
+it stands still while the scene grows around it, which reads as shrinking.
+Simulated with Cesium's own rule, the drawn size stood still for 46% of the
+zoom on a hostile quadcopter, 29 to 38% on a fixed-wing.
+
+**Fix** (`src/model_zoom_floor.js`). Inside the swap distance the floor grows
+as the camera closes, `N * (swap / d) ^ 0.5`: the same N where the map symbol
+hands over, so the swap stays seamless, then 1.4 times bigger each time the
+distance halves, until true size takes over. `maximumScale` is unchanged.
+Cesium already recomputes the model matrix every frame whenever a floor is
+set (`Model.js`, `_minimumPixelSize !== 0`), so a moving floor costs nothing
+extra.
+
+Applied to the threat tracks (hostile quads, fixed-wings, loitering
+munitions) and the swarm members. The F-35, helicopter and interceptor quad
+swap to their models kilometres out, where their cap governs, and the same
+law anchored there would balloon them; unchanged.
+
+Live knob, and the way back:
+
+```js
+window.__isr_model_tuning = { zoomGrowth: 0.5 }   // default
+window.__isr_model_tuning = { zoomGrowth: 0 }     // the flat floor of before
+```
+
+Gated by `check:model-zoom`, which runs Cesium's sizing rule over the zoom.
+
 ## Altitude datum: `alt` is above the ellipsoid, not above ground
 
 Recorded 2026-10-22 after the recon swarm flew through Terminal 3.

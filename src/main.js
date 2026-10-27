@@ -183,6 +183,7 @@ import {
 } from './destinations.js';
 import { recommendationFor, preselectedDestinationIds } from './escalation_recommendation.js';
 import { createIdentificationClock, initialIdentified, isUnidentified } from './identification_gate.js';
+import { zoomFloorProperty } from './model_zoom_floor.js';
 import { maybeRequestEscalationAssessment } from './agents/agent_escalation_assessment.js';
 import { renderDetectionBrief } from './summary.js';
 import { getSourceFor as _getNnSourceFor, SITE_SOURCE_CONFIG } from './nn_registry.js';
@@ -18368,11 +18369,15 @@ async function main() {
         // maximumScale (0.248 x exaggeration) and a 14 pixel floor.
         // A 2.4 m aircraft capped at a 0.26 m drone's scale is why it
         // lost its symbol far too early and never looked right.
+        // The floor grows as the camera closes inside the swap distance,
+        // so zooming in never makes the vehicle look smaller
+        // (model_zoom_floor.js). Same value as before at the swap.
         ...(isAirliner || isHostileHeli ? {} : (isFixedWing ? {
-          minimumPixelSize: 20,
+          minimumPixelSize: zoomFloorProperty(Cesium, viewer, () => _billboardRef, 20, MODEL_SWAP_M),
           maximumScale: _fixedWingSpec().scale * MODEL_MAX_EXAGGERATION,
         } : {
-          minimumPixelSize: isLoiterMun ? 24 : (_qT.swarmMinimumPixelSize ?? 14),
+          minimumPixelSize: zoomFloorProperty(Cesium, viewer, () => _billboardRef,
+            isLoiterMun ? 24 : (_qT.swarmMinimumPixelSize ?? 14), MODEL_SWAP_M),
           maximumScale: (isLoiterMun ? SHAHED_SCALE : _quadModelSpec(_quadKey).scale)
             * (_qT.swarmMaxExaggeration ?? MODEL_MAX_EXAGGERATION),
         })),
@@ -18801,7 +18806,9 @@ async function main() {
             //
             // The Shahed keeps its 24: it is a 3.5 m airframe that was
             // tuned against the terrain and is not what was reported.
-            minimumPixelSize: isLoiterMun ? 24 : (_qT.swarmMinimumPixelSize ?? 14),
+            // Grows as the camera closes, like the lead (model_zoom_floor.js).
+            minimumPixelSize: zoomFloorProperty(Cesium, viewer, () => _swBbRef,
+              isLoiterMun ? 24 : (_qT.swarmMinimumPixelSize ?? 14), MODEL_SWAP_M),
             maximumScale: (isLoiterMun ? SHAHED_SCALE : _quadModelSpec(_quadKey).scale)
               * (_qT.swarmMaxExaggeration ?? MODEL_MAX_EXAGGERATION),
             distanceDisplayCondition: new Cesium.DistanceDisplayCondition(0, MODEL_SWAP_M),
