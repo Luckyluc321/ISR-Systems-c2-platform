@@ -1935,6 +1935,9 @@ async function main() {
       sdfiLayer = viewer.imageryLayers.addImageryProvider(sdfi);
       sdfiLayer.colorToAlpha = Cesium.Color.fromCssColorString(_dk.keyColor);
       sdfiLayer.colorToAlphaThreshold = _dk.keyThreshold;
+      // Early-spring photo, lifted toward the summer look (basemap_denmark.js).
+      sdfiLayer.saturation = _dk.saturation;
+      sdfiLayer.contrast = _dk.contrast;
       // Starts hidden. basemap_denmark.js turns it on over Denmark.
       sdfiLayer.show = false;
     } catch (err) { console.warn('SDFI GeoDanmark failed:', err); }

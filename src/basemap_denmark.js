@@ -78,6 +78,12 @@ export const DK_BASEMAP_CFG = {
   // noise in a flat field of the key and no more.
   keyColor: '#4075a8',
   keyThreshold: 0.08,
+  // The orthophoto is flown in early spring, before the leaves, so the
+  // ground under the trees can be mapped. Untouched it reads pale and
+  // brown next to Google's summer imagery. Lucas tried these live on
+  // 2026-10-28: "MUCH better". Display only, no extra tiles.
+  saturation: 1.4,
+  contrast: 1.15,
   // Level 19 draws about 17 cm a pixel at 56 N, coarser than the 12.5 cm
   // the orthophoto is flown at. Level 20 draws about 8 cm, so the photo's
   // own detail reaches the screen.

@@ -107,6 +107,9 @@ check('the orthophoto asks for the key colour and makes it see-through',
   && /sdfiLayer\.colorToAlpha = Cesium\.Color\.fromCssColorString\(_dk\.keyColor\);/.test(main)
   && /sdfiLayer\.colorToAlphaThreshold = _dk\.keyThreshold;/.test(main));
 check('the orthophoto stays JPEG (PNG weighed 13 times more)', /format: 'image\/jpeg'/.test(main));
+check('the colour lift Lucas picked is the default (saturation 1.4, contrast 1.15)',
+  CFG.saturation === 1.4 && CFG.contrast === 1.15
+  && /sdfiLayer\.saturation = _dk\.saturation;\s*sdfiLayer\.contrast = _dk\.contrast;/.test(main));
 check('a mode switch hands the layers back to the rule', /try \{ meshBasemap\.apply\('imagery mode'\); \} catch/.test(main));
 
 const mod = readFileSync(new URL('../src/basemap_denmark.js', import.meta.url), 'utf8');
