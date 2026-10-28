@@ -84,6 +84,61 @@ it the 3D city is simply absent and the OSM building boxes draw
 unclipped in its place; every reader of the tileset already handles it
 being absent. Gated by `check:google-guard`.
 
+### 2b. Over Denmark, the ground is the Danish orthophoto, not Google's 2D (2026-10-28)
+
+Google's billing report for October, by SKU, settled where the money
+went:
+
+| SKU | Usage | Cost |
+|---|---|---|
+| Map Tiles API: 2D Map Tiles | 175,742 tiles | 298.94 kr |
+| Map Tiles API: Photorealistic 3D Tiles | 588 root requests | 0.00 kr (under the 1,000 free a month) |
+
+The 3D city was free. The whole bill was the flat 2D satellite layer
+under it, metered per tile (100,000 free a month, then USD 0.60 per
+1,000), which every pan, zoom and camera follow pulls.
+
+`src/basemap_denmark.js` draws the Danish state orthophoto (GeoDanmark
+Ortofoto forår, Dataforsyningen WMS) over Denmark and switches Google's
+2D layer off there, so it requests no tiles:
+
+| Camera | Ground |
+|---|---|
+| over Denmark, below 60 km | Danish orthophoto on top |
+| ... below 30 km, and the orthophoto on for 1.5 s | Google's 2D switched off, no tiles requested |
+| anywhere else, or higher | Google's 2D, as before |
+| night mode | untouched, as before |
+
+Google's 3D city, OSM buildings and terrain are untouched. Where the
+orthophoto has no picture (open sea, Swedish and German land inside its
+rectangle) the service paints a key colour, `bgcolor=0x4075A8`, which
+the layer makes see-through (`colorToAlpha`). Underneath is a free
+backdrop: Cesium's bundled Natural Earth, added under Google's 2D. The
+key is the backdrop's own sea blue, so JPEG's soft edge around it reads
+as water. A transparent PNG does the same without a key, but measured
+145 KB a tile against 11 KB, about 10 MB per site view against 0.8 MB.
+
+Measured on a private port with Google's 2D faked as red tiles (nothing
+billed): 0 Google 2D tile requests while the camera sits over Copenhagen
+Airport or Aarhus harbour, Google's 2D back over Malmö, at night and on
+`__isr_basemap.force('bing')`.
+
+**Licence.** The orthophoto is free and allowed for commercial use under
+the agency's own terms ("Vilkår for brug af frie geografiske data",
+2022), not CC BY 4.0, which the old credit said. The credit on screen is
+the one those terms ask for. The terms also ask that customers can see
+the terms or a link to them. The agency (renamed Klimadatastyrelsen in
+2024) gives no availability guarantee.
+
+**Why it also matters for section 2.** Google lists 2D satellite tiles,
+not only the 3D tiles, as unavailable to European Economic Area
+projects. Over Denmark the base map no longer depends on them.
+
+The way back: `__isr_basemap.force('bing')` for a session,
+`force('auto')` to return. The rule it replaced (orthophoto over meshed
+sites only) is kept in `src/basemap_meshed_sites.js`. Gated by
+`check:basemap-denmark`.
+
 ## 3. BBR REST — retired end of 2026
 
 `services.datafordeler.dk/BBR/BBRPublic/1/rest`, reached with

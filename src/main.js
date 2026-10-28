@@ -835,9 +835,11 @@ import {
 import { applyBuildingSwap, clearBuildingSwap, footprintsFor, coverageFor, sitesWithFootprints } from './building_footprints.js';
 import { createCoverageTracer, createBoxClipOwner, coverageClipPolygons, coverageRings } from './photoreal_coverage.js';
 import { createAltAudit } from './alt_audit.js';
-// Danish imagery over ground where we built the buildings, and nowhere
-// else. Default stays Bing + Google photoreal. See basemap_meshed_sites.js.
-import { createMeshedSiteBasemap } from './basemap_meshed_sites.js';
+// Over Denmark the ground is the Danish state orthophoto, and Google's 2D
+// layer, the whole of the Google bill, is not requested. Everywhere else
+// Google's 2D as before. See basemap_denmark.js. The rule it replaces,
+// orthophoto over meshed sites only, is kept in basemap_meshed_sites.js.
+import { createDenmarkBasemap, DK_BASEMAP_CFG } from './basemap_denmark.js';
 import { primeDagiCache, receiverIdsForPoint, dagiCacheStats } from './sovereign_geo_routing.js';
 import { runbookFor } from './runbooks.js';
 import { TARGETS as TARGETS_CORE } from './targets.js';
@@ -1070,13 +1072,28 @@ async function main() {
     console.log('[google] Google tiles OFF for this development load: no 3D session and no 2D tiles billed. Add ?google=1 to the address to load them.');
   }
   let bingLayer = null;
+  // True only when the base layer is Google's 2D, metered per tile. The
+  // Denmark basemap rule hides it over Denmark only then (basemap_denmark.js).
+  let _baseBilled = false;
   try {
     const _gKey2d = import.meta.env.VITE_GOOGLE_MAP_TILES_KEY;
     if (_gKey2d && _googleOk) {
       Cesium.GoogleMaps.defaultApiKey = _gKey2d;
       const g2d = await Cesium.Google2DImageryProvider.fromUrl({ mapType: 'satellite' });
       bingLayer = viewer.imageryLayers.addImageryProvider(g2d);
+      _baseBilled = true;
       console.log('[imagery] Google 2D satellite via OUR OWN Google key — no ion imagery session');
+      // A free backdrop UNDER Google's 2D: Cesium's bundled Natural Earth,
+      // served from this app. Over Denmark the basemap rule switches
+      // Google's layer off and the Danish orthophoto is drawn instead.
+      // Where the orthophoto has no picture (open sea, Sweden) this is what
+      // shows, rather than the near-black globe colour. Its own failure
+      // only loses the backdrop, never the base map.
+      try {
+        const backdrop = await Cesium.TileMapServiceImageryProvider.fromUrl(
+          Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII'));
+        viewer.imageryLayers.addImageryProvider(backdrop, 0);
+      } catch (err) { console.warn('[imagery] offline backdrop failed:', err?.message || err); }
     } else if (_gKey2d) {
       // Held back in development. Cesium's own offline world imagery,
       // served from this app: no Google, and no ion either, whose free
@@ -1898,19 +1915,27 @@ async function main() {
       // The same imagery as WMS advertises EPSG:3857, so the server
       // reprojects and Cesium consumes it with no tiling scheme at all.
       // Verified against the live service.
+      // Denmark-wide since 2026-10-28 (basemap_denmark.js), so the parts
+      // of the layer with no picture matter: open sea and the Swedish and
+      // German land inside its rectangle came back as solid white JPEG
+      // ("a huuuge white square out in the sea"). The service now paints
+      // them in a key colour and the layer makes that colour see-through.
+      // JPEG, not transparent PNG: measured over Copenhagen Airport, PNG
+      // was 145 KB a tile against 11 KB.
+      const _dk = DK_BASEMAP_CFG;
       const sdfi = new Cesium.WebMapServiceImageryProvider({
         url: `https://api.dataforsyningen.dk/orto_foraar_DAF?token=${SDFI_TOKEN}`,
         layers: 'orto_foraar',
-        parameters: { format: 'image/jpeg', transparent: false },
-        // Denmark only. The response is opaque JPEG, so without this it
-        // would paint over Bing across the whole globe.
-        rectangle: Cesium.Rectangle.fromDegrees(7.5, 54.4, 15.6, 58.0),
-        maximumLevel: 19,
-        credit: new Cesium.Credit('© GeoDanmark / Klimadatastyrelsen (CC BY 4.0)', true),
+        parameters: { format: 'image/jpeg', transparent: false, bgcolor: `0x${_dk.keyColor.slice(1).toUpperCase()}` },
+        // Denmark only: the service's published coverage.
+        rectangle: Cesium.Rectangle.fromDegrees(_dk.rectangle.w, _dk.rectangle.s, _dk.rectangle.e, _dk.rectangle.n),
+        maximumLevel: _dk.maximumLevel,
+        credit: new Cesium.Credit(_dk.credit, true),
       });
       sdfiLayer = viewer.imageryLayers.addImageryProvider(sdfi);
-      // Starts hidden. basemap_meshed_sites.js turns it on only where we
-      // have built a mesh, which today is Billund and nowhere else.
+      sdfiLayer.colorToAlpha = Cesium.Color.fromCssColorString(_dk.keyColor);
+      sdfiLayer.colorToAlphaThreshold = _dk.keyThreshold;
+      // Starts hidden. basemap_denmark.js turns it on over Denmark.
       sdfiLayer.show = false;
     } catch (err) { console.warn('SDFI GeoDanmark failed:', err); }
   } else if (_renderProfile === 'sovereign') {
@@ -1925,14 +1950,13 @@ async function main() {
   // and written back there.
   createParkedAircraft(viewer, Cesium);
 
-  // Keyed off the coverage rectangles, which are generated from the
-  // built meshes, so this cannot claim ground that was not built and
-  // there is no second list to drift. Today that is Billund alone;
-  // every other site renders exactly as it did before this existed.
-  const meshBasemap = createMeshedSiteBasemap({
-    Cesium, viewer, sdfiLayer, bingLayer,
-    meshedSiteIds: () => Object.keys(SITE_MESHES),
-    coverageFor,
+  // Over Denmark, the Danish orthophoto, with Google's 2D switched off
+  // under it when Google's 2D is the base (basemap_denmark.js). Billund's
+  // mesh, which this rule used to be limited to, sits inside Denmark and
+  // keeps its matching photo. The variable keeps its name: every caller
+  // of window.__isr_basemap reads the same contract.
+  const meshBasemap = createDenmarkBasemap({
+    Cesium, viewer, sdfiLayer, baseLayer: bingLayer, billedBase: _baseBilled,
     // Night mode turns this layer off on purpose. Respect that instead
     // of flipping it back on at the next camera move.
     allow: () => imageryMode !== 'night',
@@ -2827,6 +2851,12 @@ async function main() {
       _clearInfraLights();
       nightBloom.enabled = false;
     }
+    // The branches above show the base layer and hide the orthophoto as
+    // they see fit. Let the Denmark basemap rule take them back for the
+    // camera as it stands, rather than at the next camera move, so a
+    // switch back to day over Denmark does not pull Google tiles until
+    // someone pans. It defers to night mode by itself.
+    try { meshBasemap.apply('imagery mode'); } catch (_) { /* never block a mode switch */ }
   }
 
   // Night + Sim only: show the photorealistic building tileset when the
