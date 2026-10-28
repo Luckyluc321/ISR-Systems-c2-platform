@@ -184,6 +184,7 @@ import {
 import { recommendationFor, preselectedDestinationIds } from './escalation_recommendation.js';
 import { createIdentificationClock, initialIdentified, isUnidentified } from './identification_gate.js';
 import { zoomFloorProperty } from './model_zoom_floor.js';
+import { googleTilesAllowed } from './google_tiles_guard.js';
 import { maybeRequestEscalationAssessment } from './agents/agent_escalation_assessment.js';
 import { renderDetectionBrief } from './summary.js';
 import { getSourceFor as _getNnSourceFor, SITE_SOURCE_CONFIG } from './nn_registry.js';
@@ -1041,25 +1042,51 @@ async function main() {
   //
   // The imagery will not be pixel-identical to Bing. Different captures,
   // different colour grading. Resolution over Denmark is equal or better.
+  // GOOGLE IS OPT-IN DURING DEVELOPMENT (google_tiles_guard.js). With a
+  // key configured, a development load without ?google=1 in the address
+  // touches no Google service: the base map is Cesium's bundled offline
+  // imagery and the 3D tileset below is not created. A production build,
+  // and any load with ?google=1, is exactly as before. Without a key
+  // nothing here changes (1573).
+  const _googleOk = googleTilesAllowed({ isDev: import.meta.env.DEV, search: window.location.search });
+  const _googleKeySet = !!import.meta.env.VITE_GOOGLE_MAP_TILES_KEY;
+  const _googleHeldBack = _googleKeySet && !_googleOk;
+  if (_googleHeldBack) {
+    console.log('[google] Google tiles OFF for this development load: no 3D session and no 2D tiles billed. Add ?google=1 to the address to load them.');
+  }
   let bingLayer = null;
   try {
     const _gKey2d = import.meta.env.VITE_GOOGLE_MAP_TILES_KEY;
-    if (_gKey2d) {
+    if (_gKey2d && _googleOk) {
       Cesium.GoogleMaps.defaultApiKey = _gKey2d;
       const g2d = await Cesium.Google2DImageryProvider.fromUrl({ mapType: 'satellite' });
       bingLayer = viewer.imageryLayers.addImageryProvider(g2d);
       console.log('[imagery] Google 2D satellite via OUR OWN Google key — no ion imagery session');
+    } else if (_gKey2d) {
+      // Held back in development. Cesium's own offline world imagery,
+      // served from this app: no Google, and no ion either, whose free
+      // imagery allowance is already spent.
+      const offline = await Cesium.TileMapServiceImageryProvider.fromUrl(
+        Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII'));
+      bingLayer = viewer.imageryLayers.addImageryProvider(offline);
+      console.log('[imagery] offline Natural Earth II base map (Google held back in development)');
     } else {
       const bing = await Cesium.IonImageryProvider.fromAssetId(2);
       bingLayer = viewer.imageryLayers.addImageryProvider(bing);
       console.log('[imagery] Bing Aerial via ion asset 2 — this is the session the quota counts');
     }
   } catch (err) {
-    console.error('Base imagery failed, falling back to ion Bing:', err);
-    try {
-      const bing = await Cesium.IonImageryProvider.fromAssetId(2);
-      bingLayer = viewer.imageryLayers.addImageryProvider(bing);
-    } catch (err2) { console.error('Bing Aerial failed too:', err2); }
+    // Held back in development, a failure stays offline: falling back
+    // to ion here would spend the ion allowance this guard avoids.
+    if (_googleHeldBack) {
+      console.error('Offline base imagery failed; no base map for this development load:', err);
+    } else {
+      console.error('Base imagery failed, falling back to ion Bing:', err);
+      try {
+        const bing = await Cesium.IonImageryProvider.fromAssetId(2);
+        bingLayer = viewer.imageryLayers.addImageryProvider(bing);
+      } catch (err2) { console.error('Bing Aerial failed too:', err2); }
+    }
   }
 
   // ── Earth at Night (asset 3812) ──
@@ -1222,7 +1249,12 @@ async function main() {
       // a far lighter layer, but it means this does not take ion usage to
       // zero on its own.
       const _gKey = import.meta.env.VITE_GOOGLE_MAP_TILES_KEY;
-      if (_gKey) {
+      if (_gKey && !_googleOk) {
+        // Held back in development (google_tiles_guard.js): no tileset, so
+        // no root request and no session. Every reader of googlePhotoreal
+        // already handles null; OSM buildings draw unclipped in its place.
+        console.log('[3d_tiles] Google Photorealistic held back in development — add ?google=1 to load it');
+      } else if (_gKey) {
         Cesium.GoogleMaps.defaultApiKey = _gKey;
         // THE SECOND ARGUMENT IS NOT OPTIONAL IN PRACTICE.
         //
@@ -1254,9 +1286,11 @@ async function main() {
         googlePhotoreal = await Cesium.Cesium3DTileset.fromIonAssetId(2275207);
         console.log('[3d_tiles] Google Photorealistic via ion asset 2275207 — set VITE_GOOGLE_MAP_TILES_KEY to go direct and stop burning ion quota');
       }
-      viewer.scene.primitives.add(googlePhotoreal);
-      if (_renderProfile === 'sovereign') {
-        console.log('[render_profile] sovereign: Google Photoreal 3D Tiles active (interim). Swap to self-hosted DK tiles when VITE_CITY_TILES_URL is set.');
+      if (googlePhotoreal) {
+        viewer.scene.primitives.add(googlePhotoreal);
+        if (_renderProfile === 'sovereign') {
+          console.log('[render_profile] sovereign: Google Photoreal 3D Tiles active (interim). Swap to self-hosted DK tiles when VITE_CITY_TILES_URL is set.');
+        }
       }
     } catch (err) { console.warn('Google 3D Tiles failed:', err); }
   }

@@ -44,7 +44,8 @@
     "check:airliner-elevator": "node scripts/check-airliner-elevator.mjs",
     "check:escalation-flow": "node scripts/check-escalation-flow.mjs",
     "check:identification-gate": "node scripts/check-identification-gate.mjs",
-    "check:model-zoom": "node scripts/check-model-zoom.mjs"
+    "check:model-zoom": "node scripts/check-model-zoom.mjs",
+    "check:google-guard": "node scripts/check-google-guard.mjs"
   },
   "devDependencies": {
     "vite": "^8.1.1"

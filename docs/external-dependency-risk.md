@@ -45,8 +45,10 @@ on a **European Economic Area billing address, created after 8 July
 
 **It does not affect us today**, and the reason matters: we reach the
 tiles through Cesium ion under Cesium's agreement with Google, not
-through an ISR Google Cloud project. There is no Google key anywhere in
-the codebase.
+through an ISR Google Cloud project. (Since October 2026 that is only
+true for a server with no key: with `VITE_GOOGLE_MAP_TILES_KEY` set,
+main.js reaches the tiles directly through our own Google Cloud project.
+See 2a.)
 
 **What is unverified** is whether that route stays open. If Google ever
 applies the restriction to end users rather than to billing accounts,
@@ -57,6 +59,30 @@ Google publishes **no coverage map, no polygon, no city list and no
 availability endpoint** for this product — only a country-level table.
 So we also cannot answer "is site X covered" without flying there and
 looking.
+
+### 2a. Google is billed per load, so it is opt-in during development (2026-10-28)
+
+With a key set, the platform reaches Google's Map Tiles API directly:
+2D satellite as the base map and the photorealistic 3D tileset. Google
+bills a 3D session each time the tileset's root is requested and the 2D
+layer per tile, and both were created at every page load, so every
+development reload and every automated test run was billed whether or
+not anyone looked at 3D.
+
+`src/google_tiles_guard.js` makes Google opt-in during development:
+
+| Load | Google |
+|---|---|
+| production build | loads, exactly as before |
+| development, no `?google=1` in the address | not touched: no 3D tileset, and the base map is Cesium's bundled offline imagery (Natural Earth II), never ion, whose free allowance is spent |
+| development, `?google=1` in the address | loads, exactly as before |
+| any server without a key (1573) | the ion path it always had |
+
+The switch survives a reload because a reload keeps the address, so a
+recording or demo session opens `localhost:1574/?google=1` once. Without
+it the 3D city is simply absent and the OSM building boxes draw
+unclipped in its place; every reader of the tileset already handles it
+being absent. Gated by `check:google-guard`.
 
 ## 3. BBR REST — retired end of 2026
 
