@@ -422,7 +422,9 @@ EVENTS.forEach(e => {
 
 // ── Escalation (mock UX, real dispatchers replace later) ──
 let _escalationCounter = 0;
-export function escalateEvent(id, { destinationIds, payload, message, operator = 'L. Flindt', operatorRoleId = null, assessmentPackage = null }) {
+// No default person. A caller that does not say who sent it records
+// "Unknown account", never a real name (actor_signature.js).
+export function escalateEvent(id, { destinationIds, payload, message, operator = 'Unknown account', operatorRoleId = null, assessmentPackage = null }) {
   const e = EVENTS.find(x => x.id === id);
   if (!e || !destinationIds || !destinationIds.length) return [];
   const now = new Date();
@@ -925,7 +927,7 @@ _seedEscalation('DET-20260723-0417', [
   },
 ]);
 
-export function addNote(id, text, author = 'L. Flindt') {
+export function addNote(id, text, author = 'Unknown account') {
   const e = EVENTS.find(x => x.id === id);
   if (!e || !text || !text.trim()) return;
   e.notes.push({
@@ -938,7 +940,7 @@ export function addNote(id, text, author = 'L. Flindt') {
   _notify(id);
 }
 
-export function reclassifyEvent(id, { classification, threat = null, reason = '' }) {
+export function reclassifyEvent(id, { classification, threat = null, reason = '', author = 'Unknown account' }) {
   const e = EVENTS.find(x => x.id === id);
   if (!e) return;
   const from = classification === e.classification && threat === e.threat
@@ -956,8 +958,10 @@ export function reclassifyEvent(id, { classification, threat = null, reason = ''
   if (e.status === 'closed') _resyncPrecedent(e);
   if (from) {
     e.notes.push({
-      timestamp: new Date('2026-07-24T14:32:41Z').toISOString(),
-      author: 'L. Flindt',
+      // The moment it happened and who did it. Both were fixed values
+      // until 2026-11-02 (a 24 July timestamp and "L. Flindt").
+      timestamp: new Date().toISOString(),
+      author,
       text: `Reclassified from ${from}${reason ? '. Reason: ' + reason : ''}`,
       type: 'reclassification',
     });

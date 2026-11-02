@@ -184,6 +184,7 @@ import {
 import { recommendationFor, preselectedDestinationIds } from './escalation_recommendation.js';
 import { createIdentificationClock, initialIdentified, isUnidentified, shownType, shownClass, shownClassLabel } from './identification_gate.js';
 import { canOpenView } from './view_access.js';
+import { signatureFor, displayNameFor } from './actor_signature.js';
 import { zoomFloorProperty } from './model_zoom_floor.js';
 import { googleTilesAllowed } from './google_tiles_guard.js';
 import { maybeRequestEscalationAssessment } from './agents/agent_escalation_assessment.js';
@@ -27973,7 +27974,7 @@ async function main() {
           const adv = ev?._attackProfileAdvisory;
           if (!ev || !adv) return;
           const reason = `Operator confirmed attack profile advisory. Triggers: ${adv.rules.join('; ')}.`;
-          reclassifyEvent(evId, { classification: 'hostile', threat: 'high', reason });
+          reclassifyEvent(evId, { classification: 'hostile', threat: 'high', reason, author: signatureFor(getActiveRole()) });
           adv.confirmedAt = new Date().toISOString();
           toast('Promoted to hostile-high per operator confirmation.', 'warn');
           renderAlertStrip();
@@ -27985,7 +27986,7 @@ async function main() {
           const adv = ev?._attackProfileAdvisory;
           if (!ev || !adv) return;
           adv.dismissedAt = new Date().toISOString();
-          addNote(evId, `Attack profile advisory dismissed by operator. Triggers surfaced: ${adv.rules.join('; ')}.`, 'L. Flindt');
+          addNote(evId, `Attack profile advisory dismissed by operator. Triggers surfaced: ${adv.rules.join('; ')}.`, signatureFor(getActiveRole()));
           toast('Advisory dismissed. Classification unchanged.', 'info');
           renderDetailPanel();
         }
@@ -28601,7 +28602,7 @@ async function main() {
         if (!activeDests.length) { toast('Select at least one destination first', 'err'); return; }
         const payload = modalCard.querySelector('input[name="payload"]:checked').value;
         const message = document.getElementById('esc-message').value;
-        const records = escalateEvent(eventId, { destinationIds: activeDests, payload, message, operatorRoleId: getActiveRole()?.id || 'operator' });
+        const records = escalateEvent(eventId, { destinationIds: activeDests, payload, message, operator: signatureFor(getActiveRole()), operatorRoleId: getActiveRole()?.id || 'operator' });
         closeBriefPreview();
         closeEscalateModal();
         records.forEach((r, idx) => {
@@ -28618,7 +28619,7 @@ async function main() {
         if (!activeDests.length) { toast('Select at least one destination', 'err'); return; }
         const payload = modalCard.querySelector('input[name="payload"]:checked').value;
         const message = document.getElementById('esc-message').value;
-        const records = escalateEvent(eventId, { destinationIds: activeDests, payload, message, operatorRoleId: getActiveRole()?.id || 'operator' });
+        const records = escalateEvent(eventId, { destinationIds: activeDests, payload, message, operator: signatureFor(getActiveRole()), operatorRoleId: getActiveRole()?.id || 'operator' });
         closeEscalateModal();
         records.forEach((r, idx) => {
           setTimeout(() => updateEscalationStatus(eventId, r.id, 'delivered'), 1500 + idx * 300);
@@ -28740,7 +28741,7 @@ async function main() {
       const reason = document.getElementById('reclass-reason').value;
       let classification = val, threat = null;
       if (val.startsWith('hostile-')) { classification = 'hostile'; threat = val.split('-')[1]; }
-      reclassifyEvent(eventId, { classification, threat, reason });
+      reclassifyEvent(eventId, { classification, threat, reason, author: signatureFor(getActiveRole()) });
       area.innerHTML = '';
     });
   }
@@ -28763,7 +28764,7 @@ async function main() {
     area.querySelector('[data-form="save-note"]').addEventListener('click', () => {
       const txt = document.getElementById('note-text').value;
       if (!txt.trim()) return;
-      addNote(eventId, txt);
+      addNote(eventId, txt, signatureFor(getActiveRole()));
       area.innerHTML = '';
     });
     setTimeout(() => document.getElementById('note-text')?.focus(), 20);
@@ -29756,7 +29757,7 @@ async function main() {
       opAvatarEl.textContent = r.initials;
       opAvatarEl.classList.remove('with-logo');
     }
-    opNameEl.textContent = r.person;
+    opNameEl.textContent = displayNameFor(r);   // 369 receivers carry no person
     const roleLabel =
       r.kind === 'admin'    ? `Admin · ${r.org}` :
       r.kind === 'operator' ? `Operator · ${r.org}` :
@@ -34006,7 +34007,7 @@ async function main() {
           submitLabel: 'Add note',
           minChars: 1,
           onSubmit: (text) => {
-            addNote(eventId, text, `${getActiveRole()?.person || getActiveRole()?.org || 'Receiver'}`);
+            addNote(eventId, text, signatureFor(getActiveRole()));
             toast('Note added to audit trail', 'ok');
             _lastConsoleSig = null;
             renderReceiverView({ immediate: true });
@@ -34304,7 +34305,7 @@ async function main() {
         // path re-introduces _selectedReceiverEventId.
         const evtId = _workspaceEventId || _selectedReceiverEventId;
         if (!evtId) { toast('No event context for response', 'err'); return; }
-        respondToEscalation(evtId, escId, txt, `${getActiveRole().person} (${getActiveRole().org})`, getActiveRole()?.id || null);
+        respondToEscalation(evtId, escId, txt, signatureFor(getActiveRole()), getActiveRole()?.id || null);
         fireEscalationAdapter('replyToEscalation', {
           eventId: evtId,
           event: getEvent(evtId),

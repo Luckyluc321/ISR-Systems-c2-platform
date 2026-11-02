@@ -23,6 +23,15 @@ Config. A receiver sees Live Ops only, which for a receiver is its own console
 bar, refused if reached any other way, and the escalation-chain and rules
 editors will not open for it. An account of an unknown kind gets Live Ops only.
 
+**Who signs the record** (2026-11-02, `src/actor_signature.js`, gated by
+`check:signatures`). Every manual escalation, note, reclassification and
+receiver reply is signed by the signed-in account: "Name (Organisation)"
+where the account names a person, otherwise the account's own name, which
+for an agency is the agency. Reclassifications carry the moment they
+happened. Nothing falls back to a real person's name: a write with no
+signer records "Unknown account". The seeded demo history in `events.js`
+still carries its own fixed authors.
+
 ---
 
 ## Receiver Hierarchy (P92)
