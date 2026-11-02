@@ -180,6 +180,7 @@ import { canOpenView } from './view_access.js';
 import { signatureFor, displayNameFor } from './actor_signature.js';
 import { applyAutoDestinations } from './auto_destinations.js';
 import { incidentExecSummary } from './incident_summary.js';
+import { canDispatchUnit } from './mission_console_scope.js';
 import { zoomFloorProperty } from './model_zoom_floor.js';
 import { googleTilesAllowed } from './google_tiles_guard.js';
 import { maybeRequestEscalationAssessment } from './agents/agent_escalation_assessment.js';
@@ -29841,8 +29842,11 @@ async function main() {
       'flv-qra':        new Set(['helicopter-intercept']),   // legacy alias
     };
     const roleScopeMc = ROLE_SCOPE_MC[activeRole?.id] || null;
-    const canDispatchMc = (kind) => (activeRole?.kind === 'admin')
-      || (roleScopeMc ? roleScopeMc.has(kind) : false);
+    // Whose unit it is decides who may dispatch it, not what kind of unit
+    // it is (mission_console_scope.js). ROLE_SCOPE_MC still says which
+    // roles get the counter-drone console at all; it no longer says
+    // which units are theirs.
+    const canDispatchMc = (asset) => canDispatchUnit(activeRole, asset?.id);
 
     // Subject one-liner for orientation
     const subj = event.subject;
@@ -29853,8 +29857,8 @@ async function main() {
     // Assets to show: tactical bundle, split into dispatchable-by-me
     // and other-agency lists.
     const tactical = bundle.tactical || [];
-    const mineList = tactical.filter(a => DISPATCHABLE_KINDS_MC.has(a.kind) && canDispatchMc(a.kind));
-    const otherList = tactical.filter(a => DISPATCHABLE_KINDS_MC.has(a.kind) && !canDispatchMc(a.kind));
+    const mineList = tactical.filter(a => DISPATCHABLE_KINDS_MC.has(a.kind) && canDispatchMc(a));
+    const otherList = tactical.filter(a => DISPATCHABLE_KINDS_MC.has(a.kind) && !canDispatchMc(a));
 
     // Units this role owns outright, for roles the counter-drone table
     // does not cover.
@@ -33491,6 +33495,12 @@ async function main() {
           : responseBundle(threatLat, threatLon);
         const asset = [...bundle.tactical, ...bundle.ground, ...bundle.consequence].find(a => a.id === assetId);
         if (!asset) { toast('Asset not found in response bundle', 'err'); return; }
+        // The console only offers a receiver its own counter-drone units;
+        // the rule holds here too, whatever button was clicked.
+        if (getActiveRole()?.kind === 'receiver' && bundle.tactical.includes(asset) && !canDispatchUnit(getActiveRole(), asset.id)) {
+          toast(`${asset.name} belongs to another agency. Send it a request instead.`, 'warn');
+          return;
+        }
         // Read units picker if present (multi-dispatch kinds only)
         const unitsSelect = document.querySelector(`[data-units-for="${assetId}"]`);
         const requested = unitsSelect ? Math.max(1, parseInt(unitsSelect.value, 10) || 1) : 1;
@@ -33506,7 +33516,13 @@ async function main() {
         if (units < requested) {
           toast(`${asset.name}: only ${units} of ${requested} available. Sending ${units}.`, 'warn');
         }
-        dispatchCounterResponse(id, asset, units > 1 ? { swarmSize: units } : {});
+        // Who sent it, so the report gives the agency its own chapter and
+        // the live response does not credit "Operator". A receiver sends
+        // as itself; admin or an operator is recorded as the unit's owner.
+        const _dispatchOwner = getActiveRole()?.kind === 'receiver'
+          ? getActiveRole().id
+          : (ownerRoleIdForAsset(asset.id) || null);
+        dispatchCounterResponse(id, asset, { ...(units > 1 ? { swarmSize: units } : {}), ownerRoleId: _dispatchOwner });
         // Feedback log: record the operator decision + snapshot the
         // agent recommendation live at the moment of action. Non-blocking.
         try {

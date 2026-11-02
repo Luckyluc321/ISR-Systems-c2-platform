@@ -49,7 +49,8 @@
     "check:view-access": "node scripts/check-view-access.mjs",
     "check:signatures": "node scripts/check-signatures.mjs",
     "check:national-reach": "node scripts/check-national-reach.mjs",
-    "check:incident-summary": "node scripts/check-incident-summary.mjs"
+    "check:incident-summary": "node scripts/check-incident-summary.mjs",
+    "check:mission-console": "node scripts/check-mission-console.mjs"
   },
   "devDependencies": {
     "vite": "^8.1.1"
