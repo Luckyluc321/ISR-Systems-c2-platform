@@ -183,6 +183,7 @@ import {
 } from './destinations.js';
 import { recommendationFor, preselectedDestinationIds } from './escalation_recommendation.js';
 import { createIdentificationClock, initialIdentified, isUnidentified } from './identification_gate.js';
+import { canOpenView } from './view_access.js';
 import { zoomFloorProperty } from './model_zoom_floor.js';
 import { googleTilesAllowed } from './google_tiles_guard.js';
 import { maybeRequestEscalationAssessment } from './agents/agent_escalation_assessment.js';
@@ -25810,6 +25811,9 @@ async function main() {
   }
 
   window.__openConfigModal = () => {
+    // The escalation chains are the operator's configuration. Not a
+    // receiver's, whatever route reaches this (view_access.js).
+    if (!canOpenView(getActiveRole(), 'config')) return;
     configBackdrop.style.display = 'flex';
     renderConfig();
   };
@@ -25996,6 +26000,7 @@ async function main() {
   }
 
   window.__openRulesModal = () => {
+    if (!canOpenView(getActiveRole(), 'config')) return;
     rulesBackdrop.style.display = 'flex';
     renderRules();
   };
@@ -29075,6 +29080,9 @@ async function main() {
 
   const configView = document.getElementById('config-view');
   function setActiveView(view) {
+    // A receiver has its console and nothing else (view_access.js). Any
+    // route to another view, the console included, lands on live.
+    if (!canOpenView(getActiveRole(), view)) view = 'live';
     _activeView = view;
     document.querySelectorAll('.tb-nav-btn').forEach(b => b.classList.toggle('on', b.dataset.view === view));
     document.body.classList.toggle('view-history', view === 'history');
@@ -29751,6 +29759,12 @@ async function main() {
     document.body.classList.toggle('mode-operator', r.kind === 'operator');
     document.body.classList.toggle('mode-admin', r.kind === 'admin');
     if (r.kind === 'receiver') renderReceiverView(); else receiverView.style.display = 'none';
+    // The tab bar shows only the views this account may open, and an
+    // account switch never leaves someone on a view they may not see.
+    document.querySelectorAll('.tb-nav-btn').forEach(b => {
+      b.style.display = canOpenView(r, b.dataset.view) ? '' : 'none';
+    });
+    if (!canOpenView(r, _activeView)) setActiveView('live');
   }
 
   // ══════════════════════════════════════════════════════════════════

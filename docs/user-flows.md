@@ -16,6 +16,13 @@ Strict isolation. Separate deployments in prod. No cross-tenant access.
 | **Operator** | Site owner (utility, port, grid, data centre, telecom, hospital) | SaaS + HaaS. Sensors on their site + full C2 dashboard. | Live map, sensor health, event ledger, escalate to receivers, config, history, fleet |
 | **Receiver** | Government agency (Politi, PET, FE, Forsvaret branches + bases, Beredskabsstyrelsen) | SaaS only. Receives escalations from operators. Now hierarchical — see below. | Filtered inbox scoped to their destination IDs, brief detail, acknowledge, respond, cascade, dispatch counter-response |
 
+**Enforced in the top bar since 2026-11-02** (`src/view_access.js`, gated by
+`check:view-access`). Admin and operators see Live Ops, History, Fleet and
+Config. A receiver sees Live Ops only, which for a receiver is its own console
+(inbox, reports, case file). History, Fleet and Config are hidden from its tab
+bar, refused if reached any other way, and the escalation-chain and rules
+editors will not open for it. An account of an unknown kind gets Live Ops only.
+
 ---
 
 ## Receiver Hierarchy (P92)
