@@ -86,16 +86,9 @@ registerPostIncidentReportGenerator((event, opts) => buildPostIncidentReport(eve
 // Aktionsstyrken destination). Runs once at boot after destinations.js
 // has finalized its catalogue. Keeps role-to-destination membership
 // in sync with the site list without requiring per-role manual edits.
-for (const r of RECEIVERS) {
-  if (r.autoDestPattern instanceof RegExp) {
-    const matches = getAllDestinations()
-      .filter(d => r.autoDestPattern.test(d.id))
-      .map(d => d.id);
-    if (matches.length) {
-      r.destinationIds = Array.from(new Set([...(r.destinationIds || []), ...matches]));
-    }
-  }
-}
+// Since 2026-11-02 every national agency works this way, not only
+// Aktionsstyrken (auto_destinations.js, check:national-reach).
+applyAutoDestinations(RECEIVERS, getAllDestinations());
 // Window-scoped destination resolver so the PIR generator (called from
 // events.js closeEvent) can look up display names without importing
 // destinations.js (would create a cycle). Present at load; consumers
@@ -185,6 +178,7 @@ import { recommendationFor, preselectedDestinationIds } from './escalation_recom
 import { createIdentificationClock, initialIdentified, isUnidentified, shownType, shownClass, shownClassLabel } from './identification_gate.js';
 import { canOpenView } from './view_access.js';
 import { signatureFor, displayNameFor } from './actor_signature.js';
+import { applyAutoDestinations } from './auto_destinations.js';
 import { zoomFloorProperty } from './model_zoom_floor.js';
 import { googleTilesAllowed } from './google_tiles_guard.js';
 import { maybeRequestEscalationAssessment } from './agents/agent_escalation_assessment.js';

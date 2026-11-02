@@ -777,6 +777,11 @@ const _SITE_PREFIXES = {
   energinet_kassoe: 'kas',
   energinet_ferslev: 'frv',
   energinet_amager_koblingsstation: 'amk',
+  // Billund and Odense declare their own national endpoints inline but
+  // were never added here, so they had no CFCS, Center for Terroranalyse,
+  // NC3 or tier-5 endpoint (audit of 2026-10-30).
+  billund: 'bll',
+  odense: 'ode',
 };
 
 const _UNIVERSAL_CYBER_INTEL = [
@@ -904,6 +909,39 @@ if (Array.isArray(overrides) && overrides.length) {
       availabilityStatus: 'on-shift',
       domains: ['ground'],
     });
+  }
+})();
+
+// Every site reaches the national agencies. The comment above the
+// Aktionsstyrken block named this as the pattern to adopt, and the
+// 2026-10-30 audit showed why: Amager Koblingsstation had no PET, FE,
+// Rigspolitiet, Beredskabsstyrelsen, Forsvarskommandoen, air force or
+// Hjemmeværnet endpoint at all, so nothing about an incident there could
+// reach them. For each national service, every site that lacks it gets a
+// copy of Copenhagen's entry (the reference site), with its own id and
+// site. Runs after the override load for the same reason as the blocks
+// above, and never touches an entry a site already has, so a site's own
+// declaration (Billund's Karup entry, say) and an operator's edit win.
+export const NATIONAL_SERVICE_SUFFIXES = Object.freeze([
+  't2-pet',          // PET, Politiets Efterretningstjeneste
+  't3-rigspoliti',   // Rigspolitiet
+  't3-fe',           // Forsvarets Efterretningstjeneste
+  't3-beredskab',    // Beredskabsstyrelsen
+  't4-qra',          // Flyvevåbnet, quick reaction alert
+  't4-forsvar',      // Forsvarskommandoen
+  't4-hjv',          // Hjemmeværnet
+]);
+(() => {
+  const siteIds = [...new Set(DESTINATIONS.map(d => d.siteId).filter(id => id != null))];
+  for (const suffix of NATIONAL_SERVICE_SUFFIXES) {
+    const template = DESTINATIONS.find(d => d.id === `cph-${suffix}`)
+      || DESTINATIONS.find(d => d.siteId != null && d.id.endsWith(`-${suffix}`));
+    if (!template) continue;
+    for (const sid of siteIds) {
+      if (DESTINATIONS.some(d => d.siteId === sid && d.id.endsWith(`-${suffix}`))) continue;
+      const prefix = DESTINATIONS.find(d => d.siteId === sid)?.id?.split('-')[0] || sid;
+      DESTINATIONS.push({ ...template, id: `${prefix}-${suffix}`, siteId: sid });
+    }
   }
 })();
 

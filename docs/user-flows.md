@@ -32,6 +32,28 @@ happened. Nothing falls back to a real person's name: a write with no
 signer records "Unknown account". The seeded demo history in `events.js`
 still carries its own fixed authors.
 
+**National agencies reach every site** (2026-11-02, gated by
+`check:national-reach`). Every site has an endpoint for PET, Rigspolitiet,
+FE, Beredskabsstyrelsen, the air force's quick reaction alert,
+Forsvarskommandoen and Hjemmeværnet: `destinations.js` gives any site that
+lacks one a copy of Copenhagen's entry, after a saved browser edit has been
+loaded, and never replaces a site's own entry. The national agency accounts
+hold their endpoint at every site by rule (`autoDestPattern` or
+`autoDestMatch`, applied by `auto_destinations.js`), as Aktionsstyrken
+already did, so a new site joins without editing any account. Before this,
+the hand-written lists stopped at the first eight sites and nothing sent from
+Billund, Odense or Amager reached these agencies.
+
+Still open, counted 2026-11-02: 326 of the 386 receiver accounts hold no
+endpoint at any site, not even through their sub-units. A receiver's inbox
+shows escalations to the endpoints it holds, so theirs can never fill:
+98 municipalities, 82 Hjemmeværnet units, 23 agencies (among them CFCS,
+Center for Terroranalyse, NC3, Energistyrelsen, JRCC, Trafikstyrelsen and the
+Naviair towers), 20 municipal fire services, 14 naval units, 13 hospitals,
+12 air force units, and the NATO and EU bodies. Each needs a decision on
+which endpoint it answers for. That belongs with the planned unified account
+setup, not with a hand-edited list.
+
 ---
 
 ## Receiver Hierarchy (P92)
