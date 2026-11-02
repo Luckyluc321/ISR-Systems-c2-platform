@@ -215,3 +215,22 @@ never swings from 0.8 to 0.4 in a couple of seconds. `peakConfidence` is kept
 beside it for the report. Airliners (transponder identity), swarms and the
 two `mockConfidenceRamp` scenarios are unchanged. Linked site events inherit
 the starting value.
+
+## The incident report's summary comes from the event (2026-11-02)
+
+The detail panel's post-incident section printed one story for every
+neutralised event: a cruise missile from south west of Kassø on bearing 62°,
+"impact avoided over inner Copenhagen", and a fighter response whenever no
+responder was recorded. A drone downed over Aarhus harbour read as a missile
+over Copenhagen. `src/incident_summary.js` now writes it from the event's own
+fields: airframe and class (nothing while classifying), first detection time
+and site, the sites that tracked it, a course change only above 8°, and who
+neutralised it, when and where. A fact the event does not carry is left out.
+
+The same pass removed the other fixed stories the 2026-10-30 audit found:
+"fighter response", "Mach 0.8 doctrine" and "E-W transit" in the closed-event
+summary, "Missile diverged from Kassø projection" in the evasion alert, the
+interceptor outcome that always read "over Amager. Four DJI airframes downed",
+and Københavns Politi on the cordon button at every site. A missing responder
+reads "Not recorded" and a missing threat level "UNASSESSED". Gated by
+`check:incident-summary`.

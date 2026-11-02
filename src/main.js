@@ -179,6 +179,7 @@ import { createIdentificationClock, initialIdentified, isUnidentified, shownType
 import { canOpenView } from './view_access.js';
 import { signatureFor, displayNameFor } from './actor_signature.js';
 import { applyAutoDestinations } from './auto_destinations.js';
+import { incidentExecSummary } from './incident_summary.js';
 import { zoomFloorProperty } from './model_zoom_floor.js';
 import { googleTilesAllowed } from './google_tiles_guard.js';
 import { maybeRequestEscalationAssessment } from './agents/agent_escalation_assessment.js';
@@ -11141,14 +11142,16 @@ async function main() {
         // Auto-outcome on the dispatch group
         const outcomeId = overwatchSurvived ? 'partial_neutralisation' : 'neutralised';
         const outcomeLabel = overwatchSurvived
-          ? `Partial neutralisation. ${downedCount} hostile drones downed. Overwatch airframe escaped over Øresund.`
+          ? `Partial neutralisation. ${downedCount} hostile drones downed. Overwatch airframe escaped.`
           : `Hostile drones neutralised. ${downedCount} downed.`;
         setDispatchOutcome(event.id, d.id, {
           outcomeId,
           outcomeLabel,
           notes: overwatchSurvived
-            ? 'Interceptor swarm engaged the hostile pack over Amager. Four DJI airframes downed. Overwatch drone with unknown control link continued east over Øresund and exited coverage. Signature exploitation pending on downed airframes. Wreckage location logged for perimeter response.'
-            : 'Interceptor swarm engaged the hostile pack over Amager. All targets confirmed down. Wreckage location logged for perimeter response.',
+            // From this engagement, not the Amager scenario it was first
+            // written for: the event's own site and the count just taken.
+            ? `Interceptor swarm engaged the hostile group over ${siteName(event.siteId)}. ${downedCount} airframe${downedCount === 1 ? '' : 's'} downed. The overwatch drone escaped and left sensor coverage. Signature exploitation pending on the downed airframes. Wreckage location logged for perimeter response.`
+            : `Interceptor swarm engaged the hostile group over ${siteName(event.siteId)}. All ${downedCount} targets confirmed down. Wreckage location logged for perimeter response.`,
           confirmedAt: new Date().toISOString(),
           confirmedBy: 'system_auto',
         });
@@ -11825,7 +11828,9 @@ async function main() {
       if (d?.assetName) _dispatchedAssetNames.add(d.assetName);
     }
     const _responderText = e.neutralizedBy
-      || (_dispatchedAssetNames.size ? Array.from(_dispatchedAssetNames).join(', ') : (_isMissile ? 'Flyvevåbnet fighter response' : 'Counter-drone response (see dispatches)'));
+      // Nothing recorded means nothing to name. It used to name a fighter
+      // response for any missile, and point at dispatches that did not exist.
+      || (_dispatchedAssetNames.size ? Array.from(_dispatchedAssetNames).join(', ') : 'Not recorded');
     // Counter-drone dispatch table rows — only used when !_isMissile.
     const _counterDispatchRows = (e.counterDispatches || []).map(d => {
       const distKm = Math.round(haversineM(impactLat, impactLon, d.originLat ?? impactLat, d.originLon ?? impactLon) / 1000);
@@ -12128,7 +12133,7 @@ async function main() {
       if (delta > 180) delta = 360 - delta;
       if (delta >= 8) {
         setTimeout(() => {
-          toast(`EVASION CONFIRMED · course change ${Math.round(delta)}° captured at ${site ? site.name : siteId}. Missile diverged from Kassø projection during sensor gap.`, 'warn');
+          toast(`EVASION CONFIRMED · course change ${Math.round(delta)}° captured at ${site ? site.name : siteId}. Missile diverged from its projected path during the sensor gap.`, 'warn');
         }, 6000);
       }
     }
@@ -15880,7 +15885,7 @@ async function main() {
     } catch (_) { /* silent — never break narrative */ }
 
     if (event.classification === 'hostile') {
-      parts.push(`Classification remained <b style="color:#ff8a8a;">HOSTILE</b> throughout. ${event.outcome === 'neutralized' ? 'Target neutralised by fighter response.' : 'No neutralisation dispatched.'}`);
+      parts.push(`Classification remained <b style="color:#ff8a8a;">HOSTILE</b> throughout. ${event.outcome === 'neutralized' ? `Target neutralised${event.neutralizedBy ? ` by ${event.neutralizedBy}` : ''}.` : 'No neutralisation dispatched.'}`);
     } else if (event.platform === 'non-identifiable') {
       parts.push(`Contact was <b>never positively identified</b>. Analyst review outstanding.`);
     }
@@ -26210,15 +26215,17 @@ async function main() {
     const linkedPhrase = linkedCount
       ? ` Cross-linked to ${linkedCount} related event${linkedCount === 1 ? '' : 's'}${e.correlationScore ? ` at ${Math.round(e.correlationScore * 100)}% signature match` : ''}.`
       : '';
+    // Who neutralised it is on the event when anyone did. It used to say
+    // "fighter response" for every neutralised track, drones included.
     const outcomePhrase = outcome === 'neutralized'
-      ? ' Target neutralised by fighter response.'
+      ? ` Target neutralised${e.neutralizedBy ? ` by ${e.neutralizedBy}` : ''}.`
       : (e.classification === 'friendly' ? ' Non-threat confirmed and logged.' : '');
 
     let core;
     if (isSwarm) {
-      core = `Coordinated formation observed on E-W transit across sensor coverage.${linkedPhrase}${outcomePhrase}`;
+      core = `Coordinated formation observed across ${siteN} sensor coverage.${linkedPhrase}${outcomePhrase}`;
     } else if (e.platform === 'missile') {
-      core = `Passive detection on inbound trajectory. Fighter dispatch executed under Mach 0.8 doctrine.${outcomePhrase}`;
+      core = `Passive detection on an inbound trajectory over ${siteN}.${outcomePhrase}`;
     } else if (e.platform === 'non-identifiable') {
       core = `RF energy detected without signature lock. Analyst review pending on platform identification.${linkedPhrase}`;
     } else {
@@ -27487,7 +27494,7 @@ async function main() {
       <div class="dp-section dp-outcome">
         <div class="dp-section-title" style="color:#4dff9c;">Target Neutralised</div>
         <div class="dp-outcome-row">
-          <span class="dp-outcome-k">Responder</span><span class="dp-outcome-v">${e.neutralizedBy || 'Flyvevåbnet Fighter Response'}</span>
+          <span class="dp-outcome-k">Responder</span><span class="dp-outcome-v">${e.neutralizedBy || 'Not recorded'}</span>
         </div>
         <div class="dp-outcome-row">
           <span class="dp-outcome-k">Time</span><span class="dp-outcome-v mono">${e.neutralizedAt ? e.neutralizedAt.slice(11,19) : '-'}</span>
@@ -27514,6 +27521,8 @@ async function main() {
       const veraDispatched = dispatchedFlags.includes('vera');
       const cordonDispatched = dispatchedFlags.includes('cordon');
       const beredskabDispatched = dispatchedFlags.includes('beredskab-mass');
+      // The site's own police district, not Københavns Politi for every site.
+      const _sitePoliceName = destinationsForSite(e.siteId).find(d => /-t2-politi$/.test(d.id))?.name || 'local police district';
       return `
       <div class="dp-section dp-pir">
         <div class="dp-pir-hdr">
@@ -27521,21 +27530,23 @@ async function main() {
           <div class="dp-pir-title">Full Incident Report</div>
         </div>
         <div class="dp-pir-exec">
-          Cruise missile signature originated south west of Kassø on bearing 62°.
-          Detected by ${sitesTouched.size} independent sensor sites (${siteChain}).
-          Evasion course correction of ${evasion}° recorded post Kassø exit.
-          Neutralised by ${e.neutralizedBy || 'Flyvevåbnet fighter response'} at ${impact} (${impactSite}).
-          Impact avoided over inner Copenhagen.
+          ${incidentExecSummary(e, {
+            siteName,
+            sitesTouched: Array.from(sitesTouched),
+            evasionDeg: evasion,
+            position: lk ? impact : null,
+            positionSite: lk ? impactSite : null,
+          })}
         </div>
         <div class="dp-pir-grid">
           <div class="dp-pir-kv"><span class="k">FIRST DETECT</span><span class="v mono">${e.startTime.slice(11,19)}Z · ${siteName(e.siteId)}</span></div>
           <div class="dp-pir-kv"><span class="k">SITES CROSS CUED</span><span class="v mono">${sitesTouched.size}</span></div>
           <div class="dp-pir-kv"><span class="k">EVASION</span><span class="v mono">${evasion > 8 ? evasion + '° course change' : 'None recorded'}</span></div>
           <div class="dp-pir-kv"><span class="k">ESCALATIONS</span><span class="v mono">${escCount}</span></div>
-          <div class="dp-pir-kv"><span class="k">RESPONDER</span><span class="v mono">${e.neutralizedBy || 'Flyvevåbnet'}</span></div>
+          <div class="dp-pir-kv"><span class="k">RESPONDER</span><span class="v mono">${e.neutralizedBy || 'Not recorded'}</span></div>
           <div class="dp-pir-kv"><span class="k">NEUTRALISED</span><span class="v mono">${e.neutralizedAt ? e.neutralizedAt.slice(11,19) + 'Z' : '—'}</span></div>
           <div class="dp-pir-kv"><span class="k">IMPACT ZONE</span><span class="v mono">${impactSite}</span></div>
-          <div class="dp-pir-kv"><span class="k">CLASSIFICATION</span><span class="v mono">${(e.classification || '').toUpperCase()} · ${e.threat?.toUpperCase() || 'HIGH'}</span></div>
+          <div class="dp-pir-kv"><span class="k">CLASSIFICATION</span><span class="v mono">${(e.classification || '').toUpperCase()} · ${e.threat?.toUpperCase() || 'UNASSESSED'}</span></div>
         </div>
         <div class="dp-pir-cta-hdr">Command Handoff</div>
         <button class="dp-pir-cta ${veraDispatched ? 'done' : 'primary'}" data-pir="dispatch-vera" data-id="${e.id}" ${veraDispatched ? 'disabled' : ''}>
@@ -27543,7 +27554,7 @@ async function main() {
         </button>
         <div class="dp-pir-cta-hdr">Civil Response</div>
         <button class="dp-pir-cta ${cordonDispatched ? 'done' : ''}" data-pir="cordon" data-id="${e.id}" ${cordonDispatched ? 'disabled' : ''}>
-          ${cordonDispatched ? 'Cordon deployed · Københavns Politi' : 'Afspær området · Politi cordon (mass dispatch)'}
+          ${cordonDispatched ? `Cordon deployed · ${_sitePoliceName}` : 'Afspær området · Politi cordon (mass dispatch)'}
         </button>
         <button class="dp-pir-cta ${beredskabDispatched ? 'done' : ''}" data-pir="beredskab-mass" data-id="${e.id}" ${beredskabDispatched ? 'disabled' : ''}>
           ${beredskabDispatched ? 'Beredskabsstyrelsen inbound · full deployment' : 'Alert Beredskabsstyrelsen · full civil deployment'}
