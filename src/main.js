@@ -182,7 +182,7 @@ import {
   CHANNEL_META, getDestinationGuidance, getAllDestinations,
 } from './destinations.js';
 import { recommendationFor, preselectedDestinationIds } from './escalation_recommendation.js';
-import { createIdentificationClock, initialIdentified, isUnidentified } from './identification_gate.js';
+import { createIdentificationClock, initialIdentified, isUnidentified, shownType, shownClass, shownClassLabel } from './identification_gate.js';
 import { canOpenView } from './view_access.js';
 import { zoomFloorProperty } from './model_zoom_floor.js';
 import { googleTilesAllowed } from './google_tiles_guard.js';
@@ -29113,13 +29113,21 @@ async function main() {
     // visibleEvents() applies the ambient tenant filter in events.js.
     // Reading the raw EVENTS array here put every other tenant's
     // incident history in an operator's History view.
-    const allEvents = visibleEvents().sort((a, b) => b.startTime.localeCompare(a.startTime));
+    //
+    // Same rule as the event ledger (filteredEvents in events.js): a
+    // track no sensor has detected is not an event yet. Until 2026-11-02
+    // History listed it as LIVE with its true type and class, ahead of
+    // the sensor grid. And a classifying track shows no type or class,
+    // not even through the class filter or the search box.
+    const allEvents = visibleEvents()
+      .filter(e => e.detected !== false)
+      .sort((a, b) => b.startTime.localeCompare(a.startTime));
     const filtered = allEvents.filter(e => {
       if (_historyFilters.site !== 'all' && e.siteId !== _historyFilters.site) return false;
-      if (_historyFilters.class !== 'all' && e.classification !== _historyFilters.class) return false;
+      if (_historyFilters.class !== 'all' && shownClass(e) !== _historyFilters.class) return false;
       if (_historyFilters.search) {
         const q = _historyFilters.search.toLowerCase();
-        if (!e.id.toLowerCase().includes(q) && !(e.droneType || '').toLowerCase().includes(q)) return false;
+        if (!e.id.toLowerCase().includes(q) && !shownType(e).toLowerCase().includes(q)) return false;
       }
       return true;
     });
@@ -29129,18 +29137,18 @@ async function main() {
       const isActive = e.status === 'active';
       const isSel = e.id === _historyEventId;
       return `
-        <div class="hst-row ${e.classification} ${isSel ? 'is-selected' : ''}" data-hst="pick" data-id="${e.id}">
+        <div class="hst-row ${shownClass(e)} ${isSel ? 'is-selected' : ''}" data-hst="pick" data-id="${e.id}">
           <div class="hst-row-time">
             <div class="hst-row-date">${e.startTime.slice(0,10)}</div>
             <div class="hst-row-hm">${e.startTime.slice(11,16)}Z</div>
           </div>
           <div class="hst-row-body">
             <div class="hst-row-hdr">
-              <span class="rcv-card-cls rcv-cls-${e.classification}">${(e.classification || '').toUpperCase()}</span>
+              <span class="rcv-card-cls rcv-cls-${shownClass(e)}">${shownClassLabel(e)}</span>
               ${isActive ? '<span class="alert-live">● LIVE</span>' : ''}
               <span class="hst-row-conf">${Math.round(e.confidence * 100)}%</span>
             </div>
-            <div class="hst-row-drone">${e.droneType}</div>
+            <div class="hst-row-drone">${shownType(e)}</div>
             <div class="hst-row-meta">${e.id}  ·  ${siteName(e.siteId)}  ·  ${formatDuration(e.duration)}</div>
           </div>
         </div>`;
@@ -29150,7 +29158,7 @@ async function main() {
       <div class="hst-detail-hdr">
         <div>
           <div class="hst-detail-eid">${selectedEv.id}</div>
-          <div class="hst-detail-drone">${selectedEv.droneType}</div>
+          <div class="hst-detail-drone">${shownType(selectedEv)}</div>
           <div class="hst-detail-meta">${siteName(selectedEv.siteId)}  ·  ${selectedEv.startTime.slice(0,10)}  ·  ${selectedEv.startTime.slice(11,19)}Z to ${(selectedEv.endTime || selectedEv.startTime).slice(11,19)}Z  ·  ${formatDuration(selectedEv.duration)}</div>
         </div>
       </div>
@@ -31180,8 +31188,8 @@ async function main() {
     const rows = chain.events.map(ev => {
       const isCurrent = ev.id === event.id;
       const site = String(ev.siteId || 'unknown').toUpperCase();
-      const cls  = String(ev.classification || 'unknown').toUpperCase();
-      const drone = ev.droneType || ev.platform || '';
+      const cls  = shownClassLabel(ev, 'unknown');
+      const drone = shownType(ev, ev.platform || '');
       const ts = ev.startTime ? ev.startTime.slice(11, 19) + 'Z' : '';
       const status = ev.status === 'closed' ? 'CLOSED' : 'ACTIVE';
       const isRolePresent = presence && presence.eventIds.includes(ev.id);
@@ -31391,7 +31399,7 @@ async function main() {
   // content. This is the shell + routing only.
   function renderEventWorkspace(event) {
     const role = getActiveRole();
-    const typeLabel = event.droneType || event.classification || 'Event';
+    const typeLabel = isUnidentified(event) ? shownType(event) : (event.droneType || event.classification || 'Event');
     const isMap = _workspaceMode === 'map';
     return `
       <div class="rcv-workspace ${isMap ? 'is-map-mode' : ''}">
@@ -31674,7 +31682,7 @@ async function main() {
 
     const platformLabel = (event.platform || 'unknown').replace(/-/g, ' ');
     const confPct = Math.round((event.confidence || 0) * 100);
-    const clsChip = `<span class="rer-cls rer-cls-${event.classification}">${(event.classification || '').toUpperCase()}</span>`;
+    const clsChip = `<span class="rer-cls rer-cls-${shownClass(event)}">${shownClassLabel(event)}</span>`;
     const threatChip = event.threat ? `<span class="rer-threat rer-threat-${event.threat}">${event.threat.toUpperCase()} THREAT</span>` : '';
 
     // ── 1. Case header ─────────────────────────────────────────
@@ -31686,7 +31694,7 @@ async function main() {
           ${isActive ? '<span class="rer-live">● LIVE</span>' : '<span class="rer-closed">CLOSED</span>'}
           <span class="rer-conf">Confidence ${confPct}%</span>
         </div>
-        <h1 class="rer-title">${event.droneType || 'Unknown platform'}</h1>
+        <h1 class="rer-title">${shownType(event, 'Unknown platform')}</h1>
         <div class="rer-header-meta">
           <span class="rer-meta-item"><span class="rer-meta-k">Case</span><span class="rer-meta-v">${event.id}</span></span>
           <span class="rer-meta-item"><span class="rer-meta-k">Site</span><span class="rer-meta-v">${site?.name || event.siteId}</span></span>
@@ -32329,6 +32337,12 @@ async function main() {
 
   async function _fireMistralCaseFile(event, opts = {}) {
     if (!isMistralConfigured() || !event) return;
+    // The model is given the airframe and the classification. While the
+    // track is classifying it gets nothing to write about, and the case
+    // file keeps the neutral text from _mockAiSynthesis. Nothing marks it
+    // as fired, so the case file's next render after identification
+    // starts the stream.
+    if (isUnidentified(event)) return;
     const { force = false } = opts;
 
     const bodyEl = document.querySelector(`[data-ai-body="${event.id}"]`);
@@ -32475,7 +32489,12 @@ async function main() {
     // acronyms (QRA, FE, PET spelled out where used). Reads like a
     // duty officer briefing another human, not a tactical checklist.
     let body, recommendation;
-    if (isMissile) {
+    if (isUnidentified(event)) {
+      // Not before the system knows what it is (identification_gate.js).
+      // The branches below would name the airframe and call it hostile.
+      body = `Track ${event.id} was detected at ${siteName}. Classification is in progress, so its type and intent are not known yet.`;
+      recommendation = 'Hold until the track is identified. This case updates by itself when it is.';
+    } else if (isMissile) {
       body = `Track ${event.id} shows a cruise-missile-class signature moving toward ${siteName} with ${conf}% confidence. Radio, acoustic, and visual sensors agree across ${event.sensorsTop?.length || 3} independent nodes. No matching flight plan on file. Approach vector suggests a low-altitude ingress from the southwest. Under a minute to the inner perimeter.`;
       recommendation = `Immediate national escalation warranted. Alert the on-call fighter squadron and prepare shelter posture at the affected site. Downstream agencies should acknowledge and stand by for coordination.`;
     } else if (isHostile) {
@@ -32653,7 +32672,9 @@ async function main() {
       entries.push({
         ts: _fmtTs(event.createdAt),
         title: 'Event detected',
-        detail: `${event.droneType || 'Unknown'} classified as ${event.classification}`,
+        detail: isUnidentified(event)
+          ? 'Unidentified track, classification in progress'
+          : `${event.droneType || 'Unknown'} classified as ${event.classification}`,
         actor: 'ISR C2 Platform',
       });
     }
@@ -33138,7 +33159,7 @@ async function main() {
           <div><div class="rcv-adv-hero-k">Track</div><div class="rcv-adv-hero-v mono">${ev.id}</div></div>
           <div><div class="rcv-adv-hero-k">ETA</div><div class="rcv-adv-hero-v strong">${impact.etaMin} min</div></div>
           <div><div class="rcv-adv-hero-k">Distance</div><div class="rcv-adv-hero-v">${impact.distanceKm} km</div></div>
-          <div><div class="rcv-adv-hero-k">Class</div><div class="rcv-adv-hero-v">${(ev.classification || 'unknown').toUpperCase()}</div></div>
+          <div><div class="rcv-adv-hero-k">Class</div><div class="rcv-adv-hero-v">${shownClassLabel(ev, 'unknown')}</div></div>
         </div>
         <div class="rcv-adv-hero-cta">Click to open cross-cued advisory →</div>
       </div>`).join('') : '';
@@ -33159,15 +33180,15 @@ async function main() {
     const list = receivedEvents.length ? receivedEvents.map(e => {
       const rec = e.escalations.find(r => roleDestSet.has(r.destinationId));
       const isActive = e.status === 'active';
-      const cls = e.classification;
+      const cls = shownClass(e);   // classifying shows neither type nor class (identification_gate.js)
       return `
         <div class="rcv-card ${cls} ${isActive ? 'is-live' : ''}" data-rcv="open-report" data-id="${e.id}" role="button" tabindex="0" title="Open case workspace">
           <div class="rcv-card-hdr">
-            <span class="rcv-card-cls rcv-cls-${cls}">${(cls || '').toUpperCase()}</span>
+            <span class="rcv-card-cls rcv-cls-${cls}">${shownClassLabel(e)}</span>
             ${isActive ? '<span class="alert-live">● LIVE</span>' : ''}
             <span class="rcv-card-conf">${Math.round(e.confidence * 100)}%</span>
           </div>
-          <div class="rcv-card-drone">${e.droneType}</div>
+          <div class="rcv-card-drone">${shownType(e)}</div>
           <div class="rcv-card-meta">${e.id}  ·  ${SITES[e.siteId]?.name || e.siteId}</div>
           <div class="rcv-card-status">Dispatched: <b>${rec.statusHistory[0].timestamp.slice(11,19)}Z</b>  ·  Status: <b>${(rec.status || '').toUpperCase()}</b>${rec.overdue ? '<span class="rcv-card-overdue" style="display:inline-flex;align-items:center;padding:1px 6px;margin-left:8px;background:rgba(255,120,120,0.14);border:1px solid rgba(255,120,120,0.55);border-radius:10px;font-size:var(--fs-2xs);letter-spacing:0.14em;color:#ff7878;font-family:var(--font-mono);">OVERDUE</span>' : ''}${_renderProgressBadge(rec)}</div>
           <div class="rcv-card-actions">
@@ -33190,7 +33211,7 @@ async function main() {
     const filterChipsHtml = _renderReportsFilterChips(reportsPool, _reportsFilter);
     const reportsList = reportsFiltered.length ? reportsFiltered.map(e => {
       const rpt = e.postIncidentReport;
-      const cls = e.classification;
+      const cls = shownClass(e);   // classifying shows neither type nor class (identification_gate.js)
       const rec = e.escalations.find(r => roleDestSet.has(r.destinationId));
       const closedAt = e.closedAt || e.endTime || '';
       const site = SITES[e.siteId]?.name || e.siteId;
@@ -33215,10 +33236,10 @@ async function main() {
       return `
         <div class="rcv-card rcv-card-report ${cls}" data-rcv="open-report" data-id="${e.id}" role="button" tabindex="0" title="Open incident report">
           <div class="rcv-card-hdr">
-            <span class="rcv-card-cls rcv-cls-${cls}">${(cls || '').toUpperCase()}</span>
+            <span class="rcv-card-cls rcv-cls-${cls}">${shownClassLabel(e)}</span>
             <span class="rcv-card-conf" style="color:#ffb84d;font-family:var(--font-mono);">REPORT</span>
           </div>
-          <div class="rcv-card-drone">${e.droneType}</div>
+          <div class="rcv-card-drone">${shownType(e)}</div>
           <div class="rcv-card-meta">${e.id}  ·  ${site}${metaSuffix}  ·  Closed ${closedAt ? closedAt.slice(0,10) + ' ' + closedAt.slice(11,19) + 'Z' : 'time unknown'}</div>
           <div class="rcv-card-status" style="color: var(--text-dim); line-height: 1.5; margin-top: 4px;">${summaryOneLine}${(rpt.summary || '').length > 200 ? '…' : ''}</div>
           <div class="rcv-card-actions">
@@ -34035,7 +34056,7 @@ async function main() {
             priority: 'info',
             payload: {
               revokedBy: activeRoleId,
-              toast: `You have been removed from ${ev.droneType || 'event'} at ${SITES[ev.siteId]?.name || ev.siteId}.`,
+              toast: `You have been removed from ${shownType(ev, 'event')} at ${SITES[ev.siteId]?.name || ev.siteId}.`,
             },
           });
           toast(`Removed ${targetLabel} from event.`, 'ok');

@@ -49,6 +49,34 @@ export function isUnidentified(event) {
   return event?.identified === false;
 }
 
+// ── What a screen shows for a track's type and class ──
+// While a track is classifying, nobody outside the classifier knows the
+// airframe or whether it is hostile, so no screen may show either. The
+// brief and the messages said so from 2026-10-27; History and the
+// receiver's console still printed the template's type and class
+// (audit of 2026-10-30). Every such display reads these three, with the
+// brief's own words. CSS class 'unknown' is the existing neutral style.
+export const UNIDENTIFIED_SHOWN = Object.freeze({
+  type: 'Unidentified track',
+  cls: 'unknown',
+  label: 'CLASSIFYING',
+});
+
+/** The airframe a screen may show for this track. */
+export function shownType(event, fallback = '') {
+  return isUnidentified(event) ? UNIDENTIFIED_SHOWN.type : (event?.droneType || fallback);
+}
+
+/** The classification a screen may use (CSS class and filters). */
+export function shownClass(event, fallback = 'unknown') {
+  return isUnidentified(event) ? UNIDENTIFIED_SHOWN.cls : (event?.classification || fallback);
+}
+
+/** The classification a screen may print, upper case. */
+export function shownClassLabel(event, fallback = '') {
+  return isUnidentified(event) ? UNIDENTIFIED_SHOWN.label : String(event?.classification || fallback).toUpperCase();
+}
+
 /** The value a new event starts with: a cooperative or friendly track
  *  is known at once, anything else is classifying until the clock says
  *  otherwise. */

@@ -83,6 +83,13 @@ stateDiagram-v2
 - `event.identified` is `false` while classifying, `true` once identified
   with `identifiedAt` stamped, and absent on events this does not own (the
   live sensor feed, history), which are treated as known.
+- **What the screens show** (2026-11-02): History and the receiver's console
+  (inbox and report cards, advisories, the case file's title, class chip and
+  audit trail) read `shownType`, `shownClass` and `shownClassLabel` from
+  `identification_gate.js`. While classifying they print "Unidentified track"
+  and "CLASSIFYING", and History's class filter and search cannot find the
+  track by its true type. The case file's AI summary waits for identification.
+  History also lists only detected tracks, the same rule as the event ledger.
 
 ## A drone we lose but that never left
 

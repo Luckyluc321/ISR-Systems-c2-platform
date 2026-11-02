@@ -9,7 +9,7 @@
 // sent before identification names no type, no class and no "drones".
 // ═══════════════════════════════════════════════════════════════════
 import { readFileSync } from 'node:fs';
-import { IDENT_CFG, createIdentificationClock, initialIdentified, isUnidentified } from '../src/identification_gate.js';
+import { IDENT_CFG, createIdentificationClock, initialIdentified, isUnidentified, shownType, shownClass, shownClassLabel, UNIDENTIFIED_SHOWN } from '../src/identification_gate.js';
 import { destinationsForSite } from '../src/destinations.js';
 import { defaultEscalationMessage } from '../src/escalation_messages.js';
 import { renderDetectionBrief } from '../src/summary.js';
@@ -96,6 +96,43 @@ check('the clock stamps identified and identifiedAt', /_identClock\.step\(EVENTS
 check('the clock does not run while the sim is paused', /setInterval\(\(\) => \{\s*if \(simIsPaused\(\)\) return;\s*const ids = _identClock/.test(main));
 check('auto-rules skip an unidentified track', /export function evaluateAllRules[\s\S]{0,600}if \(event\.identified === false\) return;/.test(rules));
 check("the escalate modal's summary says unidentified while classifying", /isUnidentified\(e\) \? 'Unidentified track, classification in progress,'/.test(main));
+
+// ── Screens: History and the receiver's console (audit 2026-10-30) ──
+console.log('\n[what a screen may show]');
+const tb2 = { identified: false, droneType: 'Bayraktar TB2', classification: 'hostile' };
+const known = { identified: true, droneType: 'Bayraktar TB2', classification: 'hostile' };
+check('while classifying: no airframe, no class, the brief\'s own words',
+  shownType(tb2) === 'Unidentified track' && shownClass(tb2) === 'unknown' && shownClassLabel(tb2) === 'CLASSIFYING'
+  && !/TB2|HOSTILE/i.test(shownType(tb2) + shownClass(tb2) + shownClassLabel(tb2)));
+check('once identified: the real airframe and class',
+  shownType(known) === 'Bayraktar TB2' && shownClass(known) === 'hostile' && shownClassLabel(known) === 'HOSTILE');
+check('an event with no identified flag (seeded history) shows as it always did',
+  shownType({ droneType: 'DJI Mavic 3', classification: 'friendly' }) === 'DJI Mavic 3' && shownClassLabel({ classification: 'friendly' }) === 'FRIENDLY');
+check('fallbacks hold for an event with no type', shownType({ identified: true }, 'Unknown platform') === 'Unknown platform');
+check('the shown words cannot be changed at runtime', Object.isFrozen(UNIDENTIFIED_SHOWN));
+
+console.log('\n[History]');
+check('History drops a track no sensor has detected, like the event ledger',
+  /const allEvents = visibleEvents\(\)\s*\.filter\(e => e\.detected !== false\)/.test(main));
+check('History\'s class filter and search cannot find a classifying track by its true type or class',
+  /shownClass\(e\) !== _historyFilters\.class/.test(main) && /!shownType\(e\)\.toLowerCase\(\)\.includes\(q\)/.test(main));
+check('History rows and the detail header print the shown type and class',
+  /hst-row \$\{shownClass\(e\)\}/.test(main) && /rcv-cls-\$\{shownClass\(e\)\}">\$\{shownClassLabel\(e\)\}/.test(main)
+  && /hst-row-drone">\$\{shownType\(e\)\}/.test(main) && /hst-detail-drone">\$\{shownType\(selectedEv\)\}/.test(main));
+
+console.log('\n[the receiver\'s console]');
+check('inbox and report cards use the shown class and type',
+  (main.match(/const cls = shownClass\(e\);/g) || []).length === 2
+  && (main.match(/rcv-card-drone">\$\{shownType\(e\)\}/g) || []).length === 2
+  && !/rcv-card-drone">\$\{e\.droneType\}/.test(main));
+check('the advisory hero prints the shown class', /rcv-adv-hero-v">\$\{shownClassLabel\(ev, 'unknown'\)\}/.test(main));
+check('the case file title and class chip use the shown type and class',
+  /rer-title">\$\{shownType\(event, 'Unknown platform'\)\}/.test(main) && /rer-cls-\$\{shownClass\(event\)\}">\$\{shownClassLabel\(event\)\}/.test(main));
+check('the audit trail\'s first line does not name a classifying track',
+  /isUnidentified\(event\)\s*\? 'Unidentified track, classification in progress'\s*: `\$\{event\.droneType \|\| 'Unknown'\} classified as/.test(main));
+check('the AI summary waits for identification, model and fallback alike',
+  /async function _fireMistralCaseFile\(event, opts = \{\}\) \{[\s\S]{0,500}if \(isUnidentified\(event\)\) return;/.test(main)
+  && /function _mockAiSynthesis\(event, site\) \{[\s\S]{0,1200}if \(isUnidentified\(event\)\) \{/.test(main));
 
 console.log(failures ? `\n${failures} failing` : '\nall passing');
 process.exit(failures ? 1 : 0);
