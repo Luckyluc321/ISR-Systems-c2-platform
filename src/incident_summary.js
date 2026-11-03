@@ -24,6 +24,19 @@ export const EVASION_MIN_DEG = 8;
 const _t = (iso) => (typeof iso === 'string' && iso.length >= 19 ? `${iso.slice(11, 19)}Z` : null);
 
 /**
+ * Who neutralised it, from the record: the responder the event names,
+ * else the units dispatched against it. null when the record has neither.
+ * The swarm path once set only the outcome, so a report read "a responder
+ * the record does not name" with the interceptor's dispatch on the event.
+ */
+export function respondersOf(e) {
+  if (!e) return null;
+  if (e.neutralizedBy) return e.neutralizedBy;
+  const names = [...new Set((e.counterDispatches || []).map((d) => d?.assetName).filter(Boolean))];
+  return names.length ? names.join(', ') : null;
+}
+
+/**
  * opts:
  *   siteName      (siteId) => display name
  *   sitesTouched  site ids the track was seen at, first detection first
@@ -49,7 +62,8 @@ export function incidentExecSummary(e, opts = {}) {
   const ev = Number(opts.evasionDeg) || 0;
   if (ev > EVASION_MIN_DEG) parts.push(`Course changed by ${Math.round(ev)}° during the track.`);
 
-  const by = e.neutralizedBy ? `by ${e.neutralizedBy}` : 'by a responder the record does not name';
+  const who = respondersOf(e);
+  const by = who ? `by ${who}` : 'by a responder the record does not name';
   const when = _t(e.neutralizedAt);
   const where = opts.position ? `, position ${opts.position}${opts.positionSite ? ` (${opts.positionSite})` : ''}` : '';
   parts.push(`Neutralised ${by}${when ? ` at ${when}` : ''}${where}.`);

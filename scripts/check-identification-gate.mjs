@@ -134,5 +134,21 @@ check('the AI summary waits for identification, model and fallback alike',
   /async function _fireMistralCaseFile\(event, opts = \{\}\) \{[\s\S]{0,500}if \(isUnidentified\(event\)\) return;/.test(main)
   && /function _mockAiSynthesis\(event, site\) \{[\s\S]{0,1200}if \(isUnidentified\(event\)\) \{/.test(main));
 
+console.log('\n[the receiver\'s screens follow identification]');
+check('the inbox re-renders when a card is identified (signature counts the classifying ones)',
+  /`unid:\$\{receivedEvents\.filter\(e => e\.identified === false\)\.length\}`/.test(main));
+check('the console and the case-file signatures change when the flag flips',
+  (main.match(/identified === false \? 'cls' : 'idd'/g) || []).length === 2);
+check('the case file remounts on the flip, so its title, chip and AI text update by themselves',
+  /_lastReceiverWorkspaceUnidentified !== \(wsEvent\.identified === false\)/.test(main)
+  && /_lastReceiverWorkspaceUnidentified = wsEvent\.identified === false;/.test(main));
+check('while classifying the case file shows no threat level and no platform',
+  /const threatChip = event\.threat && !isUnidentified\(event\)/.test(main)
+  && /rer-meta-v">\$\{isUnidentified\(event\) \? 'Classifying' : platformLabel\}/.test(main));
+check('the console names no platform and shows no pattern panels while classifying',
+  /const subjectLine = isUnidentified\(event\)\s*\? 'Classification in progress'/.test(main)
+  && /const _context = isUnidentified\(event\) \? '' : \[/.test(main));
+check('the loop-in toast does not name a classifying track', /Looped into \$\{shownType\(event, 'event'\)\}/.test(main));
+
 console.log(failures ? `\n${failures} failing` : '\nall passing');
 process.exit(failures ? 1 : 0);

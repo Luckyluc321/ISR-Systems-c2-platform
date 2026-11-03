@@ -90,6 +90,15 @@ stateDiagram-v2
   and "CLASSIFYING", and History's class filter and search cannot find the
   track by its true type. The case file's AI summary waits for identification.
   History also lists only detected tracks, the same rule as the event ledger.
+  While classifying, the receiver's case file shows no threat level, no
+  platform and no historical-pattern or attribution panels, and the Mission
+  Console reads "Classification in progress". When the flag flips, the inbox,
+  the console and the case file update by themselves: the flag is part of
+  their render signatures and the case file remounts on it.
+- **Not covered:** the operator's own live screens (event ledger, detail
+  panel, map label, "detected" toasts) still show the classifier's output from
+  the first moment, as before. Whether they should wait too is an open
+  question for Lucas, not part of this change.
 
 ## A drone we lose but that never left
 

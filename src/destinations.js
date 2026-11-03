@@ -922,6 +922,16 @@ if (Array.isArray(overrides) && overrides.length) {
 // site. Runs after the override load for the same reason as the blocks
 // above, and never touches an entry a site already has, so a site's own
 // declaration (Billund's Karup entry, say) and an operator's edit win.
+// The universal cyber, terror-analysis, cyber-crime and tier-5 endpoints
+// were only pushed before the override load, so a browser with saved
+// destination edits never got the ones added for Billund and Odense.
+// Re-applied here, after the load. Idempotent: nothing already present
+// is touched.
+for (const sid of Object.keys(_SITE_PREFIXES)) {
+  _pushForSite(sid, _UNIVERSAL_CYBER_INTEL);
+  _pushForSite(sid, _UNIVERSAL_TIER5);
+}
+
 export const NATIONAL_SERVICE_SUFFIXES = Object.freeze([
   't2-pet',          // PET, Politiets Efterretningstjeneste
   't3-rigspoliti',   // Rigspolitiet

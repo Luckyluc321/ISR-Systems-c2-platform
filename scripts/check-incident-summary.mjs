@@ -9,7 +9,7 @@
 // places in main.js that used to carry a fixed story.
 // ═══════════════════════════════════════════════════════════════════
 import { readFileSync } from 'node:fs';
-import { EVASION_MIN_DEG, incidentExecSummary } from '../src/incident_summary.js';
+import { EVASION_MIN_DEG, incidentExecSummary, respondersOf } from '../src/incident_summary.js';
 
 let failures = 0;
 const check = (label, ok, why) => {
@@ -55,6 +55,20 @@ check('a missing threat is "UNASSESSED", not "HIGH"', /e\.threat\?\.toUpperCase\
 check("the cordon names the site's own police district", /Cordon deployed · \$\{_sitePoliceName\}/.test(main) && !/Cordon deployed · Københavns Politi/.test(main));
 check('the interceptor outcome uses the event\'s site and its own count',
   /engaged the hostile group over \$\{siteName\(event\.siteId\)\}\. \$\{downedCount\} airframe/.test(main) && !/hostile pack over Amager|Four DJI airframes downed/.test(code));
+
+console.log('\n[the responder comes from the record]');
+const swarm = { ...bare, counterDispatches: [{ assetName: 'Rigspolitiet interceptor swarm' }, { assetName: 'Rigspolitiet interceptor swarm' }] };
+check('no named responder, but a dispatch on the event: the dispatched unit is named once',
+  respondersOf(swarm) === 'Rigspolitiet interceptor swarm' && /by Rigspolitiet interceptor swarm/.test(incidentExecSummary(swarm, { siteName })));
+check('a named responder wins over the dispatch list', respondersOf({ ...swarm, neutralizedBy: 'F-35, Skrydstrup' }) === 'F-35, Skrydstrup');
+check('neither: nothing is invented', respondersOf(bare) === null);
+check('the swarm takedown records who did it and when',
+  /outcome: overwatchSurvived \? 'partial_neutralisation' : 'neutralized',\s*neutralizedBy: event\.neutralizedBy \|\| d\.assetName \|\| null,\s*neutralizedAt: event\.neutralizedAt \|\| new Date\(\)\.toISOString\(\),/.test(main));
+check('no "Fighter Response" fallback anywhere a responder is shown',
+  !/\|\| 'Fighter Response'/.test(main) && !/\|\| 'Flyvevåbnet Fighter Response'/.test(main));
+check('every responder cell and sentence reads respondersOf', (main.match(/respondersOf\((e|event)\)/g) || []).length >= 5);
+check('the PDF header does not default to HIGH or HOSTILE',
+  /\(e\.threat \|\| 'UNASSESSED'\)\.toUpperCase\(\)/.test(main) && !/\(e\.threat \|\| 'HIGH'\)/.test(main) && !/\(e\.classification \|\| 'HOSTILE'\)/.test(main));
 
 console.log(failures ? `\n${failures} failing` : '\nall passing');
 process.exit(failures ? 1 : 0);

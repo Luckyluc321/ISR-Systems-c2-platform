@@ -55,5 +55,11 @@ check("a receiver cannot dispatch another agency's counter-drone unit by any but
 check('the dispatch records who sent it, so the report credits the agency',
   /dispatchCounterResponse\(id, asset, \{ \.\.\.\(units > 1 \? \{ swarmSize: units \} : \{\}\), ownerRoleId: _dispatchOwner \}\);/.test(main));
 
+console.log('\n[a counter-drone role that owns none of the units in play]');
+check('falls back to the units it does own, instead of "You hold no units"',
+  /const _mcNoOwnCounterDrone = !roleScopeMc \|\| \(roleScopeMc\.size > 0 && mineList\.length === 0\);/.test(main)
+  && /const _mcOwnSpec = \(_mcNoOwnCounterDrone && /.test(main));
+check('Energinet keeps its deliberately empty table entry', /'op-energinet':\s*new Set\(\[\]\)/.test(main));
+
 console.log(failures ? `\n${failures} failing` : '\nall passing');
 process.exit(failures ? 1 : 0);

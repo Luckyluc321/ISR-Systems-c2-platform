@@ -195,13 +195,25 @@ function _commonAncestor(ids) {
 }
 
 // destinationId -> [roleId, ...], straight from what roles declare.
+//
+// Rebuildable since 2026-11-02. auto_destinations.js adds the national
+// agencies' endpoints at every site AFTER this module has loaded, so a
+// load-time snapshot missed them: Varde, Jægerkorpset, Karup and the
+// other garrisons received Billund, Odense and Amager escalations in
+// their inbox and were still left out of the incident report (22
+// agency/endpoint pairs). main.js calls refreshAgencyOwnership() once
+// the rules have run.
 const _claims = new Map();
-for (const r of RECEIVERS) {
-  for (const did of r.destinationIds || []) {
-    if (!_claims.has(did)) _claims.set(did, []);
-    _claims.get(did).push(r.id);
+function _rebuildClaims() {
+  _claims.clear();
+  for (const r of RECEIVERS) {
+    for (const did of r.destinationIds || []) {
+      if (!_claims.has(did)) _claims.set(did, []);
+      _claims.get(did).push(r.id);
+    }
   }
 }
+_rebuildClaims();
 
 function _slugOf(dest) {
   // Site-scoped ids are <site>-t<tier>-<slug>. Keyed off siteId rather
@@ -234,6 +246,12 @@ function _deriveOwners() {
 }
 
 _deriveOwners();
+
+/** Re-read every account's endpoint list and re-derive ownership. */
+export function refreshAgencyOwnership() {
+  _rebuildClaims();
+  _deriveOwners();
+}
 
 // Destinations are editable from the config view at runtime, and the map
 // above was a load-time snapshot, so an added or removed endpoint left

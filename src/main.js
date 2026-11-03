@@ -89,6 +89,10 @@ registerPostIncidentReportGenerator((event, opts) => buildPostIncidentReport(eve
 // Since 2026-11-02 every national agency works this way, not only
 // Aktionsstyrken (auto_destinations.js, check:national-reach).
 applyAutoDestinations(RECEIVERS, getAllDestinations());
+// The endpoint-holder record (agency_ownership.js) was taken when that
+// module loaded, before the rules above ran. Re-take it, or the report
+// leaves out agencies that the inbox already reaches.
+refreshAgencyOwnership();
 // Window-scoped destination resolver so the PIR generator (called from
 // events.js closeEvent) can look up display names without importing
 // destinations.js (would create a cycle). Present at load; consumers
@@ -179,7 +183,7 @@ import { createIdentificationClock, initialIdentified, isUnidentified, shownType
 import { canOpenView } from './view_access.js';
 import { signatureFor, displayNameFor } from './actor_signature.js';
 import { applyAutoDestinations } from './auto_destinations.js';
-import { incidentExecSummary } from './incident_summary.js';
+import { incidentExecSummary, respondersOf } from './incident_summary.js';
 import { canDispatchUnit } from './mission_console_scope.js';
 import { zoomFloorProperty } from './model_zoom_floor.js';
 import { googleTilesAllowed } from './google_tiles_guard.js';
@@ -800,7 +804,7 @@ const STUB_DISPATCH_ACTIONS = new Set([
   'hjv-reinforce',
   'region-ambulance-standby', 'region-triage-prep',
 ]);
-import { ownerRoleIdForAsset } from './agency_ownership.js';
+import { ownerRoleIdForAsset, refreshAgencyOwnership } from './agency_ownership.js';
 import { availableCTAsForReceiver } from './receiver_ctas.js';
 import { AisShipRenderer, AirspaceRenderer, TrafficEventRenderer } from './sovereign_renderers.js';
 import { fetchDanishAirspaces } from './sovereign_services.js';
@@ -11156,7 +11160,14 @@ async function main() {
           confirmedAt: new Date().toISOString(),
           confirmedBy: 'system_auto',
         });
-        mutateEvent(event.id, { outcome: overwatchSurvived ? 'partial_neutralisation' : 'neutralized' });
+        // Who did it and when, from this engagement. The swarm path set
+        // the outcome only, so the report read "a responder the record
+        // does not name" while the dispatch sat on the event.
+        mutateEvent(event.id, {
+          outcome: overwatchSurvived ? 'partial_neutralisation' : 'neutralized',
+          neutralizedBy: event.neutralizedBy || d.assetName || null,
+          neutralizedAt: event.neutralizedAt || new Date().toISOString(),
+        });
         toast(overwatchSurvived
           ? `Partial neutralisation. ${downedCount} downed. Overwatch escaped.`
           : `Threat neutralised. ${downedCount} downed.`, 'ok');
@@ -11868,7 +11879,7 @@ async function main() {
     <div class="brand">ISR SYSTEMS · CROSS-SITE INCIDENT AUDIT</div>
     <h1>Post Incident Report · ${e.id}</h1>
     <div class="sub">Generated ${new Date().toISOString().slice(0,19).replace('T',' ')}Z</div>
-    <div class="classification">SEVERITY · ${(e.threat || 'HIGH').toUpperCase()} · ${(e.classification || 'HOSTILE').toUpperCase()}</div>
+    <div class="classification">SEVERITY · ${(e.threat || 'UNASSESSED').toUpperCase()} · ${(e.classification || 'UNCLASSIFIED').toUpperCase()}</div>
   </div>
 
   <h2>Executive Summary</h2>
@@ -15886,7 +15897,7 @@ async function main() {
     } catch (_) { /* silent — never break narrative */ }
 
     if (event.classification === 'hostile') {
-      parts.push(`Classification remained <b style="color:#ff8a8a;">HOSTILE</b> throughout. ${event.outcome === 'neutralized' ? `Target neutralised${event.neutralizedBy ? ` by ${event.neutralizedBy}` : ''}.` : 'No neutralisation dispatched.'}`);
+      parts.push(`Classification remained <b style="color:#ff8a8a;">HOSTILE</b> throughout. ${event.outcome === 'neutralized' ? `Target neutralised${respondersOf(event) ? ` by ${respondersOf(event)}` : ''}.` : 'No neutralisation dispatched.'}`);
     } else if (event.platform === 'non-identifiable') {
       parts.push(`Contact was <b>never positively identified</b>. Analyst review outstanding.`);
     }
@@ -25644,7 +25655,7 @@ async function main() {
         payload: {
           addedBy: activeRoleId,
           reason: 'manual-loop-in',
-          toast: `Advisory · Looped into ${event.droneType || 'event'} at ${SITES[event.siteId]?.name || event.siteId}.`,
+          toast: `Advisory · Looped into ${shownType(event, 'event')} at ${SITES[event.siteId]?.name || event.siteId}.`,
         },
       });
       toast(`Looped in ${role?.org || roleId} as observer.`, 'ok');
@@ -26219,7 +26230,7 @@ async function main() {
     // Who neutralised it is on the event when anyone did. It used to say
     // "fighter response" for every neutralised track, drones included.
     const outcomePhrase = outcome === 'neutralized'
-      ? ` Target neutralised${e.neutralizedBy ? ` by ${e.neutralizedBy}` : ''}.`
+      ? ` Target neutralised${respondersOf(e) ? ` by ${respondersOf(e)}` : ''}.`
       : (e.classification === 'friendly' ? ' Non-threat confirmed and logged.' : '');
 
     let core;
@@ -26375,7 +26386,7 @@ async function main() {
       </div>
       ${isNeutralised ? `<div class="pl-kv">
         <div class="pl-k">Outcome</div>
-        <div class="pl-v">Neutralised by ${e.neutralizedBy || 'Fighter Response'} at ${(e.neutralizedAt || '').slice(11, 19)}Z</div>
+        <div class="pl-v">Neutralised by ${respondersOf(e) || 'a responder the record does not name'}${e.neutralizedAt ? ` at ${e.neutralizedAt.slice(11, 19)}Z` : ''}</div>
       </div>` : ''}
       ${timelineItems.length ? `<div class="pl-subsection">
         <div class="pl-subsection-title">Timeline</div>
@@ -27495,7 +27506,7 @@ async function main() {
       <div class="dp-section dp-outcome">
         <div class="dp-section-title" style="color:#4dff9c;">Target Neutralised</div>
         <div class="dp-outcome-row">
-          <span class="dp-outcome-k">Responder</span><span class="dp-outcome-v">${e.neutralizedBy || 'Not recorded'}</span>
+          <span class="dp-outcome-k">Responder</span><span class="dp-outcome-v">${respondersOf(e) || 'Not recorded'}</span>
         </div>
         <div class="dp-outcome-row">
           <span class="dp-outcome-k">Time</span><span class="dp-outcome-v mono">${e.neutralizedAt ? e.neutralizedAt.slice(11,19) : '-'}</span>
@@ -27544,7 +27555,7 @@ async function main() {
           <div class="dp-pir-kv"><span class="k">SITES CROSS CUED</span><span class="v mono">${sitesTouched.size}</span></div>
           <div class="dp-pir-kv"><span class="k">EVASION</span><span class="v mono">${evasion > 8 ? evasion + '° course change' : 'None recorded'}</span></div>
           <div class="dp-pir-kv"><span class="k">ESCALATIONS</span><span class="v mono">${escCount}</span></div>
-          <div class="dp-pir-kv"><span class="k">RESPONDER</span><span class="v mono">${e.neutralizedBy || 'Not recorded'}</span></div>
+          <div class="dp-pir-kv"><span class="k">RESPONDER</span><span class="v mono">${respondersOf(e) || 'Not recorded'}</span></div>
           <div class="dp-pir-kv"><span class="k">NEUTRALISED</span><span class="v mono">${e.neutralizedAt ? e.neutralizedAt.slice(11,19) + 'Z' : '—'}</span></div>
           <div class="dp-pir-kv"><span class="k">IMPACT ZONE</span><span class="v mono">${impactSite}</span></div>
           <div class="dp-pir-kv"><span class="k">CLASSIFICATION</span><span class="v mono">${(e.classification || '').toUpperCase()} · ${e.threat?.toUpperCase() || 'UNASSESSED'}</span></div>
@@ -29850,9 +29861,11 @@ async function main() {
 
     // Subject one-liner for orientation
     const subj = event.subject;
-    const subjectLine = subj
-      ? `${subj.class.replace(/_/g, ' ')} · ${subj.cardinality?.kind || 'single'} · ${Math.round((subj.class_confidence || 0) * 100)}% confidence`
-      : `${event.platform || 'unknown'} · ${Math.round((event.confidence || 0) * 100)}% confidence`;
+    const subjectLine = isUnidentified(event)
+      ? 'Classification in progress'
+      : subj
+        ? `${subj.class.replace(/_/g, ' ')} · ${subj.cardinality?.kind || 'single'} · ${Math.round((subj.class_confidence || 0) * 100)}% confidence`
+        : `${event.platform || 'unknown'} · ${Math.round((event.confidence || 0) * 100)}% confidence`;
 
     // Assets to show: tactical bundle, split into dispatchable-by-me
     // and other-agency lists.
@@ -29877,19 +29890,21 @@ async function main() {
     // units by owning role and already drives a working dispatch path
     // in the case file.
     //
-    // Gated on the role having NO counter-drone scope rather than on
-    // mineList being empty. If it keyed on the empty list, a police
-    // role facing a threat class it cannot answer would suddenly grow a
-    // panel it does not have today. Every role in the table renders
-    // exactly what it renders now, on every subject. Energinet keeps
-    // its deliberately empty Set, which is truthy, so it keeps the
-    // escalate-and-coordinate treatment that is correct for a grid
-    // operator.
+    // Gated on the role having NO counter-drone scope, and since
+    // 2026-11-02 also on a counter-drone role that OWNS none of the units
+    // in play. Ownership (mission_console_scope.js) left Syd- og
+    // Sønderjyllands Politi with no counter-drone unit at Esbjerg, and the
+    // console then said "You hold no units" beside its own patrol car and
+    // cordon. A role with no unit of its own in the table falls back to
+    // the units it does own. Energinet keeps its deliberately empty Set
+    // (size 0), so it keeps the escalate-and-coordinate treatment that is
+    // correct for a grid operator.
     //
     // Same event gate as the case-file rail: a live event, or a closed
     // one with wreckage still on the ground.
     const _mcWreckagePhase = Array.isArray(event.wreckages) && event.wreckages.length > 0;
-    const _mcOwnSpec = (!roleScopeMc && (event.status === 'active' || _mcWreckagePhase))
+    const _mcNoOwnCounterDrone = !roleScopeMc || (roleScopeMc.size > 0 && mineList.length === 0);
+    const _mcOwnSpec = (_mcNoOwnCounterDrone && (event.status === 'active' || _mcWreckagePhase))
       ? assetsForReceiverRole(activeRole?.id)
       : null;
     const _mcOwnUnits = _mcOwnSpec?.dispatchable || [];
@@ -30241,7 +30256,9 @@ async function main() {
         //
         // Each divider is emitted only when its group has content, so a
         // quiet event can never show a heading above nothing.
-        const _context = [
+        // Both panels below compare this platform family with earlier
+        // cases, so they name it. Not before the track is identified.
+        const _context = isUnidentified(event) ? '' : [
           renderHistoricalPatternPanel(event, activeRole,
             { hasReportFor: (id) => !!getEvent(id)?.postIncidentReport }),
           (() => {
@@ -31693,7 +31710,8 @@ async function main() {
     const platformLabel = (event.platform || 'unknown').replace(/-/g, ' ');
     const confPct = Math.round((event.confidence || 0) * 100);
     const clsChip = `<span class="rer-cls rer-cls-${shownClass(event)}">${shownClassLabel(event)}</span>`;
-    const threatChip = event.threat ? `<span class="rer-threat rer-threat-${event.threat}">${event.threat.toUpperCase()} THREAT</span>` : '';
+    // The threat level follows from the classification, so it waits too.
+    const threatChip = event.threat && !isUnidentified(event) ? `<span class="rer-threat rer-threat-${event.threat}">${event.threat.toUpperCase()} THREAT</span>` : '';
 
     // ── 1. Case header ─────────────────────────────────────────
     const header = `
@@ -31708,7 +31726,7 @@ async function main() {
         <div class="rer-header-meta">
           <span class="rer-meta-item"><span class="rer-meta-k">Case</span><span class="rer-meta-v">${event.id}</span></span>
           <span class="rer-meta-item"><span class="rer-meta-k">Site</span><span class="rer-meta-v">${site?.name || event.siteId}</span></span>
-          <span class="rer-meta-item"><span class="rer-meta-k">Platform</span><span class="rer-meta-v">${platformLabel}</span></span>
+          <span class="rer-meta-item"><span class="rer-meta-k">Platform</span><span class="rer-meta-v">${isUnidentified(event) ? 'Classifying' : platformLabel}</span></span>
           <span class="rer-meta-item"><span class="rer-meta-k">Dispatched</span><span class="rer-meta-v">${dispatchAge != null ? _fmtAge(dispatchAge) + ' ago' : '—'}</span></span>
           <span class="rer-meta-item"><span class="rer-meta-k">Status</span><span class="rer-meta-v">${isAcked ? 'Acknowledged' : (rec?.status || 'pending').toUpperCase()}</span></span>
         </div>
@@ -32899,6 +32917,7 @@ async function main() {
   // Mission Console aside re-renders in place.
   let _lastReceiverWorkspaceId = null;
   let _lastReceiverWorkspaceMode = null;
+  let _lastReceiverWorkspaceUnidentified = null;
   let _lastConsoleSig = null;
 
   function _consoleSignature(role, wsEvent) {
@@ -32915,6 +32934,9 @@ async function main() {
       wsEvent.id,
       wsEvent.status,
       wsEvent.outcome || 'n',
+      // Classifying vs identified. The console names the platform once it
+      // is known (identification_gate.js), so the flip must re-render it.
+      wsEvent.identified === false ? 'cls' : 'idd',
       (wsEvent.counterDispatches || []).length > 0 ? 'cd1' : 'cd0',
       Object.keys(wsEvent.dispatchOutcomes || {}).length > 0 ? 'o1' : 'o0',
       (wsEvent.postIncidentDispatched || []).length > 0 ? 'h1' : 'h0',
@@ -32957,6 +32979,7 @@ async function main() {
               wsEvent.id,
               wsEvent.status,
               wsEvent.outcome || 'n',
+              wsEvent.identified === false ? 'cls' : 'idd',
               // bool, not count — flipping from 0→1 matters, 1→2 does not
               (wsEvent.counterDispatches || []).length > 0 ? 'cd1' : 'cd0',
               Object.keys(wsEvent.dispatchOutcomes || {}).length > 0 ? 'o1' : 'o0',
@@ -32972,6 +32995,9 @@ async function main() {
       wsPart,
       wsClosed ? '' : escStatusHash,   // ack changes irrelevant once closed
       `evc:${receivedEvents.length}`,
+      // An inbox card turns from "Unidentified track" to its airframe when
+      // the track is identified. The count alone never changes then.
+      `unid:${receivedEvents.filter(e => e.identified === false).length}`,
       // Include the reports filter so chip changes trigger a re-render
       // without callers having to null the sig manually.
       `rf:${Object.values(_reportsFilter).join(',')}`,
@@ -33065,8 +33091,12 @@ async function main() {
         // without touching the center pane or top bar. Center pane
         // (Report / Live Map) keeps its Mistral output intact through
         // step transitions.
+        // Identification flips the case file from neutral to named. Its
+        // title, class chip and AI summary live in the centre pane, which
+        // only draws on a full mount, so the flip forces one.
         const isFullMount = _lastReceiverViewSig === null || _lastReceiverWorkspaceId !== wsEvent.id
-                          || _lastReceiverWorkspaceMode !== _workspaceMode;
+                          || _lastReceiverWorkspaceMode !== _workspaceMode
+                          || _lastReceiverWorkspaceUnidentified !== (wsEvent.identified === false);
         if (isFullMount) {
           const _priorScroll = {
             center: receiverView.querySelector('.rws-center')?.scrollTop || 0,
@@ -33077,6 +33107,7 @@ async function main() {
           receiverView.style.display = 'block';
           _lastReceiverWorkspaceId = wsEvent.id;
           _lastReceiverWorkspaceMode = _workspaceMode;
+          _lastReceiverWorkspaceUnidentified = wsEvent.identified === false;
           _lastConsoleSig = _consoleSignature(role, wsEvent);
           _lastReceiverViewSig = 'workspace-open';
           requestAnimationFrame(() => {

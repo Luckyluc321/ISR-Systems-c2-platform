@@ -56,5 +56,8 @@ check('a receiver\'s reply and note are signed by the account',
   && /addNote\(eventId, text, signatureFor\(getActiveRole\(\)\)\)/.test(main));
 check('the account chip never reads "undefined"', /opNameEl\.textContent = displayNameFor\(r\);/.test(main));
 
+const pipe = readFileSync(new URL('../src/classification_pipeline.js', import.meta.url), 'utf8');
+check('an automatic reclassification is signed by the pipeline, not "Unknown account"', /author: 'Classification pipeline'/.test(pipe));
+
 console.log(failures ? `\n${failures} failing` : '\nall passing');
 process.exit(failures ? 1 : 0);

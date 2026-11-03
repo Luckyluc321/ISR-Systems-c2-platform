@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs';
 import { RECEIVERS } from '../src/roles.js';
 import { NATIONAL_SERVICE_SUFFIXES, getAllDestinations } from '../src/destinations.js';
 import { applyAutoDestinations } from '../src/auto_destinations.js';
+import { refreshAgencyOwnership, roleOwnsDestination } from '../src/agency_ownership.js';
 
 let failures = 0;
 const check = (label, ok, why) => {
@@ -71,6 +72,16 @@ check('the national pass runs after a saved browser edit replaces the catalogue'
   dsrc.indexOf('DESTINATIONS.push(...overrides);') > -1
   && dsrc.indexOf('for (const suffix of NATIONAL_SERVICE_SUFFIXES)') > dsrc.indexOf('DESTINATIONS.push(...overrides);'));
 check('Billund and Odense get the universal endpoints too', /billund: 'bll',/.test(dsrc) && /odense: 'ode',/.test(dsrc));
+
+console.log('\n[the incident report reaches the same agencies as the inbox]');
+refreshAgencyOwnership();
+let orphan = 0;
+for (const r of RECEIVERS) for (const d of r.destinationIds || []) if (!roleOwnsDestination(r.id, d)) orphan++;
+check('every agency/endpoint pair an inbox holds is also credited in the report', orphan === 0, `${orphan} pairs`);
+check('main.js re-takes the endpoint-holder record after the rules run',
+  /applyAutoDestinations\(RECEIVERS, getAllDestinations\(\)\);[\s\S]{0,400}refreshAgencyOwnership\(\);/.test(main));
+check('the universal endpoints are re-applied after saved edits too',
+  dsrc.lastIndexOf('_pushForSite(sid, _UNIVERSAL_CYBER_INTEL);') > dsrc.indexOf('DESTINATIONS.push(...overrides);'));
 
 console.log(failures ? `\n${failures} failing` : '\nall passing');
 process.exit(failures ? 1 : 0);

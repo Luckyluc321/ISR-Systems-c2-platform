@@ -225,5 +225,7 @@ function _transition(event, state, nextMode, classification, threat, reason) {
     classification,
     threat,
     reason,
+    // An automatic reclassification is the pipeline's, not a person's.
+    author: 'Classification pipeline',
   });
 }
