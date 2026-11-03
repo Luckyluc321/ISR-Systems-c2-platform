@@ -29709,7 +29709,9 @@ async function main() {
   setInterval(() => {
     if (simIsPaused()) return;
     const ids = _identClock.step(EVENTS, monoNow(), id => droneState.get(id)?._firstDetectedMs ?? null);
-    for (const id of ids) mutateEvent(id, { identified: true, identifiedAt: new Date().toISOString() });
+    // notify: the receiver's inbox, console and case file only redraw on a
+    // notify, and their signatures carry the flag (verifier, 2026-11-03).
+    for (const id of ids) mutateEvent(id, { identified: true, identifiedAt: new Date().toISOString() }, { notify: true });
   }, 250);
   const _assessAsked = new Set();   // events whose auto-escalation was assessed
   const _detectionLineTransport = {
@@ -30233,7 +30235,7 @@ async function main() {
           ${ackedBadge}
         </div>
         <div class="c-label" style="margin-bottom: var(--space-3); text-transform: none; letter-spacing: var(--ls-body); font-family: var(--font-body); font-size: var(--fs-xs); color: var(--text-dim);">${subjectLine}</div>
-        <div style="padding: var(--space-2) var(--space-3); background: rgba(77, 210, 255, 0.05); border-left: 2px solid var(--accent); margin-bottom: var(--space-3); font-size: var(--fs-xs); color: var(--text); line-height: 1.55;">${bundle.tacticalRationale || 'Graduated response computed from live subject.'}</div>
+        <div style="padding: var(--space-2) var(--space-3); background: rgba(77, 210, 255, 0.05); border-left: 2px solid var(--accent); margin-bottom: var(--space-3); font-size: var(--fs-xs); color: var(--text); line-height: 1.55;">${isUnidentified(event) ? 'Response options follow once the track is identified.' : (bundle.tacticalRationale || 'Graduated response computed from live subject.')}</div>
       </div>
 
       ${ackGateHtml}

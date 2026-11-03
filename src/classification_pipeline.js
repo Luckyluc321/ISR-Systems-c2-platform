@@ -120,6 +120,15 @@ export function evaluateClassificationPipeline(event, ctx = {}) {
 
   // ── State machine ──
 
+  // The net's verdict waits for the identification moment
+  // (identification_gate.js). A transition writes a reclassification
+  // note naming the platform, and before this it could land in the audit
+  // trail while every screen still read "Unidentified track". Confidence
+  // keeps ramping above; the verdict lands on the first evaluation after
+  // the track is identified.
+  if (event.identified === false) return null;
+
+
   // Weapon-class classes never downgrade regardless of confidence.
   // If the NN identifies a weapon signature at any meaningful
   // confidence, the event belongs at hostile-high.

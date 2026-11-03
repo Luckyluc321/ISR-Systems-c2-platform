@@ -25,15 +25,22 @@ const _t = (iso) => (typeof iso === 'string' && iso.length >= 19 ? `${iso.slice(
 
 /**
  * Who neutralised it, from the record: the responder the event names,
- * else the units dispatched against it. null when the record has neither.
+ * else the dispatch the record says made the kill. null when it has neither.
  * The swarm path once set only the outcome, so a report read "a responder
  * the record does not name" with the interceptor's dispatch on the event.
  */
 export function respondersOf(e) {
   if (!e) return null;
   if (e.neutralizedBy) return e.neutralizedBy;
-  const names = [...new Set((e.counterDispatches || []).map((d) => d?.assetName).filter(Boolean))];
-  return names.length ? names.join(', ') : null;
+  // The dispatch that made the kill, when the record says which. Not every
+  // dispatch on the event: a patrol car or an ambulance sent to the same
+  // case did not neutralise it (verifier, 2026-11-03).
+  const id = e.neutralisedByDispatchId;
+  if (id != null) {
+    const d = (e.counterDispatches || []).find((x) => x && (x.dispatchId === id || x.groupId === id));
+    if (d?.assetName) return d.assetName;
+  }
+  return null;
 }
 
 /**

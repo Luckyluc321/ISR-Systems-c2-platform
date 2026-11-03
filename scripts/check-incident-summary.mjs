@@ -57,10 +57,17 @@ check('the interceptor outcome uses the event\'s site and its own count',
   /engaged the hostile group over \$\{siteName\(event\.siteId\)\}\. \$\{downedCount\} airframe/.test(main) && !/hostile pack over Amager|Four DJI airframes downed/.test(code));
 
 console.log('\n[the responder comes from the record]');
-const swarm = { ...bare, counterDispatches: [{ assetName: 'Rigspolitiet interceptor swarm' }, { assetName: 'Rigspolitiet interceptor swarm' }] };
-check('no named responder, but a dispatch on the event: the dispatched unit is named once',
-  respondersOf(swarm) === 'Rigspolitiet interceptor swarm' && /by Rigspolitiet interceptor swarm/.test(incidentExecSummary(swarm, { siteName })));
-check('a named responder wins over the dispatch list', respondersOf({ ...swarm, neutralizedBy: 'F-35, Skrydstrup' }) === 'F-35, Skrydstrup');
+const killed = { ...bare, neutralisedByDispatchId: 'D-7', counterDispatches: [
+  { dispatchId: 'D-3', assetName: 'Københavns Politi patrol car' },
+  { dispatchId: 'D-7', assetName: 'Rigspolitiet interceptor swarm' },
+  { dispatchId: 'D-9', assetName: 'Hovedstaden ambulance' },
+] };
+check('no named responder: the dispatch the record says made the kill is named, and only that one',
+  respondersOf(killed) === 'Rigspolitiet interceptor swarm' && /by Rigspolitiet interceptor swarm\b/.test(incidentExecSummary(killed, { siteName }))
+  && !/patrol car|ambulance/.test(incidentExecSummary(killed, { siteName })));
+check('a named responder wins over the dispatch', respondersOf({ ...killed, neutralizedBy: 'F-35, Skrydstrup' }) === 'F-35, Skrydstrup');
+check('dispatches on the event but no record of which one killed it: nothing is guessed',
+  respondersOf({ ...bare, counterDispatches: killed.counterDispatches }) === null);
 check('neither: nothing is invented', respondersOf(bare) === null);
 check('the swarm takedown records who did it and when',
   /outcome: overwatchSurvived \? 'partial_neutralisation' : 'neutralized',\s*neutralizedBy: event\.neutralizedBy \|\| d\.assetName \|\| null,\s*neutralizedAt: event\.neutralizedAt \|\| new Date\(\)\.toISOString\(\),/.test(main));

@@ -92,7 +92,7 @@ const ev = { id: 'E5', siteId: 'cph', classification: 'hostile', threat: 'high',
 
 console.log('\n[the wiring]');
 check('a template event starts with initialIdentified(template)', /identified: initialIdentified\(template\),/.test(main));
-check('the clock stamps identified and identifiedAt', /_identClock\.step\(EVENTS, monoNow\(\)[\s\S]{0,200}mutateEvent\(id, \{ identified: true, identifiedAt:/.test(main));
+check('the clock stamps identified and identifiedAt', /_identClock\.step\(EVENTS, monoNow\(\)[\s\S]{0,500}mutateEvent\(id, \{ identified: true, identifiedAt:/.test(main));
 check('the clock does not run while the sim is paused', /setInterval\(\(\) => \{\s*if \(simIsPaused\(\)\) return;\s*const ids = _identClock/.test(main));
 check('auto-rules skip an unidentified track', /export function evaluateAllRules[\s\S]{0,600}if \(event\.identified === false\) return;/.test(rules));
 check("the escalate modal's summary says unidentified while classifying", /isUnidentified\(e\) \? 'Unidentified track, classification in progress,'/.test(main));
@@ -149,6 +149,15 @@ check('the console names no platform and shows no pattern panels while classifyi
   /const subjectLine = isUnidentified\(event\)\s*\? 'Classification in progress'/.test(main)
   && /const _context = isUnidentified\(event\) \? '' : \[/.test(main));
 check('the loop-in toast does not name a classifying track', /Looped into \$\{shownType\(event, 'event'\)\}/.test(main));
+
+check('identification notifies, so the receiver screens actually redraw',
+  /mutateEvent\(id, \{ identified: true, identifiedAt: new Date\(\)\.toISOString\(\) \}, \{ notify: true \}\)/.test(main));
+check('the console rationale waits for identification',
+  /\$\{isUnidentified\(event\) \? 'Response options follow once the track is identified\.' : \(bundle\.tacticalRationale/.test(main));
+const pipeSrc = readFileSync(new URL('../src/classification_pipeline.js', import.meta.url), 'utf8');
+check("the net's verdict, and its reclassification note, wait for the identification moment",
+  /\/\/ ── State machine ──[\s\S]{0,700}if \(event\.identified === false\) return null;/.test(pipeSrc)
+  && pipeSrc.indexOf('if (event.identified === false) return null;') < pipeSrc.indexOf('WEAPON_SIGNATURE_CLASSES.has(subject.class)'));
 
 console.log(failures ? `\n${failures} failing` : '\nall passing');
 process.exit(failures ? 1 : 0);
