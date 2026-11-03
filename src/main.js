@@ -12108,7 +12108,11 @@ async function main() {
   // receivers + camera fly to. The visual ENTRY marker is dropped separately
   // by processPerSiteMarkers to avoid duplicating labels at the same spot.
   const _reacquiredMarkers = new Map();
-  function _fireReacquisition(event, siteId) {
+  // escalate:false keeps the site bookkeeping (the report's "sites
+  // crossed") and the evasion alert, without the automatic message to
+  // every national tier. A single drone takes that form since 2026-11-03;
+  // missiles keep the full path (r-missile-all-tiers covers them anyway).
+  function _fireReacquisition(event, siteId, { escalate = true } = {}) {
     if (event._reacquiredSites && event._reacquiredSites.has(siteId)) return;
     addToEventSet(event.id, '_reacquiredSites', siteId);
     const site = SITES[siteId];
@@ -12117,9 +12121,9 @@ async function main() {
     // Domain-scoped via destinationsForEvent so a track re-acquired at a
     // harbour site still fans out to maritime + ground; re-acquired at an
     // airport stays aviation + ground; substation stays ground-only.
-    const autoDests = destinationsForEvent(event)
-      .filter(d => d.type === 'agency' && d.tier >= 2 && d.tier <= 4)
-      .map(d => d.id);
+    const autoDests = escalate
+      ? destinationsForEvent(event).filter(d => d.type === 'agency' && d.tier >= 2 && d.tier <= 4).map(d => d.id)
+      : [];
     if (autoDests.length) {
       const records = escalateEvent(event.id, {
         destinationIds: autoDests,
@@ -12146,7 +12150,7 @@ async function main() {
       if (delta > 180) delta = 360 - delta;
       if (delta >= 8) {
         setTimeout(() => {
-          toast(`EVASION CONFIRMED · course change ${Math.round(delta)}° captured at ${site ? site.name : siteId}. Missile diverged from its projected path during the sensor gap.`, 'warn');
+          toast(`EVASION CONFIRMED · course change ${Math.round(delta)}° captured at ${site ? site.name : siteId}. ${event.platform === 'missile' ? 'Missile' : 'Track'} diverged from its projected path during the sensor gap.`, 'warn');
         }, 6000);
       }
     }
@@ -14208,6 +14212,22 @@ async function main() {
       if (le && le.siteId === siteId) candidates.push(le);
     }
     return candidates.find(e => e.status === 'active') || null;
+  }
+
+  // How long a single drone's crossed-site case stays open after the
+  // drone was last seen at that site. 30 s, the same "demonstrably left"
+  // grace the first case gets (see the grace notes at the top of the file).
+  const SOLO_SITE_EXIT_GRACE_MS = 30000;
+
+  // Close a single drone's crossed-site cases together with its first
+  // case, when that one ends by leaving all coverage.
+  function _closeSoloSiteCases(primary, outcome) {
+    for (const lid of (primary.linkedEventIds || [])) {
+      const le = getEvent(lid);
+      if (!le || le.status !== 'active') continue;
+      closeEvent(lid, le.exit || null, { autoOutcome: outcome });
+      addNote(lid, `Closed with ${primary.id}: the track left all sensor coverage.`, 'AUTO-CORRELATOR');
+    }
   }
 
   // A single multi-site drone, not a swarm (whose block runs the per-site
@@ -19655,12 +19675,12 @@ async function main() {
           if (
             event._prevInCoverage === false &&
             event._prevCoverageSite !== undefined &&
-            bestSid !== event._prevCoverageSite &&
-            // A single drone now takes the swarm's per-site flow below
-            // (_singleDroneSiteFlow). Missiles keep this path.
-            !_singleDroneSiteFlow(event, state)
+            bestSid !== event._prevCoverageSite
           ) {
-            _fireReacquisition(event, bestSid);
+            // A single drone keeps the bookkeeping and the evasion alert;
+            // its new site gets a case of its own below instead of the
+            // automatic national message (_singleDroneSiteFlow).
+            _fireReacquisition(event, bestSid, { escalate: !_singleDroneSiteFlow(event, state) });
           }
           mutateEvent(event.id, { _prevCoverageSite: bestSid });
         }
@@ -19758,7 +19778,10 @@ async function main() {
               const le = getEvent(lid);
               return le && le.status === 'active';
             });
-          if (inAnyCoverage === false && noChase && !linkedActive) {
+          // A single drone's crossed-site cases (_singleDroneSiteFlow) do
+          // not hold its first case open: it closes on the timing it always
+          // had, and takes them with it below.
+          if (inAnyCoverage === false && noChase && (!linkedActive || _singleDroneSiteFlow(event, state))) {
             // Classify the loss the first tick coverage drops. Result
             // stored on event.temporaryLoss so the detail panel can
             // render the countdown section, and the same graceMs is
@@ -19790,6 +19813,7 @@ async function main() {
               mutateEvent(event.id, { exit: exitPoint });
               if (!_trackContinuesAfterClose(event)) markTrackClosed(p.eventId);
               closeEvent(p.eventId, exitPoint, { autoOutcome: 'left coverage' });
+              if (_singleDroneSiteFlow(event, state)) _closeSoloSiteCases(event, 'left coverage');
               toast(`Sim auto-ended · ${event.droneType || 'track'} left all sensor coverage with no active pursuit.`, 'info');
               updateContributingRings();
               renderAlertStrip();
@@ -21265,22 +21289,37 @@ async function main() {
         _handlePerSiteLifecycle(event, state, currentGroupSites);
       } } catch (err) { console.error('[SWARM tick error]', err); }
 
-      // ONE DRONE, THE SAME SITE FLOW AS A SWARM (Lucas, 2026-11-03: "Just
-      // make the drone swarm flow match into the sole event flow").
+      // ONE DRONE, A CASE AT EVERY SITE IT CROSSES, AS A SWARM HAS (Lucas,
+      // 2026-11-03: "Just make the drone swarm flow match into the sole
+      // event flow").
       //
-      // A swarm's sites are read every tick above: entering a site's
-      // coverage opens that site's own linked case, leaving closes it. A
-      // single drone took an older path instead (_fireReacquisition): the
-      // second site was only noted on the first case and an automatic
-      // message went to every national tier at once. So a Shahed crossing
-      // Amager Koblingsstation never reached Energinet's own ledger, the
-      // report had no linked event, and twelve agencies were told with
-      // nobody pressing anything. Same helper, same rules, one drone.
-      // Missiles keep their own path (r-missile-all-tiers covers them).
+      // A swarm opens a linked case at each site whose coverage it enters.
+      // A single drone only noted the second site on its first case and
+      // sent an automatic message to every national tier, so a Shahed
+      // crossing Amager Koblingsstation never reached Energinet's ledger
+      // and its report had no linked event.
+      //
+      // The FIRST case keeps exactly the lifecycle it had: its own site is
+      // left out here, so detection, the close when the drone has left all
+      // coverage, and a warhead impact ending all behave as before. The
+      // first attempt ran the whole swarm lifecycle and closed the first
+      // case at the airport's edge, which cost Geran-3 and Shahed-238
+      // their impact ending and consequence cascade (verifier, 2026-11-03).
+      //
+      // A crossed site's case closes SOLO_SITE_EXIT_GRACE_MS after the
+      // drone was last seen there, not on the first missed tick: a drone
+      // flickering at a coverage edge would otherwise open a new case on
+      // every return. Sim clock, so a paused scene does not age it.
       try {
         if (_singleDroneSiteFlow(event, state)) {
-          const solo = p?.lat != null ? [{ lat: p.lat, lon: p.lon, alt: typeof p.alt === 'number' ? p.alt : 0 }] : [];
-          _handlePerSiteLifecycle(event, state, _aggregateGroupSites(solo));
+          const now = monoNow();
+          if (!state._soloSiteSeenMs) state._soloSiteSeenMs = {};
+          const seen = state._soloSiteSeenMs;
+          if (p?.lat != null) {
+            for (const sid of _aggregateGroupSites([{ lat: p.lat, lon: p.lon, alt: typeof p.alt === 'number' ? p.alt : 0 }])) seen[sid] = now;
+          }
+          const crossed = new Set(Object.keys(seen).filter(sid => sid !== event.siteId && now - seen[sid] < SOLO_SITE_EXIT_GRACE_MS));
+          _handlePerSiteLifecycle(event, state, crossed);
         }
       } catch (err) { console.error('[single-drone site flow]', err); }
 
@@ -26089,8 +26128,10 @@ async function main() {
       // without having to open the detail panel.
       const respCount = (e.escalations || []).filter(esc => esc.response && esc.response.text).length;
       const respBadge = respCount > 0 ? `<span class="alert-resp" title="${respCount} response${respCount === 1 ? '' : 's'} received">↩ ${respCount}</span>` : '';
-      // "Started now" stood on a case of any age while it was live.
-      const timeStr = relativeTime(e.startTime);
+      // "Started now" stood on a case of any age while it was live, and a
+      // relative "8s ago" froze between renders. A live case shows the
+      // clock time it started; a closed one how long ago.
+      const timeStr = isActive ? `${(e.startTime || '').slice(11, 19)}Z` : relativeTime(e.startTime);
       const rangeLine = isActive && e.lastPosition && e.lastPosition.rangeToPerim != null
         ? `<div class="alert-line"><span>Range</span><b>${e.lastPosition.rangeToPerim} m</b></div>`
         : `<div class="alert-line"><span>Duration</span><b>${formatDuration(e.duration)}</b></div>`;

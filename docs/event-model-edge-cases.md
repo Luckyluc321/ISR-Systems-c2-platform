@@ -50,6 +50,17 @@ Companion: docs/testing/historical-pattern-test-plan.md covers the hands-on test
 
 Drone dips in and out of coverage repeatedly. One event = one full lifecycle (entry → track → loss → re-entry → exit); re-acquisition inside the detection window continues the SAME event (`src/events.js:1-3`, `_fireReacquisition` in main.js). Coverage gaps hide the object on the map (sensors-observe-only rule) but never split the event. History gets exactly one record per flight. Test 5 in the test plan.
 
+**A single drone crossing ANOTHER site (2026-11-03).** The first case still
+holds the whole flight, exactly as above. In addition, each other site whose
+coverage the drone enters gets a linked case of its own, owned by that site's
+operator, as a swarm's crossed sites always did (`_singleDroneSiteFlow` in
+main.js). That case closes 30 s after the drone was last seen at that site
+(`SOLO_SITE_EXIT_GRACE_MS`), so a drone flickering at that site's edge keeps
+one case, and it closes with the first case if that ends first. The automatic
+message to every national tier on re-acquisition is gone for single drones;
+the "sites crossed" record and the evasion alert stay. Missiles are unchanged.
+Gated by `check:single-drone-flow`.
+
 #### How long the grace lasts, and why it branches
 
 `_classifyDetectionLoss` decides this the first tick coverage drops, off the
