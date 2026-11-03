@@ -50,22 +50,43 @@ Companion: docs/testing/historical-pattern-test-plan.md covers the hands-on test
 
 Drone dips in and out of coverage repeatedly. One event = one full lifecycle (entry → track → loss → re-entry → exit); re-acquisition inside the detection window continues the SAME event (`src/events.js:1-3`, `_fireReacquisition` in main.js). Coverage gaps hide the object on the map (sensors-observe-only rule) but never split the event. History gets exactly one record per flight. Test 5 in the test plan.
 
-**A single drone crossing ANOTHER site (2026-11-03).** The first case still
-holds the whole flight, exactly as above. In addition, each other site whose
-coverage the drone enters gets a linked case of its own, owned by that site's
-operator, as a swarm's crossed sites always did (`_singleDroneSiteFlow` in
-main.js). That case closes 30 s after the drone was last seen at that site
-(`SOLO_SITE_EXIT_GRACE_MS`), so a drone flickering at that site's edge keeps
-one case. If the track ends first, the case closes with it, with what that
-site's own sensors saw (`_closeSoloSiteCases`): a drone shot down inside the
-site's coverage closes it as neutralised, as a swarm's site case does; a site
-the drone had already left records that it left. The case carries
-`soloSiteCaseOf`, and the unobserved-case sweeper leaves it alone while the
-drone flies: its swarm rule read a single drone, which has no swarm members,
-as "every airframe down" and closed the case as neutralised 15 s after the
-drone left. The automatic message to every national tier on re-acquisition
-is gone for single drones; the "sites crossed" record and the evasion alert
-stay. Missiles are unchanged. Gated by `check:single-drone-flow`.
+**A single drone crossing several sites (2026-11-03).** A single drone runs
+the swarm's per-site flow (`_singleDroneSiteFlow` in main.js). The swarm
+block hands `_handlePerSiteLifecycle` the sites whose sensors see its drones
+on each tick; a single drone hands it the sites whose sensors see it. One
+case per site, opened on entry and closed on exit, the first site included,
+exactly as for a swarm. So the airport's case ends when the airport's
+sensors lose the drone, Amager gets its own case owned by Energinet, and a
+return to a site whose case has closed opens a new related case. Across one
+site's coverage, a gap inside the detection window still continues the same
+case, as above. The first site joins once the drone has been detected, so
+detection keeps its own moment.
+
+The swarm's own code is unchanged. What is single-drone only:
+
+- Nothing the tick works out is written to a single drone's first case
+  after it has closed (`_soloCaseClosed`): its end time, exit, duration,
+  last known position, confidence and projected path stay what its own
+  site saw. The track's countdown to its end is kept on the track.
+- The unobserved-case sweeper leaves a single drone's site case
+  (`soloSiteCaseOf`) alone while the drone flies. Its swarm rule read a
+  single drone, which has no swarm members, as "every airframe down".
+  When the track has ended, the case closes with what its own site saw
+  (`_closeSoloSiteCases`): shot down inside its coverage reads as
+  neutralised, as a swarm's site case does.
+- The automatic message to every national tier on re-acquisition is gone;
+  the "sites crossed" record and the evasion alert stay.
+
+An impact is recorded only on a case still open when the route ends. With
+the airport's case closed at the airport's edge, a Geran-3 or Shahed-238
+striking Amalienborg, where no sensor stands, records no impact and sends
+no consequence cascade.
+
+Known limits, shared with swarms and left in the swarm's flow as it is: a
+drone skimming a coverage edge opens a new case on each return, and a route
+that ends inside a second site's coverage leaves that site's case open
+until the scenario is cancelled. Missiles are unchanged. Gated by
+`check:single-drone-flow`.
 
 #### How long the grace lasts, and why it branches
 
