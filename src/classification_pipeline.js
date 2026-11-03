@@ -120,13 +120,12 @@ export function evaluateClassificationPipeline(event, ctx = {}) {
 
   // ── State machine ──
 
-  // The net's verdict waits for the identification moment
-  // (identification_gate.js). A transition writes a reclassification
-  // note naming the platform, and before this it could land in the audit
-  // trail while every screen still read "Unidentified track". Confidence
-  // keeps ramping above; the verdict lands on the first evaluation after
-  // the track is identified.
-  if (event.identified === false) return null;
+  // The verdict runs on time, classifying or not. Holding it back until
+  // identification left a track at its precautionary hostile/high at the
+  // identification moment, the rules fired on that, and the DJI Mini 3
+  // hobbyist case auto-escalated to seven airport recipients that main
+  // never sends to (verifier, 2026-11-03). Only the reclassification
+  // NOTE waits, in events.js reclassifyEvent.
 
 
   // Weapon-class classes never downgrade regardless of confidence.

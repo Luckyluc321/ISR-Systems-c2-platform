@@ -181,6 +181,7 @@ import {
 import { recommendationFor, preselectedDestinationIds } from './escalation_recommendation.js';
 import { createIdentificationClock, initialIdentified, isUnidentified, shownType, shownClass, shownClassLabel } from './identification_gate.js';
 import { canOpenView } from './view_access.js';
+import { releaseDeferredNotes } from './events.js';
 import { signatureFor, displayNameFor } from './actor_signature.js';
 import { applyAutoDestinations } from './auto_destinations.js';
 import { incidentExecSummary, respondersOf } from './incident_summary.js';
@@ -29711,7 +29712,12 @@ async function main() {
     const ids = _identClock.step(EVENTS, monoNow(), id => droneState.get(id)?._firstDetectedMs ?? null);
     // notify: the receiver's inbox, console and case file only redraw on a
     // notify, and their signatures carry the flag (verifier, 2026-11-03).
-    for (const id of ids) mutateEvent(id, { identified: true, identifiedAt: new Date().toISOString() }, { notify: true });
+    for (const id of ids) {
+      // Notes held while classifying join the audit trail in the same
+      // redraw that names the track (events.js releaseDeferredNotes).
+      releaseDeferredNotes(id);
+      mutateEvent(id, { identified: true, identifiedAt: new Date().toISOString() }, { notify: true });
+    }
   }, 250);
   const _assessAsked = new Set();   // events whose auto-escalation was assessed
   const _detectionLineTransport = {

@@ -155,9 +155,15 @@ check('identification notifies, so the receiver screens actually redraw',
 check('the console rationale waits for identification',
   /\$\{isUnidentified\(event\) \? 'Response options follow once the track is identified\.' : \(bundle\.tacticalRationale/.test(main));
 const pipeSrc = readFileSync(new URL('../src/classification_pipeline.js', import.meta.url), 'utf8');
-check("the net's verdict, and its reclassification note, wait for the identification moment",
-  /\/\/ ── State machine ──[\s\S]{0,700}if \(event\.identified === false\) return null;/.test(pipeSrc)
-  && pipeSrc.indexOf('if (event.identified === false) return null;') < pipeSrc.indexOf('WEAPON_SIGNATURE_CLASSES.has(subject.class)'));
+const evSrc = readFileSync(new URL('../src/events.js', import.meta.url), 'utf8');
+check("the classifier's verdict runs on time, so the rules see the current class at identification",
+  !/if \(event\.identified === false\) return null;/.test(pipeSrc));
+check('a reclassification while classifying holds its note, and changes the class at once',
+  /if \(e\.identified === false\) \(e\.deferredNotes \|\| \(e\.deferredNotes = \[\]\)\)\.push\(note\);\s*else e\.notes\.push\(note\);/.test(evSrc)
+  && evSrc.indexOf('e.classification = classification;') < evSrc.indexOf('if (e.identified === false) (e.deferredNotes'));
+check('held notes join the audit trail at identification, before the redraw, and at close',
+  /releaseDeferredNotes\(id\);\s*mutateEvent\(id, \{ identified: true, identifiedAt: new Date\(\)\.toISOString\(\) \}, \{ notify: true \}\);/.test(main)
+  && /export function closeEvent\([^)]*\) \{[\s\S]{0,200}releaseDeferredNotes\(id\);/.test(evSrc));
 
 console.log(failures ? `\n${failures} failing` : '\nall passing');
 process.exit(failures ? 1 : 0);

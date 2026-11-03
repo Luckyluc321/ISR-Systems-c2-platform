@@ -355,6 +355,8 @@ export function ingestNnDetection(eventId, nnTick) {
 // precedent index and read as "outcome unrecorded" in the historical
 // pattern panel when the outcome was in fact known.
 export function closeEvent(id, exitPoint, { autoOutcome = null } = {}) {
+  // A held reclassification note is part of the record (releaseDeferredNotes).
+  releaseDeferredNotes(id);
   const e = EVENTS.find(x => x.id === id);
   if (!e) return;
   e.status = 'closed';
@@ -957,16 +959,33 @@ export function reclassifyEvent(id, { classification, threat = null, reason = ''
   // tombstones; live events are rejected by its closed-only gate.
   if (e.status === 'closed') _resyncPrecedent(e);
   if (from) {
-    e.notes.push({
+    const note = {
       // The moment it happened and who did it. Both were fixed values
       // until 2026-11-02 (a 24 July timestamp and "L. Flindt").
       timestamp: new Date().toISOString(),
       author,
       text: `Reclassified from ${from}${reason ? '. Reason: ' + reason : ''}`,
       type: 'reclassification',
-    });
+    };
+    // While the track is classifying the note would name the platform and
+    // the class in the audit trail, ahead of every screen that still reads
+    // "Unidentified track". It is held, with its true timestamp, and
+    // released at identification (or at close). The classification itself
+    // changes now, so the rules see the current value at identification.
+    if (e.identified === false) (e.deferredNotes || (e.deferredNotes = [])).push(note);
+    else e.notes.push(note);
   }
   _notify(id);
+}
+
+/** Move notes held while classifying into the audit trail. Returns how many. */
+export function releaseDeferredNotes(id) {
+  const e = EVENTS.find(x => x.id === id);
+  if (!e || !Array.isArray(e.deferredNotes) || !e.deferredNotes.length) return 0;
+  const n = e.deferredNotes.length;
+  e.notes.push(...e.deferredNotes);
+  e.deferredNotes = [];
+  return n;
 }
 
 // ── Selection state ──
