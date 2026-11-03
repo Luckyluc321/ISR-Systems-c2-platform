@@ -32,7 +32,7 @@ check('says nothing about a missile, Kassø, Copenhagen or a fighter', !/missile
 check('a course change under the threshold is not reported as evasion', !/Course changed/.test(s1));
 
 console.log('\n[facts it does not have are left out]');
-const bare = { siteId: 'cph', droneType: 'DJI Mavic 3', classification: 'hostile', startTime: '2026-11-02T10:00:00.000Z' };
+const bare = { siteId: 'cph', droneType: 'DJI Mavic 3', classification: 'hostile', startTime: '2026-11-02T10:00:00.000Z', outcome: 'neutralized' };
 const s2 = incidentExecSummary(bare, { siteName });
 check('no recorded responder is said as such, never filled with one', /responder the record does not name/.test(s2) && !/fighter|Flyvevåbnet/i.test(s2), s2);
 check('no position, no position clause', !/position/.test(s2), s2);
@@ -74,8 +74,17 @@ check('the swarm takedown records who did it and when',
 check('no "Fighter Response" fallback anywhere a responder is shown',
   !/\|\| 'Fighter Response'/.test(main) && !/\|\| 'Flyvevåbnet Fighter Response'/.test(main));
 check('every responder cell and sentence reads respondersOf', (main.match(/respondersOf\((e|event)\)/g) || []).length >= 5);
-check('the PDF header does not default to HIGH or HOSTILE',
-  /\(e\.threat \|\| 'UNASSESSED'\)\.toUpperCase\(\)/.test(main) && !/\(e\.threat \|\| 'HIGH'\)/.test(main) && !/\(e\.classification \|\| 'HOSTILE'\)/.test(main));
+const reportDoc = readFileSync(new URL('../src/incident_report_document.js', import.meta.url), 'utf8');
+check('the PDF header does not default to HIGH or HOSTILE (it lives in incident_report_document.js now)',
+  /String\(m\.classification \|\| 'unclassified'\)/.test(reportDoc) && /String\(m\.threat \|\| 'unassessed'\)/.test(reportDoc)
+  && !/\(e\.threat \|\| 'HIGH'\)/.test(main) && !/\(e\.classification \|\| 'HOSTILE'\)/.test(main));
+
+console.log('\n[only a neutralised incident says it was neutralised]');
+const monitored = { siteId: 'esbjerg', droneType: 'DJI Mavic 3 Pro', classification: 'hostile', status: 'closed', outcome: 'monitored',
+  startTime: '2026-07-23T22:14:07.000Z', endTime: '2026-07-23T22:15:37.000Z' };
+const sm = incidentExecSummary(monitored, { siteName });
+check('a monitored incident is not called neutralised, and says how it closed', !/Neutralised/.test(sm) && /Closed at 22:15:37Z, outcome monitored\./.test(sm), sm);
+check('a live one says so', /Still active/.test(incidentExecSummary({ ...monitored, status: 'active', endTime: null, outcome: null }, { siteName })));
 
 console.log(failures ? `\n${failures} failing` : '\nall passing');
 process.exit(failures ? 1 : 0);

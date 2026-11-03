@@ -121,7 +121,14 @@ const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 check('a loop offers active, detected events to the agent', /maybeRequestDetectionLine\(ev, \{/.test(main) && /ev\.detected === false\) continue/.test(main));
 check('the loop sits out a paused sim', /setInterval\(\(\) => \{\n\s*if \(simIsPaused\(\)\) return;\n\s*\/\/ Parked \(key rejected\)/.test(main));
 check('the line is written through the event mutator', /write: \(id, line\) => mutateEvent\(id, \{ detectionLine: line \}\)/.test(main));
-check('panel HTML escapes the model line', (main.match(/escapeHtml\(detectionLineSuffix\(e\)\)/g) || []).length === 2);
+// The detail panel escapes the model line in main.js. The downloadable
+// report (since 2026-11-03) hands it to incident_report_document.js, which
+// escapes every value it draws; escaping it here as well would double it.
+const _reportDoc = readFileSync(new URL('../src/incident_report_document.js', import.meta.url), 'utf8');
+check('panel HTML escapes the model line, and the report draws it through an escaping renderer',
+  (main.match(/escapeHtml\(detectionLineSuffix\(e\)\)/g) || []).length === 1
+  && /confidence: typeof e\.confidence === 'number' \? `\$\{e\.confidence\.toFixed\(2\)\}\$\{detectionLineSuffix\(e\)\}`/.test(main)
+  && /\$\{kv\('Confidence', m\.confidence\)\}/.test(_reportDoc) && /replace\(\/</.test(_reportDoc));
 check('only active events are offered', /if \(!ev \|\| ev\.status !== 'active' \|\| ev\.detected === false\) continue;/.test(main));
 check('one detection-line loop, and it is the paused-sim-guarded one', (main.match(/maybeRequestDetectionLine\(/g) || []).length === 1);
 check('the live patch writes text, not HTML', /setTxt = \(sel, val\) => \{ const el = section\.querySelector\(sel\); if \(el\) el\.textContent = val; \}/.test(main));
