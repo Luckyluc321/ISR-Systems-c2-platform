@@ -12951,6 +12951,24 @@ async function main() {
       if (ev.detected !== true) continue;             // pre-detection transits are not ours to kill
       if (ev.awaitingNeutralization) continue;
       if (droneState.has(ev.id)) continue;            // owns a live track; its own tick governs it
+      // A single drone's crossed-site case belongs to that drone's site
+      // flow while its track flies: it closes 30 s after the drone left
+      // the site, or with the first case. Read with the swarm rule below,
+      // it closed 15 s after the drone left, as "neutralized", because a
+      // single drone has no swarm members (verifier, 2026-11-03). Once
+      // the track has ended, shot down for one, it closes now with what
+      // this site's own sensors saw.
+      if (ev.soloSiteCaseOf) {
+        if (isTrackLive(ev.soloSiteCaseOf)) continue;
+        const _own = getEvent(ev.soloSiteCaseOf);
+        if (_own) {
+          _closeSoloSiteCases(_own, _own.outcome === 'neutralized'
+            ? { endedAt: _own.exit || _own.lastPosition, outcome: 'neutralized' }
+            : { endedAt: _own.lastPosition, outcome: 'lost contact' });
+          renderAlertStrip();
+          continue;
+        }
+      }
       const lastObs = ev._lastDetectionTs || ev.spawnTs || Date.parse(ev.startTime || 0) || 0;
       if (now - lastObs < _SWEEP_GRACE_MS) continue;
       let chased = false;
@@ -14219,14 +14237,22 @@ async function main() {
   // grace the first case gets (see the grace notes at the top of the file).
   const SOLO_SITE_EXIT_GRACE_MS = 30000;
 
-  // Close a single drone's crossed-site cases together with its first
-  // case, when that one ends by leaving all coverage.
-  function _closeSoloSiteCases(primary, outcome) {
+  // End a single drone's crossed-site cases when its track ends, each
+  // with what that site's own sensors saw, as a swarm's site cases do:
+  // the drone ended inside the site's coverage (endedAt, closed with
+  // `outcome`), or it had already left. Only the cases this drone's site
+  // flow opened, never another case the correlator linked to it.
+  function _closeSoloSiteCases(primary, { endedAt = null, outcome = null } = {}) {
+    const endSites = (endedAt?.lat != null && outcome) ? _aggregateGroupSites([endedAt]) : new Set();
     for (const lid of (primary.linkedEventIds || [])) {
       const le = getEvent(lid);
-      if (!le || le.status !== 'active') continue;
-      closeEvent(lid, le.exit || null, { autoOutcome: outcome });
-      addNote(lid, `Closed with ${primary.id}: the track left all sensor coverage.`, 'AUTO-CORRELATOR');
+      if (!le || le.status !== 'active' || le.soloSiteCaseOf !== primary.id) continue;
+      const name = SITES[le.siteId]?.name || le.siteId;
+      const endedHere = endSites.has(le.siteId);
+      closeEvent(lid, le.exit || null, { autoOutcome: endedHere ? outcome : 'left coverage' });
+      addNote(lid, !endedHere ? `The track left ${name} sensor coverage. Event closed.`
+        : outcome === 'neutralized' ? `The tracked airframe at ${name} is down. Event closed.`
+        : `Contact lost inside ${name} sensor coverage. Event closed.`, 'AUTO-CORRELATOR');
     }
   }
 
@@ -14333,6 +14359,10 @@ async function main() {
       }],
       templateKey: null,
       multiSiteTrack: true,
+      // Set only when a single drone's site flow opened this case
+      // (_singleDroneSiteFlow): that flow closes it, never the swarm rule
+      // in the unobserved-case sweeper (2026-11-03).
+      soloSiteCaseOf: _singleDroneSiteFlow(primary, droneState.get(primary.id)) ? primary.id : null,
       // MUST travel with multiSiteTrack. The coverage check reads
       // coverageGatedTrack, and it is otherwise set in exactly one
       // place: the template event constructor. An event built
@@ -19813,7 +19843,7 @@ async function main() {
               mutateEvent(event.id, { exit: exitPoint });
               if (!_trackContinuesAfterClose(event)) markTrackClosed(p.eventId);
               closeEvent(p.eventId, exitPoint, { autoOutcome: 'left coverage' });
-              if (_singleDroneSiteFlow(event, state)) _closeSoloSiteCases(event, 'left coverage');
+              if (_singleDroneSiteFlow(event, state)) _closeSoloSiteCases(event);
               toast(`Sim auto-ended · ${event.droneType || 'track'} left all sensor coverage with no active pursuit.`, 'info');
               updateContributingRings();
               renderAlertStrip();
@@ -21526,6 +21556,10 @@ async function main() {
           _perEventMarkers.get(event.id).push(_impactEnt);
         }
         closeEvent(p.eventId, event.exit || null, { autoOutcome: _didImpact ? 'target impact' : 'left coverage' });
+        // A single drone's crossed-site cases first, each with what its
+        // own site saw: one the drone had already left records that it
+        // left, not that contact was lost there.
+        if (_singleDroneSiteFlow(event, state)) _closeSoloSiteCases(event, { endedAt: p, outcome: 'lost contact' });
         // Also close any linked/secondary events (e.g. swarm's shadow
         // event at AMK) so they don't linger as active in the inbox.
         const linkedIds = event.linkedEventIds || [];

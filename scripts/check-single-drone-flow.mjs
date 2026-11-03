@@ -37,7 +37,7 @@ check('a crossed site closes 30 s after the drone was last seen there, on the si
 console.log('\n[the first case is as before]');
 check("its close is not held open by its crossed-site cases, and takes them with it",
   /\(!linkedActive \|\| _singleDroneSiteFlow\(event, state\)\)/.test(main)
-  && /closeEvent\(p\.eventId, exitPoint, \{ autoOutcome: 'left coverage' \}\);\s*if \(_singleDroneSiteFlow\(event, state\)\) _closeSoloSiteCases\(event, 'left coverage'\);/.test(main));
+  && /closeEvent\(p\.eventId, exitPoint, \{ autoOutcome: 'left coverage' \}\);\s*if \(_singleDroneSiteFlow\(event, state\)\) _closeSoloSiteCases\(event\);/.test(main));
 check('the reacquisition bookkeeping and evasion alert stay; only the automatic national message goes',
   /_fireReacquisition\(event, bestSid, \{ escalate: !_singleDroneSiteFlow\(event, state\) \}\);/.test(main)
   && /function _fireReacquisition\(event, siteId, \{ escalate = true \} = \{\}\)/.test(main)
@@ -45,6 +45,23 @@ check('the reacquisition bookkeeping and evasion alert stay; only the automatic 
 check('the evasion alert calls a drone a track', /\$\{event\.platform === 'missile' \? 'Missile' : 'Track'\} diverged from its projected path/.test(main));
 check('notes call one drone a "track", a swarm a "threat group"',
   /\? 'Threat group' : 'Track'\} re-acquired at/.test(main) && /The track left \$\{SITES\[sid\]\?\.name \|\| sid\} sensor coverage\. Event closed\./.test(main));
+
+console.log('\n[nothing else closes them early or wrongly]');
+check("a case records it was opened by a single drone's site flow, never a swarm's",
+  /soloSiteCaseOf: _singleDroneSiteFlow\(primary, droneState\.get\(primary\.id\)\) \? primary\.id : null,/.test(main));
+check("the unobserved-case sweeper leaves it alone while the drone flies (it read as 'neutralized' 15 s after the drone left)",
+  /if \(ev\.soloSiteCaseOf\) \{\s*if \(isTrackLive\(ev\.soloSiteCaseOf\)\) continue;/.test(main)
+  && main.indexOf('if (ev.soloSiteCaseOf) {') < main.indexOf('if (now - lastObs < _SWEEP_GRACE_MS) continue;'));
+check('once the track has ended (shot down), it closes at once with what its site saw',
+  /_closeSoloSiteCases\(_own, _own\.outcome === 'neutralized'\s*\? \{ endedAt: _own\.exit \|\| _own\.lastPosition, outcome: 'neutralized' \}\s*: \{ endedAt: _own\.lastPosition, outcome: 'lost contact' \}\);/.test(main));
+check('closing touches only the cases this drone opened', /le\.soloSiteCaseOf !== primary\.id\) continue;/.test(main));
+check('down inside the site reads as down, as a swarm site does; a site it had left records that it left',
+  /autoOutcome: endedHere \? outcome : 'left coverage'/.test(main)
+  && /The tracked airframe at \$\{name\} is down\. Event closed\./.test(main)
+  && /The track left \$\{name\} sensor coverage\. Event closed\./.test(main));
+check('at the end of its route, before the generic linked-case close',
+  /if \(_singleDroneSiteFlow\(event, state\)\) _closeSoloSiteCases\(event, \{ endedAt: p, outcome: 'lost contact' \}\);\s*\/\/ Also close any linked\/secondary events/.test(main));
+check('no case is closed as "target impact" here, so no second consequence cascade', !/_closeSoloSiteCases\([^)]*target impact/.test(main));
 
 console.log('\n[the display]');
 check('LAST is the last detection, not the first', /const last = \(e\.endTime \|\| e\.lastKnownPosition\?\.timestamp \|\| e\.startTime\)\.slice\(11, 19\) \+ 'Z';/.test(main));
