@@ -69,11 +69,23 @@ export function incidentExecSummary(e, opts = {}) {
   const ev = Number(opts.evasionDeg) || 0;
   if (ev > EVASION_MIN_DEG) parts.push(`Course changed by ${Math.round(ev)}° during the track.`);
 
-  const who = respondersOf(e);
-  const by = who ? `by ${who}` : 'by a responder the record does not name';
-  const when = _t(e.neutralizedAt);
-  const where = opts.position ? `, position ${opts.position}${opts.positionSite ? ` (${opts.positionSite})` : ''}` : '';
-  parts.push(`Neutralised ${by}${when ? ` at ${when}` : ''}${where}.`);
+  // Only a neutralised incident says it was neutralised. The sentence was
+  // written for the post-incident section, which only exists for those,
+  // and the downloadable report also covers incidents that were not
+  // (verifier sample, 2026-11-03: a monitored Esbjerg drone read
+  // "Neutralised by a responder the record does not name").
+  if (e.outcome === 'neutralized' || e.neutralizedAt) {
+    const who = respondersOf(e);
+    const by = who ? `by ${who}` : 'by a responder the record does not name';
+    const when = _t(e.neutralizedAt);
+    const where = opts.position ? `, position ${opts.position}${opts.positionSite ? ` (${opts.positionSite})` : ''}` : '';
+    parts.push(`Neutralised ${by}${when ? ` at ${when}` : ''}${where}.`);
+  } else if (e.status === 'closed') {
+    const closedAt = _t(e.endTime);
+    parts.push(`Closed${closedAt ? ` at ${closedAt}` : ''}, outcome ${String(e.outcome || 'monitored').replace(/-/g, ' ')}.`);
+  } else {
+    parts.push('Still active when this was written.');
+  }
 
   return parts.join(' ');
 }
