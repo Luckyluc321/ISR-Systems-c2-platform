@@ -50,7 +50,8 @@
     "check:signatures": "node scripts/check-signatures.mjs",
     "check:national-reach": "node scripts/check-national-reach.mjs",
     "check:incident-summary": "node scripts/check-incident-summary.mjs",
-    "check:mission-console": "node scripts/check-mission-console.mjs"
+    "check:mission-console": "node scripts/check-mission-console.mjs",
+    "check:single-drone-flow": "node scripts/check-single-drone-flow.mjs"
   },
   "devDependencies": {
     "vite": "^8.1.1"

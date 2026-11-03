@@ -14210,6 +14210,14 @@ async function main() {
     return candidates.find(e => e.status === 'active') || null;
   }
 
+  // A single multi-site drone, not a swarm (whose block runs the per-site
+  // flow itself) and not a missile (which keeps the reacquisition path).
+  function _singleDroneSiteFlow(event, state) {
+    return !!event?.multiSiteTrack
+      && !(state?.swarmBillboards && state.swarmBillboards.length > 0)
+      && event.platform !== 'missile';
+  }
+
   function _handlePerSiteLifecycle(primaryEvent, state, currentSites) {
     if (!primaryEvent.multiSiteTrack) return; // single-site path already handled elsewhere
     const prev = state._prevSitesInCov || new Set();
@@ -14253,7 +14261,9 @@ async function main() {
         // and skip the persistence hook — an event that closed on site
         // exit stayed missing its own trajectory recording forever.
         closeEvent(ev.id, ev.exit || null, { autoOutcome: 'left coverage' });
-        addNote(ev.id, `All tracked drones exited ${SITES[sid]?.name || sid} sensor coverage. Event closed.`, 'AUTO-CORRELATOR');
+        addNote(ev.id, (primaryEvent.droneCount || 1) > 1
+          ? `All tracked drones exited ${SITES[sid]?.name || sid} sensor coverage. Event closed.`
+          : `The track left ${SITES[sid]?.name || sid} sensor coverage. Event closed.`, 'AUTO-CORRELATOR');
         // Cross-cued events (e.g. AMK when the CPH primary is still
         // running) have no own tick loop, so their recording is a
         // slice of the primary's stream. Extract + persist that slice
@@ -14299,7 +14309,7 @@ async function main() {
       notes: [{
         timestamp: new Date().toISOString(),
         author: 'System · Site-lifecycle',
-        text: `Threat group re-acquired at ${SITES[siteId]?.name || siteId}. Cross-cued from ${primary.id}.`,
+        text: `${(primary.droneCount || 1) > 1 ? 'Threat group' : 'Track'} re-acquired at ${SITES[siteId]?.name || siteId}. Cross-cued from ${primary.id}.`,
       }],
       templateKey: null,
       multiSiteTrack: true,
@@ -19645,7 +19655,10 @@ async function main() {
           if (
             event._prevInCoverage === false &&
             event._prevCoverageSite !== undefined &&
-            bestSid !== event._prevCoverageSite
+            bestSid !== event._prevCoverageSite &&
+            // A single drone now takes the swarm's per-site flow below
+            // (_singleDroneSiteFlow). Missiles keep this path.
+            !_singleDroneSiteFlow(event, state)
           ) {
             _fireReacquisition(event, bestSid);
           }
@@ -21251,6 +21264,25 @@ async function main() {
         const currentGroupSites = _aggregateGroupSites(groupPositions);
         _handlePerSiteLifecycle(event, state, currentGroupSites);
       } } catch (err) { console.error('[SWARM tick error]', err); }
+
+      // ONE DRONE, THE SAME SITE FLOW AS A SWARM (Lucas, 2026-11-03: "Just
+      // make the drone swarm flow match into the sole event flow").
+      //
+      // A swarm's sites are read every tick above: entering a site's
+      // coverage opens that site's own linked case, leaving closes it. A
+      // single drone took an older path instead (_fireReacquisition): the
+      // second site was only noted on the first case and an automatic
+      // message went to every national tier at once. So a Shahed crossing
+      // Amager Koblingsstation never reached Energinet's own ledger, the
+      // report had no linked event, and twelve agencies were told with
+      // nobody pressing anything. Same helper, same rules, one drone.
+      // Missiles keep their own path (r-missile-all-tiers covers them).
+      try {
+        if (_singleDroneSiteFlow(event, state)) {
+          const solo = p?.lat != null ? [{ lat: p.lat, lon: p.lon, alt: typeof p.alt === 'number' ? p.alt : 0 }] : [];
+          _handlePerSiteLifecycle(event, state, _aggregateGroupSites(solo));
+        }
+      } catch (err) { console.error('[single-drone site flow]', err); }
 
       // ── Classification pipeline evaluation ──
       // Runs per tick. No-op for events that don't opt in via the
@@ -26057,7 +26089,8 @@ async function main() {
       // without having to open the detail panel.
       const respCount = (e.escalations || []).filter(esc => esc.response && esc.response.text).length;
       const respBadge = respCount > 0 ? `<span class="alert-resp" title="${respCount} response${respCount === 1 ? '' : 's'} received">↩ ${respCount}</span>` : '';
-      const timeStr = isActive ? 'now' : relativeTime(e.startTime);
+      // "Started now" stood on a case of any age while it was live.
+      const timeStr = relativeTime(e.startTime);
       const rangeLine = isActive && e.lastPosition && e.lastPosition.rangeToPerim != null
         ? `<div class="alert-line"><span>Range</span><b>${e.lastPosition.rangeToPerim} m</b></div>`
         : `<div class="alert-line"><span>Duration</span><b>${formatDuration(e.duration)}</b></div>`;
@@ -26970,7 +27003,10 @@ async function main() {
     // a fresh render.
     _lastClosedPanelSig = null;
     const first = e.startTime.slice(11, 19) + 'Z';
-    const last = (e.endTime || e.startTime).slice(11, 19) + 'Z';
+    // The last detection, not the first: while live this showed the start
+    // time for the whole track. lastKnownPosition is stamped every tick a
+    // sensor sees it.
+    const last = (e.endTime || e.lastKnownPosition?.timestamp || e.startTime).slice(11, 19) + 'Z';
     const dur = formatDuration(e.duration);
 
     // Swarm focused-drone override — computed EARLY so the telemetry section
