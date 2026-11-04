@@ -190,8 +190,20 @@ Phase 3 filtered `getEvent()` for the screens, and was verified under admin only
 
 The fix keeps the filter for the screens and gives the engine its own read, `getEventForEngine()`. An independent overseer sorted all 141 filtered reads into engine and screen blind before the change; `check:engine-reads` holds the agreed sort. Three things came with it, because the filter had been hiding them by accident:
 
-- **What the engine shows is gated per case.** Its toasts, explosion flashes, fall animations, pins, outcome marks, projected paths, cordons, response units and the fighter go only to an account that may see that case (`_viewerSeesCase`). Receivers see a drone only for a case they are on. Nothing is shown to anyone that was not shown before.
+- **What the engine shows is gated per case.** Its toasts, explosion flashes, tracer fire, fall animations, pins, outcome marks, projected paths, cordons, response units, the fighter and its missile go only to an account that may see that case. The rules are pure functions in `src/operator_map_scope.js` (`caseVisibleTo`, `siteVisibleTo`, `followsTrack`), run by `check:engine-reads` for admin, an operator, a receiver on a case, a receiver on none and an unknown account. Admin sees what it saw before. Operators and receivers see less: only what concerns cases they may see. A receiver sees a drone only for a case it is on, or another case of the same track.
 - **Automatic cascades record the system as sender.** The impact and cordon cascades used to stamp whoever was signed in into the case's audit trail.
 - **`unionLinkedEventDomains` has no account gate.** By Lucas's decision a case takes the domains of every case linked to it, whoever is signed in: it describes where the threat went and decides which agencies are alerted. The row for it in the table above is superseded.
 
-Also: a recording download or replay for a case the account cannot see now gets nothing, where it used to get the raw data.
+Also: a recording download or replay for a case the account cannot see now gets nothing, where it used to get the raw data. Admin still gets a case from an earlier session that is no longer in memory.
+
+### Round 2, same day: the overseer's review
+
+An independent overseer reviewed the change and found one high and four medium issues. All are fixed:
+
+- **The chase reads what the sensors see.** The interceptor's pursuit decisions (target reacquired, lost on every site, resume intercept) read the drone's drawn flag. Since the operator map fix earlier the same day that flag is fenced per viewer, so with an operator or receiver signed in a unit could break off a chase that only another site's sensors held. This was on main. Each chase target now carries `_sensorShown`, the same flag without the fence, kept in step at every place a drone is shown or hidden, and the dispatch engine reads only that. Verified by code equivalence and by `check:engine-reads`, not by a live chase: the platform has no hook to dispatch a unit from a test.
+- **The fighter belongs to the case it was scrambled for.** In cruise it has no target yet, so the per-case check skipped it and every account saw the jet and its trail.
+- **Response-unit status toasts** (arrival, pursuit, fuel, coverage edge, return, miss, visual verify, response complete), the live sensor's DETECTED toast and case selection, the SLA overdue toast and the cordon toast go only to an account that may see the case. Some were leaks before fix 3; the rest would have become leaks once the engine read every case.
+- **Jam-down marks** are hidden from accounts that may not see their case and stay on the map after the case closes, as before. They are deliberately kept out of `_perEventMarkers`, which removes a closed case's pins.
+- **`check:engine-reads` runs in `npm run build` and in CI.** It locates code by a brace scan rather than by indentation, which two mis-indented helpers in the response-unit tick had fooled, and it was shown to catch eleven deliberate breakages.
+
+Open, for Lucas: cooperative airliners (public ADS-B) are drawn live for every account. Before fix 3 they froze for accounts that could not see their case, because the engine stopped updating them. Fencing them like any other track, or keeping public traffic visible to all, is a product decision.

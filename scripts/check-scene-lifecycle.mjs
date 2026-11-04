@@ -233,7 +233,9 @@ const WIRING = [
    'an unpinned responder would chase the flying drone every tick'],
 
   ['spared the interceptor RTB toast',
-   /if \(!leavesSceneUnassisted\(d\.profile\)\) \{\s*\n\s*toast\(`\$\{d\.assetName\} back at base\./,
+   // The toast may carry the viewer gate (fix 3, 2026-11-04); it must
+   // still sit inside the not-for-ambulances block.
+   /if \(!leavesSceneUnassisted\(d\.profile\)\) \{\s*\n\s*(?:if \(_viewerSeesCase\(getEventForEngine\(d\.eventId\)\)\) )?toast\(`\$\{d\.assetName\} back at base\./,
    '"Target signal not reacquired" is meaningless for an ambulance'],
 ];
 for (const [name, re, why] of WIRING) {

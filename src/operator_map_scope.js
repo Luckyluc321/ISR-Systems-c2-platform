@@ -79,3 +79,42 @@ export function siteOfPinLabel(label, sites) {
   }
   return UNKNOWN_SITE;
 }
+
+/** Admin, or no account yet (boot): nothing is fenced. */
+export function isUnfenced(actor) {
+  return !actor || !!actor.isAdminBypass || actor.kind === 'admin';
+}
+
+/**
+ * Whether an account may be shown something about a case (fix 3,
+ * 2026-11-04). Admin always. An operator: the cases of its own company.
+ * A receiver: a case it is on, or any case of the same track once it is
+ * on one of them, because the response layer follows the threat.
+ * deps: { lookup(id) -> case, visibleToActor(case, actor) -> boolean }.
+ */
+export function caseVisibleTo(actor, ev, deps) {
+  if (isUnfenced(actor)) return true;
+  if (!ev) return false;
+  if (deps.visibleToActor(ev, actor)) return true;
+  if (actor.kind !== 'receiver') return false;
+  const chain = [ev.linkedEventId, ev.shadowOfEventId, ...(ev.linkedEventIds || [])];
+  return chain.some((id) => id && deps.visibleToActor(deps.lookup(id), actor));
+}
+
+/**
+ * A site-specific message or pin: an operator by its own sites, a
+ * receiver by the case, admin always. deps adds roleCanSeeSite(siteId).
+ */
+export function siteVisibleTo(actor, ev, siteId, deps) {
+  if (isUnfenced(actor)) return true;
+  if (actor.kind === 'operator') return deps.roleCanSeeSite(siteId);
+  return caseVisibleTo(actor, ev, deps);
+}
+
+/**
+ * A track on the map: a receiver by the case. Operators are fenced by
+ * their own sites' sensors (ownSitesSeePoint), admin not at all.
+ */
+export function followsTrack(actor, ev, deps) {
+  return actor?.kind === 'receiver' ? caseVisibleTo(actor, ev, deps) : true;
+}

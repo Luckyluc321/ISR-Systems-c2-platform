@@ -353,7 +353,7 @@ export function createLiveSensorRuntime(deps) {
   const {
     sites, viewer, Cesium, events, addEvent, getEvent, mutateEvent, addNote,
     nextEventId, applyDetectionBatch, selectEvent, renderAlertStrip,
-    renderDetailPanel, toast, ringIcon, nightNow, colours, liveFeeds,
+    renderDetailPanel, toast, ringIcon, nightNow, colours, liveFeeds, canShow,
   } = deps;
   const log = deps.log || console;
   const ringHoldMs = deps.ringHoldMs || 15000;
@@ -477,8 +477,12 @@ export function createLiveSensorRuntime(deps) {
 
     if (opened) {
       const site = sites[siteId];
-      toast?.(`DETECTED · Drone within ${site?.name || siteId} sensor range (${sensor.id}, p=${det.confidence.toFixed(2)})`, 'warn');
-      try { selectEvent?.(liveEvent.id); } catch (_) { /* selection is a courtesy */ }
+      // Only to an account that may see the case; main.js passes the
+      // rule as canShow (fix 3, 2026-11-04). Without it, as before.
+      if (canShow?.(liveEvent.id) ?? true) {
+        toast?.(`DETECTED · Drone within ${site?.name || siteId} sensor range (${sensor.id}, p=${det.confidence.toFixed(2)})`, 'warn');
+        try { selectEvent?.(liveEvent.id); } catch (_) { /* selection is a courtesy */ }
+      }
       try { renderAlertStrip?.(); } catch (_) { /* never let a render break ingest */ }
     } else if (nowMs() - _lastPanelMs > 500) {
       _lastPanelMs = nowMs();

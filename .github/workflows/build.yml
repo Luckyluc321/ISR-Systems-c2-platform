@@ -71,6 +71,9 @@ jobs:
       - name: Eval fixtures (no stale prompt copies)
         run: npm run check:eval-fixtures
 
+      - name: Engine reads every case (records never depend on who is signed in)
+        run: npm run check:engine-reads
+
       - name: Production build
         run: npx vite build
 
