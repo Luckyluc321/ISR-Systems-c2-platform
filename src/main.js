@@ -182,6 +182,7 @@ import { recommendationFor, preselectedDestinationIds } from './escalation_recom
 import { createIdentificationClock, initialIdentified, isUnidentified, shownType, shownClass, shownClassLabel } from './identification_gate.js';
 import { canOpenView } from './view_access.js';
 import { releaseDeferredNotes } from './events.js';
+import { getEventForEngine, getCurrentActor, _visibleToActor } from './events.js';
 import { signatureFor, displayNameFor } from './actor_signature.js';
 import { applyAutoDestinations } from './auto_destinations.js';
 import { incidentExecSummary, respondersOf } from './incident_summary.js';
@@ -4962,7 +4963,7 @@ async function main() {
       // owner's case projected (operator_map_scope.js).
       const line = viewer.entities.add({
         properties: { siteId: event.siteId },
-        show: _roleCanSeeSite(event.siteId),
+        show: _viewerSeesCase(event),
         polyline: {
           positions: new Cesium.CallbackProperty(() => {
             const pp2 = event.projectedPath;
@@ -5018,7 +5019,7 @@ async function main() {
       const offset = 0.06 + (i * 0.02);  // spread out more per index to reduce line overlap
       entities.secondaryLines.push(viewer.entities.add({
         properties: { siteId: event.siteId },
-        show: _roleCanSeeSite(event.siteId),
+        show: _viewerSeesCase(event),
         polyline: {
           positions: sampleBezierArc(pp.from.lat, pp.from.lon, imp.lat, imp.lon, 22, offset, side),
           width: 1.5,
@@ -5037,7 +5038,7 @@ async function main() {
       const labelOffsetY = 18 + (i * 12);  // stagger just in case
       entities.impactRings.push(viewer.entities.add({
         properties: { siteId: event.siteId },
-        show: _roleCanSeeSite(event.siteId),
+        show: _viewerSeesCase(event),
         position: Cesium.Cartesian3.fromDegrees(imp.lon, imp.lat, 20),
         point: {
           pixelSize: 14,
@@ -5820,7 +5821,9 @@ async function main() {
   // Overpass street cordon when reachable, compass ring on timeout.
   const _wreckagePerimeterEntities = new Map();  // wreckageId -> {fill, outline}
 
-  function _renderWreckagePerimeter(wreckage, cordon) {
+  // caseEvent: the case the wreck belongs to. A cordon is shown only to
+  // an account that may see that case (fix 3, 2026-11-04).
+  function _renderWreckagePerimeter(wreckage, cordon, caseEvent = null) {
     if (!wreckage || !cordon || !cordon.perimeter || cordon.perimeter.length < 4) return;
     const existing = _wreckagePerimeterEntities.get(wreckage.id);
     if (existing) {
@@ -5837,7 +5840,8 @@ async function main() {
         outline: false,
         heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
       },
-      properties: { type: 'wreckage-perimeter', wreckageId: wreckage.id },
+      properties: { type: 'wreckage-perimeter', wreckageId: wreckage.id, caseEventId: caseEvent?.id || null },
+      show: _viewerSeesCase(caseEvent),
     });
     const outline = viewer.entities.add({
       polyline: {
@@ -5849,7 +5853,8 @@ async function main() {
         }),
         clampToGround: true,
       },
-      properties: { type: 'wreckage-perimeter-outline', wreckageId: wreckage.id },
+      properties: { type: 'wreckage-perimeter-outline', wreckageId: wreckage.id, caseEventId: caseEvent?.id || null },
+      show: _viewerSeesCase(caseEvent),
     });
     _wreckagePerimeterEntities.set(wreckage.id, { fill, outline });
   }
@@ -6096,7 +6101,7 @@ async function main() {
   // primary-event lastPosition.
   function _bestTargetForDispatch(event) {
     if (!event) return null;
-    const chain = [event, ...(event.linkedEventIds || []).map(getEvent).filter(Boolean)];
+    const chain = [event, ...(event.linkedEventIds || []).map(getEventForEngine).filter(Boolean)];
     // 1. Wreckage — any event in chain has a downed-drone location
     for (const e of chain) {
       if (e.wreckageLocation) {
@@ -6256,9 +6261,11 @@ async function main() {
   // Fire-and-forget so the UI stays snappy. Adapter is responsible
   // for forwarding intent to the recipient's real inbox system;
   // events.js has already mutated the local source of truth.
-  function _fireEscalationAdapterSend(event, records) {
+  // actorRole: who sent it. An automatic cascade passes its own system
+  // actor, so the case's audit trail does not record whoever happened to
+  // be signed in (fix 3, 2026-11-04). A person's action keeps theirs.
+  function _fireEscalationAdapterSend(event, records, actorRole = getActiveRole()) {
     if (!event || !Array.isArray(records) || !records.length) return;
-    const actorRole = getActiveRole();
     records.forEach(rec => {
       fireEscalationAdapter('sendEscalation', {
         eventId: event.id,
@@ -6340,7 +6347,7 @@ async function main() {
         }
       } catch (_) { /* fall through */ }
     }
-    const ev = getEvent(d.eventId);
+    const ev = getEventForEngine(d.eventId);
     if (!ev) return null;
     const st = droneState.get(d.eventId);
     if (st?.billboard?.position) {
@@ -6385,7 +6392,7 @@ async function main() {
     // Altitude gap
     const altGapM = Math.abs((d.curAlt || 60) - (live.alt || 0));
     // Speed of target (rough estimate from event, defaults to 50 m/s for Shahed cruise)
-    const ev = getEvent(d.eventId);
+    const ev = getEventForEngine(d.eventId);
     const targetSpeedMs = ev?.lastPosition?.speed || ev?.subject?.kinematics?.speed_ms || 50;
     // Base quality from geometry
     const distFactor = Math.max(0, Math.min(1, 1 - (engageDistM / 400)));   // 0m dist = 1.0, 400m = 0
@@ -6744,7 +6751,7 @@ async function main() {
   // geometry in which the gunner can fire at all.
   function _passPointFor(d, tgtLat, tgtLon) {
     if (!d.profile?.beamPass) return null;
-    const hdg = getEvent(d.eventId)?.lastPosition?.heading;
+    const hdg = getEventForEngine(d.eventId)?.lastPosition?.heading;
     if (typeof hdg !== 'number') return null;
     const side = ((window.__isr_muzzle_tuning || {})[d.kind] || {}).side
       ?? d.profile.muzzleOffsetM?.side ?? 0;
@@ -7823,6 +7830,7 @@ async function main() {
       }, false);
     }
     d.entity = viewer.entities.add(_entitySpec);
+    d.entity.show = _viewerSeesCase(getEventForEngine(d.eventId));
 
 
     if (d.profile.trail) {
@@ -7967,7 +7975,7 @@ async function main() {
 
   function _initiateJamFall(d) {
     const RAD_RADIUS_M = 800;
-    const event = getEvent(d.eventId);
+    const event = getEventForEngine(d.eventId);
     if (!event) return;
     const state = droneState.get(d.eventId);
     if (!state) return;
@@ -8015,11 +8023,11 @@ async function main() {
       };
       jammedCount++;
     }
-    if (jammedCount > 0) {
+    if (jammedCount > 0 && _viewerSeesCase(event)) {
       toast(`${d.assetName} jamming ${jammedCount} hostile drone${jammedCount === 1 ? '' : 's'}.`, 'info');
     }
     if (resistantCount > 0) {
-      toast(`${resistantCount} target${resistantCount === 1 ? '' : 's'} resistant to ${d.assetName} jamming (anti-jam guidance). No effect.`, 'warn');
+      if (_viewerSeesCase(event)) toast(`${resistantCount} target${resistantCount === 1 ? '' : 's'} resistant to ${d.assetName} jamming (anti-jam guidance). No effect.`, 'warn');
     }
   }
 
@@ -8386,7 +8394,7 @@ async function main() {
       _inboundState = { unit, eventId, priorLat: unit.targetLat, priorLon: unit.targetLon };
       const follow = () => {
         if (!_inboundState) return;
-        const ev = eventId ? getEvent(eventId) : null;
+        const ev = eventId ? getEventForEngine(eventId) : null;
         const pos = ev?.lastPosition || ev?.lastKnownPosition;
         if (pos && pos.lat != null) {
           unit.targetLat = pos.lat;
@@ -8412,9 +8420,10 @@ async function main() {
 
   /** Newest event spawned from a template key, or null. */
   function _inboundFindEvent(key) {
-    const all = filteredEvents({ filter: 'all' }) || [];
-    for (let i = all.length - 1; i >= 0; i--) {
-      if (all[i]?.templateKey === key) return all[i].id;
+    // The engine's raw list, newest last: the screen list is filtered by
+    // account and the chips, and sorted by urgency (fix 3, 2026-11-04).
+    for (let i = EVENTS.length - 1; i >= 0; i--) {
+      if (EVENTS[i]?.templateKey === key) return EVENTS[i].id;
     }
     return null;
   }
@@ -8756,7 +8765,7 @@ async function main() {
   // means every tab renders from the same data, and future report
   // generators have historical dispatch state to work with.
   function _syncDispatchToEvent(d) {
-    const event = getEvent(d.eventId);
+    const event = getEventForEngine(d.eventId);
     if (!event) return;
     let entry = (event.counterDispatches || []).find(x => x.dispatchId === d.id);
     if (!entry) {
@@ -8878,14 +8887,14 @@ async function main() {
     // reacquires the swarm after CPH exit), interceptor updates to
     // that live position without operator intervention. Agency owns
     // the dispatch decision, sites provide data.
-    let event = getEvent(d.eventId);
+    let event = getEventForEngine(d.eventId);
 
     // Cross-cue handover: primary event closed AND linked event still
     // active → follow the linked event. Toast the handover once so
     // the operator sees the reacquisition drove the target update.
     if (event?.status === 'closed' && event.linkedEventIds?.length) {
       for (const linkedId of event.linkedEventIds) {
-        const linked = getEvent(linkedId);
+        const linked = getEventForEngine(linkedId);
         // NEVER hand an interceptor group to a breakaway child: it is
         // a single promoted member the group was not assigned to. The
         // child was the first linked event in a month to satisfy the
@@ -8898,7 +8907,8 @@ async function main() {
           if (d.eventId !== linkedId) {
             const fromSite = siteName(event.siteId) || event.siteId;
             const toSite = siteName(linked.siteId) || linked.siteId;
-            toast(`${d.assetName} track handed off. Signal reacquired at ${toSite} (was ${fromSite}). Live coordinates updated.`, 'info');
+            // Names both sites: only for an account that sees both cases.
+            if (_viewerSeesCase(event) && _viewerSeesCase(linked)) toast(`${d.assetName} track handed off. Signal reacquired at ${toSite} (was ${fromSite}). Live coordinates updated.`, 'info');
           }
           d.eventId = linkedId;
           d.crossCued = true;
@@ -8912,7 +8922,7 @@ async function main() {
     // linked event is still tracking.
     const primaryClosed = event?.status === 'closed' || event?.trackLost === true;
     const anyLinkedActive = (event?.linkedEventIds || []).some(id => {
-      const l = getEvent(id);
+      const l = getEventForEngine(id);
       return l && l.status === 'active';
     });
     const targetLost = primaryClosed && !anyLinkedActive;
@@ -9466,7 +9476,7 @@ async function main() {
       // stays as the destination (dead reckoning to last-known).
       // Live vs sim mode: only sim events (templateKey set) get this
       // physics — real events will get target updates from adapters.
-      const targetEv = getEvent(d.eventId);
+      const targetEv = getEventForEngine(d.eventId);
       const isSimEvent = !!targetEv?.templateKey;
       if (isSimEvent && d.profile.airborne && !d.routePositions) {
         const live = _liveTargetPositionFor(d);
@@ -9724,7 +9734,7 @@ async function main() {
           // Without it every value below is byte-identical to before,
           // so the counter-drone swarm's fan is untouched.
           if (d.profile.beamPass) {
-            const _bpEv = getEvent(d.eventId);
+            const _bpEv = getEventForEngine(d.eventId);
             const _tgtHdgDeg = _bpEv?.lastPosition?.heading;
             if (typeof _tgtHdgDeg === 'number') {
               const _tgtHdg = (_tgtHdgDeg * Math.PI) / 180;
@@ -9840,7 +9850,7 @@ async function main() {
         // the engagement window closes. Real (live) events bypass this
         // and use adapter-reported outcomes only. See
         // _simComputeEngagementOutcome + _SIM_INTERCEPTOR_PHYSICS.
-        const targetEv = getEvent(d.eventId);
+        const targetEv = getEventForEngine(d.eventId);
         const isSimEvent = !!targetEv?.templateKey;
         const hasPhysics = !!_SIM_INTERCEPTOR_PHYSICS[d.kind];
         if (isSimEvent && hasPhysics) {
@@ -9863,7 +9873,7 @@ async function main() {
               if (_wp?.class === 'jamming') {
                 const _jamFx = resolveJammingEffect({ weaponKind: d.kind, targetPlatform: targetEv.platform });
                 if (!_jamFx.jammed) {
-                  toast(`${targetEv.droneType || 'Target'} resistant to ${d.assetName} jamming (anti-jam guidance). No effect.`, 'warn');
+                  if (_viewerSeesCase(targetEv)) toast(`${targetEv.droneType || 'Target'} resistant to ${d.assetName} jamming (anti-jam guidance). No effect.`, 'warn');
                   appendEventArray(targetEv.id, 'notes', {
                     timestamp: new Date().toISOString(),
                     author: 'Interceptor telemetry',
@@ -9899,7 +9909,7 @@ async function main() {
                 // observe: rounds fired, target still flying. The
                 // damage model is sim-internal and NEVER surfaced —
                 // no sensor measures airframe damage percentages.
-                toast(`${targetEv.droneType || 'Target'} not neutralised. Still flying. ${d.assetName} re-engaging.`, 'warn');
+                if (_viewerSeesCase(targetEv)) toast(`${targetEv.droneType || 'Target'} not neutralised. Still flying. ${d.assetName} re-engaging.`, 'warn');
                 appendEventArray(targetEv.id, 'notes', {
                   timestamp: new Date().toISOString(),
                   author: 'Interceptor telemetry',
@@ -9976,7 +9986,7 @@ async function main() {
 
               try {
                 if (mode === 'explosion') {
-                  _playExplosionSequence(killLon, killLat, startAlt);
+                  if (_viewerSeesCase(targetEv)) _playExplosionSequence(killLon, killLat, startAlt);
                   wreckDelayMs = 900;
                   // Explosion — hide drone billboard promptly since the
                   // airframe is gone (fireball is what the eye tracks).
@@ -9992,7 +10002,8 @@ async function main() {
                   // physics-fall: hijack billboard to descend, land
                   // downrange. Wreckage sits at the ballistic impact
                   // point, NOT at the kill point.
-                  const impact = _playPhysicsFallSequence(stTarget, killLat, killLon, startAlt, targetSpeedMs, targetHeadingRad);
+                  const impact = _playPhysicsFallSequence(stTarget, killLat, killLon, startAlt, targetSpeedMs, targetHeadingRad,
+                    { visible: _viewerSeesCase(targetEv) });
                   if (impact) {
                     wreckLat = impact.impactLat;
                     wreckLon = impact.impactLon;
@@ -10030,7 +10041,7 @@ async function main() {
                   const killEnt = viewer.entities.add({
                     position: Cesium.Cartesian3.fromDegrees(wreckLon, wreckLat, 0),
                     properties: { markerEventId: targetEv.id, markerKind: 'kill', siteId: targetEv.siteId },
-                    show: _roleCanSeeSite(targetEv.siteId),
+                    show: _viewerSeesCase(targetEv),
                     point: {
                       pixelSize: 6,
                       color: Cesium.Color.fromCssColorString('#8b0e0e'),
@@ -10065,7 +10076,7 @@ async function main() {
                 // single-target kill: any dispatched police unit
                 // auto-reroutes to establish perimeter.
                 buildCordon(wreck).then(cordon => {
-                  _renderWreckagePerimeter(wreck, cordon);
+                  _renderWreckagePerimeter(wreck, cordon, targetEv);
                   _rebalancePatrolsToWreckages(targetEv);
                 }).catch(err => console.warn('[cordon build] failed:', err.message));
               }, wreckDelayMs);
@@ -10080,7 +10091,7 @@ async function main() {
               const outcomeMsg = mode === 'explosion'
                 ? `${d.assetName} destroyed ${targetEv.droneType || 'target'} in air. Warhead cook-off at ${killLat.toFixed(4)} ${killLon.toFixed(4)}.`
                 : `${d.assetName} disabled ${targetEv.droneType || 'target'}. Ballistic descent under way.`;
-              toast(outcomeMsg, 'ok');
+              if (_viewerSeesCase(targetEv)) toast(outcomeMsg, 'ok');
             }
             d.state = 'complete';
             _resolveEngagement(d);
@@ -10864,7 +10875,9 @@ async function main() {
   // Also draws a thin dashed trail behind the falling drone so the
   // ballistic trajectory reads visually — Lucas asked for a "cool"
   // fall animation.
-  function _playPhysicsFallSequence(state, killLat, killLon, killAlt, velocityMs, headingRad) {
+  // visible: false still runs the physics, because where the airframe
+  // lands is data (the wreck and its cordon); it only draws nothing.
+  function _playPhysicsFallSequence(state, killLat, killLon, killAlt, velocityMs, headingRad, { visible = true } = {}) {
     const G = 9.81;
     // Ballistic drop time from starting altitude (assumes v_y0 = 0 at
     // kill — control lost from level flight). Real IRL descent would
@@ -10884,6 +10897,7 @@ async function main() {
     const trailPositions = [Cesium.Cartesian3.fromDegrees(killLon, killLat, killAlt)];
     let lastSampleT = 0;
     const trailEntity = viewer.entities.add({
+      show: visible,
       polyline: {
         positions: new Cesium.CallbackProperty(() => trailPositions.slice(), false),
         width: 1.6,
@@ -10916,9 +10930,11 @@ async function main() {
     // signal-loss overlay so they experience the loss-of-signal beat
     // before being pushed back to overhead view.
     simAfter(() => {
-      _spawnFlashEntity(impactLon, impactLat, 900,  'rgba(190,170,140,0.80)', 22, 60, 4);
-      _spawnFlashEntity(impactLon, impactLat, 1800, 'rgba(160,145,120,0.55)', 28, 78, 10);
-      _spawnFlashEntity(impactLon, impactLat, 4500, 'rgba(130,115,100,0.32)', 20, 65, 24);
+      if (visible) {
+        _spawnFlashEntity(impactLon, impactLat, 900,  'rgba(190,170,140,0.80)', 22, 60, 4);
+        _spawnFlashEntity(impactLon, impactLat, 1800, 'rgba(160,145,120,0.55)', 28, 78, 10);
+        _spawnFlashEntity(impactLon, impactLat, 4500, 'rgba(130,115,100,0.32)', 20, 65, 24);
+      }
       if (state?.billboard) state.billboard.show = false;
       if (state?.trail) state.trail.show = false;
       if (state?.shadow) state.shadow.show = false;
@@ -10946,7 +10962,7 @@ async function main() {
   }
 
   function _resolveEngagement(d) {
-    const event = getEvent(d.eventId);
+    const event = getEventForEngine(d.eventId);
 
     // Phase D · Counter-drone interceptor swarm engagement outcome.
     // PER-INTERCEPTOR kill: each interceptor takes down its assigned
@@ -10975,7 +10991,7 @@ async function main() {
         });
         sw._damageAccum = _swFx.damage;
         if (_swFx.outcome === 'survive') {
-          toast(`${sw.model || 'Target'} not neutralised. Still flying. ${d.assetName} re-engaging.`, 'warn');
+          if (_viewerSeesCase(event)) toast(`${sw.model || 'Target'} not neutralised. Still flying. ${d.assetName} re-engaging.`, 'warn');
           d._firedAtLeastOnce = false;
           d._roundsFired = 0;
           d.engageStartTs = null;
@@ -10994,11 +11010,11 @@ async function main() {
           const cartographic = Cesium.Cartographic.fromCartesian(cart);
           const dropLat = Cesium.Math.toDegrees(cartographic.latitude);
           const dropLon = Cesium.Math.toDegrees(cartographic.longitude);
-          _spawnFlashEntity(dropLon, dropLat, 500, '#ff5a5a', 6, 22);
+          if (_viewerSeesCase(event)) _spawnFlashEntity(dropLon, dropLat, 500, '#ff5a5a', 6, 22);
           const _killEnt = viewer.entities.add({
             position: Cesium.Cartesian3.fromDegrees(dropLon, dropLat, 0),
             properties: { markerEventId: event.id, markerKind: 'kill', siteId: event.siteId },
-            show: _roleCanSeeSite(event.siteId),
+            show: _viewerSeesCase(event),
             point: {
               pixelSize: 6,
               color: Cesium.Color.fromCssColorString('#8b0e0e'),
@@ -11043,7 +11059,7 @@ async function main() {
           // promise resolves. Compass fallback ensures a polygon
           // renders even when Overpass is down.
           buildCordon(wreck).then(cordon => {
-            _renderWreckagePerimeter(wreck, cordon);
+            _renderWreckagePerimeter(wreck, cordon, event);
             _rebalancePatrolsToWreckages(event);
           });
         }
@@ -11180,7 +11196,7 @@ async function main() {
           neutralizedBy: event.neutralizedBy || d.assetName || null,
           neutralizedAt: event.neutralizedAt || new Date().toISOString(),
         });
-        toast(overwatchSurvived
+        if (_viewerSeesCase(event)) toast(overwatchSurvived
           ? `Partial neutralisation. ${downedCount} downed. Overwatch escaped.`
           : `Threat neutralised. ${downedCount} downed.`, 'ok');
       }
@@ -11240,7 +11256,7 @@ async function main() {
           });
           if (_st) _st._damageAccum = _fx.damage;
           if (_fx.outcome === 'survive') {
-            toast(`${event.droneType || 'Target'} not neutralised after `
+            if (_viewerSeesCase(event)) toast(`${event.droneType || 'Target'} not neutralised after `
               + `${d._roundsFired || 0} rounds. Still flying. ${d.assetName} re-engaging.`, 'warn');
             d._firedAtLeastOnce = false;
             d._roundsFired = 0;
@@ -11281,7 +11297,7 @@ async function main() {
               + `on its own sensor, outside all site coverage. Not witnessed by the network.`,
           type: 'engagement-result',
         });
-        toast(_observed
+        if (_viewerSeesCase(event)) toast(_observed
           ? `Threat neutralised. ${d.assetName} confirmed disruption.`
           : `Threat neutralised. Reported by ${d.assetName}, outside sensor coverage.`, 'ok');
       }
@@ -11370,9 +11386,9 @@ async function main() {
       d.lastFrameTs = wallNow();
       // Say WHY it is breaking off. A unit turning for home without a
       // stated reason reads as the simulation losing interest.
-      const _ev = getEvent(d.eventId);
+      const _ev = getEventForEngine(d.eventId);
       const _killed = _ev?.outcome === 'neutralized';
-      toast(_killed
+      if (_viewerSeesCase(_ev)) toast(_killed
         ? `${_ev?.droneType || 'Target'} neutralised by ${d.assetName}. Returning to base.`
         : `${d.assetName} breaking off, target out of range. Returning to base.`,
         _killed ? 'ok' : 'warn');
@@ -11475,7 +11491,7 @@ async function main() {
     for (const [, d] of _counterDispatches) {
       if (d.eventId === eventId && d.assetId === assetId) return d.state;
     }
-    const event = getEvent(eventId);
+    const event = getEventForEngine(eventId);
     if (event?.counterDispatches?.some(cd => cd.assetId === assetId)) return 'complete';
     return null;
   }
@@ -12078,7 +12094,7 @@ async function main() {
       let speed = _f35.cruiseSpeed || F35_CRUISE_SPEED_MS;
 
       if (_f35.mode === 'chase' && _f35.targetEventId) {
-        const target = getEvent(_f35.targetEventId);
+        const target = getEventForEngine(_f35.targetEventId);
         const tp = target?.lastPosition;
         if (tp) {
           const dLat = tp.lat - _f35.curLat;
@@ -12146,7 +12162,7 @@ async function main() {
       records.forEach((r, idx) => {
         setTimeout(() => updateEscalationStatus(event.id, r.id, 'delivered'), 800 + idx * 200);
       });
-      if (_roleCanSeeSite(siteId)) toast(`Auto escalated · reacquired at ${site ? site.name : siteId}`, 'ok');
+      if (_viewerSeesSite(event, siteId)) toast(`Auto escalated · reacquired at ${site ? site.name : siteId}`, 'ok');
     }
     // Evasion detection: if the newly captured heading differs materially
     // from the previously snapshotted heading (from an earlier sensor), the
@@ -12161,7 +12177,7 @@ async function main() {
       if (delta > 180) delta = 360 - delta;
       if (delta >= 8) {
         setTimeout(() => {
-          if (!_roleCanSeeSite(siteId)) return;
+          if (!_viewerSeesSite(event, siteId)) return;
           toast(`EVASION CONFIRMED · course change ${Math.round(delta)}° captured at ${site ? site.name : siteId}. ${event.platform === 'missile' ? 'Missile' : 'Track'} diverged from its projected path during the sensor gap.`, 'warn');
         }, 6000);
       }
@@ -12175,7 +12191,7 @@ async function main() {
     if (_f35.airborne && _f35.mode !== 'chase') {
       _f35.mode = 'chase';
       _f35.targetEventId = event.id;
-      if (_roleCanSeeSite(siteId)) toast(`F-35 cross cued from ${site ? site.name : siteId}. Chase pattern engaged.`, 'ok');
+      if (_viewerSeesSite(event, siteId)) toast(`F-35 cross cued from ${site ? site.name : siteId}. Chase pattern engaged.`, 'ok');
     }
   }
 
@@ -12217,7 +12233,7 @@ async function main() {
       const dt = Math.max(0, (now - _friendlyMissile.lastFrameTs) / 1000);
       _friendlyMissile.lastFrameTs = now;
 
-      const target = getEvent(_friendlyMissile.targetEventId);
+      const target = getEventForEngine(_friendlyMissile.targetEventId);
       const tp = target?.lastPosition;
       if (tp) {
         const dLat = tp.lat - _friendlyMissile.curLat;
@@ -12330,7 +12346,7 @@ async function main() {
     //   3. Impact → animated shockwave, F-35 + friendly dissolve, event
     //      marked neutralised.
     if (!_f35.airborne || _f35.mode !== 'chase') return false;
-    const event = getEvent(eventId);
+    const event = getEventForEngine(eventId);
     if (!event || event.outcome === 'neutralized') return false;
     if (_f35.targetEventId !== eventId) return false;
     const dist = haversineM(p.lat, p.lon, _f35.curLat, _f35.curLon);
@@ -12347,7 +12363,7 @@ async function main() {
     // ─── Impact: animated shockwave + fading burst ───────
     // Two rings expand outward over 1.6 sec, alpha fades from 1 → 0.
     // A central burst puffs briefly (scale 0 → 1 → 0). No sudden pop.
-    _spawnNeutralisationBurst(p.lat, p.lon, eventId);
+    if (_viewerSeesCase(event)) _spawnNeutralisationBurst(p.lat, p.lon, eventId);
     // Update event record
     markNeutralised(event.id, {
       outcome: 'neutralized',
@@ -12485,7 +12501,7 @@ async function main() {
       },
       properties: { markerEventId: eventId || 'orphan', markerKind: _markerKindFromLabel(labelText), ...(siteId ? { siteId } : {}) },
     });
-    if (siteId) ent.show = _roleCanSeeSite(siteId);
+    if (siteId) ent.show = _viewerSeesSite(getEventForEngine(eventId), siteId);
     if (eventId) {
       if (!_perEventMarkers.has(eventId)) _perEventMarkers.set(eventId, []);
       _perEventMarkers.get(eventId).push(ent);
@@ -12851,7 +12867,7 @@ async function main() {
             agg._pendingOorPos = null;
             // P1: operator/receiver-visible notification. Mirrors the
             // DETECTED toast pattern so signal-loss isn't silent.
-            if (_roleCanSeeSite(sid)) toast(`OUT OF RANGE · ${event.droneType || 'track'} left ${site.name || site.code || sid} sensor coverage.`, 'warn');
+            if (_viewerSeesSite(event, sid)) toast(`OUT OF RANGE · ${event.droneType || 'track'} left ${site.name || site.code || sid} sensor coverage.`, 'warn');
           }
         } else {
           const n = (agg.droneOorCount.get(droneKey) || 0) + 1;
@@ -12860,7 +12876,7 @@ async function main() {
           const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid} · ${droneLabel || droneKey}`;
           _dropMarker(hit.lat, hit.lon, '#ff5a5a', lbl, event.id, sid);
           _persist('oor', hit.lat, hit.lon, '#ff5a5a', lbl, sid);
-          if (_roleCanSeeSite(sid)) toast(`OUT OF RANGE · ${droneLabel || droneKey} left ${site.name || site.code || sid} sensor coverage.`, 'warn');
+          if (_viewerSeesSite(event, sid)) toast(`OUT OF RANGE · ${droneLabel || droneKey} left ${site.name || site.code || sid} sensor coverage.`, 'warn');
         }
       }
       droneCov.set(sid, nowInCov);
@@ -12946,7 +12962,7 @@ async function main() {
       appendEventArray(event.id, 'perSiteCrossings', { kind: 'oor', lat: pos.lat, lon: pos.lon, color: '#ff5a5a', label: lbl, siteId: sid, timestamp: now });
       agg._oorFiredThisCycle = true;
       agg._pendingOorPos = null;
-      if (_roleCanSeeSite(sid)) toast(`OUT OF RANGE · ${event.droneType || 'track'} left ${site?.name || site?.code || sid} sensor coverage.`, 'warn');
+      if (_viewerSeesSite(event, sid)) toast(`OUT OF RANGE · ${event.droneType || 'track'} left ${site?.name || site?.code || sid} sensor coverage.`, 'warn');
     }
   }
 
@@ -12977,7 +12993,7 @@ async function main() {
       // this site's own sensors saw.
       if (ev.soloSiteCaseOf) {
         if (isTrackLive(ev.soloSiteCaseOf)) continue;
-        const _own = getEvent(ev.soloSiteCaseOf);
+        const _own = getEventForEngine(ev.soloSiteCaseOf);
         if (_own) {
           _closeSoloSiteCases(_own, _own.outcome === 'neutralized'
             ? { endedAt: _own.exit || _own.lastPosition, outcome: 'neutralized' }
@@ -12993,7 +13009,7 @@ async function main() {
         if (cd.eventId === ev.id && (cd.state === 'en_route' || cd.state === 'engaging')) { chased = true; break; }
       }
       if (chased) continue;
-      const primary = getEvent(ev.linkedEventId || ev.shadowOfEventId || ev.provenance?.breakawayOf);
+      const primary = getEventForEngine(ev.linkedEventId || ev.shadowOfEventId || ev.provenance?.breakawayOf);
       const st = primary ? droneState.get(primary.id) : null;
       let anyLive = false;
       if (st) {
@@ -13121,7 +13137,7 @@ async function main() {
         operatorRoleId: 'system-cordon-command',
       });
       if (!records.length) continue;
-      _fireEscalationAdapterSend(event, records);
+      _fireEscalationAdapterSend(event, records, { id: 'system-cordon-command', kind: 'system' });
       // Toasted once per event, not per sweep. The escalation itself is
       // deduped, but a toast inside a two-second loop would storm.
       if (!_cordonCommandWarned.has(eventId)) {
@@ -14179,7 +14195,9 @@ async function main() {
   // is ever created for a live event: _sweepUnobservedActiveEvents owns
   // its close.
   const _liveSensors = createLiveSensorRuntime({
-    sites: SITES, viewer, Cesium, events: EVENTS, addEvent, getEvent, mutateEvent, addNote,
+    // The engine's read: a detection finds its case whoever is signed
+    // in (fix 3, 2026-11-04). The module reads cases nowhere else.
+    sites: SITES, viewer, Cesium, events: EVENTS, addEvent, getEvent: getEventForEngine, mutateEvent, addNote,
     nextEventId, applyDetectionBatch: _applyDetectionBatchToEvent, selectEvent, renderAlertStrip,
     renderDetailPanel: renderDetailPanelThrottled, toast, ringIcon,
     nightNow: () => !!window.__isr_nvgStage?.enabled,
@@ -14243,7 +14261,7 @@ async function main() {
     const candidates = [];
     if (primaryEvent.siteId === siteId) candidates.push(primaryEvent);
     for (const lid of (primaryEvent.linkedEventIds || [])) {
-      const le = getEvent(lid);
+      const le = getEventForEngine(lid);
       if (le && le.siteId === siteId) candidates.push(le);
     }
     return candidates.find(e => e.status === 'active') || null;
@@ -14257,7 +14275,7 @@ async function main() {
   function _closeSoloSiteCases(primary, { endedAt = null, outcome = null } = {}) {
     const endSites = (endedAt?.lat != null && outcome) ? _aggregateGroupSites([endedAt]) : new Set();
     for (const lid of (primary.linkedEventIds || [])) {
-      const le = getEvent(lid);
+      const le = getEventForEngine(lid);
       if (!le || le.status !== 'active' || le.soloSiteCaseOf !== primary.id) continue;
       const name = SITES[le.siteId]?.name || le.siteId;
       const endedHere = endSites.has(le.siteId);
@@ -14297,7 +14315,7 @@ async function main() {
         if (existing.detected === false) {
           existing.detected = true;
           const siteName_ = SITES[sid]?.name || sid;
-          if (_roleCanSeeSite(sid)) toast(`DETECTED · ${primaryEvent.droneType} within ${siteName_} sensor range.`, 'warn');
+          if (_viewerSeesSite(primaryEvent, sid)) toast(`DETECTED · ${primaryEvent.droneType} within ${siteName_} sensor range.`, 'warn');
           renderAlertStrip();
         }
         // Nothing to do for a closed event here: _findGroupEventForSite
@@ -14516,6 +14534,37 @@ async function main() {
     return _anySensorSeesPoint(lat, lon, altM);
   }
 
+  // ── What the signed-in account may be shown about a case (fix 3) ──
+  // The engine runs every case whoever is signed in (getEventForEngine).
+  // What it SHOWS goes only to an account that may see the case: admin
+  // always; an operator the cases of its own company; a receiver a case
+  // it is on, or any case of the same track once it is on one of them
+  // (the response layer follows the threat, not the site). Before
+  // 2026-11-04 these toasts, flashes and units stayed off other accounts
+  // only because the engine itself went blind to their cases.
+  function _viewerSeesCase(ev) {
+    if (!ev) return false;
+    const actor = getCurrentActor();
+    if (!actor || actor.isAdminBypass || actor.kind === 'admin') return true;
+    if (_visibleToActor(ev, actor)) return true;
+    if (actor.kind !== 'receiver') return false;
+    const chain = [ev.linkedEventId, ev.shadowOfEventId, ...(ev.linkedEventIds || [])];
+    return chain.some(id => id && _visibleToActor(getEventForEngine(id), actor));
+  }
+  // A site-specific message or pin: an operator by its own sites
+  // (operator_map_scope.js), a receiver by the case, admin always.
+  function _viewerSeesSite(ev, siteId) {
+    const actor = getCurrentActor();
+    if (!actor || actor.isAdminBypass || actor.kind === 'admin') return true;
+    if (actor.kind === 'operator') return _roleCanSeeSite(siteId);
+    return _viewerSeesCase(ev);
+  }
+  // A track on the map: operators are fenced by their sites' sensors
+  // below, receivers by the case, admin not at all.
+  function _viewerFollowsTrack(ev) {
+    return getCurrentActor()?.kind === 'receiver' ? _viewerSeesCase(ev) : true;
+  }
+
   // ── What the signed-in account may see on the live map ──
   // operator_map_scope.js: an operator sees a drone, its trail and its
   // pins only where its own sites' sensors saw it. DISPLAY ONLY. The
@@ -14536,7 +14585,8 @@ async function main() {
   }
   // A trail as the signed-in account may see it. Admin and receivers:
   // the same array, untouched.
-  function _viewerTrail(positions, seenBy) {
+  function _viewerTrail(positions, seenBy, eventId) {
+    if (eventId && !_viewerFollowsTrack(getEventForEngine(eventId))) return [];
     return trailForRole(getActiveRole(), positions, seenBy);
   }
   // The site a pin rebuilt from a saved point belongs to: the case's own
@@ -15289,7 +15339,7 @@ async function main() {
     console.log(`[P5A cross-cued] primary recording found via ${primarySource}, ${primaryRec.timeseries.length} samples`);
     const linkedIds = primaryEvent.linkedEventIds || [];
     for (const linkedId of linkedIds) {
-      const linked = getEvent(linkedId);
+      const linked = getEventForEngine(linkedId);
       if (!linked) { console.warn(`[P5A cross-cued] linked event ${linkedId} not found`); continue; }
       // Only persist if the linked event doesn't already have its own
       // recording (e.g. if it was spawned from its own template with
@@ -15411,7 +15461,10 @@ async function main() {
   function _scopeRecordingForActiveRole(rec, eventId) {
     const event = getEvent(eventId);
     const roleId = getActiveRole?.()?.id;
-    if (!event || !rec?.timeseries) return rec;
+    // A case this account may not see gets nothing, not the raw
+    // recording (fix 3, 2026-11-04).
+    if (!event) return null;
+    if (!rec?.timeseries) return rec;
     const scope = scopedTrajectoryFor(event, roleId, rec.timeseries);
     if (scope.fullyVisible) return rec;
     const filteredTs = _confirmedSamplesForScope(scope, rec.timeseries);
@@ -15436,6 +15489,7 @@ async function main() {
     const rawRec = window.__isr_getRecording(eventId);
     if (!rawRec) { console.warn('[P5A] no recording for', eventId); return; }
     const rec = _scopeRecordingForActiveRole(rawRec, eventId);
+    if (!rec) { toast('Recording is not available for this account.', 'info'); return; }
     const blob = new Blob([JSON.stringify(rec, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -15455,6 +15509,7 @@ async function main() {
     const rawRec = window.__isr_getRecording(eventId);
     if (!rawRec || !rawRec.timeseries?.length) { console.warn('[P5C] no recording for', eventId); return; }
     const rec = _scopeRecordingForActiveRole(rawRec, eventId);
+    if (!rec) { toast('Recording is not available for this account.', 'info'); return; }
     if (!rec.timeseries.length) { console.warn('[P5C] no scoped rows for role', eventId); toast('No trajectory rows in your site scope.', 'info'); return; }
     const cols = [
       'droneId', 'timestamp_utc', 't_sec_from_event',
@@ -17441,6 +17496,9 @@ async function main() {
   }
 
   async function startReplay(eventId) {
+    // A case this account may not see is not replayed: no full
+    // trajectory for it (fix 3, 2026-11-04).
+    if (!getEvent(eventId)) { toast('Replay is not available for this account.', 'info'); return; }
     // One marker language at a time: the live run's persistent markers
     // (OUT OF RANGE, DETECTED, ENTRY/EXIT) tell the same story the
     // replay seam markers tell, at nearly the same coordinates. Hide
@@ -17600,7 +17658,7 @@ async function main() {
     const trail = viewer.entities.add({
       id: `drone-trail-${event.id}`,
       polyline: {
-        positions: new Cesium.CallbackProperty(() => _viewerTrail(trailPositions, trailSeenBy), false),
+        positions: new Cesium.CallbackProperty(() => _viewerTrail(trailPositions, trailSeenBy, event.id), false),
         width: 2.5,
         material: new Cesium.PolylineDashMaterialProperty({
           color: Cesium.Color.fromCssColorString(color).withAlpha(0.75),
@@ -19055,7 +19113,7 @@ async function main() {
         const trailLine = viewer.entities.add({
           id: `drone-${event.id}-swarm-${i}-trail`,
           polyline: {
-            positions: new Cesium.CallbackProperty(() => _viewerTrail(trailPositions, trailSeenBy), false),
+            positions: new Cesium.CallbackProperty(() => _viewerTrail(trailPositions, trailSeenBy, event.id), false),
             width: 2,
             material: new Cesium.PolylineDashMaterialProperty({
               color: Cesium.Color.fromCssColorString('#ff3d3d').withAlpha(0.7),
@@ -19674,7 +19732,7 @@ async function main() {
       // fixed-wing rig reads it to look up the path AHEAD of the
       // aircraft, so the bank can lead the turn the way a roll-in does.
       state.routeTSec = p.tSec;
-      const event = getEvent(p.eventId);
+      const event = getEventForEngine(p.eventId);
       if (!event) return;
 
       // QRA intercept dispatch is now MANUAL — Flyvevåbnet receiver clicks
@@ -19761,7 +19819,7 @@ async function main() {
           if (event.detected === false) {
             mutateEvent(event.id, { detected: true });
             const site = SITES[bestSid];
-            if (_roleCanSeeSite(bestSid)) toast(`DETECTED · ${event.droneType} within ${site?.name || bestSid} sensor range.`, 'warn');
+            if (_viewerSeesSite(event, bestSid)) toast(`DETECTED · ${event.droneType} within ${site?.name || bestSid} sensor range.`, 'warn');
             renderAlertStrip();
           }
           if (
@@ -19867,7 +19925,7 @@ async function main() {
                  || leavesSceneUnassisted(CD_PROFILE[c.kind]));
           const linkedActive = Array.isArray(event.linkedEventIds)
             && event.linkedEventIds.some(lid => {
-              const le = getEvent(lid);
+              const le = getEventForEngine(lid);
               return le && le.status === 'active';
             });
           // A single drone runs the swarm's flow (_singleDroneSiteFlow), so
@@ -19914,7 +19972,7 @@ async function main() {
                 closeEvent(p.eventId, exitPoint, { autoOutcome: 'left coverage' });
               }
               if (_singleDroneSiteFlow(event, state)) _closeSoloSiteCases(event);
-              toast(`Sim auto-ended · ${event.droneType || 'track'} left all sensor coverage with no active pursuit.`, 'info');
+              if (_viewerSeesCase(event)) toast(`Sim auto-ended · ${event.droneType || 'track'} left all sensor coverage with no active pursuit.`, 'info');
               updateContributingRings();
               renderAlertStrip();
               if (getSelectedEventId() === p.eventId) renderDetailPanel();
@@ -19982,10 +20040,10 @@ async function main() {
         // on a fighter's seeker. Admin and receivers: unchanged. leadInCov
         // itself stays the any-site answer, because it drives data below.
         const _fencedView = !!fencedSiteIds(getActiveRole());
-        const leadViewable = _viewerSeesPoint(p.lat, p.lon, p.alt, leadInCov);
+        const leadViewable = _viewerSeesPoint(p.lat, p.lon, p.alt, leadInCov) && _viewerFollowsTrack(event);
         const shouldShow = (leadDown || povSuppressed) ? false : (state.closedAt
           ? false
-          : (leadViewable || (beingChased && !_fencedView) || _coop));
+          : (leadViewable || (beingChased && !_fencedView && _viewerFollowsTrack(event)) || _coop));
         state.billboard.show = shouldShow;
         state.shadow.show = shouldShow && !povSuppressed;
         // FUSED CONFIDENCE FOR EVERY SINGLE DRONE, the same approach as
@@ -20987,7 +21045,7 @@ async function main() {
               viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(jfLon, jfLat, jf.groundAlt + 0.5),
                 properties: { markerEventId: event.id, markerKind: 'jam-down', siteId: event.siteId },
-                show: _roleCanSeeSite(event.siteId),
+                show: _viewerSeesCase(event),
                 point: {
                   pixelSize: 6,
                   color: Cesium.Color.fromCssColorString('#ffd54d'),
@@ -21098,7 +21156,7 @@ async function main() {
           // sensors do (operator_map_scope.js). Display only: swShouldShow
           // still drives the trail reset, the pursuit anchor and the
           // member track below, whoever is signed in.
-          const _swViewable = _swVisible && _viewerSeesPoint(pos.lat, pos.lon, pos.alt, true);
+          const _swViewable = _swVisible && _viewerSeesPoint(pos.lat, pos.lon, pos.alt, true) && _viewerFollowsTrack(event);
           sw.billboard.show = _swViewable && !sw._povActive;
           // Trail visibility mirrors the drone billboard — as soon as
           // the drone drops out of coverage (billboard hides), its
@@ -21385,7 +21443,7 @@ async function main() {
             if (sw.projPositions.length > 300) sw.projPositions.shift();
             // The path no sensor saw. Never for an operator, whose map
             // shows only what its own sites saw (operator_map_scope.js).
-            sw.projLine.show = sw.projPositions.length >= 2 && !fencedSiteIds(getActiveRole());
+            sw.projLine.show = sw.projPositions.length >= 2 && !fencedSiteIds(getActiveRole()) && _viewerFollowsTrack(event);
           }
           // Per-drone per-site transitions (polygon + cov). Uses THIS
           // drone's own current + previous position. Swarm-density
@@ -21478,7 +21536,7 @@ async function main() {
         evaluateClassificationPipeline(event, pipelineCtx);
         evaluateAttackProfileDetector(event, pipelineCtx, {
           onAdvisory: (ev, rules) => {
-            toast(`Attack profile advisory. ${ev.droneType || 'track'} · ${rules[0]}. Operator confirmation required to promote to red.`, 'warn');
+            if (_viewerSeesCase(ev)) toast(`Attack profile advisory. ${ev.droneType || 'track'} · ${rules[0]}. Operator confirmation required to promote to red.`, 'warn');
             renderAlertStrip();
           },
         });
@@ -21520,8 +21578,8 @@ async function main() {
         const _tplDone = TEMPLATES[event.templateKey];
         const _didImpact = !!_tplDone?.terminalImpact;
         if (_didImpact && p.lat != null && p.lon != null) {
-          _playExplosionSequence(p.lon, p.lat, Math.max(25, p.alt || 30));
-          if (_roleCanSeeSite(event.siteId)) toast(`IMPACT · ${event.droneType || 'weapon'} detonated at target.`, 'warn');
+          if (_viewerSeesCase(event)) _playExplosionSequence(p.lon, p.lat, Math.max(25, p.alt || 30));
+          if (_viewerSeesCase(event)) toast(`IMPACT · ${event.droneType || 'weapon'} detonated at target.`, 'warn');
           // CODE RED ground response: the impact point enters the
           // wreckages ledger exactly like a downed drone, so every
           // dispatched patrol re-routes to the detonation site and a
@@ -21535,7 +21593,7 @@ async function main() {
           mutateEvent(event.id, { wreckageLocation: { lat: p.lat, lon: p.lon, at: _impIso } });
           _rebalancePatrolsToWreckages(event);
           buildCordon(_impWreck).then(cordon => {
-            _renderWreckagePerimeter(_impWreck, cordon);
+            _renderWreckagePerimeter(_impWreck, cordon, event);
             _rebalancePatrolsToWreckages(event);
           }).catch(err => console.warn('[impact cordon] build failed:', err.message));
           // Consequence auto-cascade: our sensors observed a warhead
@@ -21603,8 +21661,8 @@ async function main() {
             // per-role escalation adapter that real customer inbox
             // systems will register against. Fire-and-forget, guarded
             // internally against an empty array.
-            _fireEscalationAdapterSend(event, _casRecords);
-            if (_roleCanSeeSite(event.siteId)) toast(_casRecords.length
+            _fireEscalationAdapterSend(event, _casRecords, { id: 'system-impact-cascade', kind: 'system' });
+            if (_viewerSeesCase(event)) toast(_casRecords.length
               ? `Consequence cascade sent: ${_casRecords.length} agencies alerted, local to this site.`
               : 'Consequence cascade: every agency was already on the case.', 'warn');
           } catch (err) { console.warn('[impact cascade] failed:', err.message); }
@@ -21616,7 +21674,7 @@ async function main() {
           const _impactEnt = viewer.entities.add({
             position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 0),
             properties: { markerEventId: event.id, markerKind: 'impact', siteId: event.siteId },
-            show: _roleCanSeeSite(event.siteId),
+            show: _viewerSeesCase(event),
             point: {
               pixelSize: 7,
               color: Cesium.Color.fromCssColorString('#8b2500'),
@@ -21652,7 +21710,7 @@ async function main() {
         // event at AMK) so they don't linger as active in the inbox.
         const linkedIds = event.linkedEventIds || [];
         for (const lid of linkedIds) {
-          const le = getEvent(lid);
+          const le = getEventForEngine(lid);
           // Outcome per what the sensors last knew: a linked track that
           // was still detected when the scenario tore down ends as
           // 'lost contact' (the track ended, not the drone's transit);
@@ -21941,7 +21999,7 @@ async function main() {
     // and per-site markers are all handled uniformly.
     const droneStateIds = Array.from(droneState.keys());
     for (const eventId of droneStateIds) {
-      const event = getEvent(eventId);
+      const event = getEventForEngine(eventId);
       if (event && event.status === 'active') closeEvent(eventId, event.exit || null, { autoOutcome: 'cancelled' });
       if (event) mutateEvent(event.id, { projectedPath: null });
       markTrackClosed(eventId);
@@ -24602,7 +24660,7 @@ async function main() {
   // pushNotification(role_id, {kind, event_id, payload, priority})
   function pushNotification(roleId, { kind, event_id, payload = {}, priority = 'info' }) {
     if (!roleId || !kind || !event_id) return null;
-    const event = getEvent(event_id);
+    const event = getEventForEngine(event_id);
     if (!event) return null;
     const nowIso = new Date().toISOString();
     // Interaction record (audit)
@@ -24638,7 +24696,7 @@ async function main() {
   // by cross-site advisories, coordination flows, and cascade. Silent
   // by itself — pair with pushNotification for the recipient toast.
   function pushObserver(event_id, roleId, { addedBy = 'system', reason = 'auto-scoped', mode = 'observer' } = {}) {
-    const event = getEvent(event_id);
+    const event = getEventForEngine(event_id);
     if (!event) return null;
     if (event.participants?.has(roleId)) return event.participants.get(roleId);
     const entry = {
@@ -34815,6 +34873,51 @@ async function main() {
   document.addEventListener('click', (ev) => {
     if (!roleMenu.contains(ev.target) && ev.target !== tbOperator) roleMenu.style.display = 'none';
   });
+  // ── Per-case visibility of what the engine draws (fix 3) ──
+  // Pins, outcome marks, projected paths, cordons, response units and
+  // the fighter: shown only to an account that may see their case,
+  // re-checked every second and on every account switch, so a receiver
+  // sees them once a case reaches it. Display only. First-person view
+  // keeps its own hiding of the projected path.
+  function _rescopeCaseEntities() {
+    try {
+      for (const [eventId, list] of _perEventMarkers) {
+        const ev = getEventForEngine(eventId);
+        for (const ent of list) {
+          const sid = ent.properties?.siteId?.getValue?.();
+          const kind = ent.properties?.markerKind?.getValue?.();
+          const outcomeMark = kind === 'kill' || kind === 'jam-down' || kind === 'impact';
+          ent.show = (sid && !outcomeMark) ? _viewerSeesSite(ev, sid) : _viewerSeesCase(ev);
+        }
+      }
+      for (const [eventId, ents] of projectedTrajectoryEntities) {
+        const ok = _viewerSeesCase(getEventForEngine(eventId))
+          && !(_dronePov?.active && _dronePov.eventId === eventId);
+        if (ents.line) ents.line.show = ok;
+        (ents.impactRings || []).forEach(e => { if (e) e.show = ok; });
+        (ents.secondaryLines || []).forEach(e => { if (e) e.show = ok; });
+      }
+      for (const [, ents] of _wreckagePerimeterEntities) {
+        const ok = _viewerSeesCase(getEventForEngine(ents.fill?.properties?.caseEventId?.getValue?.()));
+        if (ents.fill) ents.fill.show = ok;
+        if (ents.outline) ents.outline.show = ok;
+      }
+      for (const [, d] of _counterDispatches) {
+        const ok = _viewerSeesCase(getEventForEngine(d.eventId));
+        for (const k of ['entity', 'trail', 'radiationEntity', 'jammingPipEntity']) { if (d[k]) d[k].show = ok; }
+      }
+      if (_f35.targetEventId) {
+        const ok = _viewerSeesCase(getEventForEngine(_f35.targetEventId));
+        if (_f35.jetEntity) _f35.jetEntity.show = ok;
+        if (_f35.trailEntity) _f35.trailEntity.show = ok;
+      }
+      if (_friendlyMissile.entity && _friendlyMissile.targetEventId) {
+        _friendlyMissile.entity.show = _viewerSeesCase(getEventForEngine(_friendlyMissile.targetEventId));
+      }
+    } catch (err) { console.warn('[scope] case entities re-check failed:', err.message); }
+  }
+  setInterval(_rescopeCaseEntities, 1000);
+
   onRoleChange(() => {
     // Phase 3 — re-scope the ambient actor to the newly active role.
     // events.js read functions immediately return the new tenant view.
@@ -34839,6 +34942,9 @@ async function main() {
       // entities, and a site released above should not be swept.
       syncSitesToRole();
       applySiteScopeVisibility();
+      // Then per case: the site sweep alone lets every receiver see
+      // every site's pins (fix 3).
+      _rescopeCaseEntities();
       applyFlyToScope();
       // The sensor and scope cells are derived from the account too,
       // and were the one surface this handler never refreshed. A CPH

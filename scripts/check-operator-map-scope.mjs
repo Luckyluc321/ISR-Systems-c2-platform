@@ -64,16 +64,16 @@ check('the coverage answers that drive data are still the any-site ones',
   && /const swShouldShow = inCov;/.test(main)
   && /if \(_fcOn && leadInCov && !state\.closedAt/.test(main));
 check('the lead is drawn from the viewer\'s answer, and not on a fighter\'s seeker for an operator',
-  /const leadViewable = _viewerSeesPoint\(p\.lat, p\.lon, p\.alt, leadInCov\);/.test(main)
-  && /: \(leadViewable \|\| \(beingChased && !_fencedView\) \|\| _coop\)\);/.test(main)
+  /const leadViewable = _viewerSeesPoint\(p\.lat, p\.lon, p\.alt, leadInCov\) && _viewerFollowsTrack\(event\);/.test(main)
+  && /: \(leadViewable \|\| \(beingChased && !_fencedView && _viewerFollowsTrack\(event\)\) \|\| _coop\)\);/.test(main)
   && /state\.trail\.show = !_fencedView \|\| leadViewable;/.test(main));
 check('each airframe and its trail are drawn from the viewer\'s answer',
-  /const _swViewable = _swVisible && _viewerSeesPoint\(pos\.lat, pos\.lon, pos\.alt, true\);\s*[\s\S]{0,200}sw\.billboard\.show = _swViewable && !sw\._povActive;/.test(main)
+  /const _swViewable = _swVisible && _viewerSeesPoint\(pos\.lat, pos\.lon, pos\.alt, true\) && _viewerFollowsTrack\(event\);\s*[\s\S]{0,200}sw\.billboard\.show = _swViewable && !sw\._povActive;/.test(main)
   && /if \(sw\.trailLine\) sw\.trailLine\.show = _swViewable;/.test(main));
 check('the path no sensor saw is never drawn for an operator',
-  /sw\.projLine\.show = sw\.projPositions\.length >= 2 && !fencedSiteIds\(getActiveRole\(\)\);/.test(main));
+  /sw\.projLine\.show = sw\.projPositions\.length >= 2 && !fencedSiteIds\(getActiveRole\(\)\) && _viewerFollowsTrack\(event\);/.test(main));
 check('both trails render through the viewer\'s filter, and record who saw each point',
-  (main.match(/new Cesium\.CallbackProperty\(\(\) => _viewerTrail\(trailPositions, trailSeenBy\), false\)/g) || []).length === 2
+  (main.match(/new Cesium\.CallbackProperty\(\(\) => _viewerTrail\(trailPositions, trailSeenBy, event\.id\), false\)/g) || []).length === 2
   && /state\.trailSeenBy\.push\(_trailTag\(p\.lat, p\.lon, p\.alt\)\);/.test(main)
   && /sw\.trailSeenBy\.push\(_trailTag\(pos\.lat, pos\.lon, pos\.alt\)\);/.test(main)
   && /if \(sw\.trailSeenBy\) sw\.trailSeenBy\.length = 0;/.test(main));
@@ -81,7 +81,7 @@ check('both trails render through the viewer\'s filter, and record who saw each 
 console.log('\n[main.js: pins, marks, paths, toasts]');
 check('a pin carries its site and is shown only to an account that owns it',
   /function _dropMarker\(lat, lon, colorHex, labelText, eventId = null, siteId = null\)/.test(main)
-  && /if \(siteId\) ent\.show = _roleCanSeeSite\(siteId\);/.test(main));
+  && /if \(siteId\) ent\.show = _viewerSeesSite\(getEventForEngine\(eventId\), siteId\);/.test(main));
 check('every per-site pin passes its site, and its saved record keeps it',
   (main.match(/, lbl, event\.id, sid\);/g) || []).length === 9
   && !/_dropMarker\(hit\.lat, hit\.lon, [^)]*event\.id\);/.test(main)
@@ -90,11 +90,12 @@ check('pins rebuilt from a case\'s saved points find their site',
   (main.match(/_pinSiteForPoint\(event, event\.(entry|exit|outOfRange)\.lat/g) || []).length === 3
   && /c\.siteId \|\| siteOfPinLabel\(c\.label, SITES\)/.test(main));
 check('a case\'s outcome marks and projected path belong to the case\'s site',
-  (main.match(/markerKind: '(kill|jam-down|impact)', siteId: (event|targetEv)\.siteId \},\s*show: _roleCanSeeSite\((event|targetEv)\.siteId\),/g) || []).length === 4
-  && (main.match(/properties: \{ siteId: event\.siteId \},\s*show: _roleCanSeeSite\(event\.siteId\),/g) || []).length === 3);
+  (main.match(/markerKind: '(kill|jam-down|impact)', siteId: (event|targetEv)\.siteId \},\s*show: _viewerSeesCase\((event|targetEv)\),/g) || []).length === 4
+  && (main.match(/properties: \{ siteId: event\.siteId \},\s*show: _viewerSeesCase\(event\),/g) || []).length === 3);
 check('toasts naming a site, or reporting a case, go only to an account that owns it',
-  (main.match(/if \(_roleCanSeeSite\((siteId|sid|bestSid|event\.siteId)\)\) toast\(/g) || []).length === 9
-  && /if \(!_roleCanSeeSite\(siteId\)\) return;\s*toast\(`EVASION CONFIRMED/.test(main));
+  (main.match(/if \(_viewerSeesSite\((event|primaryEvent), (siteId|sid|bestSid)\)\) toast\(/g) || []).length === 7
+  && (main.match(/if \(_viewerSeesCase\(event\)\) toast\((`IMPACT|_casRecords)/g) || []).length === 2
+  && /if \(!_viewerSeesSite\(event, siteId\)\) return;\s*toast\(`EVASION CONFIRMED/.test(main));
 check('a site switch re-applies the scope to every pin and mark, through the same siteId',
   /function applySiteScopeVisibility\(\) \{\s*for \(const e of viewer\.entities\.values\) \{\s*const sid = e\.properties\?\.siteId\?\.getValue\?\.\(\);/.test(main)
   && /syncSitesToRole\(\);\s*applySiteScopeVisibility\(\);/.test(main));

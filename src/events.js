@@ -1045,6 +1045,18 @@ export function getEvent(id) {
   return _visibleToActor(e, _currentActor) ? e : null;
 }
 
+// THE ENGINE'S READ (2026-11-04). The simulation, the case lifecycle,
+// the rules, the recording and the dispatch physics stand in for the
+// server, and must see every case whoever is signed in. Reading through
+// the account filter made the recorded data depend on the viewer: with
+// the DK Airport operator signed in, Energinet's Amager case closed as
+// "lost contact" or never closed, and with Energinet's operator signed
+// in the airport swarm froze. Screens keep getEvent(), which stays
+// filtered. check:engine-reads holds which functions may call this one.
+export function getEventForEngine(id) {
+  return EVENTS.find(x => x.id === id) || null;
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Actor context + tenant scoping (Phase 3 of the state-consolidation
 // refactor). See scripts/check-event-mutations.mjs for the Phase 1
@@ -1319,12 +1331,13 @@ export function unionLinkedEventDomains(eventId) {
   const e = EVENTS.find(x => x.id === eventId);
   if (!e || !Array.isArray(e.linkedEventIds) || !e.linkedEventIds.length) return null;
   const scope = new Set(Array.isArray(e.domainScope) ? e.domainScope : _computeInitialDomainScope(e));
-  const actor = _currentActor;
   e.linkedEventIds.forEach(linkedId => {
     const linked = EVENTS.find(x => x.id === linkedId);
     if (!linked) return;
-    // Tenant gate: operator actor only unions same-tenant linked events.
-    if (actor?.kind === 'operator' && linked.tenantId !== actor.tenantId) return;
+    // No account gate (Lucas, 2026-11-04): a case takes the domains of
+    // every case linked to it, whoever is signed in. It describes where
+    // the threat went and decides which agencies are alerted; it used to
+    // differ between an admin and an operator session.
     if (Array.isArray(linked.domainScope)) {
       linked.domainScope.forEach(d => scope.add(d));
     }

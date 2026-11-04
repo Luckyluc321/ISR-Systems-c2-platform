@@ -52,7 +52,8 @@
     "check:incident-summary": "node scripts/check-incident-summary.mjs",
     "check:mission-console": "node scripts/check-mission-console.mjs",
     "check:single-drone-flow": "node scripts/check-single-drone-flow.mjs",
-    "check:operator-map-scope": "node scripts/check-operator-map-scope.mjs"
+    "check:operator-map-scope": "node scripts/check-operator-map-scope.mjs",
+    "check:engine-reads": "node scripts/check-engine-reads.mjs"
   },
   "devDependencies": {
     "vite": "^8.1.1"

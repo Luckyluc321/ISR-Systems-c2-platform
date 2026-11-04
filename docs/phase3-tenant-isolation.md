@@ -177,3 +177,21 @@ An operator can no longer see the full chain when a drone crosses into another t
 **Phase 3 done.** Phase 2 (carving rendering out of main.js) is the last of the three internal refactors. It's the longest and highest-risk of the three, but Phase 1 and Phase 3 both landed under budget, and Phase 2 doesn't block any external work — it's an iteration-speed investment.
 
 The bigger picture: with Phase 1 (write seam) and Phase 3 (read filter) both landed, the platform is now ready for Azure to attach a real auth layer + server-side persistence without touching a single line of application code. The seams are all in place.
+
+---
+
+## Addendum, 2026-11-04: the engine reads every case
+
+Phase 3 filtered `getEvent()` for the screens, and was verified under admin only. The engine read through the same function: the simulation tick, the per-site case lifecycle, the rules, the recording, the dispatch physics and the unobserved-case sweeper. So what the platform RECORDED changed with whoever was signed in:
+
+- with the DK Airport operator signed in, Energinet's Amager case closed "lost contact", or never closed;
+- with Energinet's operator signed in, the airport swarm froze, with 0 alerts against 7;
+- a receiver not yet on a case froze it too, so it was never detected or escalated to them.
+
+The fix keeps the filter for the screens and gives the engine its own read, `getEventForEngine()`. An independent overseer sorted all 141 filtered reads into engine and screen blind before the change; `check:engine-reads` holds the agreed sort. Three things came with it, because the filter had been hiding them by accident:
+
+- **What the engine shows is gated per case.** Its toasts, explosion flashes, fall animations, pins, outcome marks, projected paths, cordons, response units and the fighter go only to an account that may see that case (`_viewerSeesCase`). Receivers see a drone only for a case they are on. Nothing is shown to anyone that was not shown before.
+- **Automatic cascades record the system as sender.** The impact and cordon cascades used to stamp whoever was signed in into the case's audit trail.
+- **`unionLinkedEventDomains` has no account gate.** By Lucas's decision a case takes the domains of every case linked to it, whoever is signed in: it describes where the threat went and decides which agencies are alerted. The row for it in the table above is superseded.
+
+Also: a recording download or replay for a case the account cannot see now gets nothing, where it used to get the raw data.
