@@ -132,6 +132,16 @@ Isolation is enforced at the query layer, not only in the UI. A receiver sees on
 
 Site geometry is drawn once at boot for every site and then swept by `applySiteScopeVisibility()`, which is re-run on every role change. Simulation ground truth (the coverage predicates, the per-site aggregation, the detection tick) deliberately continues to iterate every site regardless of viewer, because narrowing it would change what the sensors physically observe rather than what the viewer is shown.
 
+**The live track layer is scoped the same way (2026-11-04).** The 2026-09-20 pass fenced the site geometry but not the tracks drawn over it, so a DK Airport operator watching a swarm leave the airport kept seeing its icons over Amager Koblingsstation, and an ENTRY pin for Amager. An operator account now sees, on the live map:
+
+- a drone's icon, label and ground line only while one of its own sites' sensors sees it, never on another site's sensors or on a fighter's seeker;
+- a drone's trail only while it is visible to that account, made only of the points its own sites saw; the dashed path no sensor saw is never drawn for it;
+- the ENTRY, EXIT, DETECTED, REACQUIRED and OUT OF RANGE pins of its own sites only. Each pin carries the `siteId` it marks, saved with the case so a pin rebuilt later keeps it; a pin saved before then finds its site from its label, and one that cannot is shown to no operator;
+- a case's outcome marks (downed, impact, forced landing) and projected path only for a case at its own site;
+- the toasts that name a site, or report a case, only for its own sites.
+
+The rules live in `src/operator_map_scope.js` and are held by `check:operator-map-scope`. The fence is display only: the any-site coverage answers that drive the case flow, the recording, the confidence and the pursuit are never replaced by it, so what the platform records does not depend on who is signed in. Pins, marks and paths carry the same `siteId` the site sweep reads, so a role change re-scopes them through `applySiteScopeVisibility()`; drones and trails are re-scoped every frame. Admin and receiver accounts see exactly what they saw before.
+
 ### 1.2 Deployment topology
 
 Three tiers. The edge tier is where a partner most often integrates.

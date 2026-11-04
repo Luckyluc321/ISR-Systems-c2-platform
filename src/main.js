@@ -185,6 +185,7 @@ import { releaseDeferredNotes } from './events.js';
 import { signatureFor, displayNameFor } from './actor_signature.js';
 import { applyAutoDestinations } from './auto_destinations.js';
 import { incidentExecSummary, respondersOf } from './incident_summary.js';
+import { fencedSiteIds, ownSitesSeePoint, siteOfPinLabel, trailForRole, UNKNOWN_SITE } from './operator_map_scope.js';
 import { canDispatchUnit } from './mission_console_scope.js';
 import { zoomFloorProperty } from './model_zoom_floor.js';
 import { googleTilesAllowed } from './google_tiles_guard.js';
@@ -4957,7 +4958,11 @@ async function main() {
           return Cesium.Cartesian3.fromRadians(c.longitude, c.latitude, 500);
         });
       };
+      // The case's own site scopes it: an operator never sees another
+      // owner's case projected (operator_map_scope.js).
       const line = viewer.entities.add({
+        properties: { siteId: event.siteId },
+        show: _roleCanSeeSite(event.siteId),
         polyline: {
           positions: new Cesium.CallbackProperty(() => {
             const pp2 = event.projectedPath;
@@ -5012,6 +5017,8 @@ async function main() {
       const side = i % 2 === 0 ? 1 : -1;
       const offset = 0.06 + (i * 0.02);  // spread out more per index to reduce line overlap
       entities.secondaryLines.push(viewer.entities.add({
+        properties: { siteId: event.siteId },
+        show: _roleCanSeeSite(event.siteId),
         polyline: {
           positions: sampleBezierArc(pp.from.lat, pp.from.lon, imp.lat, imp.lon, 22, offset, side),
           width: 1.5,
@@ -5029,6 +5036,8 @@ async function main() {
       const showLabel = i < 2;
       const labelOffsetY = 18 + (i * 12);  // stagger just in case
       entities.impactRings.push(viewer.entities.add({
+        properties: { siteId: event.siteId },
+        show: _roleCanSeeSite(event.siteId),
         position: Cesium.Cartesian3.fromDegrees(imp.lon, imp.lat, 20),
         point: {
           pixelSize: 14,
@@ -10020,7 +10029,8 @@ async function main() {
                   const label = mode === 'explosion' ? '× DESTROYED' : '× DOWNED';
                   const killEnt = viewer.entities.add({
                     position: Cesium.Cartesian3.fromDegrees(wreckLon, wreckLat, 0),
-                    properties: { markerEventId: targetEv.id, markerKind: 'kill' },
+                    properties: { markerEventId: targetEv.id, markerKind: 'kill', siteId: targetEv.siteId },
+                    show: _roleCanSeeSite(targetEv.siteId),
                     point: {
                       pixelSize: 6,
                       color: Cesium.Color.fromCssColorString('#8b0e0e'),
@@ -10987,7 +10997,8 @@ async function main() {
           _spawnFlashEntity(dropLon, dropLat, 500, '#ff5a5a', 6, 22);
           const _killEnt = viewer.entities.add({
             position: Cesium.Cartesian3.fromDegrees(dropLon, dropLat, 0),
-            properties: { markerEventId: event.id, markerKind: 'kill' },
+            properties: { markerEventId: event.id, markerKind: 'kill', siteId: event.siteId },
+            show: _roleCanSeeSite(event.siteId),
             point: {
               pixelSize: 6,
               color: Cesium.Color.fromCssColorString('#8b0e0e'),
@@ -12135,7 +12146,7 @@ async function main() {
       records.forEach((r, idx) => {
         setTimeout(() => updateEscalationStatus(event.id, r.id, 'delivered'), 800 + idx * 200);
       });
-      toast(`Auto escalated · reacquired at ${site ? site.name : siteId}`, 'ok');
+      if (_roleCanSeeSite(siteId)) toast(`Auto escalated · reacquired at ${site ? site.name : siteId}`, 'ok');
     }
     // Evasion detection: if the newly captured heading differs materially
     // from the previously snapshotted heading (from an earlier sensor), the
@@ -12150,6 +12161,7 @@ async function main() {
       if (delta > 180) delta = 360 - delta;
       if (delta >= 8) {
         setTimeout(() => {
+          if (!_roleCanSeeSite(siteId)) return;
           toast(`EVASION CONFIRMED · course change ${Math.round(delta)}° captured at ${site ? site.name : siteId}. ${event.platform === 'missile' ? 'Missile' : 'Track'} diverged from its projected path during the sensor gap.`, 'warn');
         }, 6000);
       }
@@ -12163,7 +12175,7 @@ async function main() {
     if (_f35.airborne && _f35.mode !== 'chase') {
       _f35.mode = 'chase';
       _f35.targetEventId = event.id;
-      toast(`F-35 cross cued from ${site ? site.name : siteId}. Chase pattern engaged.`, 'ok');
+      if (_roleCanSeeSite(siteId)) toast(`F-35 cross cued from ${site ? site.name : siteId}. Chase pattern engaged.`, 'ok');
     }
   }
 
@@ -12425,7 +12437,11 @@ async function main() {
     return 'detected';
   }
 
-  function _dropMarker(lat, lon, colorHex, labelText, eventId = null) {
+  // siteId: the site whose crossing the pin marks. A site the signed-in
+  // account does not own never shows its pins (operator_map_scope.js);
+  // applySiteScopeVisibility re-applies that on every account switch,
+  // through the same siteId.
+  function _dropMarker(lat, lon, colorHex, labelText, eventId = null, siteId = null) {
     // Stagger label y so overlapping markers (site-level OOR + per-drone
     // OOR firing on top of each other at AMK, etc) don't collide into
     // unreadable stacked text. Count markers within ~80 m of this new
@@ -12467,8 +12483,9 @@ async function main() {
         disableDepthTestDistance: Number.POSITIVE_INFINITY,
         show: true,   // explicit — some Cesium builds treat undefined as "not-yet-visible" until scene requests a render
       },
-      properties: { markerEventId: eventId || 'orphan', markerKind: _markerKindFromLabel(labelText) },
+      properties: { markerEventId: eventId || 'orphan', markerKind: _markerKindFromLabel(labelText), ...(siteId ? { siteId } : {}) },
     });
+    if (siteId) ent.show = _roleCanSeeSite(siteId);
     if (eventId) {
       if (!_perEventMarkers.has(eventId)) _perEventMarkers.set(eventId, []);
       _perEventMarkers.get(eventId).push(ent);
@@ -12638,8 +12655,8 @@ async function main() {
     let droneInside = event._droneInsideState.get(droneKey);
     if (!droneInside) { droneInside = new Map(); setEventMapKey(event.id, '_droneInsideState', droneKey, droneInside); }
 
-    const _persist = (kind, lat, lon, color, label) => {
-      appendEventArray(event.id, 'perSiteCrossings', { kind, lat, lon, color, label, timestamp: new Date().toISOString() });
+    const _persist = (kind, lat, lon, color, label, siteId) => {
+      appendEventArray(event.id, 'perSiteCrossings', { kind, lat, lon, color, label, siteId, timestamp: new Date().toISOString() });
     };
     const _log = (siteId, kind, lat, lon) => {
       appendEventArray(event.id, '_droneTransitionLog', {
@@ -12742,16 +12759,16 @@ async function main() {
             agg.entryCount++;
             const suffix = agg.entryCount > 1 ? ` #${agg.entryCount}` : '';
             const lbl = `ENTRY${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid}`;
-            _dropMarker(hit.lat, hit.lon, '#4dd2ff', lbl, event.id);
-            _persist('entry', hit.lat, hit.lon, '#4dd2ff', lbl);
+            _dropMarker(hit.lat, hit.lon, '#4dd2ff', lbl, event.id, sid);
+            _persist('entry', hit.lat, hit.lon, '#4dd2ff', lbl, sid);
           }
         } else {
           const n = (agg.droneEntryCount.get(droneKey) || 0) + 1;
           agg.droneEntryCount.set(droneKey, n);
           const suffix = n > 1 ? ` #${n}` : '';
           const lbl = `ENTRY${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid} · ${droneLabel || droneKey}`;
-          _dropMarker(hit.lat, hit.lon, '#4dd2ff', lbl, event.id);
-          _persist('entry', hit.lat, hit.lon, '#4dd2ff', lbl);
+          _dropMarker(hit.lat, hit.lon, '#4dd2ff', lbl, event.id, sid);
+          _persist('entry', hit.lat, hit.lon, '#4dd2ff', lbl, sid);
         }
       }
       // PERIMETER EXIT (drone crosses fenced-yard polygon outbound)
@@ -12765,16 +12782,16 @@ async function main() {
             agg.exitCount++;
             const suffix = agg.exitCount > 1 ? ` #${agg.exitCount}` : '';
             const lbl = `EXIT${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid}`;
-            _dropMarker(hit.lat, hit.lon, '#ffb84d', lbl, event.id);
-            _persist('exit', hit.lat, hit.lon, '#ffb84d', lbl);
+            _dropMarker(hit.lat, hit.lon, '#ffb84d', lbl, event.id, sid);
+            _persist('exit', hit.lat, hit.lon, '#ffb84d', lbl, sid);
           }
         } else {
           const n = (agg.droneExitCount.get(droneKey) || 0) + 1;
           agg.droneExitCount.set(droneKey, n);
           const suffix = n > 1 ? ` #${n}` : '';
           const lbl = `EXIT${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid} · ${droneLabel || droneKey}`;
-          _dropMarker(hit.lat, hit.lon, '#ffb84d', lbl, event.id);
-          _persist('exit', hit.lat, hit.lon, '#ffb84d', lbl);
+          _dropMarker(hit.lat, hit.lon, '#ffb84d', lbl, event.id, sid);
+          _persist('exit', hit.lat, hit.lon, '#ffb84d', lbl, sid);
         }
       }
       droneInside.set(sid, nowInside);
@@ -12796,8 +12813,8 @@ async function main() {
             const color = isFirst ? '#4dd2ff' : '#4dff9c';
             const tail = isFirst ? '' : ' signal returned';
             const lbl = `${kind}${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid}${tail}`;
-            _dropMarker(hit.lat, hit.lon, color, lbl, event.id);
-            _persist(isFirst ? 'detected' : 'reacq', hit.lat, hit.lon, color, lbl);
+            _dropMarker(hit.lat, hit.lon, color, lbl, event.id, sid);
+            _persist(isFirst ? 'detected' : 'reacq', hit.lat, hit.lon, color, lbl, sid);
           }
         } else {
           const n = (agg.droneDetectCount.get(droneKey) || 0) + 1;
@@ -12808,8 +12825,8 @@ async function main() {
           const color = isFirst ? '#4dd2ff' : '#4dff9c';
           const tail = isFirst ? '' : ' signal returned';
           const lbl = `${kind}${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid} · ${droneLabel || droneKey}${tail}`;
-          _dropMarker(hit.lat, hit.lon, color, lbl, event.id);
-          _persist(isFirst ? 'detected' : 'reacq', hit.lat, hit.lon, color, lbl);
+          _dropMarker(hit.lat, hit.lon, color, lbl, event.id, sid);
+          _persist(isFirst ? 'detected' : 'reacq', hit.lat, hit.lon, color, lbl, sid);
         }
       }
       // SENSOR COVERAGE loss — OUT OF RANGE
@@ -12828,22 +12845,22 @@ async function main() {
             agg.oorCount++;
             const suffix = agg.oorCount > 1 ? ` #${agg.oorCount}` : '';
             const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid} signal lost`;
-            _dropMarker(hit.lat, hit.lon, '#ff5a5a', lbl, event.id);
-            _persist('oor', hit.lat, hit.lon, '#ff5a5a', lbl);
+            _dropMarker(hit.lat, hit.lon, '#ff5a5a', lbl, event.id, sid);
+            _persist('oor', hit.lat, hit.lon, '#ff5a5a', lbl, sid);
             agg._oorFiredThisCycle = true;
             agg._pendingOorPos = null;
             // P1: operator/receiver-visible notification. Mirrors the
             // DETECTED toast pattern so signal-loss isn't silent.
-            toast(`OUT OF RANGE · ${event.droneType || 'track'} left ${site.name || site.code || sid} sensor coverage.`, 'warn');
+            if (_roleCanSeeSite(sid)) toast(`OUT OF RANGE · ${event.droneType || 'track'} left ${site.name || site.code || sid} sensor coverage.`, 'warn');
           }
         } else {
           const n = (agg.droneOorCount.get(droneKey) || 0) + 1;
           agg.droneOorCount.set(droneKey, n);
           const suffix = n > 1 ? ` #${n}` : '';
           const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site.code || site.name || sid} · ${droneLabel || droneKey}`;
-          _dropMarker(hit.lat, hit.lon, '#ff5a5a', lbl, event.id);
-          _persist('oor', hit.lat, hit.lon, '#ff5a5a', lbl);
-          toast(`OUT OF RANGE · ${droneLabel || droneKey} left ${site.name || site.code || sid} sensor coverage.`, 'warn');
+          _dropMarker(hit.lat, hit.lon, '#ff5a5a', lbl, event.id, sid);
+          _persist('oor', hit.lat, hit.lon, '#ff5a5a', lbl, sid);
+          if (_roleCanSeeSite(sid)) toast(`OUT OF RANGE · ${droneLabel || droneKey} left ${site.name || site.code || sid} sensor coverage.`, 'warn');
         }
       }
       droneCov.set(sid, nowInCov);
@@ -12925,11 +12942,11 @@ async function main() {
       // formation is a MEMBER with a status, not a separate owner of
       // markers. See docs/swarm-individual-tracking-architecture.md.
       const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site?.code || site?.name || sid} signal lost`;
-      _dropMarker(pos.lat, pos.lon, '#ff5a5a', lbl, event.id);
-      appendEventArray(event.id, 'perSiteCrossings', { kind: 'oor', lat: pos.lat, lon: pos.lon, color: '#ff5a5a', label: lbl, timestamp: now });
+      _dropMarker(pos.lat, pos.lon, '#ff5a5a', lbl, event.id, sid);
+      appendEventArray(event.id, 'perSiteCrossings', { kind: 'oor', lat: pos.lat, lon: pos.lon, color: '#ff5a5a', label: lbl, siteId: sid, timestamp: now });
       agg._oorFiredThisCycle = true;
       agg._pendingOorPos = null;
-      toast(`OUT OF RANGE · ${event.droneType || 'track'} left ${site?.name || site?.code || sid} sensor coverage.`, 'warn');
+      if (_roleCanSeeSite(sid)) toast(`OUT OF RANGE · ${event.droneType || 'track'} left ${site?.name || site?.code || sid} sensor coverage.`, 'warn');
     }
   }
 
@@ -14277,7 +14294,7 @@ async function main() {
         if (existing.detected === false) {
           existing.detected = true;
           const siteName_ = SITES[sid]?.name || sid;
-          toast(`DETECTED · ${primaryEvent.droneType} within ${siteName_} sensor range.`, 'warn');
+          if (_roleCanSeeSite(sid)) toast(`DETECTED · ${primaryEvent.droneType} within ${siteName_} sensor range.`, 'warn');
           renderAlertStrip();
         }
         // Nothing to do for a closed event here: _findGroupEventForSite
@@ -14494,6 +14511,40 @@ async function main() {
   // ═══════════════════════════════════════════════════════════════════
   function _shouldAutoDetect(lat, lon, altM) {
     return _anySensorSeesPoint(lat, lon, altM);
+  }
+
+  // ── What the signed-in account may see on the live map ──
+  // operator_map_scope.js: an operator sees a drone, its trail and its
+  // pins only where its own sites' sensors saw it. DISPLAY ONLY. The
+  // any-site answers above keep driving the case flow, the recording,
+  // the confidence and the pursuit, whoever is signed in.
+  //
+  // anySiteSees is the caller's own any-site answer, handed back as is
+  // for admin and receivers, so their view and frame cost are unchanged.
+  function _viewerSeesPoint(lat, lon, altM, anySiteSees) {
+    const own = ownSitesSeePoint(getActiveRole(), SITES, _sensorSeesPoint, lat, lon, altM);
+    return own === null ? anySiteSees : own;
+  }
+  // The sites whose sensors saw a trail point. Recorded only while an
+  // operator is signed in, so an admin's frame pays nothing; a point
+  // recorded without it is never shown to an operator.
+  function _trailTag(lat, lon, altM) {
+    return fencedSiteIds(getActiveRole()) ? [..._sitesSeeingPoint(lat, lon, altM)] : null;
+  }
+  // A trail as the signed-in account may see it. Admin and receivers:
+  // the same array, untouched.
+  function _viewerTrail(positions, seenBy) {
+    return trailForRole(getActiveRole(), positions, seenBy);
+  }
+  // The site a pin rebuilt from a saved point belongs to: the case's own
+  // site when its sensors cover the point, else the first site that does.
+  // A multi-site case's point no site covers is UNKNOWN_SITE, which no
+  // operator owns.
+  function _pinSiteForPoint(event, lat, lon, altM) {
+    if (!event?.multiSiteTrack) return event?.siteId || UNKNOWN_SITE;
+    const seen = _sitesSeeingPoint(lat, lon, typeof altM === 'number' ? altM : 0);
+    if (seen.has(event.siteId)) return event.siteId;
+    return seen.values().next().value || UNKNOWN_SITE;
   }
 
   // Binary-search the segment prev→cur for the point where the drone
@@ -17538,12 +17589,15 @@ async function main() {
           : [0, 0, 100];
 
     const trailPositions = [];
+    // Kept in step with trailPositions: the sites that saw each point,
+    // for an operator's view of the trail (_viewerTrail).
+    const trailSeenBy = [];
     const shadowPositions = [];
 
     const trail = viewer.entities.add({
       id: `drone-trail-${event.id}`,
       polyline: {
-        positions: new Cesium.CallbackProperty(() => trailPositions, false),
+        positions: new Cesium.CallbackProperty(() => _viewerTrail(trailPositions, trailSeenBy), false),
         width: 2.5,
         material: new Cesium.PolylineDashMaterialProperty({
           color: Cesium.Color.fromCssColorString(color).withAlpha(0.75),
@@ -18993,10 +19047,12 @@ async function main() {
         // Per-drone TRAIL (red dashed, past track) — grows behind the drone
         // while inside sensor coverage, freezes when out.
         const trailPositions = [];
+        // Kept in step with trailPositions (_viewerTrail).
+        const trailSeenBy = [];
         const trailLine = viewer.entities.add({
           id: `drone-${event.id}-swarm-${i}-trail`,
           polyline: {
-            positions: new Cesium.CallbackProperty(() => trailPositions, false),
+            positions: new Cesium.CallbackProperty(() => _viewerTrail(trailPositions, trailSeenBy), false),
             width: 2,
             material: new Cesium.PolylineDashMaterialProperty({
               color: Cesium.Color.fromCssColorString('#ff3d3d').withAlpha(0.7),
@@ -19040,7 +19096,7 @@ async function main() {
           memberId: `${event.id}-m${i}`,
           waypoints: droneWaypoints,   // OWN trajectory, independent of lead
           prevPos: null, prevTs: null, // motion tracking for heading + speed
-          trailLine, trailPositions,
+          trailLine, trailPositions, trailSeenBy,
           projLine, projPositions,
           offset: slot.offset,
           role: slot.role,
@@ -19087,7 +19143,7 @@ async function main() {
       swarmBillboards,   // formation[1..N] only — LEAD is state.leadSwarmMember
       leadSwarmMember,   // formation[0] wrapper, same shape as swarmBillboards entries
       spawnMs: monoNow(),   // shared timing reference for swarm interpolation
-      trailPositions, shadowPositions, _gear, _prop: isFixedWing ? _fwProp : null,
+      trailPositions, trailSeenBy, shadowPositions, _gear, _prop: isFixedWing ? _fwProp : null,
       stateHolder,      // { headingRad } — updated in tick, read by billboard rotation callback
       entryDropped: false, entryMarker: null,
       exitDropped: false, exitMarker: null, wasInCoverage: false,
@@ -19699,7 +19755,7 @@ async function main() {
           if (event.detected === false) {
             mutateEvent(event.id, { detected: true });
             const site = SITES[bestSid];
-            toast(`DETECTED · ${event.droneType} within ${site?.name || bestSid} sensor range.`, 'warn');
+            if (_roleCanSeeSite(bestSid)) toast(`DETECTED · ${event.droneType} within ${site?.name || bestSid} sensor range.`, 'warn');
             renderAlertStrip();
           }
           if (
@@ -19906,9 +19962,15 @@ async function main() {
         // Opt-in terrain-relative altitude. See the position assignment
         // below for why this is a template flag and not a global fix.
         const _terrainRel = !!(TEMPLATES[event.templateKey]?.terrainRelativeAlt);
+        // An operator sees the drone only while its own sites' sensors do
+        // (operator_map_scope.js): not on another site's sensors, and not
+        // on a fighter's seeker. Admin and receivers: unchanged. leadInCov
+        // itself stays the any-site answer, because it drives data below.
+        const _fencedView = !!fencedSiteIds(getActiveRole());
+        const leadViewable = _viewerSeesPoint(p.lat, p.lon, p.alt, leadInCov);
         const shouldShow = (leadDown || povSuppressed) ? false : (state.closedAt
           ? false
-          : (leadInCov || beingChased || _coop));
+          : (leadViewable || (beingChased && !_fencedView) || _coop));
         state.billboard.show = shouldShow;
         state.shadow.show = shouldShow && !povSuppressed;
         // FUSED CONFIDENCE FOR EVERY SINGLE DRONE, the same approach as
@@ -19982,7 +20044,7 @@ async function main() {
         // (yellow dashed line extending forward from the drone) is
         // hidden by the POV entry/exit hooks — see _enterDronePOV.
         if ((leadDown || povSuppressed) && state.trail) state.trail.show = false;
-        else if (!leadDown && state.trail && !povSuppressed) state.trail.show = true;
+        else if (!leadDown && state.trail && !povSuppressed) state.trail.show = !_fencedView || leadViewable;
         // Purge lead from aggregate sets ONCE on death so surviving
         // wingmen's transitions can flip aggregates to empty and
         // fire OUT OF RANGE / EXIT normally.
@@ -20346,7 +20408,11 @@ async function main() {
         // continuing along the drone's remaining waypoints.
         if (!leadDown && _trailAppendCounter % 3 === 0) {
           state.trailPositions.push(Cesium.Cartesian3.clone(state._cartNow));
-          if (state.trailPositions.length > 180) state.trailPositions.shift();
+          state.trailSeenBy.push(_trailTag(p.lat, p.lon, p.alt));
+          if (state.trailPositions.length > 180) {
+            state.trailPositions.shift();
+            state.trailSeenBy.shift();
+          }
         }
 
         // Perimeter crossing detection — fall back to outer siteBoundary if
@@ -20499,7 +20565,7 @@ async function main() {
           // read event.exit, and this is a duplicate pin, not a duplicate
           // record.
           if (coverageExit && !perimeterExit) {
-            state.exitMarker = _dropMarker(p.lat, p.lon, '#ffb84d', exitLabel, event.id);
+            state.exitMarker = _dropMarker(p.lat, p.lon, '#ffb84d', exitLabel, event.id, event.siteId);
           }
           mutateEvent(event.id, { exit: exitPoint });
           // If intercept is pending, don't force-close on coverage exit — let
@@ -20517,7 +20583,7 @@ async function main() {
           if (!cov.inCoverage) {
             state.outOfRangeDropped = true;
             const oorTime = new Date().toISOString().slice(11, 19);
-            state.outOfRangeMarker = _dropMarker(p.lat, p.lon, '#ff5a5a', `OUT OF RANGE ${oorTime}Z · signal lost`, event.id);
+            state.outOfRangeMarker = _dropMarker(p.lat, p.lon, '#ff5a5a', `OUT OF RANGE ${oorTime}Z · signal lost`, event.id, event.siteId);
             mutateEvent(event.id, { outOfRange: { lat: p.lat, lon: p.lon, alt: Math.round(p.alt), timestamp: new Date().toISOString() } });
           }
         }
@@ -20901,7 +20967,8 @@ async function main() {
               // it's visible in top-down after the billboard hides.
               viewer.entities.add({
                 position: Cesium.Cartesian3.fromDegrees(jfLon, jfLat, jf.groundAlt + 0.5),
-                properties: { markerEventId: event.id, markerKind: 'jam-down' },
+                properties: { markerEventId: event.id, markerKind: 'jam-down', siteId: event.siteId },
+                show: _roleCanSeeSite(event.siteId),
                 point: {
                   pixelSize: 6,
                   color: Cesium.Color.fromCssColorString('#ffd54d'),
@@ -21008,13 +21075,18 @@ async function main() {
           // stops AND the case is closed there is nothing left to
           // update, which is the freeze this guards against.
           const _swVisible = swShouldShow && (isTrackLive(event.id) || !state.closedAt);
-          sw.billboard.show = _swVisible && !sw._povActive;
+          // An operator sees this airframe only while its own sites'
+          // sensors do (operator_map_scope.js). Display only: swShouldShow
+          // still drives the trail reset, the pursuit anchor and the
+          // member track below, whoever is signed in.
+          const _swViewable = _swVisible && _viewerSeesPoint(pos.lat, pos.lon, pos.alt, true);
+          sw.billboard.show = _swViewable && !sw._povActive;
           // Trail visibility mirrors the drone billboard — as soon as
           // the drone drops out of coverage (billboard hides), its
           // trendline also hides. Prevents the "overwatch trail
           // staying visible over Øresund" ghost effect after signal
           // loss. Reappears when the drone re-enters coverage.
-          if (sw.trailLine) sw.trailLine.show = _swVisible;
+          if (sw.trailLine) sw.trailLine.show = _swViewable;
           // Track coverage transitions so we can drop indexed
           // out-of-range / reacquisition markers below.
           //
@@ -21074,6 +21146,7 @@ async function main() {
             sw._prevInCov = swShouldShow;
           } else if (sw._prevInCov && !swShouldShow) {
             if (sw.trailPositions) sw.trailPositions.length = 0;
+            if (sw.trailSeenBy) sw.trailSeenBy.length = 0;
           }
           sw._prevInCov = swShouldShow;
           // UNIDENTIFIED TAG, DECLARED BY THE SLOT, NOT GUESSED FROM THE
@@ -21248,7 +21321,11 @@ async function main() {
           // polyline and the dashed trailing line is hidden.
           if (inCov) {
             sw.trailPositions.push(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, _safeTrailAlt(pos.alt)));
-            if (sw.trailPositions.length > 400) sw.trailPositions.shift();
+            sw.trailSeenBy.push(_trailTag(pos.lat, pos.lon, pos.alt));
+            if (sw.trailPositions.length > 400) {
+              sw.trailPositions.shift();
+              sw.trailSeenBy.shift();
+            }
             sw.projLine.show = false;
             // Wipe projPositions on re-entry so the NEXT out-of-cov
             // cycle starts fresh. Otherwise the dashed projection line
@@ -21287,7 +21364,9 @@ async function main() {
           } else {
             sw.projPositions.push(Cesium.Cartesian3.fromDegrees(pos.lon, pos.lat, pos.alt));
             if (sw.projPositions.length > 300) sw.projPositions.shift();
-            sw.projLine.show = sw.projPositions.length >= 2;
+            // The path no sensor saw. Never for an operator, whose map
+            // shows only what its own sites saw (operator_map_scope.js).
+            sw.projLine.show = sw.projPositions.length >= 2 && !fencedSiteIds(getActiveRole());
           }
           // Per-drone per-site transitions (polygon + cov). Uses THIS
           // drone's own current + previous position. Swarm-density
@@ -21434,7 +21513,7 @@ async function main() {
         const _didImpact = !!_tplDone?.terminalImpact;
         if (_didImpact && p.lat != null && p.lon != null) {
           _playExplosionSequence(p.lon, p.lat, Math.max(25, p.alt || 30));
-          toast(`IMPACT · ${event.droneType || 'weapon'} detonated at target.`, 'warn');
+          if (_roleCanSeeSite(event.siteId)) toast(`IMPACT · ${event.droneType || 'weapon'} detonated at target.`, 'warn');
           // CODE RED ground response: the impact point enters the
           // wreckages ledger exactly like a downed drone, so every
           // dispatched patrol re-routes to the detonation site and a
@@ -21517,7 +21596,7 @@ async function main() {
             // systems will register against. Fire-and-forget, guarded
             // internally against an empty array.
             _fireEscalationAdapterSend(event, _casRecords);
-            toast(_casRecords.length
+            if (_roleCanSeeSite(event.siteId)) toast(_casRecords.length
               ? `Consequence cascade sent: ${_casRecords.length} agencies alerted, local to this site.`
               : 'Consequence cascade: every agency was already on the case.', 'warn');
           } catch (err) { console.warn('[impact cascade] failed:', err.message); }
@@ -21528,7 +21607,8 @@ async function main() {
           // kills).
           const _impactEnt = viewer.entities.add({
             position: Cesium.Cartesian3.fromDegrees(p.lon, p.lat, 0),
-            properties: { markerEventId: event.id, markerKind: 'impact' },
+            properties: { markerEventId: event.id, markerKind: 'impact', siteId: event.siteId },
+            show: _roleCanSeeSite(event.siteId),
             point: {
               pixelSize: 7,
               color: Cesium.Color.fromCssColorString('#8b2500'),
@@ -28926,18 +29006,21 @@ async function main() {
     let recreated = 0;
     // Single-site path — event.entry / .exit / .outOfRange
     if (event.entry?.lat != null) {
-      _dropMarker(event.entry.lat, event.entry.lon, '#4dd2ff', `ENTRY ${tstamp(event.entry.timestamp)}Z`, eventId);
+      _dropMarker(event.entry.lat, event.entry.lon, '#4dd2ff', `ENTRY ${tstamp(event.entry.timestamp)}Z`, eventId,
+        _pinSiteForPoint(event, event.entry.lat, event.entry.lon, event.entry.alt));
       recreated++;
     }
     if (event.exit?.lat != null) {
       const label = event.exit.leftCoverageOf
         ? `EXIT ${tstamp(event.exit.timestamp)}Z · cleared ${event.exit.leftCoverageOf}`
         : `EXIT ${tstamp(event.exit.timestamp)}Z`;
-      _dropMarker(event.exit.lat, event.exit.lon, '#ffb84d', label, eventId);
+      _dropMarker(event.exit.lat, event.exit.lon, '#ffb84d', label, eventId,
+        _pinSiteForPoint(event, event.exit.lat, event.exit.lon, event.exit.alt));
       recreated++;
     }
     if (event.outOfRange?.lat != null) {
-      _dropMarker(event.outOfRange.lat, event.outOfRange.lon, '#ff5a5a', `OUT OF RANGE ${tstamp(event.outOfRange.timestamp)}Z · signal lost`, eventId);
+      _dropMarker(event.outOfRange.lat, event.outOfRange.lon, '#ff5a5a', `OUT OF RANGE ${tstamp(event.outOfRange.timestamp)}Z · signal lost`, eventId,
+        _pinSiteForPoint(event, event.outOfRange.lat, event.outOfRange.lon, event.outOfRange.alt));
       recreated++;
     }
     // Multi-site path — event.perSiteCrossings array (populated by
@@ -28945,7 +29028,9 @@ async function main() {
     if (Array.isArray(event.perSiteCrossings)) {
       for (const c of event.perSiteCrossings) {
         if (c.lat == null || c.lon == null) continue;
-        _dropMarker(c.lat, c.lon, c.color || '#4dd2ff', c.label || c.kind || 'crossing', eventId);
+        // Saved before pins carried their site: read it off the label.
+        _dropMarker(c.lat, c.lon, c.color || '#4dd2ff', c.label || c.kind || 'crossing', eventId,
+          c.siteId || siteOfPinLabel(c.label, SITES));
         recreated++;
       }
     }
