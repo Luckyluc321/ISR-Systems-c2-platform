@@ -9199,12 +9199,12 @@ async function main() {
         && !d.assignedSwarmMember.neutralised
         && d.assignedSwarmMember.billboard
         && d.assignedSwarmMember._sensorShown === false
-        // ...UNLESS the target is only visually-hidden because the operator
-        // is in first-person POV inside it. Coverage is still real; only
-        // the icon has been suppressed to keep it from rendering on top
-        // of the camera. Interceptor should keep engaging normally, and
-        // the operator should get to watch themselves get shot down.
-        && !d.assignedSwarmMember._povActive
+        // First-person view inside the target does not count: it hides
+        // the icon from the camera, not from the sensors, and
+        // _sensorShown is the sensors' answer (fix 3, 2026-11-04). The
+        // view used to be excepted here because the drawn flag dropped
+        // in it, which also kept a REAL loss from being declared while
+        // someone watched from inside the drone.
         // The seeker still has it. Our mesh losing the target is not
         // the interceptor losing the target.
         && !_onboardHoldsTarget) {
@@ -20069,9 +20069,11 @@ async function main() {
           ? false
           : (leadViewable || (beingChased && !_fencedView && _viewerFollowsTrack(event)) || _coop));
         state.billboard.show = shouldShow;
-        // The same flag without the account fence, for the dispatch engine.
+        // The same flag without the account fence or the first-person
+        // view (that hides the icon from the camera, not from the
+        // sensors), for the dispatch engine.
         if (state.leadSwarmMember) {
-          state.leadSwarmMember._sensorShown = (leadDown || povSuppressed) ? false : (state.closedAt
+          state.leadSwarmMember._sensorShown = leadDown ? false : (state.closedAt
             ? false
             : (leadInCov || beingChased || _coop));
         }
@@ -21075,7 +21077,6 @@ async function main() {
               // Drop a small downed-drone marker at the landing spot so
               // it's visible in top-down after the billboard hides.
               const _jamEnt = viewer.entities.add({
-                show: _viewerSeesCase(event),
                 position: Cesium.Cartesian3.fromDegrees(jfLon, jfLat, jf.groundAlt + 0.5),
                 properties: { markerEventId: event.id, markerKind: 'jam-down', siteId: event.siteId },
                 show: _viewerSeesCase(event),
@@ -21193,7 +21194,7 @@ async function main() {
           // still drives the trail reset, the pursuit anchor and the
           // member track below, whoever is signed in.
           const _swViewable = _swVisible && _viewerSeesPoint(pos.lat, pos.lon, pos.alt, true) && _viewerFollowsTrack(event);
-          sw._sensorShown = _swVisible && !sw._povActive;
+          sw._sensorShown = _swVisible;   // the sensors' answer: no fence, no first-person view
           sw.billboard.show = _swViewable && !sw._povActive;
           // Trail visibility mirrors the drone billboard — as soon as
           // the drone drops out of coverage (billboard hides), its
@@ -23460,8 +23461,7 @@ async function main() {
     // Suppress this drone's own billboard while camera is inside it
     // (drone tick reads swRef._povActive and drops show accordingly).
     swRef._povActive = true;
-    swRef.billboard.show = false;
-    swRef._sensorShown = false;
+    swRef.billboard.show = false;   // the camera's view only: _sensorShown is untouched
     // Hide the yellow projected-trajectory polyline extending forward
     // from the drone's current position — from POV it appears as a
     // trend line 100m in front of the camera which is jarring and

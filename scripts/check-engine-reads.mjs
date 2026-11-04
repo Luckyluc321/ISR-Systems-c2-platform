@@ -47,13 +47,15 @@ function scan(src) {
   const stack = [];
   const KW = new Set(['return', 'typeof', 'case', 'do', 'else', 'in', 'of', 'new', 'delete', 'void', 'throw', 'instanceof', 'yield', 'await']);
   const isWord = (ch) => /[A-Za-z0-9_$]/.test(ch);
-  let line = 0, buf = '', mode = 'code', prevSig = '', word = '', lastWord = false, inClass = false;
+  let line = 0, buf = '', mode = 'code', prevSig = '', prevSig2 = '', word = '', lastWord = false, inClass = false;
   for (let i = 0; i < src.length; i++) {
     const c = src[i], n = src[i + 1];
     if (c === '\n') {
       code.push(buf); buf = ''; line++;
       openAt.push(stack.filter((s) => s.kind === 'code').map((s) => s.line));
-      if (mode === 'line') mode = 'code';
+      // A regex literal cannot span lines: one that seems to was a
+      // division misread, and the damage stops at the line's end.
+      if (mode === 'line' || mode === 'regex') mode = 'code';
       lastWord = false;
       continue;
     }
@@ -80,7 +82,9 @@ function scan(src) {
     if (c === '"') { mode = 'dq'; buf += ' '; continue; }
     if (c === '`') { mode = 'tmpl'; buf += ' '; continue; }
     if (c === '/') {
-      const regexStart = prevSig === '' || '(,=:[!&|?{};+-*%<>~^'.includes(prevSig) || (isWord(prevSig) && KW.has(word));
+      // After i++ or i-- a slash divides (the overseer's case).
+      const postfix = (prevSig === '+' || prevSig === '-') && prevSig2 === prevSig;
+      const regexStart = !postfix && (prevSig === '' || '(,=:[!&|?{};+-*%<>~^'.includes(prevSig) || (isWord(prevSig) && KW.has(word)));
       if (regexStart) { mode = 'regex'; inClass = false; buf += ' '; continue; }
     }
     if (c === '{') {
@@ -93,8 +97,8 @@ function scan(src) {
       if (top.kind === 'tmpl') { mode = 'tmpl'; buf += ' '; continue; }
       top.rec.close = line;
     }
-    if (isWord(c)) { word = lastWord ? word + c : c; lastWord = true; } else if (!/\s/.test(c)) lastWord = false; else lastWord = false;
-    if (!/\s/.test(c)) prevSig = c;
+    if (isWord(c)) { word = lastWord ? word + c : c; lastWord = true; } else lastWord = false;
+    if (!/\s/.test(c)) { prevSig2 = prevSig; prevSig = c; }
     buf += c;
   }
   code.push(buf);
@@ -120,11 +124,35 @@ const codeOf = (name) => { const r = rangeOf(name); return r ? code.slice(r.star
 const rawOf = (name) => { const r = rangeOf(name); return r ? lines.slice(r.start, r.end + 1).join('\n') : ''; };
 const linesIn = (name) => { const r = rangeOf(name); return r ? Array.from({ length: r.end - r.start + 1 }, (_, k) => r.start + k) : []; };
 
+// ── The agreed sort ──
+// Engine: runs whoever is watching and must read every case. The F-35
+// loop, the friendly missile and the dev inbound pass run their frames
+// in inline functions; their enclosing functions are named here.
+const ENGINE_FNS = ['_liveTargetPositionFor', '_simComputeEngagementOutcome', '_passPointFor', '_initiateJamFall', '_launchInboundPass',
+  '_syncDispatchToEvent', '_tickCounterDispatch', '_gapLimitedStep', '_resolveEngagement', 'counterDispatchStateFor', '_startF35Loop', '_launchFriendlyMissile',
+  'tryNeutralize', '_sweepUnobservedActiveEvents', '_findGroupEventForSite', '_closeSoloSiteCases', '_persistCrossCuedRecordings',
+  'onDroneTick', 'cancelActiveThreats', 'pushNotification', 'pushObserver', '_bestTargetForDispatch',
+  '_handlePerSiteLifecycle', '_spawnLinkedSiteEvent', 'processDroneSiteMarkers', '_fireDelayedOORForEmptiedSites', '_fireReacquisition',
+  '_markMemberBrokenAway', '_rebalancePatrolsToWreckages', '_sweepSceneLifecycle', '_startCounterDispatchLoop'];
+// The response-unit chase: decides from what the sensors see.
+const CHASE_FNS = ['_tickCounterDispatch', '_gapLimitedStep', '_resolveEngagement', '_assignInterceptorTarget', '_allDownableHostiles',
+  '_syncDispatchToEvent', 'counterDispatchStateFor', '_bestTargetForDispatch', '_simComputeEngagementOutcome', '_liveTargetPositionFor',
+  '_passPointFor', '_initiateJamFall', 'tryNeutralize'];
+// Visibility gates: they read a case only to decide what to SHOW.
+const GATE_FNS = ['_viewerSeesCase', '_viewerTrail', '_dropMarker', '_rescopeCaseEntities', '_createCounterDispatchEntities', '_createF35Entities'];
+// Lines in main()'s own body rather than in a function: the visibility
+// rules' case lookup, the live sensor's gate, and the live sensor's
+// engine read (the module reads cases nowhere else).
+const DOOR_LINES = [/^\s*lookup: \(id\) => getEventForEngine\(id\),$/, /^\s*canShow: \(id\) => _viewerSeesCase\(getEventForEngine\(id\)\),$/,
+  /^\s*sites: SITES, viewer, Cesium, events: EVENTS, addEvent, getEvent: getEventForEngine, mutateEvent, addNote,$/];
+
 console.log('\n[the scan itself]');
 check('every declared function closes', fns.length > 400 && fns.every((f) => f.end >= f.start), fns.filter((f) => f.end < f.start).map((f) => f.name).join(', '));
-const named = ['_tickCounterDispatch', '_gapLimitedStep', '_rescopeCaseEntities', 'pushNotification', '_assignInterceptorTarget', '_allDownableHostiles'];
+const named = [...new Set([...ENGINE_FNS, ...CHASE_FNS, ...GATE_FNS, '_enterDronePOV', '_createF35Entities'])];
 const twice = named.filter((n) => fns.filter((f) => f.name === n).length !== 1);
-check('every function this check reads by name is declared exactly once', twice.length === 0, twice.join(', '));
+check('every function this check reads by name is declared exactly once', twice.length === 0, twice.map((n) => `${n} x${fns.filter((f) => f.name === n).length}`).join(', '));
+check('a slash after i++ divides: it does not open a regex that would hide the lines after it',
+  (() => { const t = scan('let i = 0;\nconst q = i++ / 2;\ntoast(q);\nconst r = q / 2;\n'); return /toast\(q\)/.test(t.code[2]); })());
 check('the response-unit tick is read whole, past its two mis-indented helpers',
   rangeOf('_tickCounterDispatch') && rangeOf('_gapLimitedStep')
   && rangeOf('_tickCounterDispatch').end > rangeOf('_gapLimitedStep').end
@@ -184,19 +212,6 @@ console.log('\n[who may be shown a case: the rules, run]');
 }
 
 console.log('\n[the engine reads every case: the agreed sort]');
-// The F-35 loop, the friendly missile and the dev inbound pass run their
-// frames in inline functions; their enclosing functions are named here.
-const ENGINE_FNS = ['_liveTargetPositionFor', '_simComputeEngagementOutcome', '_passPointFor', '_initiateJamFall', '_launchInboundPass',
-  '_syncDispatchToEvent', '_tickCounterDispatch', '_gapLimitedStep', '_resolveEngagement', 'counterDispatchStateFor', '_startF35Loop', '_launchFriendlyMissile',
-  'tryNeutralize', '_sweepUnobservedActiveEvents', '_findGroupEventForSite', '_closeSoloSiteCases', '_persistCrossCuedRecordings',
-  'onDroneTick', 'cancelActiveThreats', 'pushNotification', 'pushObserver', '_bestTargetForDispatch'];
-// Visibility gates: they read a case only to decide what to SHOW.
-const GATE_FNS = ['_viewerSeesCase', '_viewerTrail', '_dropMarker', '_rescopeCaseEntities', '_createCounterDispatchEntities', '_createF35Entities'];
-// Lines in main()'s own body rather than in a function: the visibility
-// rules' case lookup, the live sensor's gate, and the live sensor's
-// engine read (the module reads cases nowhere else).
-const DOOR_LINES = [/^\s*lookup: \(id\) => getEventForEngine\(id\),$/, /^\s*canShow: \(id\) => _viewerSeesCase\(getEventForEngine\(id\)\),$/,
-  /^\s*sites: SITES, viewer, Cesium, events: EVENTS, addEvent, getEvent: getEventForEngine, mutateEvent, addNote,$/];
 const misplaced = [];
 code.forEach((l, i) => {
   // A lookup that only feeds a visibility test is a gate wherever it is.
@@ -214,22 +229,65 @@ const FILTERED = /(?<![A-Za-z0-9_$.])(getEvent|visibleEvents|filteredEvents|getS
 const stillFiltered = ENGINE_FNS.filter((fn) => { const b = codeOf(fn); return !b || FILTERED.test(b); });
 check('no engine function touches a filtered reader, called or passed (getEvent, visibleEvents, filteredEvents, getSelectedEvent)',
   stillFiltered.length === 0, stillFiltered.join(', '));
+// Beyond the list: everything the engine's loops can reach, called or
+// passed by name. The engine redraws screens, so screens are reachable;
+// those that read through the filter are named here, each a screen or a
+// person's own action on a case they can see. A new reachable function
+// that reads through the filter fails until someone sorts it.
+const SCREEN_OR_ACTION = ['triggerQraIntercept', 'dispatchReceiverAsset', 'requestReceiverAsset', 'dispatchCounterResponse',
+  'dispatchPostIncident', 'closePostIncidentEvent', 'dispatchPostIncidentAction', 'generatePirReport', '_setEventMarkersVisibility',
+  '_resolveChainPrimaryEvent', 'startDebrief', '_fireMistralDebrief', 'startReplay', '_openCascadeCaptureModal',
+  '_openArchetypeCascadeModal', '_openObserverPicker', 'renderAlertStrip', 'renderPalantirClosedPanel', 'renderDetailPanel',
+  'openRunbookDrawer', '_refreshBriefPreview', 'openBriefPreview', 'openEscalateModal', 'openReclassifyForm',
+  '_ensureEventMarkersFromData', '_eventChain', '_applyMarkerFilterToggle', 'renderWorkspaceMissionConsole', '_startMonEngTick',
+  '_renderPirEventChain', '_computeReceiverPatternMatch', '_bindReceiverActions'];
+const ENGINE_LOOPS = ['onDroneTick', '_tickCounterDispatch', '_startCounterDispatchLoop', '_sweepUnobservedActiveEvents',
+  '_sweepSceneLifecycle', '_startF35Loop', '_launchFriendlyMissile', 'tryNeutralize', '_persistCrossCuedRecordings'];
+const declared = new Set(fns.map((f) => f.name));
+const callees = new Map();
+for (const f of fns) {
+  const s = callees.get(f.name) || new Set();
+  for (const m of code.slice(f.start, f.end + 1).join('\n').matchAll(/(?<![A-Za-z0-9_$.])([A-Za-z_$][A-Za-z0-9_$]*)(?![A-Za-z0-9_$])/g)) {
+    if (declared.has(m[1]) && m[1] !== f.name) s.add(m[1]);
+  }
+  callees.set(f.name, s);
+}
+const reach = new Set();
+for (const queue = [...ENGINE_LOOPS]; queue.length;) {
+  const n = queue.shift();
+  if (reach.has(n)) continue;
+  reach.add(n);
+  for (const c of callees.get(n) || []) queue.push(c);
+}
+const unsorted = [...reach].filter((n) => !SCREEN_OR_ACTION.includes(n)
+  && fns.filter((f) => f.name === n).some((f) => FILTERED.test(code.slice(f.start, f.end + 1).join('\n'))));
+check(`nothing the engine's loops reach (${reach.size} functions) reads through the filter, except named screens and a person's own actions`,
+  reach.size > 200 && unsorted.length === 0, unsorted.join(', '));
 check("the dispatch target chain and the live sensor read through the engine's door",
   /\(event\.linkedEventIds \|\| \[\]\)\.map\(getEventForEngine\)/.test(main) && /getEvent: getEventForEngine, mutateEvent, addNote,/.test(main));
 check("the drone tick starts from the engine's read", /const event = getEventForEngine\(p\.eventId\);\s*if \(!event\) return;/.test(main));
 
 console.log('\n[the dispatch engine reads what the sensors see, never what is drawn]');
-// Since the account fence (2026-11-04) billboard.show is what THIS
-// viewer may see. The chase must not change with the viewer, so it
-// reads _sensorShown: the same flag without the fence.
-const CHASE_FNS = [...ENGINE_FNS, '_assignInterceptorTarget', '_allDownableHostiles'];
+// billboard.show is what THIS viewer is shown: the account fence and the
+// first-person view both change it. The chase must change with neither,
+// so it reads _sensorShown, the sensors' answer.
 const drawnReads = [];
-for (const fn of CHASE_FNS) {
+for (const fn of new Set([...ENGINE_FNS, ...CHASE_FNS])) {
   for (const i of linesIn(fn)) {
     for (const m of code[i].matchAll(/billboard\??\.show(?![A-Za-z0-9_$])(?!\s*=(?!=))/g)) drawnReads.push(`${i + 1} in ${fn}: ${m[0]}`);
   }
 }
-check('no chase or engine function reads the drawn flag', drawnReads.length === 0, drawnReads.join('; '));
+check('no engine function reads the drawn flag', drawnReads.length === 0, drawnReads.join('; '));
+const viewReads = [];
+for (const fn of CHASE_FNS) {
+  for (const i of linesIn(fn)) {
+    for (const m of code[i].matchAll(/(?<![A-Za-z0-9_$])(?:_povActive|_dronePov)(?![A-Za-z0-9_$])(?!\s*=(?!=))|\.show(?![A-Za-z0-9_$])(?!\s*=(?!=))/g)) {
+      viewReads.push(`${i + 1} in ${fn}: ${m[0]}`);
+    }
+  }
+}
+check('no chase function reads anything the viewer changes: no shown flag of any entity, no first-person view',
+  viewReads.length === 0, viewReads.join('; '));
 const chase = codeOf('_tickCounterDispatch') || '';
 check('the three chase decisions read _sensorShown',
   /d\.assignedSwarmMember\?\._sensorShown === true\)\)/.test(chase) && /d\.assignedSwarmMember\._sensorShown === false/.test(chase)
@@ -237,22 +295,39 @@ check('the three chase decisions read _sensorShown',
 check('every chase target starts with it: each member and the lead wrapper',
   /swarmBillboards\.push\(\{\s*billboard: swarmBb,(?:\s*\/\/[^\n]*)*\s*_sensorShown: true,/.test(main)
   && /isLead: true,[^\n]*\n\s*_sensorShown: true,/.test(main));
-check('the lead and each member mirror the unfenced value every tick',
-  /state\.leadSwarmMember\._sensorShown = \(leadDown \|\| povSuppressed\) \? false : \(state\.closedAt\s*\? false\s*: \(leadInCov \|\| beingChased \|\| _coop\)\);/.test(main)
-  && /sw\._sensorShown = _swVisible && !sw\._povActive;\s*sw\.billboard\.show = _swViewable && !sw\._povActive;/.test(main));
-// Every place a drone is hidden or shown keeps the mirror of the SAME
-// drone in step, within four lines. e, ent and billboard hold Cesium
-// graphics, not drone entities.
+check("the lead and each member mirror the sensors' value every tick, without the account fence or the first-person view",
+  /state\.leadSwarmMember\._sensorShown = leadDown \? false : \(state\.closedAt\s*\? false\s*: \(leadInCov \|\| beingChased \|\| _coop\)\);/.test(main)
+  && /sw\._sensorShown = _swVisible;[^\n]*\n\s*sw\.billboard\.show = _swViewable && !sw\._povActive;/.test(main));
+// Every other write of a drone's shown flag is a hide (= false), and
+// hides the SAME drone's _sensorShown, also to false, within four lines.
+// Exempt by exact line: the four Cesium graphics writes (overlay icons,
+// marker filters, the model and symbol swap), the two display writes
+// whose mirrors are pinned above, and the first-person view, which
+// hides the icon from the camera and must leave _sensorShown alone.
+const NOT_A_DRONE = [
+  /^\s*if \(e\.billboard\) e\.billboard\.show = overlayState\.icons;$/,
+  /^\s*if \(ent\.billboard\) ent\.billboard\.show = false;$/,
+  /^\s*if \(ent\.billboard\) ent\.billboard\.show = catVisible && filters\.showIcons !== false;$/,
+  /^\s*billboard\.billboard\.show = new Cesium\.CallbackProperty\(\(\) => !_useModel\(\), false\);$/,
+  /^\s*state\.billboard\.show = shouldShow;$/,
+  /^\s*sw\.billboard\.show = _swViewable && !sw\._povActive;$/,
+];
+const CAMERA_ONLY = /^\s*swRef\.billboard\.show = false;\s*\/\/ the camera's view only: _sensorShown is untouched$/;
 const unmirrored = [];
 code.forEach((l, i) => {
-  for (const m of l.matchAll(/\b([A-Za-z_$][A-Za-z0-9_$]*)\??\.billboard\.show(?![A-Za-z0-9_$])\s*=(?!=)/g)) {
-    if (['e', 'ent', 'billboard'].includes(m[1])) continue;
+  for (const m of l.matchAll(/\b([A-Za-z_$][A-Za-z0-9_$]*)\??\.billboard\.show(?![A-Za-z0-9_$])\s*=(?!=)\s*([^;]*)/g)) {
+    if (NOT_A_DRONE.some((rx) => rx.test(lines[i]))) continue;
     const near = code.slice(Math.max(0, i - 4), i + 5).join('\n');
-    const mirror = new RegExp(`\\b${m[1].replace('$', '\\$')}\\??\\.(?:leadSwarmMember\\.)?_sensorShown\\s*=(?!=)`);
+    if (CAMERA_ONLY.test(lines[i])) {
+      if (/_sensorShown\s*=(?!=)/.test(near)) unmirrored.push(`${i + 1}: the first-person view writes _sensorShown`);
+      continue;
+    }
+    if (m[2].trim() !== 'false') { unmirrored.push(`${i + 1}: a computed write this check does not pin: ${lines[i].trim().slice(0, 60)}`); continue; }
+    const mirror = new RegExp(`\\b${m[1].replace(/\$/g, '\\$')}\\??\\.(?:leadSwarmMember\\.)?_sensorShown\\s*=\\s*false\\b`);
     if (!mirror.test(near)) unmirrored.push(`${i + 1}: ${lines[i].trim().slice(0, 70)}`);
   }
 });
-check('every drone show write keeps the same drone\'s _sensorShown in step', unmirrored.length === 0, unmirrored.join('; '));
+check("every drone hide sets the same drone's _sensorShown false; the first-person view leaves it alone", unmirrored.length === 0, unmirrored.join('; '));
 
 console.log('\n[nobody is shown more than before]');
 // A toast about a case, raised whoever is watching, is gated on the
@@ -260,17 +335,23 @@ console.log('\n[nobody is shown more than before]');
 // block. The rule holds in every engine function and in every function
 // that already gates one, so a new toast next to a gated one cannot
 // slip through.
-const isGateText = (s) => /_viewerSees[A-Za-z]*\(|canShow\b/.test(s);
+// A gate lets the toast through only when the viewer MAY see the case:
+// an if whose condition calls _viewerSees… unnegated and joins with &&
+// alone (a ! or an || would let it through without the gate), or an
+// early return on the negated call alone. A call whose answer is
+// ignored is no gate.
+const posGate = (cond) => /_viewerSees[A-Za-z]*\(/.test(cond) && !/!\s*_viewerSees|\|\|/.test(cond);
 const toastLines = code.map((l, i) => (/(?<![A-Za-z0-9_$.])toast\??\.?\(/.test(l) ? i : -1)).filter((i) => i >= 0);
 const gated = (i) => {
   const at = code[i].search(/(?<![A-Za-z0-9_$.])toast\??\.?\(/);
-  if (isGateText(code[i].slice(0, at))) return true;
+  const same = code[i].slice(0, at).match(/^\s*(?:\}\s*else\s+)?if\s*\((.*)\)\s*$/);
+  if (same && posGate(same[1])) return true;
   const fn = enclosingRange(i);
   const opens = openAt[i].filter((o) => !fn || o >= fn.start);
-  if (opens.some((o) => isGateText(code[o]))) return true;
+  if (opens.some((o) => { const m = code[o].match(/^\s*(?:\}\s*else\s+)?if\s*\((.*)\)\s*\{\s*$/); return m && posGate(m[1]); })) return true;
   const from = opens.length ? opens[opens.length - 1] : (fn ? fn.start : 0);
   for (let g = from + 1; g < i; g++) {
-    if (openAt[g].length === openAt[i].length && /if \(![^\n]*_viewerSees[A-Za-z]*\([^\n]*\)\s*return\b/.test(code[g])) return true;
+    if (openAt[g].length === openAt[i].length && /^\s*if\s*\(\s*!\s*_viewerSees[A-Za-z]*\([^|&]*\)\s*\)\s*return\b/.test(code[g])) return true;
   }
   return false;
 };
@@ -312,6 +393,13 @@ check('every response-unit, fighter and missile entity is created hidden from ac
   created.length >= 8 && unscoped.length === 0
   && /const _show = _viewerSeesCase\(getEventForEngine\(_f35\.targetEventId \|\| _f35\.dispatchedForEventId\)\);/.test(rawOf('_createF35Entities')),
   unscoped.join(', '));
+const unitAssign = [];
+code.forEach((l, i) => {
+  for (const m of l.matchAll(/\b(d\.(?:entity|trail|routeEntity|radiationEntity|jammingPipEntity)|_f35\.(?:jetEntity|trailEntity)|_friendlyMissile\.entity)\s*=(?!=)\s*([^;]*)/g)) {
+    if (m[2].trim() !== 'null' && !m[2].trim().startsWith('viewer.entities.add(')) unitAssign.push(`${i + 1}: ${m[1]} = ${m[2].trim().slice(0, 40)}`);
+  }
+});
+check('a unit, fighter or missile entity comes only from a creation checked above, or is cleared', unitAssign.length === 0, unitAssign.join('; '));
 const rescope = codeOf('_rescopeCaseEntities') || '';
 const unitParts = (main.match(/for \(const k of (\[[^\]]*\])\) \{ if \(d\[k\]\) d\[k\]\.show = ok; \}/) || [])[1] || '';
 const notRescoped = created.filter((m) => m[1] === 'd' && !unitParts.includes(`'${m[2]}'`)).map((m) => `d.${m[2]}`);
@@ -322,8 +410,9 @@ check('the re-check covers pins, jam-down marks, projected paths, cordons, units
   && /const _f35Case = _f35\.targetEventId \|\| _f35\.dispatchedForEventId;/.test(main)
   && /setInterval\(_rescopeCaseEntities, 1000\);/.test(main) && /applySiteScopeVisibility\(\);\s*\/\/[^\n]*\n[^\n]*\n\s*_rescopeCaseEntities\(\);/.test(main));
 check('a jam-down mark is hidden from the first frame and re-checked, and stays on the map after its case closes',
-  /const _jamEnt = viewer\.entities\.add\(\{\s*show: _viewerSeesCase\(event\),/.test(main) && /_jamDownMarks\.set\(_jamEnt, event\.id\);/.test(main)
-  && !/_perEventMarkers[^\n]*_jamEnt/.test(main));
+  /const _jamEnt = viewer\.entities\.add\(\{\s*position: [^\n]*\n\s*properties: \{ markerEventId: event\.id, markerKind: 'jam-down', siteId: event\.siteId \},\s*show: _viewerSeesCase\(event\),/.test(main) && /_jamDownMarks\.set\(_jamEnt, event\.id\);/.test(main)
+  && !/_perEventMarkers[^\n]*_jamEnt/.test(main)
+  && /for \(const \[ent, eventId\] of _jamDownMarks\) \{\s*if \(!viewer\.entities\.contains\(ent\)\) \{ _jamDownMarks\.delete\(ent\); continue; \}\s*ent\.show = _viewerSeesCase\(getEventForEngine\(eventId\)\);\s*\}/.test(main));
 check('cordons carry their case',
   /function _renderWreckagePerimeter\(wreckage, cordon, caseEvent = null\)/.test(main)
   && (main.match(/_renderWreckagePerimeter\((wreck|_impWreck), cordon, (targetEv|event)\);/g) || []).length === 3);
