@@ -278,16 +278,30 @@ for (const fn of new Set([...ENGINE_FNS, ...CHASE_FNS])) {
   }
 }
 check('no engine function reads the drawn flag', drawnReads.length === 0, drawnReads.join('; '));
+// Over everything the chase can reach, called or passed by name, up to
+// the screens and four functions that only draw for the first-person
+// view (tracer aim, the static and signal-lost overlays, leaving the
+// view), which the overseer confirmed write no data.
+const DRAW_ONLY = ['_fireSingleTracerRound', '_triggerDronePovSignalLossIfActive', '_triggerDroneStatic', '_exitDronePOV'];
+const chaseReach = new Set();
+for (const queue = [...CHASE_FNS]; queue.length;) {
+  const n = queue.shift();
+  if (chaseReach.has(n) || SCREEN_OR_ACTION.includes(n) || DRAW_ONLY.includes(n) || /^_?(?:render|open|toast)/.test(n)) continue;
+  chaseReach.add(n);
+  for (const c of callees.get(n) || []) queue.push(c);
+}
 const viewReads = [];
-for (const fn of CHASE_FNS) {
-  for (const i of linesIn(fn)) {
-    for (const m of code[i].matchAll(/(?<![A-Za-z0-9_$])(?:_povActive|_dronePov)(?![A-Za-z0-9_$])(?!\s*=(?!=))|\.show(?![A-Za-z0-9_$])(?!\s*=(?!=))/g)) {
-      viewReads.push(`${i + 1} in ${fn}: ${m[0]}`);
+for (const n of chaseReach) {
+  for (const f of fns.filter((x) => x.name === n)) {
+    for (let i = f.start; i <= f.end; i++) {
+      for (const m of code[i].matchAll(/(?<![A-Za-z0-9_$])(?:_povActive|_dronePov)(?![A-Za-z0-9_$])(?!\s*=(?!=))|\.show(?![A-Za-z0-9_$])(?!\s*=(?!=))/g)) {
+        viewReads.push(`${i + 1} in ${n}: ${m[0]}`);
+      }
     }
   }
 }
-check('no chase function reads anything the viewer changes: no shown flag of any entity, no first-person view',
-  viewReads.length === 0, viewReads.join('; '));
+check(`nothing the chase reaches (${chaseReach.size} functions) reads what the viewer changes: no shown flag of any entity, no first-person view`,
+  chaseReach.size > 20 && viewReads.length === 0, viewReads.join('; '));
 const chase = codeOf('_tickCounterDispatch') || '';
 check('the three chase decisions read _sensorShown',
   /d\.assignedSwarmMember\?\._sensorShown === true\)\)/.test(chase) && /d\.assignedSwarmMember\._sensorShown === false/.test(chase)
@@ -340,7 +354,8 @@ console.log('\n[nobody is shown more than before]');
 // alone (a ! or an || would let it through without the gate), or an
 // early return on the negated call alone. A call whose answer is
 // ignored is no gate.
-const posGate = (cond) => /_viewerSees[A-Za-z]*\(/.test(cond) && !/!\s*_viewerSees|\|\|/.test(cond);
+const posGate = (cond) => /_viewerSees[A-Za-z]*\(/.test(cond)
+  && !/!\s*_viewerSees|\|\||!\s*\(|[!=]==?\s*(?:false|true)\b|(?<!\?)\?(?![.?])/.test(cond);
 const toastLines = code.map((l, i) => (/(?<![A-Za-z0-9_$.])toast\??\.?\(/.test(l) ? i : -1)).filter((i) => i >= 0);
 const gated = (i) => {
   const at = code[i].search(/(?<![A-Za-z0-9_$.])toast\??\.?\(/);
