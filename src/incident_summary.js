@@ -89,3 +89,55 @@ export function incidentExecSummary(e, opts = {}) {
 
   return parts.join(' ');
 }
+
+// The turn between two compass headings: the smaller angle, 0 to 180
+// degrees. Subtracting them raw read a turn from 50 to 283 as 233
+// degrees; it is 127 (2026-11-05). Null when either is missing.
+export function courseChangeDeg(fromDeg, toDeg) {
+  if (fromDeg == null || toDeg == null) return null;
+  const a = Number(fromDeg);
+  const b = Number(toDeg);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return null;
+  const d = Math.abs(a - b) % 360;
+  return Math.round(d > 180 ? 360 - d : d);
+}
+
+// Who made each link. Two paths exist: the platform links the case a
+// track opens at another site to the case it came from
+// (shadowOfEventId), and the signature correlator links detections it
+// matches. No operator link path exists, so no link is ever called
+// operator-confirmed. linkedEvents: the linked cases this account may
+// open, as objects.
+export function linkKinds(event, linkedEvents) {
+  const crossing = [];
+  const matched = [];
+  for (const le of linkedEvents || []) {
+    if (!le) continue;
+    if (le.shadowOfEventId === event?.id || (event?.shadowOfEventId && event.shadowOfEventId === le.id)) crossing.push(le.id);
+    else matched.push(le.id);
+  }
+  return { crossing, matched };
+}
+
+const _count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+// Pattern flags for the analysis panel and the report.
+export function linkFlags({ crossing = [], matched = [] } = {}, correlationScore = null) {
+  const out = [];
+  if (crossing.length) out.push(`Same track at ${_count(crossing.length, 'other site', 'other sites')}`);
+  if (matched.length) {
+    out.push(`Signature match with ${_count(matched.length, 'other detection', 'other detections')}`
+      + (correlationScore ? ` (${Math.round(correlationScore * 100)}%)` : ''));
+  }
+  return out;
+}
+
+// One sentence for the debrief narrative, or null when there is nothing.
+export function linkSentence({ crossing = [], matched = [] } = {}) {
+  const parts = [];
+  if (crossing.length) parts.push(`the same track was seen at ${_count(crossing.length, 'other site', 'other sites')}`);
+  if (matched.length) parts.push(`the signature correlator matched ${_count(matched.length, 'related detection', 'related detections')}`);
+  if (!parts.length) return null;
+  const s = parts.join(', and ');
+  return `${s.charAt(0).toUpperCase()}${s.slice(1)}.`;
+}
