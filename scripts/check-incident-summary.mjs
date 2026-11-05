@@ -9,7 +9,7 @@
 // places in main.js that used to carry a fixed story.
 // ═══════════════════════════════════════════════════════════════════
 import { readFileSync } from 'node:fs';
-import { EVASION_MIN_DEG, incidentExecSummary, respondersOf } from '../src/incident_summary.js';
+import { courseChangeDeg, EVASION_MIN_DEG, incidentExecSummary, linkFlags, linkKinds, linkSentence, respondersOf } from '../src/incident_summary.js';
 
 let failures = 0;
 const check = (label, ok, why) => {
@@ -86,5 +86,23 @@ const sm = incidentExecSummary(monitored, { siteName });
 check('a monitored incident is not called neutralised, and says how it closed', !/Neutralised/.test(sm) && /Closed at 22:15:37Z, outcome monitored\./.test(sm), sm);
 check('a live one says so', /Still active/.test(incidentExecSummary({ ...monitored, status: 'active', endTime: null, outcome: null }, { siteName })));
 
+console.log('\n[a turn, and who made a link] (2026-11-05)');
+check('a turn is the smaller angle between two headings',
+  courseChangeDeg(50, 283) === 127 && courseChangeDeg(350, 10) === 20 && courseChangeDeg(90, 90) === 0
+  && courseChangeDeg(0, 180) === 180 && courseChangeDeg(null, 10) === null && courseChangeDeg(10, undefined) === null);
+{
+  const first = { id: 'A' };
+  const opened = { id: 'B', shadowOfEventId: 'A' };
+  const matchedCase = { id: 'C' };
+  const k = linkKinds(first, [opened, matchedCase]);
+  check('a link is the same track at another site, or a signature match, from either side',
+    k.crossing.join() === 'B' && k.matched.join() === 'C' && linkKinds(opened, [first]).crossing.join() === 'A');
+  const flags = linkFlags(k, 0.87);
+  check('no link is ever called operator-confirmed', !flags.some((f) => /operator/i.test(f)) && !linkFlags(k).some((f) => /operator/i.test(f)), flags.join(' | '));
+  check('the flags say what made each link', flags.includes('Same track at 1 other site') && flags.includes('Signature match with 1 other detection (87%)'), flags.join(' | '));
+  check('the debrief says the same, and nothing when there is nothing',
+    linkSentence(k) === 'The same track was seen at 1 other site, and the signature correlator matched 1 related detection.'
+    && linkSentence({ crossing: [], matched: [] }) === null && linkFlags({}).length === 0, linkSentence(k));
+}
 console.log(failures ? `\n${failures} failing` : '\nall passing');
 process.exit(failures ? 1 : 0);

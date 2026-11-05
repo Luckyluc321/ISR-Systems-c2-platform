@@ -240,7 +240,10 @@ const SCREEN_OR_ACTION = ['triggerQraIntercept', 'dispatchReceiverAsset', 'reque
   '_openArchetypeCascadeModal', '_openObserverPicker', 'renderAlertStrip', 'renderPalantirClosedPanel', 'renderDetailPanel',
   'openRunbookDrawer', '_refreshBriefPreview', 'openBriefPreview', 'openEscalateModal', 'openReclassifyForm',
   '_ensureEventMarkersFromData', '_eventChain', '_applyMarkerFilterToggle', 'renderWorkspaceMissionConsole', '_startMonEngTick',
-  '_renderPirEventChain', '_computeReceiverPatternMatch', '_bindReceiverActions'];
+  '_renderPirEventChain', '_computeReceiverPatternMatch', '_bindReceiverActions',
+  // The linked cases an account may open, for its analysis flags,
+  // debrief and report (2026-11-05): read at render time only.
+  '_openLinkedEvents'];
 const ENGINE_LOOPS = ['onDroneTick', '_tickCounterDispatch', '_startCounterDispatchLoop', '_sweepUnobservedActiveEvents',
   '_sweepSceneLifecycle', '_startF35Loop', '_launchFriendlyMissile', 'tryNeutralize', '_persistCrossCuedRecordings'];
 const declared = new Set(fns.map((f) => f.name));

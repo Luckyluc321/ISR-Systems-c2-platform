@@ -185,7 +185,7 @@ import { releaseDeferredNotes } from './events.js';
 import { getEventForEngine, getCurrentActor, _visibleToActor } from './events.js';
 import { signatureFor, displayNameFor } from './actor_signature.js';
 import { applyAutoDestinations } from './auto_destinations.js';
-import { incidentExecSummary, respondersOf } from './incident_summary.js';
+import { courseChangeDeg, incidentExecSummary, linkFlags, linkKinds, linkSentence, respondersOf } from './incident_summary.js';
 import { caseVisibleTo, fencedSiteIds, followsTrack, isUnfenced, ownSitesSeePoint, siteOfPinLabel, siteVisibleTo, trailForRole, UNKNOWN_SITE } from './operator_map_scope.js';
 import { canDispatchUnit } from './mission_console_scope.js';
 import { reportLogoUrl } from './report_theme.js';
@@ -630,6 +630,14 @@ function _siteWorkOrder(a, b) {
 // Operators: only see links within their own tenant (same operator's
 // siteIds). Receivers + Admin: see everything (no filter — receivers
 // need the full chain for response context, admin is ISR internal).
+// The linked cases this account may open, as objects: the live panel's
+// tenant rule, then only cases it can actually open, so another
+// company's case is never named (2026-11-05). Screens only.
+function _openLinkedEvents(event) {
+  return _tenantScopedLinkedIds(event?.linkedEventIds || [], event?.siteId, getActiveRole())
+    .map((lid) => getEvent(lid)).filter(Boolean);
+}
+
 function _tenantScopedLinkedIds(linkedIds, currentSiteId, activeRole) {
   if (!Array.isArray(linkedIds) || !linkedIds.length) return [];
   if (!activeRole || activeRole.kind !== 'operator') return linkedIds;
@@ -11756,7 +11764,7 @@ async function main() {
     const impact = lk ? `${lk.lat.toFixed(4)}°N ${lk.lon.toFixed(4)}°E` : NA;
     const impactSite = lk?.siteId ? (SITES[lk.siteId]?.name || lk.siteId) : (siteChain[siteChain.length - 1] || NA);
     const evasion = e.projectionSnapshot && lk
-      ? Math.round(Math.abs(lk.heading - e.projectionSnapshot.heading))
+      ? (courseChangeDeg(e.projectionSnapshot.heading, lk.heading) ?? 0)
       : 0;
 
     // Executive summary: the cached Mistral narrative when the debrief has
@@ -11941,7 +11949,9 @@ async function main() {
       initialSite: siteName(e.siteId),
       lastConfirmed: impactSite,
       evasion: evasion > 8 ? `${evasion}°` : 'None',
-      linkedEvents: (e.linkedEventIds || []).map(lid => { const le = getEvent(lid); return { id: lid, site: le ? siteName(le.siteId) : 'unavailable', status: le?.status || null }; }),
+      // Only linked cases this account may open; another company's case
+      // is not named (2026-11-05).
+      linkedEvents: _openLinkedEvents(e).map(le => ({ id: le.id, site: siteName(le.siteId), status: le.status || null })),
       correlationScore: typeof e.correlationScore === 'number' ? Math.round(e.correlationScore * 100) : null,
       sensors,
       timeline,
@@ -11959,9 +11969,9 @@ async function main() {
       airDefense: _showAirDefenseAssets ? airDefenseRows : null,
       dispatches,
       postIncident: [
-        { handoff: 'Verá command layer', status: pi.includes('vera') ? 'DISPATCHED' : 'PENDING' },
-        { handoff: 'Politi cordon (afspærring)', status: pi.includes('cordon') ? 'DEPLOYED' : 'PENDING' },
-        { handoff: 'Beredskabsstyrelsen full deployment', status: pi.includes('beredskab-mass') ? 'INBOUND' : 'PENDING' },
+        { handoff: 'Verá command layer', status: pi.includes('vera') ? 'DISPATCHED' : 'Not requested' },
+        { handoff: 'Politi cordon (afspærring)', status: pi.includes('cordon') ? 'DEPLOYED' : 'Not requested' },
+        { handoff: 'Beredskabsstyrelsen full deployment', status: pi.includes('beredskab-mass') ? 'INBOUND' : 'Not requested' },
       ],
     };
     const html = renderIncidentReport(model, { doc: document, logoUrl: _logoUrl });
@@ -15058,12 +15068,10 @@ async function main() {
     if (dwellRanked.length && dwellRanked[0].pct >= 20) {
       flags.push(`Sustained dwell (${dwellRanked[0].pct}%) over ${dwellRanked[0].name}`);
     }
-    if (event.linkedEventIds?.length) {
-      const scoreStr = event.correlationScore
-        ? `${(event.correlationScore * 100).toFixed(0)}% signature match`
-        : 'operator-confirmed';
-      flags.push(`Cross-linked to ${event.linkedEventIds.length} event(s) · ${scoreStr}`);
-    }
+    // Labelled by who made each link, counting only links this account
+    // may open. No operator link path exists, so none is called
+    // operator-confirmed (2026-11-05).
+    flags.push(...linkFlags(linkKinds(event, _openLinkedEvents(event)), event.correlationScore));
     if (event.platform === 'non-identifiable') {
       flags.push('Radio signature does not match anything in the threat library');
     }
@@ -16011,9 +16019,9 @@ async function main() {
       const closestLbl = closest.minDistM < 100 ? 'Very close approach' : closest.minDistM < 200 ? 'Closest approach' : 'Nearest asset';
       parts.push(`${closestLbl}: <b>${closest.minDistM}m</b> from <b>${closest.name}</b>.`);
     }
-    if (event.linkedEventIds?.length) {
-      parts.push(`Signature correlator linked this to <b>${event.linkedEventIds.length}</b> related detection${event.linkedEventIds.length === 1 ? '' : 's'} at other sites.`);
-    }
+    // Who made each link, and only links this account may open.
+    const _links = linkSentence(linkKinds(event, _openLinkedEvents(event)));
+    if (_links) parts.push(_links);
 
     // Per-drone outlier detection — for multi-drone events, compute mean
     // confidence per drone and flag any that ran significantly weaker than
@@ -27794,7 +27802,7 @@ async function main() {
       const impact = lk ? `${lk.lat.toFixed(4)}°N ${lk.lon.toFixed(4)}°E` : '—';
       const impactSite = lk ? (SITES[lk.siteId]?.name || lk.siteId) : '—';
       const evasion = e.projectionSnapshot && lk
-        ? Math.round(Math.abs(lk.heading - e.projectionSnapshot.heading))
+        ? (courseChangeDeg(e.projectionSnapshot.heading, lk.heading) ?? 0)
         : 0;
       const escCount = (e.escalations || []).length;
       const dispatchedFlags = e.postIncidentDispatched || [];
