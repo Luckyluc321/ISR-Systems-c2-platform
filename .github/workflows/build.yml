@@ -74,6 +74,9 @@ jobs:
       - name: Engine reads every case (records never depend on who is signed in)
         run: npm run check:engine-reads
 
+      - name: Site case scope (a case holds only what its own sensors saw)
+        run: npm run check:site-case-scope
+
       - name: Production build
         run: npx vite build
 

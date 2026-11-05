@@ -29,6 +29,7 @@ Every contract section follows the same shape:
 - [2. NN classifier](#2-nn-classifier) — raw detection → classified event
 - [3. Site definition](#3-site-definition) — customer site schema + onboarding
 - [4. Post-Incident Report export](#4-post-incident-report-export) — JSON / PDF / CSV bundling
+- Track and site case: what the engine follows versus what a site records; a position enters through `live_track.js` `observe`. See `track-and-site-case-architecture.md` (2026-11-05)
 
 ### Phase B · Integration contracts
 

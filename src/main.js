@@ -187,6 +187,8 @@ import { signatureFor, displayNameFor } from './actor_signature.js';
 import { applyAutoDestinations } from './auto_destinations.js';
 import { incidentExecSummary, respondersOf } from './incident_summary.js';
 import { caseVisibleTo, fencedSiteIds, followsTrack, isUnfenced, ownSitesSeePoint, siteOfPinLabel, siteVisibleTo, trailForRole, UNKNOWN_SITE } from './operator_map_scope.js';
+import { ensureTrack, getTrack, markTrackEnded, observe as observeTrack, removeTrack, setProjection as setTrackProjection, setTemporaryLoss as setTrackLoss, trackLastSeen, trackPosition } from './live_track.js';
+import { caseAccepts, siteObservationWrite, sitesSeeing } from './site_case_scope.js';
 import { canDispatchUnit } from './mission_console_scope.js';
 import { zoomFloorProperty } from './model_zoom_floor.js';
 import { googleTilesAllowed } from './google_tiles_guard.js';
@@ -628,6 +630,14 @@ function _siteWorkOrder(a, b) {
 // Operators: only see links within their own tenant (same operator's
 // siteIds). Receivers + Admin: see everything (no filter — receivers
 // need the full chain for response context, admin is ISR internal).
+// The linked cases this account may open, as objects: the live panel's
+// tenant rule, then only cases it can actually open, so another
+// company's case is never named (2026-11-05). Screens only.
+function _openLinkedEvents(event) {
+  return _tenantScopedLinkedIds(event?.linkedEventIds || [], event?.siteId, getActiveRole())
+    .map((lid) => getEvent(lid)).filter(Boolean);
+}
+
 function _tenantScopedLinkedIds(linkedIds, currentSiteId, activeRole) {
   if (!Array.isArray(linkedIds) || !linkedIds.length) return [];
   if (!activeRole || activeRole.kind !== 'operator') return linkedIds;
@@ -665,17 +675,19 @@ const _LOSS_GRACE_FLOOR_MS = 30000;
 // drift apart.
 const _PURSUIT_GRACE_MS = _LOSS_GRACE_FLOOR_MS;
 
-function _classifyDetectionLoss(event) {
-  const site = SITES[event.siteId];
+// `lk` is the track's last sighting and `siteId` the site that made it
+// (docs/track-and-site-case-architecture.md): a loss over Amager is
+// judged against Amager's fence, not the first case's.
+function _classifyDetectionLoss(event, lk = event.lastKnownPosition || event.lastPosition, siteId = event.siteId) {
+  const site = SITES[siteId];
   const boundary = site?.siteBoundary;
-  const lk = event.lastKnownPosition || event.lastPosition;
   if (!boundary?.length || !lk?.lat || !lk?.lon) {
     return { classification: 'fled', graceMs: _LOSS_GRACE_FLOOR_MS, reason: 'no boundary or last-known position on record' };
   }
   const speed = Math.max(1, lk.speed || 0);
   const graceSeconds = Math.max(15, Math.min(60, 900 / speed));
   const graceMs = graceSeconds * 1000;
-  const bufferM = contextForSite(event.siteId)?.temporary_loss_buffer_m || 200;
+  const bufferM = contextForSite(siteId)?.temporary_loss_buffer_m || 200;
 
   const insidePerimeter = pointInPolygon(lk.lat, lk.lon, boundary);
   if (!insidePerimeter) {
@@ -4937,8 +4949,8 @@ async function main() {
     };
   }
 
-  function updateProjectedTrajectoryEntity(event) {
-    const pp = event.projectedPath;
+  function updateProjectedTrajectoryEntity(event, path = getTrack(event?.id)?.projectedPath ?? event?.projectedPath) {
+    const pp = path;
     if (!pp) { removeProjectedTrajectoryEntity(event.id); return; }
     if (!overlayState.projections) { removeProjectedTrajectoryEntity(event.id); return; }
     let entities = projectedTrajectoryEntities.get(event.id);
@@ -4966,7 +4978,7 @@ async function main() {
         show: _viewerSeesCase(event),
         polyline: {
           positions: new Cesium.CallbackProperty(() => {
-            const pp2 = event.projectedPath;
+            const pp2 = getTrack(event.id)?.projectedPath ?? event.projectedPath;
             if (!pp2) return [];
             const endPt2 = pp2.impacts && pp2.impacts.length
               ? pp2.impacts[pp2.impacts.length - 1]
@@ -5908,9 +5920,9 @@ async function main() {
     // because a child was created.
     sw._brokenAway = true;
     if (sw.memberId) {
-      setMemberStatus(event.id, sw.memberId, 'broken-away', {
+      _setMemberStatusEverywhere(event, sw.memberId, 'broken-away', {
         reason: 'sustained formation deviation',
-      });
+      }, pos);
     }
     appendEventArray(event.id, 'notes', {
       timestamp: new Date().toISOString(),
@@ -6115,20 +6127,18 @@ async function main() {
         return { lat: e.lastSpottedLocation.lat, lon: e.lastSpottedLocation.lon, kind: 'last_spotted', siteHint: siteName(e.siteId) };
       }
     }
-    // 3. Freshest active event's lastPosition — prefers a linked
-    //    event over the primary if the primary is closed. Handles the
-    //    handover case: primary CPH closed, AMK still tracking.
-    const activeWithPos = chain.filter(e => e.status === 'active' && e.lastPosition);
-    if (activeWithPos.length) {
-      // Prefer linked (non-primary) if it exists and primary is closed
-      const preferred = event.status === 'closed'
-        ? activeWithPos.find(e => e.id !== event.id) || activeWithPos[0]
-        : activeWithPos[0];
-      return { lat: preferred.lastPosition.lat, lon: preferred.lastPosition.lon, kind: 'live_track', siteHint: siteName(preferred.siteId) };
+    // 3. The live track behind the case, while any sensor sees it.
+    //    A case's own lastPosition is its site's last sighting, not
+    //    where the track is (docs/track-and-site-case-architecture.md).
+    const _tp = _trackPositionFor(event.id);
+    if (_tp && _tp.inCoverage) {
+      const _seenBy = _tp.siteIds?.[0] || event.siteId;
+      return { lat: _tp.lat, lon: _tp.lon, kind: 'live_track', siteHint: siteName(_seenBy) };
     }
-    // 4. Fallback: primary event's lastPosition even if stale
-    if (event.lastPosition) {
-      return { lat: event.lastPosition.lat, lon: event.lastPosition.lon, kind: 'stale', siteHint: siteName(event.siteId) };
+    // 4. Fallback: the track's last sighting, even if stale
+    const _last = trackLastSeen(_trackIdFor(event.id)) || event.lastPosition;
+    if (_last) {
+      return { lat: _last.lat, lon: _last.lon, kind: 'stale', siteHint: siteName(_last.siteIds?.[0] || event.siteId) };
     }
     // 5. Last resort: entry point
     if (event.entry) {
@@ -6349,7 +6359,7 @@ async function main() {
     }
     const ev = getEventForEngine(d.eventId);
     if (!ev) return null;
-    const st = droneState.get(d.eventId);
+    const st = droneState.get(_trackIdFor(d.eventId));
     if (st?.billboard?.position) {
       try {
         const cart = st.billboard.position.getValue?.(Cesium.JulianDate.now());
@@ -6363,11 +6373,12 @@ async function main() {
         }
       } catch (_) { /* fall through */ }
     }
-    if (ev.lastPosition) {
+    const tp = _trackPositionFor(d.eventId);
+    if (tp) {
       return {
-        lat: ev.lastPosition.lat,
-        lon: ev.lastPosition.lon,
-        alt: ev.lastPosition.alt || 0,
+        lat: tp.lat,
+        lon: tp.lon,
+        alt: tp.alt || 0,
       };
     }
     return null;
@@ -6393,7 +6404,7 @@ async function main() {
     const altGapM = Math.abs((d.curAlt || 60) - (live.alt || 0));
     // Speed of target (rough estimate from event, defaults to 50 m/s for Shahed cruise)
     const ev = getEventForEngine(d.eventId);
-    const targetSpeedMs = ev?.lastPosition?.speed || ev?.subject?.kinematics?.speed_ms || 50;
+    const targetSpeedMs = _trackPositionFor(d.eventId)?.speed || ev?.subject?.kinematics?.speed_ms || 50;
     // Base quality from geometry
     const distFactor = Math.max(0, Math.min(1, 1 - (engageDistM / 400)));   // 0m dist = 1.0, 400m = 0
     const altFactor = Math.max(0, Math.min(1, 1 - (altGapM / 300)));         // 0m gap = 1.0, 300m = 0
@@ -6752,7 +6763,7 @@ async function main() {
   // geometry in which the gunner can fire at all.
   function _passPointFor(d, tgtLat, tgtLon) {
     if (!d.profile?.beamPass) return null;
-    const hdg = getEventForEngine(d.eventId)?.lastPosition?.heading;
+    const hdg = _trackPositionFor(d.eventId)?.heading;
     if (typeof hdg !== 'number') return null;
     const side = ((window.__isr_muzzle_tuning || {})[d.kind] || {}).side
       ?? d.profile.muzzleOffsetM?.side ?? 0;
@@ -8399,7 +8410,7 @@ async function main() {
       const follow = () => {
         if (!_inboundState) return;
         const ev = eventId ? getEventForEngine(eventId) : null;
-        const pos = ev?.lastPosition || ev?.lastKnownPosition;
+        const pos = _trackPositionFor(ev?.id) || ev?.lastKnownPosition;
         if (pos && pos.lat != null) {
           unit.targetLat = pos.lat;
           unit.targetLon = pos.lon;
@@ -8896,31 +8907,13 @@ async function main() {
     // Cross-cue handover: primary event closed AND linked event still
     // active → follow the linked event. Toast the handover once so
     // the operator sees the reacquisition drove the target update.
-    if (event?.status === 'closed' && event.linkedEventIds?.length) {
-      for (const linkedId of event.linkedEventIds) {
-        const linked = getEventForEngine(linkedId);
-        // NEVER hand an interceptor group to a breakaway child: it is
-        // a single promoted member the group was not assigned to. The
-        // child was the first linked event in a month to satisfy the
-        // lastPosition gate (its mirror writes per tick), which flipped
-        // every interceptor's eventId to it the moment the overwatch
-        // panicked — no assignments, no engagement, mass RTB past four
-        // live drones (field-found 2026-09-18, deep-dive confirmed).
-        if (linked?.provenance?.breakawayOf) continue;
-        if (linked && linked.status === 'active' && linked.lastPosition) {
-          if (d.eventId !== linkedId) {
-            const fromSite = siteName(event.siteId) || event.siteId;
-            const toSite = siteName(linked.siteId) || linked.siteId;
-            // Names both sites: only for an account that sees both cases.
-            if (_viewerSeesCase(event) && _viewerSeesCase(linked)) toast(`${d.assetName} track handed off. Signal reacquired at ${toSite} (was ${fromSite}). Live coordinates updated.`, 'info');
-          }
-          d.eventId = linkedId;
-          d.crossCued = true;
-          event = linked;
-          break;
-        }
-      }
-    }
+    // A dispatch stays bound to the case it was sent on. It used to be
+    // re-keyed to a linked site case once that case had a lastPosition,
+    // which never happened because linked cases never got one. They do
+    // now (docs/track-and-site-case-architecture.md), and re-keying
+    // would hand every unit to a case with no track state: the
+    // "mass RTB past four live drones" failure the breakaway path hit on
+    // 2026-09-18. The unit follows the track through _trackPositionFor.
 
     // Target considered lost only when primary event closed AND no
     // linked event is still tracking.
@@ -9015,11 +9008,12 @@ async function main() {
     // They are re-aimed by _rebalancePatrolsToWreckages instead, which
     // gives them d.sceneWreckageId and the ingress standoff once the
     // airframe is down.
-    } else if (event?.lastPosition && !targetLost && !d.assignedWreckageId
+    } else if (_trackPositionFor(d.eventId) && !targetLost && !d.assignedWreckageId
                && !d.sceneWreckageId && !leavesSceneUnassisted(d.profile)) {
-      d.targetLat = event.lastPosition.lat;
-      d.targetLon = event.lastPosition.lon;
-      if (typeof event.lastPosition.alt === 'number') d.targetAlt = event.lastPosition.alt;
+      const _tp = _trackPositionFor(d.eventId);
+      d.targetLat = _tp.lat;
+      d.targetLon = _tp.lon;
+      if (typeof _tp.alt === 'number') d.targetAlt = _tp.alt;
     }
 
     // Altitude interpolation for airborne interceptors — climb or
@@ -9484,7 +9478,9 @@ async function main() {
       const isSimEvent = !!targetEv?.templateKey;
       if (isSimEvent && d.profile.airborne && !d.routePositions) {
         const live = _liveTargetPositionFor(d);
-        if (live && targetEv.currentlyInCoverage !== false) {
+        // The track's own answer to "do our sensors see it", never a
+        // case's field, which froze when the case closed.
+        if (live && _trackPositionFor(d.eventId)?.inCoverage !== false) {
           d.targetLat = live.lat;
           d.targetLon = live.lon;
           if (typeof live.alt === 'number') d.targetAlt = live.alt;
@@ -9513,7 +9509,7 @@ async function main() {
           // as the dashed breadcrumb: honest here because we have ground
           // truth, and in a real deployment this vector would come from
           // the dispatching department rather than from us.
-          const lk = targetEv.lastPosition;
+          const lk = _trackPositionFor(d.eventId);
           if (lk && typeof lk.heading === 'number' && lk.speed > 0) {
             if (!d._vecLostAt) {
               d._vecLostAt = now;
@@ -9738,8 +9734,7 @@ async function main() {
           // Without it every value below is byte-identical to before,
           // so the counter-drone swarm's fan is untouched.
           if (d.profile.beamPass) {
-            const _bpEv = getEventForEngine(d.eventId);
-            const _tgtHdgDeg = _bpEv?.lastPosition?.heading;
+            const _tgtHdgDeg = _trackPositionFor(d.eventId)?.heading;
             if (typeof _tgtHdgDeg === 'number') {
               const _tgtHdg = (_tgtHdgDeg * Math.PI) / 180;
               // SIT ON THE SIDE OPPOSITE THE GUN.
@@ -9979,7 +9974,7 @@ async function main() {
                          : d._effectOutcome === 'disable' ? 'physics-fall'
                          : _resolveNeutralisationMode(d);
               d._effectOutcome = null;
-              const lastPos = targetEv.lastPosition || {};
+              const lastPos = _trackPositionFor(d.eventId) || {};
               const targetSpeedMs = lastPos.speed || targetEv?.subject?.kinematics?.speed_ms || 30;
               const targetHeadingDeg = (typeof lastPos.heading === 'number') ? lastPos.heading : 0;
               const targetHeadingRad = (targetHeadingDeg * Math.PI) / 180;
@@ -11078,7 +11073,7 @@ async function main() {
         sw._neutralisedAt = new Date().toISOString();
         // Swarm Phase 1: source-of-truth status transition. The sw
         // flag above stays as the render-cache fast path.
-        if (sw.memberId) setMemberStatus(d.eventId, sw.memberId, 'neutralised', { reason: 'interceptor kill' });
+        if (sw.memberId) _setMemberStatusEverywhere(getEventForEngine(d.eventId), sw.memberId, 'neutralised', { reason: 'interceptor kill' }, _liveTargetPositionFor(d));
         // No child event to close. A detached member's fate is the
         // member status set just above, on this event.
         // Clear any lingering jamming visuals from other counter-
@@ -11297,7 +11292,7 @@ async function main() {
         // outcome still stands: the dispatching unit saw it on its own
         // seeker and reported it, the same way a crew radios a result.
         // What changes is the provenance, and the record says which.
-        const _kp = _liveTargetPositionFor(d) || event.lastPosition;
+        const _kp = _liveTargetPositionFor(d) || _trackPositionFor(d.eventId);
         const _observed = !!(_kp && _sitesSeeingPoint(_kp.lat, _kp.lon, _kp.alt).length);
         appendEventArray(event.id, 'notes', {
           timestamp: new Date().toISOString(),
@@ -11732,12 +11727,14 @@ async function main() {
     const e = getEvent(eventId);
     if (!e) return;
     _rehydrateNarrativeCache(e);
-    // Fold in the shadow chain so a swarm that crossed CPH → AMK
-    // reports both sites, not just the primary siteId. Also picks up
-    // any explicit _reacquiredSites.
+    // Fold in the linked cases this account may open, so a swarm that
+    // crossed CPH → AMK reports both sites for admin, and only its own
+    // for an operator (docs/track-and-site-case-architecture.md).
     const sitesTouched = new Set();
     if (e.siteId) sitesTouched.add(e.siteId);
-    if (e._reacquiredSites) e._reacquiredSites.forEach(s => sitesTouched.add(s));
+    // The sites this case's own links reach, as the account may open them:
+    // never the track's whole list, which names other companies' sites.
+    for (const le of _openLinkedEvents(e)) if (le.siteId) sitesTouched.add(le.siteId);
     for (const lid of (e.linkedEventIds || [])) {
       const linked = getEvent(lid);
       if (linked?.siteId) sitesTouched.add(linked.siteId);
@@ -12111,7 +12108,7 @@ async function main() {
 
       if (_f35.mode === 'chase' && _f35.targetEventId) {
         const target = getEventForEngine(_f35.targetEventId);
-        const tp = target?.lastPosition;
+        const tp = target ? _trackPositionFor(target.id) : null;
         if (tp) {
           const dLat = tp.lat - _f35.curLat;
           const dLon = tp.lon - _f35.curLon;
@@ -12156,8 +12153,11 @@ async function main() {
   // every national tier. A single drone takes that form since 2026-11-03;
   // missiles keep the full path (r-missile-all-tiers covers them anyway).
   function _fireReacquisition(event, siteId, { escalate = true } = {}) {
-    if (event._reacquiredSites && event._reacquiredSites.has(siteId)) return;
-    addToEventSet(event.id, '_reacquiredSites', siteId);
+    // Sites crossed are the track's record (sitesCrossed in live_track.js);
+    // a case's "sites crossed" is derived from its links.
+    const _t = ensureTrack(event.id, event.siteId);
+    if (_t.reacquiredSites?.has(siteId)) return;
+    (_t.reacquiredSites ||= new Set()).add(siteId);
     const site = SITES[siteId];
     // Auto-escalate to the re-acquiring site's national tier destinations so
     // their receivers' advisory strip upgrades to a full escalation card.
@@ -12250,7 +12250,7 @@ async function main() {
       _friendlyMissile.lastFrameTs = now;
 
       const target = getEventForEngine(_friendlyMissile.targetEventId);
-      const tp = target?.lastPosition;
+      const tp = target ? _trackPositionFor(target.id) : null;
       if (tp) {
         const dLat = tp.lat - _friendlyMissile.curLat;
         const dLon = tp.lon - _friendlyMissile.curLon;
@@ -12619,8 +12619,8 @@ async function main() {
   //     with the drone identity in the label so a spread-out group
   //     produces one marker per drone.
   //
-  // Every transition is ALWAYS logged to event._droneTransitionLog for
-  // per-drone summary reports (regardless of aggregation mode).
+  // Every transition is ALWAYS logged to the live track's transitionLog
+  // for per-drone summary reports (regardless of aggregation mode).
   //
   // Segment-boundary bisection uses this drone's own prev→cur segment
   // (22 iterations, sub-metre). No shared anchor, no stale billboard,
@@ -12681,22 +12681,20 @@ async function main() {
     // Lazily initialise tick-loop internal state via mutators. Silent
     // (no listener fire) because these init writes shouldn't provoke
     // a UI render — the tick loop's own render happens at end of tick.
-    if (!event.perSiteCrossings) mutateEvent(event.id, { perSiteCrossings: [] });
-    if (!event._droneCovState) mutateEvent(event.id, { _droneCovState: new Map() });
-    if (!event._droneInsideState) mutateEvent(event.id, { _droneInsideState: new Map() });
-    if (!event._siteAgg) mutateEvent(event.id, { _siteAgg: {} });
-    if (!event._droneTransitionLog) mutateEvent(event.id, { _droneTransitionLog: [] });
-
-    let droneCov = event._droneCovState.get(droneKey);
-    if (!droneCov) { droneCov = new Map(); setEventMapKey(event.id, '_droneCovState', droneKey, droneCov); }
-    let droneInside = event._droneInsideState.get(droneKey);
-    if (!droneInside) { droneInside = new Map(); setEventMapKey(event.id, '_droneInsideState', droneKey, droneInside); }
+    // Per-site bookkeeping is the TRACK's, not a case's: it names every
+    // site. A crossing row goes to the open case of the site it names,
+    // which is that site's observation (docs/track-and-site-case-architecture.md).
+    const _trk = ensureTrack(event.id, event.siteId);
+    let droneCov = _trk.droneCovState.get(droneKey);
+    if (!droneCov) { droneCov = new Map(); _trk.droneCovState.set(droneKey, droneCov); }
+    let droneInside = _trk.droneInsideState.get(droneKey);
+    if (!droneInside) { droneInside = new Map(); _trk.droneInsideState.set(droneKey, droneInside); }
 
     const _persist = (kind, lat, lon, color, label, siteId) => {
-      appendEventArray(event.id, 'perSiteCrossings', { kind, lat, lon, color, label, siteId, timestamp: new Date().toISOString() });
+      _appendSiteCrossing(event, siteId, { kind, lat, lon, color, label, siteId, timestamp: new Date().toISOString() });
     };
     const _log = (siteId, kind, lat, lon) => {
-      appendEventArray(event.id, '_droneTransitionLog', {
+      _trk.transitionLog.push({
         droneKey, droneLabel: droneLabel || droneKey,
         siteId, kind, lat, lon,
         timestamp: new Date().toISOString(),
@@ -12730,7 +12728,7 @@ async function main() {
       const relevantToSite = nowInside || wasInside || nowInCov || wasInCov;
       if (!relevantToSite) continue;
 
-      let agg = event._siteAgg[sid];
+      let agg = _trk.siteAgg.get(sid);
       if (!agg) {
         agg = {
           insideDrones: new Set(), inCovDrones: new Set(),
@@ -12739,7 +12737,7 @@ async function main() {
           droneEntryCount: new Map(), droneExitCount: new Map(),
           droneDetectCount: new Map(), droneOorCount: new Map(),
         };
-        setEventObjectKey(event.id, '_siteAgg', sid, agg);
+        _trk.siteAgg.set(sid, agg);
       }
 
       const bisectPoly = (direction) => {
@@ -12915,9 +12913,9 @@ async function main() {
   // the surviving drone. Purge is silent (no marker fires): the
   // drone was killed by an interceptor, not signal-lost.
   function _purgeDroneFromAggregates(event, droneKey) {
-    if (!event?._siteAgg) return;
-    for (const sid of Object.keys(event._siteAgg)) {
-      const agg = event._siteAgg[sid];
+    const _agg = getTrack(event?.id)?.siteAgg;
+    if (!_agg) return;
+    for (const [sid, agg] of _agg) {
       if (!agg) continue;
       if (agg.inCovDrones)  agg.inCovDrones.delete(droneKey);
       if (agg.insideDrones) agg.insideDrones.delete(droneKey);
@@ -12938,7 +12936,8 @@ async function main() {
   // On the last purge that empties the aggregate → fire OOR at the
   // remembered overwatch exit pos.
   function _fireDelayedOORForEmptiedSites(event, state, deathLat, deathLon) {
-    if (!event?._siteAgg) return;
+    const _aggAll = getTrack(event?.id)?.siteAgg;
+    if (!_aggAll) return;
     const _liveCount = (set) => {
       let n = 0;
       for (const key of set) {
@@ -12949,8 +12948,7 @@ async function main() {
       }
       return n;
     };
-    for (const sid of Object.keys(event._siteAgg)) {
-      const agg = event._siteAgg[sid];
+    for (const [sid, agg] of _aggAll) {
       if (!agg) continue;
       if (!agg.inCovDrones || _liveCount(agg.inCovDrones) > 0) continue;
       // Site emptied by DEATHS: close the site's linked shadow event.
@@ -12980,7 +12978,7 @@ async function main() {
       // markers. See docs/swarm-individual-tracking-architecture.md.
       const lbl = `OUT OF RANGE${suffix} ${now.slice(11,19)}Z · ${site?.code || site?.name || sid} signal lost`;
       _dropMarker(pos.lat, pos.lon, '#ff5a5a', lbl, event.id, sid);
-      appendEventArray(event.id, 'perSiteCrossings', { kind: 'oor', lat: pos.lat, lon: pos.lon, color: '#ff5a5a', label: lbl, siteId: sid, timestamp: now });
+      _appendSiteCrossing(event, sid, { kind: 'oor', lat: pos.lat, lon: pos.lon, color: '#ff5a5a', label: lbl, siteId: sid, timestamp: now });
       agg._oorFiredThisCycle = true;
       agg._pendingOorPos = null;
       if (_viewerSeesSite(event, sid)) toast(`OUT OF RANGE · ${event.droneType || 'track'} left ${site?.name || site?.code || sid} sensor coverage.`, 'warn');
@@ -13006,19 +13004,22 @@ async function main() {
       if (ev.awaitingNeutralization) continue;
       if (droneState.has(ev.id)) continue;            // owns a live track; its own tick governs it
       // A single drone's crossed-site case belongs to that drone's site
-      // flow while its track flies: it closes 30 s after the drone left
-      // the site, or with the first case. Read with the swarm rule below,
-      // it closed 15 s after the drone left, as "neutralized", because a
-      // single drone has no swarm members (verifier, 2026-11-03). Once
-      // the track has ended, shot down for one, it closes now with what
-      // this site's own sensors saw.
+      // flow while its track flies: it closes at its site's exit, or
+      // with the first case. Read with the swarm rule below, it closed
+      // 15 s after the drone left, as "neutralized", because a single
+      // drone has no swarm members (verifier, 2026-11-03). Once the
+      // track has ended, shot down for one, it closes now with what this
+      // site's own sensors saw.
       if (ev.soloSiteCaseOf) {
         if (isTrackLive(ev.soloSiteCaseOf)) continue;
         const _own = getEventForEngine(ev.soloSiteCaseOf);
         if (_own) {
+          // Where the TRACK ended, not where the first case's own site
+          // last saw it: a drone shot down inside Amager ended at Amager.
+          const _end = trackLastSeen(_own.id) || _own.exit || _own.lastPosition;
           _closeSoloSiteCases(_own, _own.outcome === 'neutralized'
-            ? { endedAt: _own.exit || _own.lastPosition, outcome: 'neutralized' }
-            : { endedAt: _own.lastPosition, outcome: 'lost contact' });
+            ? { endedAt: _end, outcome: 'neutralized' }
+            : { endedAt: _end, outcome: 'lost contact' });
           renderAlertStrip();
           continue;
         }
@@ -13279,6 +13280,7 @@ async function main() {
       try {
         removeDroneEntities(eventId);
         removeLiveTrack(eventId);
+        removeTrack(eventId);
         _removedAny = true;
       } catch (err) {
         // Flag set only AFTER success, so a partial failure is retried
@@ -14317,12 +14319,14 @@ async function main() {
       && event.platform !== 'missile';
   }
 
-  // A single drone whose first case has closed while its track flies on
-  // under other sites' cases. Nothing the tick works out is written to
-  // that closed case: its end time, exit, duration, position and
-  // confidence stay what its own site saw.
-  function _soloCaseClosed(event, state) {
-    return _singleDroneSiteFlow(event, state) && event.status !== 'active';
+  // A site case's exit is the last position ITS sensors saw, stamped
+  // when the group leaves the site. Never another site's sighting, and
+  // never moved afterwards (docs/track-and-site-case-architecture.md).
+  function _siteExitFor(ev) {
+    if (ev.exit) return ev.exit;
+    const lk = ev.lastKnownPosition;
+    if (!lk?.lat) return null;
+    return { lat: lk.lat, lon: lk.lon, alt: lk.alt, heading: lk.heading, timestamp: lk.timestamp || new Date().toISOString(), leftCoverageOf: ev.siteId };
   }
 
   function _handlePerSiteLifecycle(primaryEvent, state, currentSites) {
@@ -14367,7 +14371,7 @@ async function main() {
         // listeners fire. Direct field mutation used to leave duration=0
         // and skip the persistence hook — an event that closed on site
         // exit stayed missing its own trajectory recording forever.
-        closeEvent(ev.id, ev.exit || null, { autoOutcome: 'left coverage' });
+        closeEvent(ev.id, _siteExitFor(ev), { autoOutcome: 'left coverage' });
         addNote(ev.id, (primaryEvent.droneCount || 1) > 1
           ? `All tracked drones exited ${SITES[sid]?.name || sid} sensor coverage. Event closed.`
           : `The track left ${SITES[sid]?.name || sid} sensor coverage. Event closed.`, 'AUTO-CORRELATOR');
@@ -14463,7 +14467,10 @@ async function main() {
             nnTrackId: null,
             trackProvider: null,
             trackNodeId: null,
-            kinematics: { ...mt.kinematics },
+            // No kinematics from the first site: this case's own sensors
+            // fill them (_syncMemberEverywhere) while it is open. The
+            // reverse leak closed 2026-11-05.
+            kinematics: { lat: null, lon: null, alt: null, heading: null, speedMs: null },
             formationOffset: { ...mt.formationOffset },
             inCoverage: false,
             history: [{ status: mt.status, at: new Date().toISOString() }],
@@ -14580,6 +14587,95 @@ async function main() {
   // A track on the map: receivers by the case; operators are fenced by
   // their sites' sensors below, admin not at all.
   function _viewerFollowsTrack(ev) { return followsTrack(getCurrentActor(), ev, _viewerScopeDeps); }
+
+  // ── The live track and the site case (docs/track-and-site-case-architecture.md) ──
+  // A case's id resolves to its track: the first case's id in the
+  // simulation; a linked site case through the case it was opened from.
+  function _trackIdFor(eventId) {
+    const ev = getEventForEngine(eventId);
+    if (!ev) return eventId;
+    return ev.soloSiteCaseOf || ev.shadowOfEventId || ev.linkedEventId || ev.id;
+  }
+  // Where the track behind a case is now: the engine's answer, never a
+  // case's field. The case's own lastPosition only when it has no track
+  // (a seeded or live-sensor case).
+  function _trackPositionFor(eventId) {
+    const tp = trackPosition(_trackIdFor(eventId));
+    if (tp) return tp;
+    const ev = getEventForEngine(eventId);
+    return ev?.lastPosition ? { ...ev.lastPosition, inCoverage: ev.currentlyInCoverage !== false, siteIds: [] } : null;
+  }
+  // The sites whose sensors see a point: the one predicate for the swarm's
+  // site membership, a case's observation and the operator fence.
+  function _siteSees(siteId, lat, lon, altM) {
+    for (const s of SITES[siteId]?.sensors || []) if (_sensorSeesPoint(s, lat, lon, altM)) return true;
+    return false;
+  }
+  // The open site cases of a track: the first case and the per-site cases
+  // opened from it, by site id.
+  function _siteCasesOf(event) {
+    const out = new Map();
+    const add = (e) => { if (e && e.status === 'active' && e.siteId) out.set(e.siteId, e); };
+    add(event);
+    for (const lid of event?.linkedEventIds || []) {
+      const le = getEventForEngine(lid);
+      if (le && (le.shadowOfEventId === event.id || le.soloSiteCaseOf === event.id)) add(le);
+    }
+    return out;
+  }
+  // The one gate for a tick write to a site case: open, this site's, and
+  // the site's sensors saw the position the fields describe. A write that
+  // fails it is dropped, not redirected. check:site-case-scope holds it.
+  function _writeSiteObservation(caseRecord, siteId, position, fields) {
+    const ok = siteObservationWrite(caseRecord, siteId, position, fields, _siteSees);
+    if (!ok) return false;
+    mutateEvent(caseRecord.id, ok);
+    return true;
+  }
+  // A member's kinematics and coverage: the live group on the first
+  // case's id, and every OTHER open site case whose sensors see the
+  // member, through sourceMemberId, each with its own coverage answer.
+  function _syncMemberEverywhere(event, memberId, k) {
+    syncMemberTrack(event.id, memberId, k);
+    for (const [sid, ev] of _siteCasesOf(event)) {
+      if (ev.id === event.id) continue;
+      const seen = _siteSees(sid, k.lat, k.lon, typeof k.alt === 'number' ? k.alt : 0);
+      if (!seen) continue;
+      const m = (ev.memberTracks || []).find((t) => t.sourceMemberId === memberId);
+      if (m) syncMemberTrack(ev.id, m.memberId, { ...k, inCoverage: seen });
+    }
+  }
+  // A member's status: on the live group, and on every open site case
+  // whose sensors see where it happened (a drone downed over Amager is
+  // Amager's observation). `where` is the member's position, or null to
+  // mirror to every open case.
+  function _setMemberStatusEverywhere(event, memberId, status, extra, where) {
+    if (!event) return;
+    setMemberStatus(event.id, memberId, status, extra);
+    for (const [sid, ev] of _siteCasesOf(event)) {
+      if (ev.id === event.id) continue;
+      if (where && !_siteSees(sid, where.lat, where.lon, typeof where.alt === 'number' ? where.alt : 0)) continue;
+      const m = (ev.memberTracks || []).find((t) => t.sourceMemberId === memberId);
+      if (m) setMemberStatus(ev.id, m.memberId, status, extra);
+    }
+  }
+  // A crossing row (entry, exit, detected, out of range) is the
+  // observation of the site it names: it goes to that site's open case,
+  // and to no other. A closed case gets nothing.
+  function _appendSiteCrossing(event, siteId, row) {
+    const target = _siteCasesOf(event).get(siteId);
+    if (!target) return false;
+    if (!target.perSiteCrossings) mutateEvent(target.id, { perSiteCrossings: [] });
+    appendEventArray(target.id, 'perSiteCrossings', row);
+    return true;
+  }
+  // Every open site case that saw this position records it, each as its own.
+  function _recordObservation(event, position, fieldsFor) {
+    for (const [sid, ev] of _siteCasesOf(event)) {
+      const fields = fieldsFor(ev, sid);
+      if (fields) _writeSiteObservation(ev, sid, position, fields);
+    }
+  }
 
   // ── What the signed-in account may see on the live map ──
   // operator_map_scope.js: an operator sees a drone, its trail and its
@@ -14890,7 +14986,7 @@ async function main() {
   }
 
   function _scoreKinematicContinuity(prior, newEvent, newTemplate) {
-    const priorPos = prior.lastPosition || prior.lastKnownPosition || prior.exit;
+    const priorPos = trackLastSeen(_trackIdFor(prior.id)) || prior.lastPosition || prior.lastKnownPosition || prior.exit;
     if (!priorPos || priorPos.lat == null) return 0;
     // Position-hierarchy fallback for the new event: template waypoint 0
     // is the ideal (real ingress point), then any position already logged
@@ -15184,6 +15280,10 @@ async function main() {
       formation_role: role,
       event_id: event.id,
       site_id: event.siteId,
+      // The sites whose sensors saw this sample. A sample in an overlap
+      // is seen by two sites, so one site_id is wrong by construction;
+      // site_id stays the track's first site for every reader of it.
+      sites_seen: sensors.map((s) => s.site_id ?? s.siteId).filter(Boolean).filter((v, i, a) => a.indexOf(v) === i),
       detection_state: detState,
       // PROVENANCE. Every sample says where it came from.
       //
@@ -15543,7 +15643,7 @@ async function main() {
       'acoustic_peak_db', 'acoustic_dominant_hz', 'acoustic_signature',
       'visual_match_model', 'visual_match_confidence',
       'drone_model', 'formation_role',
-      'event_id', 'site_id', 'detection_state', 'sensors_detecting',
+      'event_id', 'site_id', 'sites_seen', 'detection_state', 'sensors_detecting',
       // Provenance travels with the evidence. A CSV handed to an agency
       // that cannot say whether a row was observed or simulated is not
       // evidence, and this file leaves the platform.
@@ -15659,8 +15759,11 @@ async function main() {
   // or event.exit so the debrief line ALWAYS reaches the saved exit
   // coordinates, not wherever the recording's last periodic sample
   // happened to land (which could be 100-500ms before the actual exit).
-  function _synthTerminalSample(event, lastSample) {
-    const term = event.outOfRange || event.exit;
+  // `terminal` overrides the case's own exit: the chain debrief passes
+  // the track's last sighting, because the chain primary's exit is its
+  // own site's edge and the track went on (docs/track-and-site-case-architecture.md).
+  function _synthTerminalSample(event, lastSample, terminal = null) {
+    const term = terminal || event.outOfRange || event.exit;
     if (!term?.lat || !term?.lon) return null;
     const base = lastSample || {};
     const lastTs = base.timestamp_utc ? new Date(base.timestamp_utc).getTime() : new Date(event.startTime).getTime();
@@ -15680,16 +15783,16 @@ async function main() {
       droneId: base.droneId || 'terminal',
     };
   }
-  function _appendTerminalIfMissing(event, samples) {
+  function _appendTerminalIfMissing(event, samples, terminal = null) {
     if (!samples?.length) return samples;
-    const term = event.outOfRange || event.exit;
+    const term = terminal || event.outOfRange || event.exit;
     if (!term?.lat || !term?.lon) return samples;
     const last = samples[samples.length - 1];
     const distDeg = Math.hypot(last.lat - term.lat, last.lon - term.lon);
     // ~0.00003° ≈ 3m — only append if the terminal coord is meaningfully
     // beyond the last recorded sample.
     if (distDeg < 0.00003) return samples;
-    const synth = _synthTerminalSample(event, last);
+    const synth = _synthTerminalSample(event, last, terminal);
     return synth ? [...samples, synth] : samples;
   }
 
@@ -15723,6 +15826,9 @@ async function main() {
   // every site's engagement, any breakaway flight — because every
   // sample for a given drone was pushed into whichever event's tick
   // loop actually owned it, and that has only ever been the primary.
+  // It is the LIVE TRACK's recording, kept whole under the first case's
+  // id on purpose; each sample says which sites saw it (sites_seen),
+  // and a site's view is cut on read (docs/track-and-site-case-architecture.md).
   // Returns the ancestor EVENT OBJECT (not just its id) so callers can
   // also source ITS OWN terminal/exit coordinate correctly.
   function _resolveChainPrimaryEvent(event) {
@@ -15749,7 +15855,7 @@ async function main() {
       const chainPrimary = _resolveChainPrimaryEvent(event);
       const chainRec = window.__isr_getRecording?.(chainPrimary.id);
       if (chainRec?.timeseries?.length) {
-        return { source: 'chain_recording', samples: _appendTerminalIfMissing(chainPrimary, chainRec.timeseries) };
+        return { source: 'chain_recording', samples: _appendTerminalIfMissing(chainPrimary, chainRec.timeseries, trackLastSeen(chainPrimary.id)) };
       }
     }
     // Prefer this event's own recording; fall back to primary's recording
@@ -19767,8 +19873,8 @@ async function main() {
       // known position from event.
       // Any hostile missile event may be neutralised once F-35 is airborne
       // and has arrived at the intercept station.
-      if (_f35.airborne && event.platform === 'missile' && event.classification === 'hostile' && !state.closedAt && event.lastPosition) {
-        const neutralized = tryNeutralize(event.id, event.lastPosition);
+      if (_f35.airborne && event.platform === 'missile' && event.classification === 'hostile' && !state.closedAt && _trackPositionFor(event.id)) {
+        const neutralized = tryNeutralize(event.id, _trackPositionFor(event.id));
         if (neutralized) {
           state.closedAt = monoNow();
           markTrackClosed(p.eventId);
@@ -19821,21 +19927,27 @@ async function main() {
         const altGate = typeof p.alt === 'number'
           ? p.alt <= _sensorCeilingM(bestSensor || {})
           : true;
+        // THE LIVE TRACK OBSERVES, WHOEVER SEES IT. The sites whose
+        // sensors see this point, by the one predicate (ceiling
+        // included); the chase and the sweeper read the track. Each
+        // open site case among them records its own sighting below,
+        // through the gate, so a case never holds another site's
+        // observation and nothing lands on a closed case
+        // (docs/track-and-site-case-architecture.md).
+        const _seenBy = sitesSeeing(Object.keys(SITES), { lat: p.lat, lon: p.lon, alt: p.alt }, _siteSees);
+        const _tpos = observeTrack(event.id, { lat: p.lat, lon: p.lon, alt: p.alt, speed: p.speed, heading: p.heading }, _seenBy);
         if (bestSid && bestDist <= bestRadius + VIS_BUFFER_M && altGate) {
           inAnyCoverage = true;
-          // Freeze a snapshot of live telemetry each tick we're in
-          // coverage — the detail panel shows THIS when the missile
-          // subsequently drops out of range (no fabricated live coords).
-          // Not onto a single drone's closed first case (_soloCaseClosed).
-          if (!_soloCaseClosed(event, state)) {
-            mutateEvent(event.id, {
-              lastKnownPosition: {
-                lat: p.lat, lon: p.lon, alt: Math.round(p.alt),
-                speed: p.speed, heading: Math.round(p.heading),
-                siteId: bestSid, timestamp: new Date().toISOString(),
-              },
-            });
-          }
+          // Each site case records the last position ITS sensors saw,
+          // with its own site id: in the overlap both record the same
+          // point, each as its own observation.
+          _recordObservation(event, _tpos, (ev, sid) => ({
+            lastKnownPosition: {
+              lat: p.lat, lon: p.lon, alt: Math.round(p.alt),
+              speed: p.speed, heading: Math.round(p.heading),
+              siteId: sid, timestamp: _tpos.timestamp,
+            },
+          }));
           // First ever entry into any sensor coverage → this is THE
           // detection moment. Promote event from pre-detection to detected
           // so the receiver inbox + alert strip surface it.
@@ -19845,20 +19957,21 @@ async function main() {
             if (_viewerSeesSite(event, bestSid)) toast(`DETECTED · ${event.droneType} within ${site?.name || bestSid} sensor range.`, 'warn');
             renderAlertStrip();
           }
+          const _trk = ensureTrack(event.id, event.siteId);
           if (
-            event._prevInCoverage === false &&
-            event._prevCoverageSite !== undefined &&
-            bestSid !== event._prevCoverageSite
+            _trk.prevInCoverage === false &&
+            _trk.prevCoverageSiteId !== null &&
+            bestSid !== _trk.prevCoverageSiteId
           ) {
             // A single drone keeps the bookkeeping and the evasion alert;
             // its new site gets a case of its own below instead of the
             // automatic national message (_singleDroneSiteFlow).
             _fireReacquisition(event, bestSid, { escalate: !_singleDroneSiteFlow(event, state) });
           }
-          mutateEvent(event.id, { _prevCoverageSite: bestSid });
+          _trk.prevCoverageSiteId = bestSid;
         }
-        mutateEvent(event.id, { _prevInCoverage: inAnyCoverage });
-        // Event-level currentlyInCoverage uses the LIVE-drones check
+        ensureTrack(event.id, event.siteId).prevInCoverage = inAnyCoverage;
+        // The track's inCoverage uses the LIVE-drones check
         // (any live drone in any sensor cov at any site), NOT just
         // the LEAD's position. Without this the "SIGNAL LOST" panel
         // could flip on/off based on the dead lead's ghost waypoints
@@ -19876,7 +19989,10 @@ async function main() {
             if (_shouldAutoDetect(sw.stats.lat, sw.stats.lon, sw.stats.alt)) { anyLiveInCov = true; break; }
           }
         }
-        mutateEvent(event.id, { currentlyInCoverage: anyLiveInCov });
+        // The track's answer; the chase reads it through _trackPositionFor.
+        // Any live member in any site's coverage, so a dead lead's ghost
+        // waypoints never decide it.
+        { const _tk = ensureTrack(event.id, event.siteId); if (_tk.position) _tk.position.inCoverage = anyLiveInCov; }
 
         // ── Multi-site auto-close ──
         // Terminal close for multi-site / cross-cued tracks that leave
@@ -19951,19 +20067,21 @@ async function main() {
               const le = getEventForEngine(lid);
               return le && le.status === 'active';
             });
-          // A single drone runs the swarm's flow (_singleDroneSiteFlow), so
-          // its first case closes when its own site's sensors lose the
-          // drone. From then on the countdown and the end of the track are
-          // kept off that closed case (_soloCaseClosed).
-          const _soloClosed = _soloCaseClosed(event, state);
+          // A per-site track (multi-site, not a missile) has its cases
+          // closed by _handlePerSiteLifecycle, one per site at its site's
+          // exit. This branch then only ENDS THE TRACK. The missile keeps
+          // its one case as the track, by design.
+          const _perSiteCases = !!event.multiSiteTrack && event.platform !== 'missile';
           if (inAnyCoverage === false && noChase && !linkedActive) {
-            // Classify the loss the first tick coverage drops. Result
-            // stored on event.temporaryLoss so the detail panel can
-            // render the countdown section, and the same graceMs is
-            // reused every subsequent tick so the countdown is stable.
+            // Classify the loss the first tick coverage drops, against the
+            // fence of the LAST SITE THAT SAW THE TRACK. Stored on the
+            // track; an open case mirrors it so its panel can show the
+            // countdown, and the same graceMs is reused every tick so the
+            // countdown is stable.
             if (!state._outOfAllCoverageSinceMs) {
               state._outOfAllCoverageSinceMs = monoNow();
-              const loss = _classifyDetectionLoss(event);
+              const _ls = trackLastSeen(event.id);
+              const loss = _classifyDetectionLoss(event, _ls || event.lastKnownPosition || event.lastPosition, _ls?.siteIds?.[0] || event.siteId);
               const _loss = {
                 firstAt: new Date().toISOString(),
                 classification: loss.classification,
@@ -19974,27 +20092,25 @@ async function main() {
                 lastHeading: loss.lastHeading ?? null,
                 graceSeconds: loss.graceSeconds ?? Math.round(loss.graceMs / 1000),
               };
-              if (_soloClosed) state._soloTrackLoss = _loss;
-              else mutateEvent(event.id, { temporaryLoss: _loss });
+              setTrackLoss(event.id, _loss);
+              if (caseAccepts(event, event.siteId)) mutateEvent(event.id, { temporaryLoss: _loss });
             }
-            const activeGraceMs = (_soloClosed
-              ? (state._soloTrackLoss?.graceMs ?? event.temporaryLoss?.graceMs)
-              : event.temporaryLoss?.graceMs) || _LOSS_GRACE_FLOOR_MS;
+            const activeGraceMs = getTrack(event.id)?.temporaryLoss?.graceMs || _LOSS_GRACE_FLOOR_MS;
             if (monoNow() - state._outOfAllCoverageSinceMs >= activeGraceMs) {
               state.closedAt = monoNow();
-              if (_soloClosed) {
-                if (!_trackContinuesAfterClose(event)) markTrackClosed(p.eventId);
-              } else {
-                const exitPoint = event.lastKnownPosition
-                  ? { lat: event.lastKnownPosition.lat, lon: event.lastKnownPosition.lon,
-                      alt: event.lastKnownPosition.alt, timestamp: new Date().toISOString(),
-                      heading: event.lastKnownPosition.heading, leftCoverageOf: 'all-sites-auto' }
+              markTrackEnded(event.id);
+              if (!_trackContinuesAfterClose(event)) markTrackClosed(p.eventId);
+              if (!_perSiteCases) {
+                // One case for the whole track: it ends where the track
+                // was last seen.
+                const _ls2 = trackLastSeen(event.id) || event.lastKnownPosition;
+                const exitPoint = _ls2
+                  ? { lat: _ls2.lat, lon: _ls2.lon, alt: _ls2.alt, timestamp: new Date().toISOString(),
+                      heading: _ls2.heading, leftCoverageOf: 'all-sites-auto' }
                   : (event.exit || null);
                 mutateEvent(event.id, { exit: exitPoint });
-                if (!_trackContinuesAfterClose(event)) markTrackClosed(p.eventId);
                 closeEvent(p.eventId, exitPoint, { autoOutcome: 'left coverage' });
               }
-              if (_singleDroneSiteFlow(event, state)) _closeSoloSiteCases(event);
               if (_viewerSeesCase(event)) toast(`Sim auto-ended · ${event.droneType || 'track'} left all sensor coverage with no active pursuit.`, 'info');
               updateContributingRings();
               renderAlertStrip();
@@ -20007,8 +20123,8 @@ async function main() {
             // object flees again. Panel will drop the Temporary
             // detection loss section on next render.
             state._outOfAllCoverageSinceMs = null;
-            state._soloTrackLoss = null;
-            if (event.temporaryLoss && !_soloClosed) mutateEvent(event.id, { temporaryLoss: null });
+            setTrackLoss(event.id, null);
+            if (event.temporaryLoss && caseAccepts(event, event.siteId)) mutateEvent(event.id, { temporaryLoss: null });
           }
         }
       }
@@ -20118,7 +20234,7 @@ async function main() {
         //    the number then follows the sensors at the capped rate.
         //  - peakConfidence is kept beside it, because the report's
         //    "peak confidence" was reading whatever the value was at close.
-        if (_fcOn && leadInCov && !state.closedAt && !_soloCaseClosed(event, state)) {
+        if (_fcOn && leadInCov && !state.closedAt && caseAccepts(event, event.siteId)) {
           if (state._fcBase == null) state._fcBase = _fcTpl.confidence ?? event.confidence ?? 0.85;
           const _raw = _fusedMemberConfidence({
             id: event.id,
@@ -20528,14 +20644,27 @@ async function main() {
         const rangeM = perim ? distanceToPerimeter(p.lat, p.lon, perim) : null;
         const isInside = perim ? pointInPolygon(p.lat, p.lon, perim) : false;
 
-        mutateEvent(event.id, {
-          lastPosition: {
-            lat: p.lat, lon: p.lon, alt: Math.round(p.alt),
-            speed: p.speed, heading: Math.round(p.heading),
-            rangeToPerim: rangeM, eta: null,
-          },
-          // Not onto a single drone's closed first case (_soloCaseClosed).
-          ...(_soloCaseClosed(event, state) ? {} : { duration: Math.round(p.tSec) }),
+        // The track moved (observeTrack above, in the coverage block, or
+        // here for a single-site track). Each open site case whose
+        // sensors see the point records its own lastPosition, with the
+        // range to ITS OWN fence, and its duration so far. A case the
+        // sensors do not see, or that has closed, gets nothing
+        // (docs/track-and-site-case-architecture.md).
+        if (inAnyCoverage === null) {
+          observeTrack(event.id, { lat: p.lat, lon: p.lon, alt: p.alt, speed: p.speed, heading: p.heading },
+            sitesSeeing(Object.keys(SITES), { lat: p.lat, lon: p.lon, alt: p.alt }, _siteSees));
+        }
+        _recordObservation(event, trackPosition(event.id), (ev, sid) => {
+          const _s = SITES[sid];
+          const _perim = _s?.perimeter?.length ? _s.perimeter : (_s?.siteBoundary?.length ? _s.siteBoundary : null);
+          return {
+            lastPosition: {
+              lat: p.lat, lon: p.lon, alt: Math.round(p.alt),
+              speed: p.speed, heading: Math.round(p.heading),
+              rangeToPerim: _perim ? distanceToPerimeter(p.lat, p.lon, _perim) : null, eta: null,
+            },
+            duration: Math.max(0, Math.round((Date.now() - new Date(ev.startTime).getTime()) / 1000)),
+          };
         });
 
         // ── Cross cueing: project trajectory forward, find impacted infra.
@@ -20547,20 +20676,29 @@ async function main() {
         // site re-acquires with a new heading, the snapshot updates and the
         // line JUMPS to the new direction, revealing that the missile's
         // real course diverges from the initial projection.
+        // THE PROJECTION IS THE TRACK'S. It says where the track goes,
+        // which is not a site's observation. The track holds the snapshot
+        // and the path and the line is drawn under the track id; an open
+        // site case whose sensors see the track mirrors the snapshot it
+        // was taken from, so its panel and report can show the projected
+        // heading, and the receiver advisory reads the path from the
+        // track behind the case the receiver is on.
         const hasLiveContact = inAnyCoverage === null ? true : inAnyCoverage;
-        if (event.classification === 'hostile' && event.status === 'active' && p.speed > 0) {
+        const _trkP = ensureTrack(event.id, event.siteId);
+        if (event.classification === 'hostile' && !_trkP.ended && p.speed > 0) {
           if (hasLiveContact) {
-            mutateEvent(event.id, { projectionSnapshot: { lat: p.lat, lon: p.lon, heading: p.heading, speed: p.speed } });
+            const _snap = { lat: p.lat, lon: p.lon, heading: p.heading, speed: p.speed };
+            setTrackProjection(event.id, _snap, undefined);
+            _recordObservation(event, trackPosition(event.id), () => ({ projectionSnapshot: _snap }));
           }
-          if (event.projectionSnapshot) {
-            mutateEvent(event.id, { projectedPath: projectImpacts(event.projectionSnapshot, event.siteId) });
-            updateProjectedTrajectoryEntity(event);
+          if (_trkP.projectionSnapshot) {
+            setTrackProjection(event.id, undefined, projectImpacts(_trkP.projectionSnapshot, event.siteId));
+            updateProjectedTrajectoryEntity(event, _trkP.projectedPath);
           }
         } else {
-          // A single drone's closed first case keeps the path it was
-          // projecting when it closed (_soloCaseClosed). Its line still
-          // comes off the map.
-          if (!_soloCaseClosed(event, state)) mutateEvent(event.id, { projectedPath: null });
+          // The track has nothing to project. A closed case keeps the
+          // snapshot it recorded; its line comes off the map.
+          setTrackProjection(event.id, undefined, null);
           removeProjectedTrajectoryEntity(event.id);
         }
 
@@ -20845,7 +20983,7 @@ async function main() {
           if (state.leadSwarmMember?.memberId && !state.leadSwarmMember.neutralised) {
             const _leadCovNow = _shouldAutoDetect(p.lat, p.lon, p.alt);
             if (!state._leadTrackSyncMs || (nowMs - state._leadTrackSyncMs) >= 1000 || state._leadTrackSyncInCov !== _leadCovNow) {
-              syncMemberTrack(event.id, state.leadSwarmMember.memberId, {
+              _syncMemberEverywhere(event, state.leadSwarmMember.memberId, {
                 lat: p.lat, lon: p.lon, alt: p.alt,
                 heading: leadHdgDeg, speedMs: p.speed || 25,
                 inCoverage: _leadCovNow,
@@ -21071,7 +21209,7 @@ async function main() {
               sw.neutralised = true;
               sw._neutralisedAt = new Date().toISOString();
               // Swarm Phase 1: source-of-truth status transition.
-              if (sw.memberId) setMemberStatus(event.id, sw.memberId, 'neutralised', { reason: 'jamming forced landing' });
+              if (sw.memberId) _setMemberStatusEverywhere(event, sw.memberId, 'neutralised', { reason: 'jamming forced landing' }, pos);
               // No child event to close. A detached member's fate is the
               // member status set just above, on this event.
               // Drop a small downed-drone marker at the landing spot so
@@ -21316,7 +21454,7 @@ async function main() {
           // stay cheap; coverage flips sync immediately below via
           // _prevInCov handling being per-tick anyway.
           if (sw.memberId && (!sw._lastTrackSyncMs || (nowMs - sw._lastTrackSyncMs) >= 1000 || sw._trackSyncInCov !== swShouldShow)) {
-            syncMemberTrack(event.id, sw.memberId, {
+            _syncMemberEverywhere(event, sw.memberId, {
               lat: pos.lat, lon: pos.lon, alt: pos.alt,
               heading: hdgDeg, speedMs,
               inCoverage: swShouldShow,
@@ -21387,9 +21525,9 @@ async function main() {
               if ((nowMs - sw._bwOorSince) >= _LOSS_GRACE_FLOOR_MS) {
                 sw._memberLostAt = nowMs;
                 if (sw.memberId) {
-                  setMemberStatus(event.id, sw.memberId, 'lost', {
+                  _setMemberStatusEverywhere(event, sw.memberId, 'lost', {
                     reason: 'no sensor or responder holds it',
-                  });
+                  }, pos);
                 }
                 appendEventArray(event.id, 'notes', {
                   timestamp: new Date().toISOString(),
@@ -21504,10 +21642,10 @@ async function main() {
         // observations (sensors-observe-only): counting them kept a
         // death-emptied site inside currentGroupSites forever, so its
         // exit-close never fired (verified AMK root-cause chain).
-        if (p?.lat != null && !state.leadSwarmMember?.neutralised) groupPositions.push({ lat: p.lat, lon: p.lon });
+        if (p?.lat != null && !state.leadSwarmMember?.neutralised) groupPositions.push({ lat: p.lat, lon: p.lon, alt: typeof p.alt === 'number' ? p.alt : 0 });
         for (const sw of state.swarmBillboards || []) {
           if (sw.neutralised) continue;
-          if (sw.stats?.lat != null) groupPositions.push({ lat: sw.stats.lat, lon: sw.stats.lon });
+          if (sw.stats?.lat != null) groupPositions.push({ lat: sw.stats.lat, lon: sw.stats.lon, alt: typeof sw.stats.alt === 'number' ? sw.stats.alt : 0 });
         }
         const currentGroupSites = _aggregateGroupSites(groupPositions);
         _handlePerSiteLifecycle(event, state, currentGroupSites);
@@ -21552,10 +21690,15 @@ async function main() {
         // kinematics. Real NN plugs into applyNnTickToSubject; this
         // mock path mirrors position/speed/altitude from the drone
         // tick so the detector fires on the Shahed dive path etc.
+        // Live kinematics into the subject of an OPEN case the sensors
+        // see, through the gate, never in place on a closed one: the
+        // archived report holds a copy of the subject, and this write
+        // used to change it after close.
         if (event.subject?.kinematics && p?.speed != null) {
-          event.subject.kinematics.speed_ms = p.speed;
-          event.subject.kinematics.heading_deg = Math.round(p.heading || 0);
-          if (p.alt != null) event.subject.kinematics.altitude_m_agl = p.alt;
+          _recordObservation(event, trackPosition(event.id), (ev) => (ev.subject?.kinematics ? {
+            subject: { ...ev.subject, kinematics: { ...ev.subject.kinematics, speed_ms: p.speed, heading_deg: Math.round(p.heading || 0),
+              ...(p.alt != null ? { altitude_m_agl: p.alt } : {}) } },
+          } : null));
         }
         // Nearest critical asset distance for the attack detector's
         // "low + fast + close-to-sensitive-asset" rule. Uses the
@@ -21603,7 +21746,11 @@ async function main() {
         }
         return false;
       })();
-      if (p.completed && !state.closedAt && event.status === 'active' && !event.awaitingNeutralization && !_resolvingEngagement) {
+      // Keyed on the TRACK: a per-site track whose first case closed at
+      // its site's exit still has to end, or the teardown never runs and
+      // no new scenario can launch. A single-case track keeps the "case
+      // active" meaning through !getTrack(...)?.ended.
+      if (p.completed && !state.closedAt && !getTrack(event.id)?.ended && !event.awaitingNeutralization && !_resolvingEngagement) {
         state.closedAt = monoNow();
         markTrackClosed(p.eventId);
         // Terminal impact: attack-profile templates (Shahed, Geran-3)
@@ -21739,7 +21886,10 @@ async function main() {
           if (!_perEventMarkers.has(event.id)) _perEventMarkers.set(event.id, []);
           _perEventMarkers.get(event.id).push(_impactEnt);
         }
-        closeEvent(p.eventId, event.exit || null, { autoOutcome: _didImpact ? 'target impact' : 'left coverage' });
+        markTrackEnded(event.id);
+        // The first case closes here only if it is still open: a per-site
+        // case that closed at its site's exit is not closed again.
+        if (event.status === 'active') closeEvent(p.eventId, event.exit || null, { autoOutcome: _didImpact ? 'target impact' : 'left coverage' });
         // A single drone's crossed-site cases first, each with what its
         // own site saw: one the drone had already left records that it
         // left, not that contact was lost there.
@@ -21761,7 +21911,8 @@ async function main() {
         // P5A: finalize + persist trajectory recording
         if (state.recording) {
           state.recording.meta.ended_at_utc = new Date().toISOString();
-          state.recording.meta.duration_sec = event.duration || null;
+          // The track's own duration: the first case's ends at its site.
+          state.recording.meta.duration_sec = Math.round(p.tSec) || event.duration || null;
           _persistRecording(p.eventId);
           console.log(`[P5A] recording persisted: isr_trajectory_${p.eventId} (${state.recording.timeseries.length} samples)`);
           // Also persist own-key recordings for every cross-cued linked
@@ -22042,6 +22193,7 @@ async function main() {
       if (event) mutateEvent(event.id, { projectedPath: null });
       markTrackClosed(eventId);
       removeLiveTrack(eventId);
+      removeTrack(eventId);
       removeDroneEntities(eventId);   // handles primary + swarm + markers + projections
     }
     // Also sweep any active event that had no droneState entry — this covers
@@ -26557,15 +26709,13 @@ async function main() {
   let _lastClosedPanelEventId = null;
   function _closedPanelSig(e) {
     // Fields DELIBERATELY excluded: duration, contributingSensors
-    // count, confidence. All three get mutated per drone tick even
-    // AFTER the event closes (onDroneTick updates event.duration
-    // unconditionally at line 6761, sensors get pushed as the fading
-    // drone billboard trips more coverage rings). Any of those flips
-    // the sig at ~2 Hz → the summary rebuilds → visible blink,
-    // particularly noticeable when the user has scrolled inside the
-    // panel (Lucas: "begins to fire once you scroll down in the
-    // summary and back up"). The panel doesn't need to react to any
-    // of them post-close.
+    // count, confidence. Since 2026-11-05 nothing the tick works out is
+    // written to a closed case (site_case_scope.js), so they no longer
+    // change after close; they stay out because the panel never needed
+    // to react to them post-close, and when they did change (per tick,
+    // before the gate) the sig flipped at ~2 Hz and the summary blinked
+    // (Lucas: "begins to fire once you scroll down in the summary and
+    // back up").
     return [
       e.id,
       e.status,
@@ -27819,7 +27969,9 @@ async function main() {
     const pir = e.outcome === 'neutralized' ? (() => {
       const sitesTouched = new Set();
       if (e.siteId) sitesTouched.add(e.siteId);
-      if (e._reacquiredSites) e._reacquiredSites.forEach(s => sitesTouched.add(s));
+      // The sites this case's own links reach, as the account may open them:
+    // never the track's whole list, which names other companies' sites.
+    for (const le of _openLinkedEvents(e)) if (le.siteId) sitesTouched.add(le.siteId);
       const siteChain = Array.from(sitesTouched).map(sid => SITES[sid]?.name || sid).join(' → ');
       const lk = e.lastKnownPosition;
       const impact = lk ? `${lk.lat.toFixed(4)}°N ${lk.lon.toFixed(4)}°E` : '—';
@@ -27886,7 +28038,7 @@ async function main() {
     // leak op-energinet's data into op-cph-airports' operator view.
     // Receivers + admin see the full chain — they're the response
     // layer with full-picture legitimacy.
-    const _reacqRawSites = e._reacquiredSites ? Array.from(e._reacquiredSites) : [];
+    const _reacqRawSites = _openLinkedEvents(e).map(le => le.siteId).filter(Boolean);
     const _reacqScopedSites = (() => {
       const activeRole = getActiveRole();
       if (!activeRole || activeRole.kind !== 'operator') return _reacqRawSites;
@@ -27902,11 +28054,14 @@ async function main() {
         </div>
       </div>` : '';
 
-    const projected = (e.projectedPath && e.projectedPath.impacts && e.projectedPath.impacts.length) ? `
+    // The track's projection, shown on an open case only: where the
+    // track goes is the track's, not a closed case's record.
+    const _ePath = (e.status === 'active' ? getTrack(_trackIdFor(e.id))?.projectedPath : null) || null;
+    const projected = (_ePath && _ePath.impacts && _ePath.impacts.length) ? `
       <div class="dp-section">
-        <div class="dp-section-title">Projected Path · ${e.projectedPath.impacts.length} downstream</div>
+        <div class="dp-section-title">Projected Path · ${_ePath.impacts.length} downstream</div>
         <div class="pp-list">
-          ${e.projectedPath.impacts.slice(0, 6).map((imp, i) => `
+          ${_ePath.impacts.slice(0, 6).map((imp, i) => `
             <div class="pp-row">
               <span class="pp-idx">${String(i + 1).padStart(2, '0')}</span>
               <span class="pp-name">${imp.name}</span>
@@ -33473,10 +33628,12 @@ async function main() {
     const advisories = EVENTS.filter(ev => {
       if (ev.status !== 'active') return false;
       if (receivedEventIds.has(ev.id)) return false;
-      if (!ev.projectedPath || !ev.projectedPath.impacts) return false;
-      return ev.projectedPath.impacts.some(imp => imp.kind === 'site' && receiverSites.has(imp.id));
+      const _pp = getTrack(_trackIdFor(ev.id))?.projectedPath;
+      if (!_pp || !_pp.impacts) return false;
+      return _pp.impacts.some(imp => imp.kind === 'site' && receiverSites.has(imp.id));
     }).map(ev => {
-      const relevantImpact = ev.projectedPath.impacts.find(imp => imp.kind === 'site' && receiverSites.has(imp.id));
+      const _pp = getTrack(_trackIdFor(ev.id))?.projectedPath;
+      const relevantImpact = _pp.impacts.find(imp => imp.kind === 'site' && receiverSites.has(imp.id));
       const originSite = SITES[ev.siteId];
       return { ev, impact: relevantImpact, originName: originSite ? originSite.name : ev.siteId };
     });

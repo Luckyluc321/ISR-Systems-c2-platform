@@ -1,7 +1,8 @@
 # Track and Site Case Architecture
 
-Status: DESIGN v2, 2026-11-05, after the overseer's review of v1
-(verdict: build with changes; every change is folded in below).
+Status: BUILT 2026-11-05 on branch fix/site-case-own-sightings, from design v2
+(the overseer's review of v1 returned build with changes; every change is
+folded in below and in the code). Gate: `check:site-case-scope`.
 Lucas's rule, verbatim in intent: a site's case keeps only what that
 site's own sensors saw. Its end time is the last sighting at that
 site. Nothing is written to a closed case.

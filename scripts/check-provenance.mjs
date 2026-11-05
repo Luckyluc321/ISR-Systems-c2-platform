@@ -322,7 +322,7 @@ console.log('\nA recorded sample describes its own scenario, not a constant');
 
 console.log('\nProvenance leaves the building with the evidence');
 check('the trajectory export includes source',
-  /'event_id', 'site_id', 'detection_state', 'sensors_detecting',[\s\S]{0,400}?'source',/.test(main),
+  /'event_id', 'site_id', 'sites_seen', 'detection_state', 'sensors_detecting',[\s\S]{0,400}?'source',/.test(main),
   'a CSV handed to an agency that cannot say whether a row was observed or simulated is not evidence');
 
 if (failures) {

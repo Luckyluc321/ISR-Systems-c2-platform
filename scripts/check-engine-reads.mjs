@@ -133,7 +133,9 @@ const ENGINE_FNS = ['_liveTargetPositionFor', '_simComputeEngagementOutcome', '_
   'tryNeutralize', '_sweepUnobservedActiveEvents', '_findGroupEventForSite', '_closeSoloSiteCases', '_persistCrossCuedRecordings',
   'onDroneTick', 'cancelActiveThreats', 'pushNotification', 'pushObserver', '_bestTargetForDispatch',
   '_handlePerSiteLifecycle', '_spawnLinkedSiteEvent', 'processDroneSiteMarkers', '_fireDelayedOORForEmptiedSites', '_fireReacquisition',
-  '_markMemberBrokenAway', '_rebalancePatrolsToWreckages', '_sweepSceneLifecycle', '_startCounterDispatchLoop'];
+  '_markMemberBrokenAway', '_rebalancePatrolsToWreckages', '_sweepSceneLifecycle', '_startCounterDispatchLoop',
+  // The live track and the site case (docs/track-and-site-case-architecture.md).
+  '_trackIdFor', '_trackPositionFor', '_siteCasesOf', '_recordObservation', '_appendSiteCrossing', '_syncMemberEverywhere', '_setMemberStatusEverywhere'];
 // The response-unit chase: decides from what the sensors see.
 const CHASE_FNS = ['_tickCounterDispatch', '_gapLimitedStep', '_resolveEngagement', '_assignInterceptorTarget', '_allDownableHostiles',
   '_syncDispatchToEvent', 'counterDispatchStateFor', '_bestTargetForDispatch', '_simComputeEngagementOutcome', '_liveTargetPositionFor',
@@ -240,7 +242,10 @@ const SCREEN_OR_ACTION = ['triggerQraIntercept', 'dispatchReceiverAsset', 'reque
   '_openArchetypeCascadeModal', '_openObserverPicker', 'renderAlertStrip', 'renderPalantirClosedPanel', 'renderDetailPanel',
   'openRunbookDrawer', '_refreshBriefPreview', 'openBriefPreview', 'openEscalateModal', 'openReclassifyForm',
   '_ensureEventMarkersFromData', '_eventChain', '_applyMarkerFilterToggle', 'renderWorkspaceMissionConsole', '_startMonEngTick',
-  '_renderPirEventChain', '_computeReceiverPatternMatch', '_bindReceiverActions'];
+  '_renderPirEventChain', '_computeReceiverPatternMatch', '_bindReceiverActions',
+  // The linked cases an account may open, for its analysis flags,
+  // debrief and report (2026-11-05): read at render time only.
+  '_openLinkedEvents'];
 const ENGINE_LOOPS = ['onDroneTick', '_tickCounterDispatch', '_startCounterDispatchLoop', '_sweepUnobservedActiveEvents',
   '_sweepSceneLifecycle', '_startF35Loop', '_launchFriendlyMissile', 'tryNeutralize', '_persistCrossCuedRecordings'];
 const declared = new Set(fns.map((f) => f.name));

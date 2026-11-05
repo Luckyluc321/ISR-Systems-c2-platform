@@ -85,7 +85,8 @@ check('a pin carries its site and is shown only to an account that owns it',
 check('every per-site pin passes its site, and its saved record keeps it',
   (main.match(/, lbl, event\.id, sid\);/g) || []).length === 9
   && !/_dropMarker\(hit\.lat, hit\.lon, [^)]*event\.id\);/.test(main)
-  && /appendEventArray\(event\.id, 'perSiteCrossings', \{ kind, lat, lon, color, label, siteId,/.test(main));
+  && /_appendSiteCrossing\(event, siteId, \{ kind, lat, lon, color, label, siteId,/.test(main)
+  && /function _appendSiteCrossing\(event, siteId, row\) \{\s*const target = _siteCasesOf\(event\)\.get\(siteId\);\s*if \(!target\) return false;/.test(main));
 check('pins rebuilt from a case\'s saved points find their site',
   (main.match(/_pinSiteForPoint\(event, event\.(entry|exit|outOfRange)\.lat/g) || []).length === 3
   && /c\.siteId \|\| siteOfPinLabel\(c\.label, SITES\)/.test(main));
