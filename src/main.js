@@ -11956,10 +11956,12 @@ async function main() {
       sensors,
       timeline,
       escalations,
+      // Nobody sent: say so. "Not recorded" read as lost data (Lucas,
+      // 2026-11-06). A case with a dispatch reads as before.
       response: {
-        responder: respondersOf(e),
+        responder: respondersOf(e) || (dispatches.length ? null : 'No response dispatched'),
         effector: _weaponText || null,
-        neutralisedAt: e.neutralizedAt ? _hms(e.neutralizedAt) : null,
+        neutralisedAt: e.neutralizedAt ? _hms(e.neutralizedAt) : (dispatches.length ? null : 'Not neutralised'),
         position: lk ? impact : null,
         zone: impactSite,
         kills: (e.wreckages || []).length,
