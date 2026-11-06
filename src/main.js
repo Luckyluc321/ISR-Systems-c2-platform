@@ -11738,10 +11738,57 @@ async function main() {
     if (persisted) setNarrativeCache(event.id, persisted);
   }
 
+  // THE REPORT IS A VIEW (Lucas, 2026-11-06): it changes no stored data,
+  // it picks the case's own slice of it. The window opens inside the click
+  // (a window opened after a wait is blocked), and the report is written
+  // into it once the case's recording is in memory, because the case's own
+  // last sighting comes from the recording.
   function generatePirReport(eventId) {
-    const e = getEvent(eventId);
-    if (!e) return;
-    _rehydrateNarrativeCache(e);
+    if (!getEvent(eventId)) return;
+    const win = window.open('', '_blank');
+    if (!win) { toast('Popup blocked. Enable popups to generate the PDF report.', 'err'); return; }
+    Promise.resolve(window.__isr_ensureRecording?.(eventId)).catch(() => null)
+      .then(() => _writePirReport(eventId, win));
+  }
+
+  // A copy of the case as its own report reads it. Never writes the case.
+  // Its end time and duration are the ones recorded when it closed (the
+  // post-incident snapshot is taken once, at its own close), so a site's
+  // case does not take the end of the whole flight; a case closed once
+  // reads exactly as before. Its last sighting is the last moment its OWN
+  // site's sensors saw the drones, taken only when the stored one names
+  // another site or is missing; the missile's one case is its whole track
+  // and reads as before.
+  function _reportViewOf(ev) {
+    const view = { ...ev };
+    const snap = ev.postIncidentReport?.event_snapshot;
+    if (ev.status === 'closed' && snap?.endTime) {
+      view.endTime = snap.endTime;
+      if (snap.duration != null) view.duration = snap.duration;
+    }
+    const lk = ev.lastKnownPosition || ev.lastPosition;
+    if (ev.platform !== 'missile' && (!lk || (lk.siteId && lk.siteId !== ev.siteId))) {
+      const own = _ownLastSighting(ev);
+      if (own) view.lastKnownPosition = own;
+    }
+    return view;
+  }
+  function _ownLastSighting(ev) {
+    const ts = window.__isr_getRecording?.(ev.id)?.timeseries || [];
+    for (let i = ts.length - 1; i >= 0; i--) {
+      const smp = ts[i];
+      if ((smp.sensors_detecting || []).some((d) => d.site_id === ev.siteId)) {
+        return { lat: smp.lat, lon: smp.lon, alt: smp.alt ?? null, heading: smp.heading_deg, siteId: ev.siteId, timestamp: smp.timestamp_utc };
+      }
+    }
+    return null;
+  }
+
+  function _writePirReport(eventId, win) {
+    const _stored = getEvent(eventId);
+    if (!_stored) return;
+    _rehydrateNarrativeCache(_stored);
+    const e = _reportViewOf(_stored);
     // Fold in the shadow chain so a swarm that crossed CPH → AMK
     // reports both sites, not just the primary siteId. Also picks up
     // any explicit _reacquiredSites.
@@ -11977,8 +12024,6 @@ async function main() {
       ],
     };
     const html = renderIncidentReport(model, { doc: document, logoUrl: _logoUrl });
-    const win = window.open('', '_blank');
-    if (!win) { toast('Popup blocked. Enable popups to generate the PDF report.', 'err'); return; }
     win.document.open();
     win.document.write(html);
     win.document.close();
@@ -27800,7 +27845,8 @@ async function main() {
       if (e.siteId) sitesTouched.add(e.siteId);
       if (e._reacquiredSites) e._reacquiredSites.forEach(s => sitesTouched.add(s));
       const siteChain = Array.from(sitesTouched).map(sid => SITES[sid]?.name || sid).join(' → ');
-      const lk = e.lastKnownPosition;
+      // The same slice as the downloadable report, so the two never differ.
+      const lk = _reportViewOf(e).lastKnownPosition;
       const impact = lk ? `${lk.lat.toFixed(4)}°N ${lk.lon.toFixed(4)}°E` : '—';
       const impactSite = lk ? (SITES[lk.siteId]?.name || lk.siteId) : '—';
       const evasion = e.projectionSnapshot && lk
