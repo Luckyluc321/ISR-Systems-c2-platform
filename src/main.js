@@ -11912,12 +11912,8 @@ async function main() {
     if (e.endTime) timeline.push({ ts: e.endTime, kind: 'closed', text: `Closed, outcome ${(e.outcome || 'monitored').replace(/-/g, ' ')}` });
     timeline.sort((a, b) => new Date(a.ts || 0).getTime() - new Date(b.ts || 0).getTime());
 
-    // Analysis and radio frequency: the closed panel's own sources, in full.
+    // Analysis: the closed panel's own source, in full.
     const _insight = (() => { try { return _generateAgentBNarrative(e); } catch (_) { return null; } })();
-    const _rfRows = (() => {
-      if (!e.evidence?.rfCarrier) return [];
-      try { return (_tierFor(e.evidence, e.evidence.rfCarrier).rows || []).map(r => ({ label: r.label, value: r.value })); } catch (_) { return []; }
-    })();
 
     // Executive summary: the AI narrative when one was written, otherwise
     // the detail panel's own summary, word for word.
@@ -11975,6 +11971,24 @@ async function main() {
     // member records and the recording, picked and sorted only; nothing
     // stored changes. A drone this site's sensors never saw keeps its
     // roster row and gets no section. A single drone has no formation.
+    // THE SIGNALS THAT DOMINATE A CASE (Lucas, 2026-11-06), from the
+    // moments its own sensors recorded: the strongest radiofrequency
+    // signal and the loudest acoustic level, each with when, and the
+    // dominant acoustic frequency at that loudest moment. No visual match
+    // and no signature match: neither has a traceable input.
+    const _seenHere = (smp) => (smp.sensors_detecting || []).some((d) => d.site_id === _stored.siteId);
+    const _signalsFrom = (moments) => {
+      let rf = null; let ac = null;
+      for (const smp of moments) {
+        if (typeof smp.rf_power_dbm === 'number' && (!rf || smp.rf_power_dbm > rf.rf_power_dbm)) rf = smp;
+        if (typeof smp.acoustic_peak_db === 'number' && (!ac || smp.acoustic_peak_db > ac.acoustic_peak_db)) ac = smp;
+      }
+      return {
+        strongest: rf ? `${rf.rf_power_dbm} dBm at ${_hms(rf.timestamp_utc)}` : null,
+        loudest: ac ? `${ac.acoustic_peak_db} dB at ${_hms(ac.timestamp_utc)}` : null,
+        dominantHz: ac && typeof ac.acoustic_dominant_hz === 'number' ? `${ac.acoustic_dominant_hz} Hz` : null,
+      };
+    };
     const _STATUS_WORDS = { tracked: 'Tracked', 'broken-away': 'Broke formation', neutralised: 'Neutralised', lost: 'Lost' };
     const _pos = (smp) => (smp && smp.lat != null && smp.lon != null ? `${Number(smp.lat).toFixed(4)}°N ${Number(smp.lon).toFixed(4)}°E` : null);
     const formation = (() => {
@@ -11985,7 +11999,7 @@ async function main() {
         const n = Number(String(mt.memberId || '').match(/-m(\d+)$/)?.[1]);
         // The recording names each airframe as the live roster does.
         const label = Number.isFinite(n) ? `DRONE-${n + 1}` : (mt.memberId || 'Drone');
-        const own = samples.filter((smp) => smp.droneId === label && (smp.sensors_detecting || []).some((d) => d.site_id === _stored.siteId));
+        const own = samples.filter((smp) => smp.droneId === label && _seenHere(smp));
         const first = own[0] || null;
         const last = own[own.length - 1] || null;
         const best = new Map();
@@ -12001,7 +12015,8 @@ async function main() {
           label,
           role: mt.role || null,
           model: mt.model || null,
-          radio: mt.rfMHz ? `${mt.rfMHz} MHz` : null,
+          // Its own carrier from its own record, not the formation's.
+          signals: { carrier: mt.rfMHz ? `${mt.rfMHz} MHz` : null, ..._signalsFrom(own) },
           observed: own.length > 0,
           firstAt: first ? _hms(first.timestamp_utc) : null,
           lastAt: last ? _hms(last.timestamp_utc) : null,
@@ -12016,6 +12031,16 @@ async function main() {
         };
       });
     })();
+
+    // A single airframe's signals: carrier and bandwidth as its record
+    // holds them, the rest from the recording at this site. A formation's
+    // are per drone, in its sections.
+    const _sigEv = signatureFieldsFromEvidence(e.evidence);
+    const signals = formation ? null : {
+      carrier: _sigEv.rf_carrier_text || null,
+      bandwidth: _sigEv.rf_bandwidth_mhz != null ? `${_sigEv.rf_bandwidth_mhz} MHz` : null,
+      ..._signalsFrom((window.__isr_getRecording?.(_stored.id)?.timeseries || []).filter(_seenHere)),
+    };
 
     const model = {
       id: e.id,
@@ -12033,13 +12058,7 @@ async function main() {
       outcome: (e.outcome || 'monitored').replace(/-/g, ' ').toUpperCase(),
       exec,
       analysis: _insight ? { pattern: _insight.pattern || null, confidence: _insight.confidence || null, dwell: _insight.dwellRanked || [], flags: _insight.flags || [] } : null,
-      // The signal library already carries a signature-match row when it
-      // has one; the record's own match is added only when it does not.
-      rf: {
-        rows: _rfRows,
-        match: e.evidence?.rfMatch && !_rfRows.some(r => String(r.value) === String(e.evidence.rfMatch)) ? e.evidence.rfMatch : null,
-        modality: e.evidence?.modality || null,
-      },
+      signals,
       sitesCrossed: siteChain,
       initialSite: siteName(e.siteId),
       lastConfirmed: impactSite,
