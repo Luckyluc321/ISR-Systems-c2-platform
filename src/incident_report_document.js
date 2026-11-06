@@ -95,7 +95,7 @@ export function renderIncidentReport(model, { doc, logoUrl } = {}) {
   `);
 
   const sensors = panel('Contributing Sensors', `${table(
-    [{ label: 'Sensor' }, { label: 'Site' }, { label: 'Node' }, { label: 'Modalities' }, { label: 'Coverage', num: true }, { label: 'Status' }, { label: 'Peak confidence', num: true }],
+    [{ label: 'Sensor' }, { label: 'Site' }, { label: 'Location' }, { label: 'Modalities' }, { label: 'Coverage', num: true }, { label: 'Status' }, { label: 'Peak confidence', num: true }],
     (m.sensors || []).map((s) => `<tr><td class="mono">${t(s.id)}</td><td>${t(or(s.site))}</td><td>${t(or(s.node))}</td><td>${t(or(s.modalities))}</td><td class="num">${t(or(s.coverage))}</td><td class="mono">${t(or(s.status))}</td><td class="num">${t(or(s.peak))}</td></tr>`),
     'No contributing sensors recorded')}
     <div class="note">Peak confidence is the best each sensor reached during the incident.</div>`);
@@ -114,7 +114,7 @@ export function renderIncidentReport(model, { doc, logoUrl } = {}) {
     ${kv('Last seen', d.lastSeen)}
     ${kv('Last status', d.outcome)}
   </div>${table(
-    [{ label: 'Top sensors for this drone' }, { label: 'Node' }, { label: 'Detection confidence', num: true }, { label: 'When' }, { label: 'Range', num: true }],
+    [{ label: 'Top sensors for this drone' }, { label: 'Location' }, { label: 'Detection confidence', num: true }, { label: 'When' }, { label: 'Range', num: true }],
     (d.topSensors || []).map((x) => `<tr><td class="mono">${t(x.id)}</td><td>${t(or(x.node))}</td><td class="num">${t(x.confidence)}</td><td class="mono">${t(x.at)}</td><td class="num">${t(or(x.range))}</td></tr>`),
     'No sensor of this site saw it')}${(d.history || []).length ? table(
     [{ label: 'When' }, { label: 'What happened' }],
