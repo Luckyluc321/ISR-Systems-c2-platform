@@ -464,16 +464,10 @@ export function createLiveSensorRuntime(deps) {
       opened = true;
       stats.opened++;
     } else {
-      // A live case is its site's own, single-site: the one rule (open,
-      // this site's) applies, and it is checked here because this module
-      // is the one writer of lastPosition outside the drone tick
-      // (docs/track-and-site-case-architecture.md).
-      if (liveEvent.status === 'active' && liveEvent.siteId === siteId) {
-        mutateEvent(liveEvent.id, {
-          confidence: +det.confidence.toFixed(2),
-          lastPosition: liveLastPosition(sensor, det),
-        });
-      }
+      mutateEvent(liveEvent.id, {
+        confidence: +det.confidence.toFixed(2),
+        lastPosition: liveLastPosition(sensor, det),
+      });
     }
     // The same fold the mock path uses. Stamps _lastDetectionTs, which
     // the unobserved-event sweeper reads to decide when the detection is

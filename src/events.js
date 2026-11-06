@@ -391,11 +391,7 @@ export function closeEvent(id, exitPoint, { autoOutcome = null } = {}) {
       // less readable.
       const resolver = (typeof window !== 'undefined' && window.__isr_getDestination) || null;
       const report = _pirGenerator ? _pirGenerator(e, { getDestination: resolver }) : null;
-      // Frozen at close: a deep copy, so a later write to the case's
-      // subject (or anything else the report holds by reference) never
-      // changes the archive (2026-11-05). linkedAfterClose is appended
-      // to this copy, as before. The report holds no Maps.
-      if (report) e.postIncidentReport = structuredClone(report);
+      if (report) e.postIncidentReport = report;
     }
   } catch (err) {
     console.warn('[pir] generation failed at close:', err.message);

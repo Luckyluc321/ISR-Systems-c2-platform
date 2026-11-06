@@ -57,10 +57,9 @@ on each tick; a single drone hands it the sites whose sensors see it. One
 case per site, opened on entry and closed on exit, the first site included,
 exactly as for a swarm. So the airport's case ends when the airport's
 sensors lose the drone, Amager gets its own case owned by Energinet, and a
-return to a site whose case has closed opens a new related case. A site's
-case closes on the first tick its sensors lose the group; there is no
-per-site grace today (the grace rule Lucas described on 2026-11-04 is
-designed separately). The first site joins once the drone has been detected, so
+return to a site whose case has closed opens a new related case. Across one
+site's coverage, a gap inside the detection window still continues the same
+case, as above. The first site joins once the drone has been detected, so
 detection keeps its own moment.
 
 The swarm's own code is unchanged. What is single-drone only:

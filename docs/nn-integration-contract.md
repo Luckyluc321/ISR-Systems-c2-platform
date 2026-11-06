@@ -271,12 +271,11 @@ Full register with reasoning: `open-questions.md`. Status as of
 2. `interface-design-document.md` IF-1 (ingest), then IF-3 (lifecycle)
 3. `live-sensor-integration.md` (the path that works today)
 4. `src/track_source.js` header (identity, SAPIENT)
-5. `track-and-site-case-architecture.md` (what is a track, what is a case, and where a position enters: `live_track.js` `observe`)
-6. `open-questions.md` Q1, Q2, Q4, Q5
-7. `agentic-signature-bridge-architecture.md` when step 3 is near
-8. `agent-panel-provenance.md` for how your output will be shown
+5. `open-questions.md` Q1, Q2, Q4, Q5
+6. `agentic-signature-bridge-architecture.md` when step 3 is near
+7. `agent-panel-provenance.md` for how your output will be shown
 
 Gates that will fail if any of the above drifts from the code:
 `check:track-identity`, `check:live-sensor`, `check:signal-tier`,
-`check:coverage-gate`, `check:site-case-scope`, `check:nn-integration-index`
-(this page's own links and the IDD status row).
+`check:coverage-gate`, `check:nn-integration-index` (this page's own
+links and the IDD status row).

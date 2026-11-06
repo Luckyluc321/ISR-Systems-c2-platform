@@ -229,7 +229,7 @@ const WIRING = [
    'without this it falls through to the cordon promotion and parks'],
 
   ['not re-aimed at the live air track',
-   /\} else if \(_trackPositionFor\(d\.eventId\) && !targetLost && !d\.assignedWreckageId\s*\n\s*&& !d\.sceneWreckageId && !leavesSceneUnassisted\(d\.profile\)\) \{/,
+   /\} else if \(event\?\.lastPosition && !targetLost && !d\.assignedWreckageId\s*\n\s*&& !d\.sceneWreckageId && !leavesSceneUnassisted\(d\.profile\)\) \{/,
    'an unpinned responder would chase the flying drone every tick'],
 
   ['spared the interceptor RTB toast',

@@ -46,17 +46,17 @@ check('the all-coverage close has the swarm\'s gate again, with no exception for
   && !/\(!linkedActive \|\| _singleDroneSiteFlow\(event, state\)\)/.test(main));
 
 console.log('\n[nothing is written to a closed case]');
-// Since 2026-11-05 the one rule for both flows is site_case_scope.js
-// (caseAccepts, siteObservationWrite), held by check:site-case-scope.
-// This check only asserts the old single-drone guard is gone, so the
-// rule is not duplicated in two shapes that drift.
-check('the old single-drone guard is gone: the one rule for both flows is site_case_scope.js',
-  !/_soloCaseClosed|_soloTrackLoss|_soloClosed\b/.test(main));
-check('the countdown is kept on the track, and the track ends without closing a per-site case again',
-  /setTrackLoss\(event\.id, _loss\);\s*if \(caseAccepts\(event, event\.siteId\)\) mutateEvent\(event\.id, \{ temporaryLoss: _loss \}\);/.test(main)
-  && /markTrackEnded\(event\.id\);\s*if \(!_trackContinuesAfterClose\(event\)\) markTrackClosed\(p\.eventId\);\s*if \(!_perSiteCases\) \{/.test(main));
-check('the fused confidence of a single drone goes only to its open case',
-  /if \(_fcOn && leadInCov && !state\.closedAt && caseAccepts\(event, event\.siteId\)\) \{/.test(main));
+check('one test for a single drone whose first case has closed',
+  /function _soloCaseClosed\(event, state\) \{\s*return _singleDroneSiteFlow\(event, state\) && event\.status !== 'active';\s*\}/.test(main));
+check('its countdown is kept on the track, and the track ends without closing the case again',
+  /if \(_soloClosed\) state\._soloTrackLoss = _loss;\s*else mutateEvent\(event\.id, \{ temporaryLoss: _loss \}\);/.test(main)
+  && /if \(_soloClosed\) \{\s*if \(!_trackContinuesAfterClose\(event\)\) markTrackClosed\(p\.eventId\);\s*\} else \{/.test(main)
+  && /if \(event\.temporaryLoss && !_soloClosed\) mutateEvent\(event\.id, \{ temporaryLoss: null \}\);/.test(main));
+check('its last known position, confidence, duration and projected path stay as they closed',
+  /if \(!_soloCaseClosed\(event, state\)\) \{\s*mutateEvent\(event\.id, \{\s*lastKnownPosition:/.test(main)
+  && /if \(_fcOn && leadInCov && !state\.closedAt && !_soloCaseClosed\(event, state\)\) \{/.test(main)
+  && /\.\.\.\(_soloCaseClosed\(event, state\) \? \{\} : \{ duration: Math\.round\(p\.tSec\) \}\),/.test(main)
+  && /if \(!_soloCaseClosed\(event, state\)\) mutateEvent\(event\.id, \{ projectedPath: null \}\);/.test(main));
 
 console.log('\n[kept from before]');
 check('the reacquisition bookkeeping and evasion alert stay; only the automatic national message goes',
@@ -70,7 +70,7 @@ check("the unobserved-case sweeper leaves a single drone's site case alone while
   /if \(ev\.soloSiteCaseOf\) \{\s*if \(isTrackLive\(ev\.soloSiteCaseOf\)\) continue;/.test(main)
   && main.indexOf('if (ev.soloSiteCaseOf) {') < main.indexOf('if (now - lastObs < _SWEEP_GRACE_MS) continue;'));
 check('once the track has ended (shot down), its site cases close at once with what each site saw',
-  /const _end = trackLastSeen\(_own\.id\) \|\| _own\.exit \|\| _own\.lastPosition;\s*_closeSoloSiteCases\(_own, _own\.outcome === 'neutralized'\s*\? \{ endedAt: _end, outcome: 'neutralized' \}\s*: \{ endedAt: _end, outcome: 'lost contact' \}\);/.test(main));
+  /_closeSoloSiteCases\(_own, _own\.outcome === 'neutralized'\s*\? \{ endedAt: _own\.exit \|\| _own\.lastPosition, outcome: 'neutralized' \}\s*: \{ endedAt: _own\.lastPosition, outcome: 'lost contact' \}\);/.test(main));
 check('closing touches only the cases this drone opened', /le\.soloSiteCaseOf !== primary\.id\) continue;/.test(main));
 check('no case is closed as "target impact" here, so no second consequence cascade', !/_closeSoloSiteCases\([^)]*target impact/.test(main));
 check('LAST is the last detection, not the first', /const last = \(e\.endTime \|\| e\.lastKnownPosition\?\.timestamp \|\| e\.startTime\)\.slice\(11, 19\) \+ 'Z';/.test(main));

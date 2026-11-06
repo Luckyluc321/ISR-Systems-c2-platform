@@ -324,7 +324,7 @@ check('it publishes once per member, not once per tick',
 check('it is hung off the kinematics sync, not off the recorder',
   (() => {
     const i = main.indexOf('_publishSimTrack(event, state.leadSwarmMember.memberId');
-    return i > 0 && main.lastIndexOf('_syncMemberEverywhere(event, state.leadSwarmMember.memberId', i) > main.lastIndexOf('recording.timeseries.push', i);
+    return i > 0 && main.lastIndexOf('syncMemberTrack(event.id', i) > main.lastIndexOf('recording.timeseries.push', i);
   })(),
   'hanging it off the recorder would couple identity to a neutralised-lead guard that exists for '
   + 'an unrelated reason, and identity would stop attaching after a kill');
