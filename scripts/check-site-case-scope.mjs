@@ -99,7 +99,7 @@ lines.forEach((l, i) => {
 check('no observation field is written to a case outside the gate', bare.length === 0, bare.join('; '));
 check('the tick observes the track for every position, and each open site case records only its own sighting',
   /const _seenBy = sitesSeeing\(Object\.keys\(SITES\), \{ lat: p\.lat, lon: p\.lon, alt: p\.alt \}, _siteSees\);\s*const _tpos = observeTrack\(event\.id,/.test(main)
-  && /_recordObservation\(event, _tpos, \(ev, sid\) => \(\{\s*lastKnownPosition: \{[^}]*siteId: sid, timestamp: _tpos\.timestamp,/.test(main)
+  && /_recordObservation\(event, _tpos, \(ev, sid, whole\) => \(\{\s*lastKnownPosition: \{[^}]*siteId: whole \? bestSid : sid, timestamp: _tpos\.timestamp,/.test(main)
   && /rangeToPerim: _perim \? distanceToPerimeter\(p\.lat, p\.lon, _perim\) : null, eta: null,/.test(main));
 check('the subject\'s live kinematics are written through the gate, never in place',
   !/event\.subject\.kinematics\.(speed_ms|heading_deg|altitude_m_agl)\s*=/.test(main)
@@ -112,6 +112,16 @@ check('a linked site case copies no kinematics from the first site, and the live
   /kinematics: \{ lat: null, lon: null, alt: null, heading: null, speedMs: null \},\s*formationOffset: \{ \.\.\.mt\.formationOffset \},\s*inCoverage: false,/.test(main)
   && /function _syncMemberEverywhere\(event, memberId, k\) \{(?:\s*\/\/[^\n]*)*\s*if \(caseAccepts\(event, event\.siteId\) && _siteSees\(event\.siteId, k\.lat, k\.lon,[^\n]*\n\s*syncMemberTrack\(event\.id, memberId, k\);/.test(main)
   && (main.match(/_setMemberStatusEverywhere\(/g) || []).length >= 5);
+check('a kill lands on the case that sent the unit (the response layer), and a loss on the open cases that held the member',
+  /function _setMemberStatusEverywhere\(event, memberId, status, extra, where, ownerCaseId = null\) \{\s*const took = \[\];\s*if \(!event\) return took;\s*if \(ownerCaseId && setMemberStatus\(ownerCaseId, memberId, status, extra\)\) took\.push\(ownerCaseId\);/.test(main)
+  && /_setMemberStatusEverywhere\(getEventForEngine\(d\.eventId\), sw\.memberId, 'neutralised', \{ reason: 'interceptor kill' \}, _liveTargetPositionFor\(d\), d\.eventId\);/.test(main)
+  && /_setMemberStatusEverywhere\(event, sw\.memberId, 'neutralised', \{ reason: 'jamming forced landing' \}, pos, event\.id\);/.test(main)
+  && /_setMemberStatusEverywhere\(event, sw\.memberId, 'lost', \{\s*reason: 'no sensor or responder holds it',\s*\}, null\)/.test(main)
+  && /if \(m && \(where \|\| m\.kinematics\?\.lat != null\) && setMemberStatus\(ev\.id, m\.memberId, status, extra\)\) took\.push\(ev\.id\);/.test(main));
+check('a member note goes where its status went: never to a closed case, never for a breakaway the case\'s sensors did not see',
+  /for \(const cid of _took\) appendEventArray\(cid, 'notes', \{[\s\S]{0,300}?broke formation/.test(main)
+  && /for \(const cid of _took\) appendEventArray\(cid, 'notes', \{[\s\S]{0,300}?lost\. `/.test(main)
+  && !/appendEventArray\(event\.id, 'notes', \{\s*timestamp: new Date\(\)\.toISOString\(\),\s*author: 'AUTO-CORRELATOR',\s*text: `\$\{sw\.role \|\| sw\.memberId \|\| 'A (detached )?member'\} (broke formation|lost)/.test(main));
 
 console.log('\n[one close per case, and the track still ends]');
 check('the track-level branch ends the track and closes only a single-case track (the missile)',
@@ -171,7 +181,7 @@ check('a unit on a linked site case follows the track but gets no target to enga
   /if \(_trackIdFor\(d\.eventId\) !== d\.eventId\) return null;\s*const st = droneState\.get\(d\.eventId\);/.test(main));
 check('the impact is recorded only on an open first case', /const _didImpact = !!_tplDone\?\.terminalImpact && event\.status === 'active';/.test(main));
 check('a single-case track records the whole track on its one case',
-  /const whole = !!event\?\.multiSiteTrack && event\.platform === 'missile';[\s\S]{0,200}whole \? null : position, fields\);/.test(main));
+  /const whole = !!event\?\.multiSiteTrack && event\.platform === 'missile';[\s\S]{0,200}fieldsFor\(ev, sid, whole\);[\s\S]{0,120}whole \? null : position, fields\);/.test(main));
 check('the evasion check reads the track', /const prevSnap = getTrack\(event\.id\)\?\.projectionSnapshot \|\| event\.projectionSnapshot;\s*const nowHeading = trackPosition\(event\.id\)\?\.heading \?\? event\.lastPosition\?\.heading;/.test(main));
 check('the projection line is drawn under the open site case whose sensors see the track',
   /const _seeing = \[\.\.\._siteCasesOf\(event\)\.values\(\)\]\.find\(\(c\) => _siteSees\(c\.siteId, p\.lat, p\.lon, p\.alt\)\) \|\| null;/.test(main));

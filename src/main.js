@@ -4949,7 +4949,7 @@ async function main() {
     };
   }
 
-  function updateProjectedTrajectoryEntity(event, path = getTrack(event?.id)?.projectedPath ?? event?.projectedPath) {
+  function updateProjectedTrajectoryEntity(event, path = getTrack(_trackIdFor(event?.id))?.projectedPath ?? event?.projectedPath) {
     const pp = path;
     if (!pp) { removeProjectedTrajectoryEntity(event.id); return; }
     if (!overlayState.projections) { removeProjectedTrajectoryEntity(event.id); return; }
@@ -4972,13 +4972,15 @@ async function main() {
         });
       };
       // The case's own site scopes it: an operator never sees another
-      // owner's case projected (operator_map_scope.js).
+      // owner's case projected (operator_map_scope.js). The path is the
+      // track's, read under the track id, resolved once and not per frame.
+      const _projTrackId = _trackIdFor(event.id);
       const line = viewer.entities.add({
         properties: { siteId: event.siteId },
         show: _viewerSeesCase(event),
         polyline: {
           positions: new Cesium.CallbackProperty(() => {
-            const pp2 = getTrack(event.id)?.projectedPath ?? event.projectedPath;
+            const pp2 = getTrack(_projTrackId)?.projectedPath ?? event.projectedPath;
             if (!pp2) return [];
             const endPt2 = pp2.impacts && pp2.impacts.length
               ? pp2.impacts[pp2.impacts.length - 1]
@@ -5919,12 +5921,14 @@ async function main() {
     // Previously the latch was _breakawayChildId, which only existed
     // because a child was created.
     sw._brokenAway = true;
-    if (sw.memberId) {
-      _setMemberStatusEverywhere(event, sw.memberId, 'broken-away', {
+    // The note goes where the status went: a case whose sensors did not
+    // see the breakaway, or that has closed, gets neither.
+    const _took = sw.memberId
+      ? _setMemberStatusEverywhere(event, sw.memberId, 'broken-away', {
         reason: 'sustained formation deviation',
-      }, pos);
-    }
-    appendEventArray(event.id, 'notes', {
+      }, pos)
+      : [];
+    for (const cid of _took) appendEventArray(cid, 'notes', {
       timestamp: new Date().toISOString(),
       author: 'AUTO-CORRELATOR',
       text: `${sw.role || sw.memberId || 'A member'} broke formation. Tracking as a detached member of this event.`,
@@ -11079,7 +11083,7 @@ async function main() {
         sw._neutralisedAt = new Date().toISOString();
         // Swarm Phase 1: source-of-truth status transition. The sw
         // flag above stays as the render-cache fast path.
-        if (sw.memberId) _setMemberStatusEverywhere(getEventForEngine(d.eventId), sw.memberId, 'neutralised', { reason: 'interceptor kill' }, _liveTargetPositionFor(d));
+        if (sw.memberId) _setMemberStatusEverywhere(getEventForEngine(d.eventId), sw.memberId, 'neutralised', { reason: 'interceptor kill' }, _liveTargetPositionFor(d), d.eventId);
         // No child event to close. A detached member's fate is the
         // member status set just above, on this event.
         // Clear any lingering jamming visuals from other counter-
@@ -13291,7 +13295,7 @@ async function main() {
         // The live track is KEPT past the teardown: the chain debrief's
         // terminal sample, the sweeper's single-drone verdict and the
         // correlator read its last sighting after the drones are gone.
-        // It goes on cancel, and on the next launch's reset.
+        // It goes on cancel; a finished track stays for the session.
         _removedAny = true;
       } catch (err) {
         // Flag set only AFTER success, so a partial failure is retried
@@ -14671,21 +14675,29 @@ async function main() {
   }
   // A member's status: on the live group, and on every open site case
   // whose sensors see where it happened (a drone downed over Amager is
-  // Amager's observation). `where` is the member's position, or null to
-  // mirror to every open case.
-  function _setMemberStatusEverywhere(event, memberId, status, extra, where) {
-    if (!event) return;
+  // Amager's observation). `where` is the member's position, or null for
+  // a loss, which no sensor saw: then the open cases whose own sensors
+  // held the member take it. `ownerCaseId` is the case the unit that
+  // made a kill was dispatched on: the kill is that case's own outcome
+  // (the response layer) and lands there whatever the case's state or
+  // its sensors, as before the split. Other cases stay gated. Returns
+  // the cases that took it, so a note about it goes where it went.
+  function _setMemberStatusEverywhere(event, memberId, status, extra, where, ownerCaseId = null) {
+    const took = [];
+    if (!event) return took;
+    if (ownerCaseId && setMemberStatus(ownerCaseId, memberId, status, extra)) took.push(ownerCaseId);
     // A status is a verdict made where the member was: the first case
     // takes it only while open and only if its own sensors saw the place.
     if (caseAccepts(event, event.siteId) && (!where || _siteSees(event.siteId, where.lat, where.lon, typeof where.alt === 'number' ? where.alt : 0))) {
-      setMemberStatus(event.id, memberId, status, extra);
+      if (setMemberStatus(event.id, memberId, status, extra)) took.push(event.id);
     }
     for (const [sid, ev] of _siteCasesOf(event)) {
       if (ev.id === event.id) continue;
       if (where && !_siteSees(sid, where.lat, where.lon, typeof where.alt === 'number' ? where.alt : 0)) continue;
       const m = (ev.memberTracks || []).find((t) => t.sourceMemberId === memberId);
-      if (m) setMemberStatus(ev.id, m.memberId, status, extra);
+      if (m && (where || m.kinematics?.lat != null) && setMemberStatus(ev.id, m.memberId, status, extra)) took.push(ev.id);
     }
+    return took;
   }
   // A crossing row (entry, exit, detected, out of range) is the
   // observation of the site it names: it goes to that site's open case,
@@ -14704,7 +14716,7 @@ async function main() {
     // and which site saw the point does not split it.
     const whole = !!event?.multiSiteTrack && event.platform === 'missile';
     for (const [sid, ev] of _siteCasesOf(event)) {
-      const fields = fieldsFor(ev, sid);
+      const fields = fieldsFor(ev, sid, whole);
       if (fields) _writeSiteObservation(ev, sid, whole ? null : position, fields);
     }
   }
@@ -19972,12 +19984,13 @@ async function main() {
           inAnyCoverage = true;
           // Each site case records the last position ITS sensors saw,
           // with its own site id: in the overlap both record the same
-          // point, each as its own observation.
-          _recordObservation(event, _tpos, (ev, sid) => ({
+          // point, each as its own observation. A single-case track (the
+          // missile) names the site that saw it, as before the split.
+          _recordObservation(event, _tpos, (ev, sid, whole) => ({
             lastKnownPosition: {
               lat: p.lat, lon: p.lon, alt: Math.round(p.alt),
               speed: p.speed, heading: Math.round(p.heading),
-              siteId: sid, timestamp: _tpos.timestamp,
+              siteId: whole ? bestSid : sid, timestamp: _tpos.timestamp,
             },
           }));
           // First ever entry into any sensor coverage → this is THE
@@ -21249,8 +21262,10 @@ async function main() {
               sw._jamFallLanded = true;
               sw.neutralised = true;
               sw._neutralisedAt = new Date().toISOString();
-              // Swarm Phase 1: source-of-truth status transition.
-              if (sw.memberId) _setMemberStatusEverywhere(event, sw.memberId, 'neutralised', { reason: 'jamming forced landing' }, pos);
+              // Swarm Phase 1: source-of-truth status transition. The
+              // jammer was dispatched on this case: only a dispatch on the
+              // first case reaches the live group (_initiateJamFall).
+              if (sw.memberId) _setMemberStatusEverywhere(event, sw.memberId, 'neutralised', { reason: 'jamming forced landing' }, pos, event.id);
               // No child event to close. A detached member's fate is the
               // member status set just above, on this event.
               // Drop a small downed-drone marker at the landing spot so
@@ -21565,12 +21580,15 @@ async function main() {
               if (!sw._bwOorSince) sw._bwOorSince = nowMs;
               if ((nowMs - sw._bwOorSince) >= _LOSS_GRACE_FLOOR_MS) {
                 sw._memberLostAt = nowMs;
-                if (sw.memberId) {
-                  _setMemberStatusEverywhere(event, sw.memberId, 'lost', {
+                // No sensor sees a lost member, so there is no place to
+                // check: the open cases that held it take the verdict, and
+                // its note.
+                const _took = sw.memberId
+                  ? _setMemberStatusEverywhere(event, sw.memberId, 'lost', {
                     reason: 'no sensor or responder holds it',
-                  }, pos);
-                }
-                appendEventArray(event.id, 'notes', {
+                  }, null)
+                  : [];
+                for (const cid of _took) appendEventArray(cid, 'notes', {
                   timestamp: new Date().toISOString(),
                   author: 'AUTO-CORRELATOR',
                   text: `${sw.role || sw.memberId || 'A detached member'} lost. `
@@ -21700,7 +21718,7 @@ async function main() {
           const t = getTrack(event.id);
           const row = t?.transitionLog?.length ? t.transitionLog[t.transitionLog.length - 1] : null;
           if (opened && row && row.siteId === sid && !(opened.perSiteCrossings || []).length) {
-            _appendSiteCrossing(event, sid, { kind: row.kind === 'reacq_or_detect' ? 'detected' : row.kind, lat: row.lat, lon: row.lon, color: '#ff5a5a', label: `DETECTED ${row.timestamp.slice(11, 19)}Z · ${SITES[sid]?.code || sid}`, siteId: sid, timestamp: row.timestamp });
+            _appendSiteCrossing(event, sid, { kind: row.kind === 'reacq_or_detect' ? 'detected' : row.kind, lat: row.lat, lon: row.lon, color: '#4dd2ff', label: `DETECTED ${row.timestamp.slice(11, 19)}Z · ${SITES[sid]?.code || sid}`, siteId: sid, timestamp: row.timestamp });
           }
         }
         state._prevSitesForRows = currentGroupSites;

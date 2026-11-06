@@ -92,7 +92,7 @@ There is no second path. `check:site-case-scope` holds it.
 | `_reacquiredSites` (sites crossed), `_prevCoverageSite`, `_prevInCoverage`, `_siteAgg`, `_droneCovState`, `_droneInsideState`, `_droneTransitionLog` | on the live track; a case's "sites crossed" is derived from its links | engine bookkeeping that named other sites on the case |
 | `_fireReacquisition` escalating the first case to national tiers | the escalation is unchanged; listed under routing (Lucas, 2026-11-05: operator-designed routing, not yet). Only its `_reacquiredSites` write moves, see above | the set is data, the escalation is routing |
 | `projectedPath` and `projectionSnapshot` | on the live track; drawn under the track id; an open site case mirrors the snapshot only from its own sightings. The receiver advisory reads the track through the case the receiver is on | a projection is a statement about where the track goes, not a site's observation |
-| member status written after close on the first case (jam landing, broken away, lost) with their notes | status on the live track's member tracks; mirrored to every OPEN site case through `sourceMemberId`, with the note | a member downed over site B after site A's case closed is B's observation |
+| member status written after close on the first case (jam landing, broken away, lost) with their notes | a kill (interceptor, jam landing) on the case the unit was dispatched on, whatever its state, as the response layer below; and on every other OPEN site case whose sensors saw it go down, through `sourceMemberId`. A breakaway on the open cases whose sensors saw it. A loss, which no sensor sees, on the open cases whose own sensors held the member. The note goes where the status went | a member downed over site B after site A's case closed is B's observation; the kill is the unit's own case's outcome |
 | the archived report built at close with live references | built from a deep copy (`structuredClone`; the report holds no Maps). `linkedAfterClose` is still appended to the copy, as today | frozen at close. Known limit, as today: a kill seconds after close is not in the archive, which is built once |
 
 **`track.position`** carries `lat, lon, alt, speed, heading, timestamp,
@@ -227,17 +227,66 @@ chain debrief, the sweeper and the correlator keep its last sighting;
 an open case's duration is sim seconds since its own start.
 
 What a case's fields mean: `lastKnownPosition` is the LEAD's last
-position this site's sensors saw; `exit` is where the last live
-airframe of the group left this site's coverage; `duration` is sim
-seconds from the case's own start to its close; `endTime` is the wall
-clock at its site's exit. Member kinematics and statuses are per member,
-mirrored only while the site's sensors see that member.
+position this site's sensors saw (the missile's single case: the site
+that saw it); `exit` is where the last live airframe of the group left
+this site's coverage; `duration` is sim seconds from the case's own
+start to the lead's last sighting at its site (the first case counts
+from launch, as on main); `endTime` is the wall clock at its site's
+exit. Member kinematics are per member, mirrored only while the site's
+sensors see that member; member statuses as in the table above.
 
 Listed, not done: keying the engagement on the track so a receiver may
 dispatch a unit on its own site's case and have it engage (today that
 unit follows but cannot hit, as on main); `subject.behavior.state` no
 longer reads 'approach' from a case's projected path (its only reader
 ignores it).
+
+## Round 3, the overseer's follow-ups
+
+The overseer found round 2 safe to merge, with six follow-ups. The ones
+that change what a customer sees are done here, with one the overseer
+did not list:
+
+- **A kill is the dispatching case's own outcome.** Round 2 wrote a
+  member's "neutralised" to the first case only while it was open and
+  its sensors saw the kill, so a drone shot down over Amager read
+  "tracked" on the airport case that sent the interceptor. Main, and the
+  response-layer rule above, put it there. `_setMemberStatusEverywhere`
+  now takes the dispatching case (`ownerCaseId`) and writes it there
+  whatever its state. Proven live: Rigspolitiet acknowledges and
+  dispatches from its own screen, four drones go down over Amager, and
+  the airport case reads four "neutralised" on the fix as on main.
+- **A loss goes to the open cases that held the member.** Round 2
+  checked the lost member's position against the site's sensors, which
+  by definition do not see it, so "lost" was never recorded anywhere.
+- **A member note goes where its status went.** The breakaway and loss
+  notes went to the first case always, also after it closed, so a closed
+  airport case gained "lost" in its notes while its roster said
+  "broken-away". Main wrote both after close; under this rule neither
+  lands on a closed case.
+- **The missile's single case names the site that saw it**
+  (`bestSid`), as main did. Round 2 named its origin site always.
+- A linked case's projection line reads the track under the track id,
+  resolved once and not per frame; the return's DETECTED row has the
+  detected colour; the teardown comment no longer claims a reset that
+  does not exist.
+
+Listed, not done:
+
+- `duration` stops at the lead's last sighting at the site, and the
+  case closes when the last member leaves, so a spread-out group's
+  duration is a few seconds short of end minus start (1 s in the
+  airport-to-Amager swarm).
+- The report's course-change figure compares a case's own snapshot
+  with its own last heading, both from its own sightings, so it reads
+  about 0. On main its non-zero values came from another site's
+  heading. The right source is the re-acquisition check, which reads
+  the projection from before the gap. This belongs to the report work.
+- A single drone's return writes no DETECTED row onto the case it
+  opens; the swarm's does.
+- A linked case lists every member of the group from its spawn. A
+  member its sensors never saw reads "tracked" with no position, as on
+  main.
 
 ## Stale text corrected in the same change
 
