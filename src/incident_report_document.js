@@ -100,6 +100,26 @@ export function renderIncidentReport(model, { doc, logoUrl } = {}) {
     'No contributing sensors recorded')}
     <div class="note">Peak confidence is the best each sensor reached during the incident.</div>`);
 
+  // THE FORMATION: a roster that links to one section per drone (a PDF
+  // cannot expand, but it can link). Only drones this site saw get one.
+  const fm = Array.isArray(m.formation) ? m.formation : [];
+  const roster = fm.length ? panel('Formation', table(
+    [{ label: 'Drone' }, { label: 'Role' }, { label: 'Model' }, { label: 'First seen' }, { label: 'Last seen' }, { label: 'Last status' }],
+    fm.map((d) => `<tr><td class="mono">${d.observed ? `<a href="#${t(d.anchor)}" style="color:inherit">${t(d.label)}</a>` : t(d.label)}</td><td>${t(or(d.role))}</td><td>${t(or(d.model))}</td><td class="mono">${t(d.observed ? or(d.firstAt) : 'Not observed by this site')}</td><td class="mono">${t(d.observed ? or(d.lastAt) : '')}</td><td>${t(or(d.outcome))}</td></tr>`),
+    '')) : '';
+  const drones = fm.filter((d) => d.observed).map((d) => `<div id="${t(d.anchor)}">${panel(`${d.label} · ${or(d.role, 'drone')}`, `<div class="grid">
+    ${kv('Model', d.model)}
+    ${kv('Radio carrier', d.radio)}
+    ${kv('First seen', d.firstSeen)}
+    ${kv('Last seen', d.lastSeen)}
+    ${kv('Last status', d.outcome)}
+  </div>${table(
+    [{ label: 'Top sensors for this drone' }, { label: 'Node' }, { label: 'Detection confidence', num: true }, { label: 'When' }, { label: 'Range', num: true }],
+    (d.topSensors || []).map((x) => `<tr><td class="mono">${t(x.id)}</td><td>${t(or(x.node))}</td><td class="num">${t(x.confidence)}</td><td class="mono">${t(x.at)}</td><td class="num">${t(or(x.range))}</td></tr>`),
+    'No sensor of this site saw it')}${(d.history || []).length ? table(
+    [{ label: 'When' }, { label: 'What happened' }],
+    d.history.map((h) => `<tr><td class="mono">${t(h.at)}</td><td>${t(h.what)}</td></tr>`), '') : ''}`)}</div>`).join('');
+
   const timeline = panel('Timeline', table(
     [{ label: 'Time' }, { label: 'What' }, { label: 'Detail' }],
     (m.timeline || []).map((r) => `<tr><td class="mono">${t(hms(r.ts))}</td><td class="mono">${t(String(r.kind || '').toUpperCase())}</td><td>${t(r.text)}</td></tr>`),
@@ -156,10 +176,12 @@ export function renderIncidentReport(model, { doc, logoUrl } = {}) {
     </div>
     ${panel('Executive Summary', exec)}
     ${panel('Track Metadata', meta)}
+    ${roster}
     ${analysis}
     ${radio}
     ${path}
     ${sensors}
+    ${drones}
     ${timeline}
     ${escalations}
     ${response}
