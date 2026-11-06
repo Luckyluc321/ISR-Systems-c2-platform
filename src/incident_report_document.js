@@ -75,9 +75,17 @@ export function renderIncidentReport(model, { doc, logoUrl } = {}) {
     ${(a.flags || []).length ? `<div style="margin-top:10px;">${a.flags.map((f) => `<div class="kv"><span class="k">Pattern flag</span><span class="v">${t(f)}</span></div>`).join('')}</div>` : ''}
   `) : '';
 
-  const rf = m.rf || {};
-  const rfRows = [...(rf.rows || []), ...(rf.match ? [{ label: 'Signature match', value: rf.match }] : []), ...(rf.modality ? [{ label: 'Modality', value: rf.modality }] : [])];
-  const radio = rfRows.length ? panel('Radio Frequency', `<div class="grid">${rfRows.map((r) => kv(r.label, r.value)).join('')}</div>`) : '';
+  // DETECTION EVIDENCE: the signals that dominate the case at this site
+  // (Lucas, 2026-11-06). No visual match and no signature match, which
+  // have no traceable input. A formation's are in each drone's section.
+  const sigRows = (s) => [
+    ['Radiofrequency carrier', s?.carrier], ['Radiofrequency bandwidth', s?.bandwidth],
+    ['Strongest radiofrequency signal', s?.strongest], ['Loudest acoustic level', s?.loudest],
+    ['Dominant acoustic frequency', s?.dominantHz],
+  ].filter(([, v]) => v != null && v !== '').map(([k, v]) => kv(k, v)).join('');
+  const radio = (m.formation || []).length
+    ? panel('Detection Evidence', `<div class="note">Each drone's detection evidence is in its own section below.</div>`)
+    : (sigRows(m.signals) ? panel('Detection Evidence', `<div class="grid">${sigRows(m.signals)}</div>`) : '');
 
   const path = panel('Sensor Path (Cross Cueing)', `
     <div class="grid">
@@ -109,10 +117,10 @@ export function renderIncidentReport(model, { doc, logoUrl } = {}) {
     '')) : '';
   const drones = fm.filter((d) => d.observed).map((d) => `<div id="${t(d.anchor)}">${panel(`${d.label} · ${or(d.role, 'drone')}`, `<div class="grid">
     ${kv('Model', d.model)}
-    ${kv('Radio carrier', d.radio)}
     ${kv('First seen', d.firstSeen)}
     ${kv('Last seen', d.lastSeen)}
     ${kv('Last status', d.outcome)}
+    ${sigRows(d.signals)}
   </div>${table(
     [{ label: 'Top sensors for this drone' }, { label: 'Location' }, { label: 'Detection confidence', num: true }, { label: 'When' }, { label: 'Range', num: true }],
     (d.topSensors || []).map((x) => `<tr><td class="mono">${t(x.id)}</td><td>${t(or(x.node))}</td><td class="num">${t(x.confidence)}</td><td class="mono">${t(x.at)}</td><td class="num">${t(or(x.range))}</td></tr>`),
