@@ -235,7 +235,7 @@ check('no engine function touches a filtered reader, called or passed (getEvent,
 // person's own action on a case they can see. A new reachable function
 // that reads through the filter fails until someone sorts it.
 const SCREEN_OR_ACTION = ['triggerQraIntercept', 'dispatchReceiverAsset', 'requestReceiverAsset', 'dispatchCounterResponse',
-  'dispatchPostIncident', 'closePostIncidentEvent', 'dispatchPostIncidentAction', 'generatePirReport', '_setEventMarkersVisibility',
+  'dispatchPostIncident', 'closePostIncidentEvent', 'dispatchPostIncidentAction', 'generatePirReport', '_writePirReport', '_setEventMarkersVisibility',
   '_resolveChainPrimaryEvent', 'startDebrief', '_fireMistralDebrief', 'startReplay', '_openCascadeCaptureModal',
   '_openArchetypeCascadeModal', '_openObserverPicker', 'renderAlertStrip', 'renderPalantirClosedPanel', 'renderDetailPanel',
   'openRunbookDrawer', '_refreshBriefPreview', 'openBriefPreview', 'openEscalateModal', 'openReclassifyForm',
