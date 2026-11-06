@@ -210,6 +210,35 @@ inside. The case stays open until the last member leaves, so the
 case-level last known position is the last position of ANY member the
 site saw, not the lead's. End time equals last sighting.
 
+## Round 2, the overseer's review of the build
+
+Build with changes became safe with fixes on the code. Folded in:
+the impact is recorded only on an open first case; a unit dispatched on
+a linked site case follows the track but gets no target to engage, as
+on main, until the chase is keyed on the track (listed below); the
+missile's single case records the whole track; the first case's member
+tracks are written only while open and seen; a site case's exit is its
+own OUT OF RANGE row, where the last live drone left its coverage,
+with the lead's last sighting as the fallback; the evasion check and the
+projection read the track, and the line is drawn under the open site
+case whose sensors see it; a return's first DETECTED row lands on the
+case the return opened; the live track is kept past the teardown so the
+chain debrief, the sweeper and the correlator keep its last sighting;
+an open case's duration is sim seconds since its own start.
+
+What a case's fields mean: `lastKnownPosition` is the LEAD's last
+position this site's sensors saw; `exit` is where the last live
+airframe of the group left this site's coverage; `duration` is sim
+seconds from the case's own start to its close; `endTime` is the wall
+clock at its site's exit. Member kinematics and statuses are per member,
+mirrored only while the site's sensors see that member.
+
+Listed, not done: keying the engagement on the track so a receiver may
+dispatch a unit on its own site's case and have it engage (today that
+unit follows but cannot hit, as on main); `subject.behavior.state` no
+longer reads 'approach' from a case's projected path (its only reader
+ignores it).
+
 ## Stale text corrected in the same change
 
 The 30 s crossed-site wait removed in d4b6df0 (sweeper comment), the

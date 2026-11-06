@@ -41,6 +41,8 @@ function _blank(trackId, siteId) {
     projectedPath: null,
     // Every site that has seen the track, in order of first sighting.
     sitesCrossed: [],
+    // Sites the track was re-acquired at after a gap (the evasion check).
+    reacquiredSites: new Set(),
     // Engine bookkeeping that used to live on the case.
     prevCoverageSiteId: null,
     prevInCoverage: null,
@@ -83,6 +85,7 @@ export function observe(trackId, position, siteIds = []) {
     alt: typeof position.alt === 'number' ? Math.round(position.alt) : null,
     speed: position.speed ?? null,
     heading: typeof position.heading === 'number' ? Math.round(position.heading) : null,
+    tSec: typeof position.tSec === 'number' ? position.tSec : null,
     timestamp: new Date().toISOString(),
     inCoverage: seen.length > 0,
     siteIds: seen,
