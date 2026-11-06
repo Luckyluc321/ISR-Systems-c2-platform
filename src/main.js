@@ -11969,6 +11969,54 @@ async function main() {
 
     const _logoUrl = reportLogoUrl(document);
     const pi = e.postIncidentDispatched || [];
+    // EACH DRONE OF A FORMATION, as this case's own sensors saw it (Lucas,
+    // 2026-11-05 and 06): a roster that links to one section per drone,
+    // with the sensors that saw it best and when. Read from the case's
+    // member records and the recording, picked and sorted only; nothing
+    // stored changes. A drone this site's sensors never saw keeps its
+    // roster row and gets no section. A single drone has no formation.
+    const _STATUS_WORDS = { tracked: 'Tracked', 'broken-away': 'Broke formation', neutralised: 'Neutralised', lost: 'Lost' };
+    const _pos = (smp) => (smp && smp.lat != null && smp.lon != null ? `${Number(smp.lat).toFixed(4)}°N ${Number(smp.lon).toFixed(4)}°E` : null);
+    const formation = (() => {
+      const members = Array.isArray(_stored.memberTracks) ? _stored.memberTracks : [];
+      if (members.length < 2) return null;
+      const samples = window.__isr_getRecording?.(_stored.id)?.timeseries || [];
+      return members.map((mt) => {
+        const n = Number(String(mt.memberId || '').match(/-m(\d+)$/)?.[1]);
+        // The recording names each airframe as the live roster does.
+        const label = Number.isFinite(n) ? `DRONE-${n + 1}` : (mt.memberId || 'Drone');
+        const own = samples.filter((smp) => smp.droneId === label && (smp.sensors_detecting || []).some((d) => d.site_id === _stored.siteId));
+        const first = own[0] || null;
+        const last = own[own.length - 1] || null;
+        const best = new Map();
+        for (const smp of own) {
+          for (const d of (smp.sensors_detecting || [])) {
+            if (d.site_id !== _stored.siteId) continue;
+            const cur = best.get(d.sensor_id);
+            if (!cur || (d.confidence || 0) > cur.confidence) best.set(d.sensor_id, { confidence: d.confidence || 0, at: smp.timestamp_utc, range: d.range_m });
+          }
+        }
+        return {
+          anchor: `drone-${Number.isFinite(n) ? n + 1 : 0}`,
+          label,
+          role: mt.role || null,
+          model: mt.model || null,
+          radio: mt.rfMHz ? `${mt.rfMHz} MHz` : null,
+          observed: own.length > 0,
+          firstAt: first ? _hms(first.timestamp_utc) : null,
+          lastAt: last ? _hms(last.timestamp_utc) : null,
+          firstSeen: first ? `${_hms(first.timestamp_utc)} · ${_pos(first)}` : null,
+          lastSeen: last ? `${_hms(last.timestamp_utc)} · ${_pos(last)}` : null,
+          outcome: _STATUS_WORDS[mt.status] || mt.status || null,
+          topSensors: [...best.entries()].sort((a, b) => b[1].confidence - a[1].confidence).slice(0, 5)
+            .map(([id, v]) => ({ id, node: _sensorLookup(id)?.sensor?.label || null, confidence: v.confidence.toFixed(2), at: _hms(v.at), range: v.range != null ? `${v.range} m` : null })),
+          // The first entry is the record's creation, before any sighting.
+          history: (mt.history || []).slice(1)
+            .map((h) => ({ at: _hms(h.at), what: (_STATUS_WORDS[h.status] || h.status) + (h.reason ? ` (${h.reason})` : '') })),
+        };
+      });
+    })();
+
     const model = {
       id: e.id,
       generatedAt: `${new Date().toISOString().slice(0,19).replace('T',' ')}Z`,
@@ -12001,6 +12049,7 @@ async function main() {
       linkedEvents: _openLinkedEvents(e).map(le => ({ id: le.id, site: siteName(le.siteId), status: le.status || null })),
       correlationScore: typeof e.correlationScore === 'number' ? Math.round(e.correlationScore * 100) : null,
       sensors,
+      formation,
       timeline,
       escalations,
       // Nobody sent: say so. "Not recorded" read as lost data (Lucas,
