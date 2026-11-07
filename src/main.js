@@ -1308,12 +1308,21 @@ async function main() {
         // These are Cesium's own defaults, restored explicitly, so the
         // tileset behaves exactly as it did through ion and only the
         // billing path differs.
-        googlePhotoreal = await Cesium.createGooglePhotorealistic3DTileset({}, {
-          cacheBytes: 512 * 1024 * 1024,
-          maximumCacheOverflowBytes: 512 * 1024 * 1024,
-          enableCollision: false,
-        });
-        console.log('[3d_tiles] Google Photorealistic via OUR OWN Google key — no ion session for this layer');
+        try {
+          googlePhotoreal = await Cesium.createGooglePhotorealistic3DTileset({}, {
+            cacheBytes: 512 * 1024 * 1024,
+            maximumCacheOverflowBytes: 512 * 1024 * 1024,
+            enableCollision: false,
+          });
+          console.log('[3d_tiles] Google Photorealistic via OUR OWN Google key, no ion session for this layer');
+        } catch (errDirect) {
+          // Google refuses 3D tiles to our own key in the European Economic
+          // Area (403, "not available for your account and region", seen
+          // 2026-11-07). The same city still streams through Cesium ion, so
+          // fall back to it rather than show no textured city at all.
+          console.warn('[3d_tiles] our own Google key was refused, falling back to Google Photorealistic via ion asset 2275207:', errDirect?.message || errDirect);
+          googlePhotoreal = await Cesium.Cesium3DTileset.fromIonAssetId(2275207);
+        }
       } else {
         googlePhotoreal = await Cesium.Cesium3DTileset.fromIonAssetId(2275207);
         console.log('[3d_tiles] Google Photorealistic via ion asset 2275207 — set VITE_GOOGLE_MAP_TILES_KEY to go direct and stop burning ion quota');
