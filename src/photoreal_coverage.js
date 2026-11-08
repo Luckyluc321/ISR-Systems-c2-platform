@@ -81,18 +81,29 @@ export function coverageClipPolygons(Cesium, rings = coverageRings()) {
 /**
  * Sole owner of clippingPolygons on the OSM box tileset.
  *
- * @param isPhotorealShown  () => boolean. The base layer applies only
- *                          while this is true; site polygons always.
+ * @param isPhotorealShown   () => boolean. The base layer applies only
+ *                           while this is true; site polygons always.
+ * @param isDanishMeshShown  () => boolean. The Danish city mesh areas
+ *                           (dk_city_meshes.js) apply only while this is
+ *                           true, so the boxes come back wherever a mesh
+ *                           is hidden or down. Defaults to never.
  */
-export function createBoxClipOwner({ Cesium, boxTileset, isPhotorealShown = () => true } = {}) {
+export function createBoxClipOwner({ Cesium, boxTileset, isPhotorealShown = () => true, isDanishMeshShown = () => false } = {}) {
   let base = [];
   let site = [];
+  let danish = [];
   let shown = null;
+  let danishShown = null;
+
+  function danishNow() {
+    try { return !!isDanishMeshShown(); } catch (_) { return false; }
+  }
 
   function apply() {
     shown = !!isPhotorealShown();
+    danishShown = danishNow();
     if (!boxTileset) return;
-    const polygons = [...(shown ? base : []), ...site];
+    const polygons = [...(shown ? base : []), ...(danishShown ? danish : []), ...site];
     boxTileset.clippingPolygons = polygons.length
       ? new Cesium.ClippingPolygonCollection({ polygons, inverse: false })
       : undefined;
@@ -102,13 +113,17 @@ export function createBoxClipOwner({ Cesium, boxTileset, isPhotorealShown = () =
     setBase(polygons) { base = Array.isArray(polygons) ? polygons : []; apply(); },
     setSite(polygons) { site = Array.isArray(polygons) ? polygons : []; apply(); },
     clearSite() { site = []; apply(); },
-    /** Per frame. Cheap: one boolean compare unless visibility flipped. */
-    follow() { if (!!isPhotorealShown() !== shown) apply(); },
+    /** Areas of the Danish city meshes that are up. Empty array clears. */
+    setDanish(polygons) { danish = Array.isArray(polygons) ? polygons : []; apply(); },
+    /** Per frame. Cheap: two boolean compares unless visibility flipped. */
+    follow() { if (!!isPhotorealShown() !== shown || danishNow() !== danishShown) apply(); },
     state() {
       return {
         base: base.length,
         site: site.length,
+        danish: danish.length,
         photorealShown: shown,
+        danishShown,
         applied: !!(boxTileset && boxTileset.clippingPolygons),
       };
     },

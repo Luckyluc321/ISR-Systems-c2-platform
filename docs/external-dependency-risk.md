@@ -139,6 +139,24 @@ The way back: `__isr_basemap.force('bing')` for a session,
 sites only) is kept in `src/basemap_meshed_sites.js`. Gated by
 `check:basemap-denmark`.
 
+### 2c. Copenhagen's 3D city is Danish, Google's is the fallback (2026-11-08)
+
+Since 2026-11-07 Google returns 403 for Photorealistic 3D Tiles and
+satellite 2D to our own key ("not available for your account and
+region"), so Google's city streams through Cesium ion and spends ion
+sessions. `src/dk_city_meshes.js` draws Danish high-definition meshes
+first, from `src/data/dk_city_meshes.json`:
+
+| mesh | source | where it streams from |
+|---|---|---|
+| Copenhagen municipality | Hexagon, 2023 imagery, made for Skat | Copenhagen municipality's ArcGIS Online, public 3D Tiles |
+
+Inside a mesh's area Google's city and the OSM boxes are clipped out.
+If the mesh fails to load or keeps failing, nothing is clipped and
+Google's city covers the area: the fallback. **The item states no
+licence.** Ask Copenhagen municipality before customer use. Gated by
+`check:dk-city-meshes`. Console: `__isr_dkMeshes.status()`.
+
 ## 3. BBR REST — retired end of 2026
 
 `services.datafordeler.dk/BBR/BBRPublic/1/rest`, reached with

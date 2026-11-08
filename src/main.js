@@ -834,6 +834,8 @@ import {
 } from './sovereign_geodanmark_features.js';
 import { applyBuildingSwap, clearBuildingSwap, footprintsFor, coverageFor, sitesWithFootprints } from './building_footprints.js';
 import { createCoverageTracer, createBoxClipOwner, coverageClipPolygons, coverageRings } from './photoreal_coverage.js';
+// Danish high-definition city meshes first, Google's city as fallback.
+import { createDanishCityMeshes } from './dk_city_meshes.js';
 import { createAltAudit } from './alt_audit.js';
 // Over Denmark the ground is the Danish state orthophoto, and Google's 2D
 // layer, the whole of the Google bill, is not requested. Everywhere else
@@ -1362,10 +1364,13 @@ async function main() {
   // the boxes are clipped away; outside them nothing changes. The owner
   // is the one writer of clippingPolygons on this tileset from here on,
   // and the base layer only applies while photoreal is actually shown.
+  // Declared before the owner, which reads it every frame. Set below.
+  let _dkMeshes = null;
   const _boxClip = createBoxClipOwner({
     Cesium,
     boxTileset: osmBuildings,
     isPhotorealShown: () => !!googlePhotoreal && googlePhotoreal.show,
+    isDanishMeshShown: () => !!_dkMeshes && _dkMeshes.anyShown(),
   });
   if (googlePhotoreal && osmBuildings) {
     if (Cesium.ClippingPolygonCollection.isSupported(viewer.scene)) {
@@ -1377,6 +1382,27 @@ async function main() {
     }
   }
   viewer.scene.preRender.addEventListener(() => _boxClip.follow());
+
+  // ── Danish high-definition city meshes (dk_city_meshes.js) ──
+  // Lucas, 2026-11-08: over Denmark the 3D city comes from Danish sources
+  // by default, and Google's city (through ion since Google refuses our
+  // key in the EEA) is the fallback. Copenhagen has one: Hexagon's 2023
+  // mesh, published by Copenhagen municipality. Inside its area the mesh
+  // is drawn and Google's city and the boxes are clipped out. If it fails,
+  // nothing is clipped and Google's city covers it as before. Loads in the
+  // background and never blocks boot. Not Google, so it loads with or
+  // without ?google=1.
+  _dkMeshes = createDanishCityMeshes({
+    Cesium,
+    viewer,
+    googlePhotoreal,
+    // imageryMode is declared further down. Read inside a function that
+    // the module calls behind a try, so an early frame cannot throw.
+    isNight: () => imageryMode === 'night',
+    onAreasChange: (polygons) => _boxClip.setDanish(polygons),
+  });
+  viewer.scene.preRender.addEventListener(() => _dkMeshes.follow());
+  window.__isr_dkMeshes = _dkMeshes.console;
 
   // ── Photorealistic mesh, reconstructed from Danish state imagery ──
   //
