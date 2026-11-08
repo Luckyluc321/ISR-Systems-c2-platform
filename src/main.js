@@ -836,6 +836,8 @@ import { applyBuildingSwap, clearBuildingSwap, footprintsFor, coverageFor, sites
 import { createCoverageTracer, createBoxClipOwner, coverageClipPolygons, coverageRings } from './photoreal_coverage.js';
 // Danish high-definition city meshes first, Google's city as fallback.
 import { createDanishCityMeshes } from './dk_city_meshes.js';
+// ion imagery (Earth at Night, Bing) only when the view needs it.
+import { createLazyIonImagery, LAZY_BING_BELOW_M } from './lazy_ion_imagery.js';
 import { createAltAudit } from './alt_audit.js';
 // Over Denmark the ground is the Danish state orthophoto, and Google's 2D
 // layer, the whole of the Google bill, is not requested. Everywhere else
@@ -1077,6 +1079,10 @@ async function main() {
   // True only when the base layer is Google's 2D, metered per tile. The
   // Denmark basemap rule hides it over Denmark only then (basemap_denmark.js).
   let _baseBilled = false;
+  // True when Google refused its satellite map and the base is Cesium's
+  // offline Natural Earth: ion Bing then loads only when the view needs
+  // it (lazy_ion_imagery.js, set up after the Danish orthophoto).
+  let _bingDeferred = false;
   try {
     const _gKey2d = import.meta.env.VITE_GOOGLE_MAP_TILES_KEY;
     if (_gKey2d && _googleOk) {
@@ -1115,25 +1121,47 @@ async function main() {
     if (_googleHeldBack) {
       console.error('Offline base imagery failed; no base map for this development load:', err);
     } else {
-      console.error('Base imagery failed, falling back to ion Bing:', err);
+      // Google refuses its satellite map to our key in the EEA since
+      // 2026-11-07. A free offline base now, ion Bing only once the view
+      // needs it, so a load over Denmark spends no ion imagery session.
+      // Lucas, 2026-11-08.
+      console.warn('[imagery] base imagery failed, offline Natural Earth now, ion Bing only when the view needs it:', err?.message || err);
       try {
-        const bing = await Cesium.IonImageryProvider.fromAssetId(2);
-        bingLayer = viewer.imageryLayers.addImageryProvider(bing);
-      } catch (err2) { console.error('Bing Aerial failed too:', err2); }
+        const offline = await Cesium.TileMapServiceImageryProvider.fromUrl(
+          Cesium.buildModuleUrl('Assets/Textures/NaturalEarthII'));
+        bingLayer = viewer.imageryLayers.addImageryProvider(offline);
+        _bingDeferred = true;
+      } catch (err2) {
+        console.error('Offline base failed too, falling back to ion Bing now:', err2);
+        try {
+          const bing = await Cesium.IonImageryProvider.fromAssetId(2);
+          bingLayer = viewer.imageryLayers.addImageryProvider(bing);
+        } catch (err3) { console.error('Bing Aerial failed too:', err3); }
+      }
     }
   }
 
-  // ── Earth at Night (asset 3812) ──
+  // ── Earth at Night (asset 3812), loaded only when night or auto needs it ──
+  // It opened an ion imagery session on every page load, and only night
+  // mode (parked) and auto mode's globe view draw it. It now loads the
+  // first time either mode is on, directly above the base as before, and
+  // the mode is re-applied so its settings land. Lucas, 2026-11-08.
   let earthAtNightLayer = null;
-  try {
-    const earthAtNight = await Cesium.IonImageryProvider.fromAssetId(3812);
-    earthAtNightLayer = viewer.imageryLayers.addImageryProvider(earthAtNight);
+  const _lazyEarthAtNight = createLazyIonImagery({
+    Cesium, viewer, assetId: 3812, label: 'Earth at Night',
+    insertAbove: () => bingLayer,
     // Sun-aware blending: city lights show ONLY on the dark side of Earth,
     // hidden on the sunlit side. Requires globe.enableLighting = true.
-    // This is Cesium's native mechanism for day/night imagery.
-    earthAtNightLayer.dayAlpha = 0.0;
-    earthAtNightLayer.nightAlpha = 1.0;
-  } catch (err) { console.error('Earth at Night failed:', err); }
+    configure: (layer) => { layer.dayAlpha = 0.0; layer.nightAlpha = 1.0; },
+    onLoaded: (layer) => { earthAtNightLayer = layer; applyImageryMode(); },
+  });
+  viewer.scene.postRender.addEventListener(() => {
+    try {
+      if (_lazyEarthAtNight.state() === 'waiting' && (imageryMode === 'night' || imageryMode === 'auto')) {
+        _lazyEarthAtNight.load(`${imageryMode} mode`);
+      }
+    } catch (_) { /* imageryMode not declared yet on an early frame */ }
+  });
   // Bing keeps its defaults (dayAlpha=1, nightAlpha=1). enableLighting
   // shades the night side of Bing automatically via sun-position math.
   if (bingLayer) {
@@ -2000,6 +2028,32 @@ async function main() {
     allow: () => imageryMode !== 'night',
   });
   window.__isr_basemap = meshBasemap;
+
+  // ── ion Bing only when the view needs it (lazy_ion_imagery.js) ──
+  // With Google's satellite refused, the base is Cesium's offline Natural
+  // Earth. Over Denmark the Danish orthophoto covers the ground, and from
+  // far out Natural Earth is enough. Bing (one ion imagery session) loads
+  // the first time the camera comes to rest below LAZY_BING_BELOW_M where
+  // the Danish photo is not showing: outside Denmark, zoomed out past the
+  // photo, or at night. Checked at rest, not mid-flight, so a fly-in to a
+  // Danish site never triggers it. Lucas, 2026-11-08.
+  const _lazyBing = createLazyIonImagery({
+    Cesium, viewer, assetId: 2, label: 'Bing Aerial',
+    insertAbove: () => bingLayer,
+    configure: (layer) => { layer.dayAlpha = 1.0; layer.nightAlpha = 0.5; },
+    onLoaded: (layer) => { bingLayer = layer; applyImageryMode(); },
+  });
+  if (_bingDeferred) {
+    viewer.camera.moveEnd.addEventListener(() => setTimeout(() => {
+      const h = viewer.camera.positionCartographic?.height ?? Infinity;
+      if (h < LAZY_BING_BELOW_M && !(sdfiLayer && sdfiLayer.show)) {
+        _lazyBing.load(`camera at rest at ${Math.round(h / 1000)} km, no Danish photo here`);
+      }
+    }, 400));
+  }
+  window.__isr_ionLazy = {
+    status: () => ({ bing: _bingDeferred ? _lazyBing.state() : 'not deferred', earthAtNight: _lazyEarthAtNight.state() }),
+  };
 
   // ── Sovereign layer registry — see sovereign_layers.js ──
   // Additive: only initialised on sovereign profile. On photoreal, the
