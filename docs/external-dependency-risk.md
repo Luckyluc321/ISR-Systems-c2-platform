@@ -149,7 +149,7 @@ first, from `src/data/dk_city_meshes.json`:
 
 | mesh | source | where it streams from |
 |---|---|---|
-| Copenhagen municipality | Hexagon, 2023 imagery, made for Skat | Copenhagen municipality's ArcGIS Online, public 3D Tiles |
+| Copenhagen municipality | Hexagon, 2023 imagery, made for Skat | Copenhagen municipality's account on Esri ArcGIS Online, on Amazon's cloud (both US companies), public 3D Tiles |
 
 Inside a mesh's area Google's city and the OSM boxes are clipped out.
 If the mesh fails to load or keeps failing, nothing is clipped and
