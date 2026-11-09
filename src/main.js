@@ -18807,7 +18807,9 @@ async function main() {
       position: Cesium.Cartesian3.fromDegrees(...startPos),
       billboard: {
         image: platformIcon(platform, color),
-        width: 32, height: 32,
+        // Fixed-wing symbol 25% larger so it reads clearly from the top in
+        // video (Lucas, 2026-11-09). Every other platform stays at 32 px.
+        width: isFixedWing ? 40 : 32, height: isFixedWing ? 40 : 32,
         // Rotation kept at 0 — direction is fully encoded in alignedAxis
         // (image_up aligns with the heading vector). Rotation would just
         // spin the image around image_up, producing roll not heading.
