@@ -3667,8 +3667,13 @@ async function main() {
 
       viewer.entities.add({
         id: `sensor-${site.id}-${sensor.id}`,
+        // Same height source as its pulse ring, always. A dot built after
+        // the terrain sweep had resolved used to fall back to 0 m, about
+        // 40 m under Danish ground, while its ring took the sampled ground
+        // height, so from a tilted camera the ring floated off its dot.
         position: _sensorPinnedPos(site.id, sensor)
-          || Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat, 0),
+          || Cesium.Cartesian3.fromDegrees(sensor.lon, sensor.lat,
+               _sensorGroundH.get(`${site.id}-${sensor.id}`) ?? 0),
         point: {
           pixelSize: sensor.isCore ? 11 : 8,
           color: color,
